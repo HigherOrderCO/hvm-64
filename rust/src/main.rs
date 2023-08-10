@@ -48,7 +48,7 @@ fn main() {
   let net  = &mut Net::new();
 
   // (n gens genz)
-  let func = do_make_tree(net, &do_copy_tree(&c22, fresh));
+  let func = do_make_tree(net, &do_copy_tree(&c10, fresh));
   let args = do_make_tree(net, &arg(do_copy_tree(&gens, fresh), arg(do_copy_tree(&genz, fresh), num(42))));
 
   net.pair.push((func, args));
@@ -58,7 +58,14 @@ fn main() {
   let mut iter = 0;
   loop {
     net.reduce();
-    println!("... {}", net.pair.len());
+    println!("... actives = {} | len = {}", net.pair.len(), net.node.len());
+    //println!("... actives = {} | len = {} | max = {}", net.pair.len(), net.node.len(), max(&net));
+    //if net.pair.len() > 700 {
+      //for (k,v) in histo(net, 100) {
+        //println!("{:3} => {:4}", k, v);
+      //}
+      //std::process::exit(0);
+    //}
     if net.rwts == rwts {
       break;
     }
@@ -72,3 +79,4 @@ fn main() {
   println!("iter: {}", iter);
 
 }
+

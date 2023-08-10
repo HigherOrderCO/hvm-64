@@ -1,47 +1,28 @@
-//Tag on node:
-//- big = (tag: 8, p1: 32, p2: 32) // total: 70
-//- sml = (tag: 8, p1: 16, p2: 16) // total: 40
-//storing 4 uint32:
-//- 3 big + 4 * (8+32) = 370 bits
-//- 3 sml + 4 * (8+32) = 280 bits
-
-//Tag on ptr:
-//- big = (t1: 8, p1: 32, t2: 8, t2: 32) // total: 80
-//- sml = (t1: 8, p1: 16, t2: 8, t2: 16) // total: 48
-//storing 4 uint32:
-//- 3 big + unboxed = 210 bits
-//- 3 sml + 4 * 32  = 176 bits
-
-// Tag of the target node
 pub type Tag = u8;
-
-// A location in the graph
 pub type Loc = u32;
 
-// Tag constants
-pub const NIL : Tag = 0; // not allocated
-pub const NUM : Tag = 1; // unboxed number
-pub const VR1 : Tag = 2; // unboxed variable to port 1
-pub const VR2 : Tag = 3; // unboxed variable to port 2
-pub const ERA : Tag = 4; // era node
-pub const CON : Tag = 5; // con node
-pub const DUP : Tag = 6; // dup node
+pub const NIL: Tag = 0;
+pub const NUM: Tag = 1;
+pub const VR1: Tag = 2;
+pub const VR2: Tag = 3;
+pub const ERA: Tag = 4;
+pub const CON: Tag = 5;
+pub const DUP: Tag = 6;
 
-// A port
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub enum Port {
   P1,
   P2,
 }
 
-// A pointer to some node, or an unboxed value
+#[repr(C)]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Ptr {
   pub tag: Tag,
   pub loc: Loc,
 }
 
-// An interaction net node
+#[repr(C)]
 #[derive(Copy, Clone, Debug)]
 pub struct Node {
   pub p1: Ptr,
@@ -49,23 +30,24 @@ pub struct Node {
 }
 
 pub struct Net {
-  pub pair: Vec<(Ptr,Ptr)>, // active pairs
-  pub node: Vec<Node>, // graph of nodes
-  pub free: Vec<Loc>, // reuse indexes
-  pub rwts: usize, // rewrite count
+  pub pair: Vec<(Ptr, Ptr)>,
+  pub node: Vec<Node>,
+  pub free: Vec<Loc>,
+  pub rwts: usize,
 }
 
 impl Node {
+  #[inline(always)]
   pub fn nil() -> Self {
     Node {
-      p1: Ptr { tag: NIL, loc: 0},
-      p2: Ptr { tag: NIL, loc: 0},
+      p1: Ptr { tag: NIL, loc: 0 },
+      p2: Ptr { tag: NIL, loc: 0 },
     }
   }
 }
 
 impl Net {
-  // Creates a new net
+  #[inline(always)]
   pub fn new() -> Self {
     Net {
       pair: vec![],
@@ -75,58 +57,68 @@ impl Net {
     }
   }
 
+  #[inline(always)]
   pub fn alloc(&mut self) -> Loc {
     if let Some(index) = self.free.pop() {
-      return index;
+      index
     } else {
       self.node.push(Node::nil());
-      return (self.node.len() - 1) as Loc;
+      (self.node.len() - 1) as Loc
     }
   }
 
+  #[inline(always)]
   pub fn free(&mut self, loc: Loc) {
     self.free.push(loc);
     self.node[loc as usize] = Node::nil();
   }
 
-  // Gets the nth child of a node.
+  #[inline(always)]
   pub fn get(&self, loc: Loc, port: Port) -> Ptr {
+    let node = unsafe { self.node.get_unchecked(loc as usize) };
     match port {
-      Port::P1 => self.node[loc as usize].p1,
-      Port::P2 => self.node[loc as usize].p2,
+      Port::P1 => { node.p1 }
+      Port::P2 => { node.p2 }
     }
   }
 
-  // Sets the nth child of a node.
+  #[inline(always)]
   pub fn set(&mut self, loc: Loc, port: Port, value: Ptr) {
+    let node = unsafe { self.node.get_unchecked_mut(loc as usize) };
     match port {
-      Port::P1 => self.node[loc as usize].p1 = value,
-      Port::P2 => self.node[loc as usize].p2 = value,
+      Port::P1 => { node.p1 = value; }
+      Port::P2 => { node.p2 = value; }
     }
   }
 
-  // Links two pointers
+  #[inline(always)]
   pub fn link(&mut self, a: Ptr, b: Ptr) {
     if a.tag == VR1 {
-      //println!("link a vr1");
       self.set(a.loc, Port::P1, b);
-    } else if a.tag == VR2 {
-      //println!("link a vr2");
+    }
+    if a.tag == VR2 {
       self.set(a.loc, Port::P2, b);
     }
     if b.tag == VR1 {
-      //println!("link b vr1");
       self.set(b.loc, Port::P1, a);
-    } else if b.tag == VR2 {
-      //println!("link b vr2");
+    }
+    if b.tag == VR2 {
       self.set(b.loc, Port::P2, a);
     }
     if a.tag != VR1 && a.tag != VR2 && b.tag != VR1 && b.tag != VR2 {
-      //println!("link a-b");
-      self.pair.push((a,b));
+      self.pair.push((a, b));
     }
   }
 
+  #[inline(always)]
+  pub fn reduce(&mut self) {
+    let pair = std::mem::replace(&mut self.pair, vec![]);
+    for (a, b) in pair {
+      self.interact(a, b);
+    }
+  }
+
+  #[inline(always)]
   pub fn interact(&mut self, a: Ptr, b: Ptr) {
     // Annihilation
     if a.tag >= CON && b.tag >= CON && a.tag == b.tag {
@@ -143,6 +135,7 @@ impl Net {
     // Commutation
     } else if a.tag >= CON && b.tag >= CON && a.tag != b.tag {
       //println!(">> comm");
+      //let (x1,x2,y1,y2) = self.alloc4();
       let x1 = self.alloc();
       let x2 = self.alloc();
       let y1 = self.alloc();
@@ -181,12 +174,26 @@ impl Net {
       self.pair.push((a,b));
     }
   }
-
-  // Reduces all active pairs in parallel
-  pub fn reduce(&mut self) {
-    let pair = std::mem::replace(&mut self.pair, vec![]);
-    for (a,b) in pair {
-      self.interact(a, b);
-    }
-  }
 }
+
+//pub fn max(net: &Net) -> Loc {
+  //let mut max_loc = 0;
+  //for node in &net.node {
+    //max_loc = max_loc.max(node.p1.loc);
+    //max_loc = max_loc.max(node.p2.loc);
+  //}
+  //return max_loc;
+//}
+
+//pub fn histo(net: &Net, chunk_len: usize) -> std::collections::BTreeMap<usize, usize> {
+  //let mut histo = std::collections::BTreeMap::new();
+  //for node in &net.node {
+    //let loc1 = (node.p1.loc as usize) / chunk_len;
+    //let count = histo.entry(loc1).or_insert(0);
+    //*count += 1;
+    //let loc2 = (node.p2.loc as usize) / chunk_len;
+    //let count = histo.entry(loc2).or_insert(0);
+    //*count += 1;
+  //}
+  //return histo;
+//}
