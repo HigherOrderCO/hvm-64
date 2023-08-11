@@ -9,16 +9,8 @@ mod lang;
 use crate::core::*;
 use crate::lang::*;
 
-// Syntax
-// ------
-
-fn rf(nam: u32) -> Ptr {
-  return Ptr { tag: REF, loc: nam };
-}
-
 fn main() {
-  let fresh = &mut 0;
-
+  // Initializes the book
   let book = &mut Book::new();
 
   // Church Nats
@@ -91,12 +83,19 @@ fn main() {
   let runI = define(book, 210, "$(0 p rundecip) & @211 ~ (0 decip rundecip) & @205 ~ (0 ip decip) & @201 ~ (0 p ip)");
   let low  = define(book, 211, "$(0 (0 @209 (0 @210 (0 @202 ret))) ret)");
 
+  // Creates a nat, for testing
+  // example_0 = ((n suc) zer)
+  let example_0 = define(book, 1000, "
+    $ root
+    & @5 ~ (0 @103 (0 @104 root))
+  ");
+
   // Allocates a big tree
-  // main = ((n g_s) g_z)
-  //let main = define(book, 1000, "
-    //$ root
-    //& @23 ~ (0 @105 (0 @106 root))
-  //");
+  // example_1 = ((n g_s) g_z)
+  let example_1 = define(book, 1000, "
+    $ root
+    & @23 ~ (0 @105 (0 @106 root))
+  ");
 
   // This example decreases a binary counter until it reaches 0. It uses recursion, based on
   // supercombinators. This, coupled with the REF-ERA rule, allows recursive calls to be collected
@@ -105,23 +104,20 @@ fn main() {
   // a success, our program will never need more than ~256 nodes of space; which is the case, as
   // we allocated only 256 nodes for `net` above.
   // main = (run ((n I) E))
-  let main = define(book, 1000, "
+  let example_2 = define(book, 1000, "
     $ main
     & @211 ~ (0 nie main)
-    & @5   ~ (0 @201 (0 @202 nie))
+    & @20  ~ (0 @201 (0 @202 nie))
   "); 
 
+  // Initializes the net
+  let net = &mut Net::init(1 << 26, &book, example_2);
+  //println!("[net]\n{}", show_net(&net));
 
-  let net = &mut Net::new(1 << 28);
+  // Computes its normal form
+  let iter = net.normal(book);
 
-  let mut root = rf(main);
-  net.deref(&book, &mut root);
-  net.root = root;
-
-  println!("[net]\n{}", show_net(&net));
-
-  let (rwts, iter) = net.normal(book);
-
+  // Shows results and stats
   //println!("[net]\n{}", show_net(&net));
   println!("size: {}", net.node.len());
   println!("used: {}", net.used);
@@ -129,4 +125,3 @@ fn main() {
   println!("iter: {}", iter);
 
 }
-
