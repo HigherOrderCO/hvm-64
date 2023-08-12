@@ -1,6 +1,6 @@
 // An interaction combinator language
 // ----------------------------------
-// 
+//
 // This file implements a textual syntax to interact with the runtime. It includes a pure AST for
 // nets, as well as functions for parsing, stringifying, and converting pure ASTs to runtime nets.
 // On the runtime, a net is represented by a list of active trees, plus a root tree. The textual
@@ -16,7 +16,7 @@
 //   <num>  ::= <num_lit>
 //   <ref>  ::= "@" <str_lit>
 //
-// For example, below is the church nat 2, encoded as an interaction net: 
+// For example, below is the church nat 2, encoded as an interaction net:
 //
 // $ (0 (1 (0 b a) (0 a R)) (0 b R))
 //
@@ -320,7 +320,7 @@ pub enum Parent {
 pub fn alloc_ltree(net: &mut Net, tree: &LTree, vars: &mut HashMap<String, Parent>, parent: Parent) -> Ptr {
   match tree {
     LTree::Era => {
-      Ptr { tag: ERA, val: 0 }
+      Ptr::new(ERA, 0)
     },
     LTree::Nod { tag, lft, rgt } => {
       let val = net.alloc(1);
@@ -328,7 +328,7 @@ pub fn alloc_ltree(net: &mut Net, tree: &LTree, vars: &mut HashMap<String, Paren
       net.set(val, Port::P1, p1);
       let p2 = alloc_ltree(net, &*rgt, vars, Parent::Node { val, port: Port::P2 });
       net.set(val, Port::P2, p2);
-      Ptr { tag: *tag, val }
+      Ptr::new(*tag, val)
     },
     LTree::Var { nam } => {
       if let Parent::Acts = parent {
@@ -344,13 +344,13 @@ pub fn alloc_ltree(net: &mut Net, tree: &LTree, vars: &mut HashMap<String, Paren
               unreachable!();
             }
             Parent::Node { val, port } => {
-              net.root = Ptr { tag: port_to_tag(port), val };
+              net.root = Ptr::new(port_to_tag(port), val);
             }
             Parent::Root => {
-              net.root = Ptr { tag: VRT, val: 0 };
+              net.root = Ptr::new(VRT, 0);
             }
           }
-          return Ptr { tag: VRT, val: 0 };
+          return Ptr::new(VRT, 0);
         },
         Some(Parent::Node { val: other_val, port: other_port }) => {
           //println!("linked {} | set {} {:?} as {} {:?}", nam, other_val, other_port, val, port);
@@ -359,26 +359,26 @@ pub fn alloc_ltree(net: &mut Net, tree: &LTree, vars: &mut HashMap<String, Paren
               unreachable!();
             }
             Parent::Node { val, port } => {
-              net.set(*other_val, *other_port, Ptr { tag: port_to_tag(port), val })
+              net.set(*other_val, *other_port, Ptr::new(port_to_tag(port), val))
             }
             Parent::Root => {
-              net.set(*other_val, *other_port, Ptr { tag: VRT, val: 0 })
+              net.set(*other_val, *other_port, Ptr::new(VRT, 0))
             }
           }
-          return Ptr { tag: port_to_tag(*other_port), val: *other_val };
+          return Ptr::new(port_to_tag(*other_port), *other_val);
         }
         None => {
           //println!("linkin {} | iam {} {:?}", nam, val, port);
           vars.insert(nam.clone(), parent);
-          Ptr { tag: NIL, val: 0 }
+          Ptr::new(NIL, 0)
         }
       }
     },
     LTree::Num { val } => {
-      Ptr { tag: NUM, val: *val }
+      Ptr::new(NUM, *val)
     },
     LTree::Ref { nam } => {
-      Ptr { tag: REF, val: *nam }
+      Ptr::new(REF, *nam)
     },
   }
 }
@@ -388,7 +388,7 @@ pub fn do_alloc_ltree(net: &mut Net, tree: &LTree) -> Ptr {
 }
 
 pub fn readback_ltree(net: &Net, ptr: Ptr, parent: Parent, vars: &mut HashMap<Parent,String>, fresh: &mut usize) -> LTree {
-  match ptr.tag {
+  match ptr.tag() {
     NIL => {
       LTree::Era
     },
@@ -396,15 +396,15 @@ pub fn readback_ltree(net: &Net, ptr: Ptr, parent: Parent, vars: &mut HashMap<Pa
       LTree::Era
     },
     NUM => {
-      LTree::Num { val: ptr.val }
+      LTree::Num { val: ptr.val() }
     },
     REF => {
-      LTree::Ref { nam: ptr.val }
+      LTree::Ref { nam: ptr.val() }
     },
     VRT | VR1 | VR2 => {
-      let key = match ptr.tag {
-        VR1 => Parent::Node { val: ptr.val, port: Port::P1 },
-        VR2 => Parent::Node { val: ptr.val, port: Port::P2 },
+      let key = match ptr.tag() {
+        VR1 => Parent::Node { val: ptr.val(), port: Port::P1 },
+        VR2 => Parent::Node { val: ptr.val(), port: Port::P2 },
         VRT => Parent::Root,
         _   => unreachable!(),
       };
@@ -418,9 +418,9 @@ pub fn readback_ltree(net: &Net, ptr: Ptr, parent: Parent, vars: &mut HashMap<Pa
       }
     },
     _ => {
-      let lft = readback_ltree(net, net.get(ptr.val, Port::P1), Parent::Node { val: ptr.val, port: Port::P1 }, vars, fresh);
-      let rgt = readback_ltree(net, net.get(ptr.val, Port::P2), Parent::Node { val: ptr.val, port: Port::P2 }, vars, fresh);
-      LTree::Nod { tag: ptr.tag, lft: Box::new(lft), rgt: Box::new(rgt) }
+      let lft = readback_ltree(net, net.get(ptr.val(), Port::P1), Parent::Node { val: ptr.val(), port: Port::P1 }, vars, fresh);
+      let rgt = readback_ltree(net, net.get(ptr.val(), Port::P2), Parent::Node { val: ptr.val(), port: Port::P2 }, vars, fresh);
+      LTree::Nod { tag: ptr.tag(), lft: Box::new(lft), rgt: Box::new(rgt) }
     },
   }
 }

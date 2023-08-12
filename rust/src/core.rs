@@ -38,18 +38,18 @@ pub enum Port {
 // A tagged pointer. When tag >= VR1, it stores an absolute target location (node index).
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Ptr {
-  pub tag: Tag,
-  pub val: Val,
+  pub data: u32,
 }
+
 
 // A delta pointer. When tag >= VR1, it stores a relative location instead.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct DPtr {
-  pub tag: Tag,
-  pub val: Val,
+  pub data: u32,
 }
 
-// A node is just a pair of two delta pointers. It uses 80 bits.
+
+// A node is just a pair of two delta pointers. It uses 64 bits.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Node {
   pub p1: DPtr,
@@ -78,33 +78,63 @@ pub struct Book {
 }
 
 impl Ptr {
+  #[inline(always)]
+  pub fn new(tag: Tag, val: Val) -> Self {
+    Ptr { data: ((tag as u32) << 28) | (val & 0x0FFFFFFF) }
+  }
+
+  #[inline(always)]
+  pub fn tag(&self) -> Tag {
+    (self.data >> 28) as Tag
+  }
+
+  #[inline(always)]
+  pub fn val(&self) -> Val {
+    self.data & 0x0FFFFFFF
+  }
+
   // Converts a pointer to a delta pointer.
   #[inline(always)]
   pub fn to_dptr(&self, val: Val) -> DPtr {
-    DPtr { 
-      tag: self.tag, 
-      val: if self.tag >= VR1 { self.val.wrapping_sub(val) } else { self.val } 
-    }
+    let tag = self.tag();
+    let dif = if tag >= VR1 { self.val().wrapping_sub(val) } else { self.val() };
+    DPtr::new(tag, dif)
   }
+
 }
 
 impl DPtr {
+  #[inline(always)]
+  pub fn new(tag: Tag, val: Val) -> Self {
+    DPtr { data: ((tag as u32) << 28) | (val & 0x0FFFFFFF) }
+  }
+
+  #[inline(always)]
+  pub fn tag(&self) -> Tag {
+    (self.data >> 28) as Tag
+  }
+
+  #[inline(always)]
+  pub fn val(&self) -> Val {
+    self.data & 0x0FFFFFFF
+  }
+
   // Converts a delta pointer to a pointer.
   #[inline(always)]
   pub fn to_ptr(&self, val: Val) -> Ptr {
-    Ptr { 
-      tag: self.tag, 
-      val: if self.tag >= VR1 { val.wrapping_add(self.val) } else { self.val } 
-    }
+    let tag = self.tag();
+    let loc = if tag >= VR1 { val.wrapping_add(self.val()) } else { self.val() };
+    Ptr::new(tag, loc)
   }
+
 }
 
 impl Node {
   #[inline(always)]
   pub fn nil() -> Self {
     Node {
-      p1: DPtr { tag: NIL, val: 0 },
-      p2: DPtr { tag: NIL, val: 0 },
+      p1: DPtr::new(NIL, 0),
+      p2: DPtr::new(NIL, 0),
     }
   }
 }
@@ -123,7 +153,7 @@ impl Net {
   // Creates an empty net with given size.
   pub fn new(size: usize) -> Self {
     Net {
-      root: Ptr { tag: NIL, val: 0 },
+      root: Ptr::new(NIL, 0),
       acts: vec![],
       node: vec![Node::nil(); size],
       next: 0,
@@ -148,7 +178,7 @@ impl Net {
         space = 0;
         self.next = 0;
       }
-      if self.get(self.next as Val, Port::P1).tag == NIL {
+      if self.get(self.next as Val, Port::P1).tag() == NIL {
         space += 1;
       } else {
         space = 0;
@@ -194,26 +224,28 @@ impl Net {
   // - Otherwise, this is an active pair, so we add it to 'acts'.
   #[inline(always)]
   pub fn link(&mut self, a: Ptr, b: Ptr) {
-    if a.tag == VRT {
+    let a_tag = a.tag();
+    let b_tag = b.tag();
+    if a_tag == VRT {
       self.root = b;
     }
-    if a.tag == VR1 {
-      self.set(a.val, Port::P1, b);
+    if a_tag == VR1 {
+      self.set(a.val(), Port::P1, b);
     }
-    if a.tag == VR2 {
-      self.set(a.val, Port::P2, b);
+    if a_tag == VR2 {
+      self.set(a.val(), Port::P2, b);
     }
-    if b.tag == VRT {
+    if b_tag == VRT {
       self.root = a;
     }
-    if b.tag == VR1 {
-      self.set(b.val, Port::P1, a);
+    if b_tag == VR1 {
+      self.set(b.val(), Port::P1, a);
     }
-    if b.tag == VR2 {
-      self.set(b.val, Port::P2, a);
+    if b_tag == VR2 {
+      self.set(b.val(), Port::P2, a);
     }
-    if a.tag != VRT && a.tag != VR1 && a.tag != VR2
-    && b.tag != VRT && b.tag != VR1 && b.tag != VR2 {
+    if a_tag != VRT && a_tag != VR1 && a_tag != VR2
+    && b_tag != VRT && b_tag != VR1 && b_tag != VR2 {
       self.acts.push((a, b));
     }
   }
@@ -240,55 +272,57 @@ impl Net {
   // Performs an interaction over an active wire.
   #[inline(always)]
   pub fn interact(&mut self, book: &Book, a: &mut Ptr, b: &mut Ptr) {
+    let a_tag = a.tag();
+    let b_tag = b.tag();
     // Collect (for closed nets)
-    if a.tag == REF && b.tag == ERA { return; }
-    if a.tag == ERA && b.tag == REF { return; }
+    if a_tag == REF && b_tag == ERA { return; }
+    if a_tag == ERA && b_tag == REF { return; }
     // Dereference
     self.load_ref(book, a);
     self.load_ref(book, b);
     // Annihilation
-    if a.tag >= CON && b.tag >= CON && a.tag == b.tag {
-      let a1 = self.get(a.val, Port::P1);
-      let b1 = self.get(b.val, Port::P1);
+    if a_tag >= CON && b_tag >= CON && a_tag == b_tag {
+      let a1 = self.get(a.val(), Port::P1);
+      let b1 = self.get(b.val(), Port::P1);
       self.link(a1, b1);
-      let a2 = self.get(a.val, Port::P2);
-      let b2 = self.get(b.val, Port::P2);
+      let a2 = self.get(a.val(), Port::P2);
+      let b2 = self.get(b.val(), Port::P2);
       self.link(a2, b2);
-      self.free(a.val);
-      self.free(b.val);
+      self.free(a.val());
+      self.free(b.val());
       self.rwts += 1;
     // Commutation
-    } else if a.tag >= CON && b.tag >= CON && a.tag != b.tag {
+    } else if a_tag >= CON && b_tag >= CON && a_tag != b_tag {
       let x1 = self.alloc(1);
       let x2 = self.alloc(1);
       let y1 = self.alloc(1);
       let y2 = self.alloc(1);
-      self.set(x1, Port::P1, Ptr { tag: VR1, val: y1 });
-      self.set(x1, Port::P2, Ptr { tag: VR1, val: y2 });
-      self.set(x2, Port::P1, Ptr { tag: VR2, val: y1 });
-      self.set(x2, Port::P2, Ptr { tag: VR2, val: y2 });
-      self.set(y1, Port::P1, Ptr { tag: VR1, val: x1 });
-      self.set(y1, Port::P2, Ptr { tag: VR1, val: x2 });
-      self.set(y2, Port::P1, Ptr { tag: VR2, val: x1 });
-      self.set(y2, Port::P2, Ptr { tag: VR2, val: x2 });
-      self.link(self.get(a.val, Port::P1), Ptr { tag: b.tag, val: x1 });
-      self.link(self.get(a.val, Port::P2), Ptr { tag: b.tag, val: x2 });
-      self.link(self.get(b.val, Port::P1), Ptr { tag: a.tag, val: y1 });
-      self.link(self.get(b.val, Port::P2), Ptr { tag: a.tag, val: y2 });
-      self.free(a.val);
-      self.free(b.val);
+      self.set(x1, Port::P1, Ptr::new(VR1, y1));
+      self.set(x1, Port::P2, Ptr::new(VR1, y2));
+      self.set(x2, Port::P1, Ptr::new(VR2, y1));
+      self.set(x2, Port::P2, Ptr::new(VR2, y2));
+      self.set(y1, Port::P1, Ptr::new(VR1, x1));
+      self.set(y1, Port::P2, Ptr::new(VR1, x2));
+      self.set(y2, Port::P1, Ptr::new(VR2, x1));
+      self.set(y2, Port::P2, Ptr::new(VR2, x2));
+      self.link(self.get(a.val(), Port::P1), Ptr::new(b_tag, x1));
+      self.link(self.get(a.val(), Port::P2), Ptr::new(b_tag, x2));
+      self.link(self.get(b.val(), Port::P1), Ptr::new(a_tag, y1));
+      self.link(self.get(b.val(), Port::P2), Ptr::new(a_tag, y2));
+      self.free(a.val());
+      self.free(b.val());
       self.rwts += 1;
     // Erasure
-    } else if a.tag >= CON && b.tag == ERA {
-      self.link(self.get(a.val, Port::P1), Ptr { tag: ERA, val: 0 });
-      self.link(self.get(a.val, Port::P2), Ptr { tag: ERA, val: 0 });
-      self.free(a.val);
+    } else if a_tag >= CON && b_tag == ERA {
+      self.link(self.get(a.val(), Port::P1), Ptr::new(ERA, 0));
+      self.link(self.get(a.val(), Port::P2), Ptr::new(ERA, 0));
+      self.free(a.val());
       self.rwts += 1;
     // Erasure
-    } else if a.tag == ERA && b.tag >= CON {
-      self.link(self.get(b.val, Port::P1), Ptr { tag: ERA, val: 0 });
-      self.link(self.get(b.val, Port::P2), Ptr { tag: ERA, val: 0 });
-      self.free(b.val);
+    } else if a_tag == ERA && b_tag >= CON {
+      self.link(self.get(b.val(), Port::P1), Ptr::new(ERA, 0));
+      self.link(self.get(b.val(), Port::P2), Ptr::new(ERA, 0));
+      self.free(b.val());
       self.rwts += 1;
     // Stuck
     } else {
@@ -300,9 +334,9 @@ impl Net {
   #[inline(always)]
   pub fn load_ref(&mut self, book: &Book, ptr: &mut Ptr) {
     // White ptr is still a REF...
-    while ptr.tag == REF {
+    while ptr.tag() == REF {
       // Loads the referenced definition...
-      if let Some(got) = book.defs.get(&ptr.val) {
+      if let Some(got) = book.defs.get(&ptr.val()) {
         // Allocates enough space...
         let len = got.node.len();
         let val = self.alloc(len);
@@ -313,20 +347,20 @@ impl Net {
         for &(p1, p2) in &got.acts {
           let mut p1 = p1;
           let mut p2 = p2;
-          if p1.tag >= VR1 { p1.val += val; }
-          if p2.tag >= VR1 { p2.val += val; }
+          if p1.tag() >= VR1 { p1 = Ptr::new(p1.tag(), p1.val() + val); }
+          if p2.tag() >= VR1 { p2 = Ptr::new(p2.tag(), p2.val() + val); }
           self.acts.push((p1, p2));
         }
         // Overwrites 'ptr' with the loaded root pointer, adjusting locations...
         *ptr = got.root;
-        if got.root.tag >= VR1 { ptr.val += val; }
+        if got.root.tag() >= VR1 { *ptr = Ptr::new(ptr.tag(), ptr.val() + val); }
       }
     }
   }
 
   // Initializes the net by loading a specific REF
   pub fn boot(&mut self, book: &Book, ref_id: u32) {
-    let mut root = Ptr { tag: REF, val: ref_id };
+    let mut root = Ptr::new(REF, ref_id);
     self.load_ref(&book, &mut root);
     self.root = root;
   }
