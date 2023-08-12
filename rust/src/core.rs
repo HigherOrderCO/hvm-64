@@ -60,9 +60,9 @@ pub struct Node {
 // - root: a single free wire, used as the entrancy point.
 // - acts: a vector of active wires, updated automatically.
 // - node: a vector of nodes, with main ports omitted.
-// - next: next pointer to allocate memory (internal).
 // - used: total nodes currently allocated on the graph.
 // - rwts: total graph rewrites performed inside this net.
+// - next: next pointer to allocate memory (internal).
 pub struct Net {
   pub root: Ptr,
   pub acts: Vec<(Ptr, Ptr)>,
@@ -304,9 +304,10 @@ impl Net {
       // Loads the referenced definition...
       if let Some(got) = book.defs.get(&ptr.val) {
         // Allocates enough space...
-        let val = self.alloc(got.node.len());
+        let len = got.node.len();
+        let val = self.alloc(len);
         // Loads nodes with a memcpy (possible because of DPtrs)...
-        let rng = (val as usize) .. (val as usize + got.node.len());
+        let rng = (val as usize) .. (val as usize + len);
         self.node[rng].copy_from_slice(&got.node);
         // Loads active wires, adjusting locations...
         for &(p1, p2) in &got.acts {

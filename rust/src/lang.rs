@@ -14,6 +14,7 @@
 //   <nod>  ::= "(" <num_lit> " " <tree> " " <tree> ")"
 //   <var>  ::= <str_lit>
 //   <num>  ::= <num_lit>
+//   <ref>  ::= "@" <str_lit>
 //
 // For example, below is the church nat 2, encoded as an interaction net: 
 //
@@ -29,8 +30,9 @@
 // ~ (0 y y)
 //
 // The net above represents two identity CON nodes connected by their main ports. This net has no
-// root, so it will just reduce to nothingness. References (to closed nets) are denoted by '@id',
-// and numbers are represented by numeric literals.
+// root, so it will just reduce to nothingness. Numbers are represented by numeric literals.
+// References (to closed nets) are denoted by '@name', where the name must have at most 5 letters,
+// from the following alphabet: ".0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_".
 
 use crate::core::*;
 use std::collections::HashMap;
@@ -103,7 +105,7 @@ pub fn parse_str_lit(chars: &mut Peekable<Chars>) -> String {
   let mut str = String::new();
   skip_spaces(chars);
   while let Some(c) = chars.peek() {
-    if !c.is_alphanumeric() {
+    if !c.is_alphanumeric() && *c != '_' && *c != '.' {
       break;
     }
     str.push(*c);
@@ -130,7 +132,8 @@ pub fn parse_ltree(chars: &mut Peekable<Chars>) -> LTree {
     Some('@') => {
       chars.next();
       skip_spaces(chars);
-      LTree::Ref { nam: parse_num_lit(chars) }
+      let name = parse_str_lit(chars);
+      LTree::Ref { nam: name_to_u32(&name) }
     },
     Some(c) if c.is_digit(10) => {
       LTree::Num { val: parse_num_lit(chars) }
@@ -187,7 +190,7 @@ pub fn show_ltree(tree: &LTree) -> String {
       val.to_string()
     },
     LTree::Ref { nam } => {
-      format!("@{}", nam.to_string())
+      format!("@{}", u32_to_name(*nam))
     },
   }
 }
@@ -245,6 +248,63 @@ pub fn lnet_to_lnet(lnet: &LNet) -> Net {
   }
   net.node = net.node[0 .. net.used].to_vec();
   return net;
+}
+
+pub fn name_to_letters(name: &str) -> Vec<u8> {
+  let mut letters = Vec::new();
+  for c in name.chars() {
+    letters.push(match c {
+      '.'       => 0,
+      '0'..='9' => c as u8 - '0' as u8 + 1,
+      'A'..='Z' => c as u8 - 'A' as u8 + 11,
+      'a'..='z' => c as u8 - 'a' as u8 + 37,
+      '_'       => 63,
+      _         => panic!("Invalid character in name"),
+    });
+  }
+  return letters;
+}
+
+pub fn letters_to_name(letters: Vec<u8>) -> String {
+  let mut name = String::new();
+  for letter in letters {
+    name.push(match letter {
+            0 => '.',
+       1..=10 => (letter - 1 + '0' as u8) as char,
+      11..=36 => (letter - 11 + 'A' as u8) as char,
+      37..=62 => (letter - 37 + 'a' as u8) as char,
+           63 => '_',
+      _       => panic!("Invalid letter in name"),
+    });
+  }
+  return name;
+}
+
+pub fn u32_to_letters(num: u32) -> Vec<u8> {
+  let mut letters = Vec::new();
+  let mut num = num;
+  while num > 0 {
+    letters.push((num % 64) as u8);
+    num /= 64;
+  }
+  letters.reverse();
+  return letters;
+}
+
+pub fn letters_to_u32(letters: Vec<u8>) -> u32 {
+  let mut num = 0;
+  for letter in letters {
+    num = num * 64 + letter as u32;
+  }
+  return num;
+}
+
+pub fn name_to_u32(name: &str) -> u32 {
+  letters_to_u32(name_to_letters(name))
+}
+
+pub fn u32_to_name(num: u32) -> String {
+  letters_to_name(u32_to_letters(num))
 }
 
 // Injection and Readback
@@ -378,7 +438,11 @@ pub fn readback_lnet(net: &Net) -> LNet {
   LNet { root, acts }
 }
 
-pub fn define(book: &mut Book, id: u32, code: &str) -> u32 {
+// Utils
+// -----
+
+pub fn define(book: &mut Book, name: &str, code: &str) -> u32 {
+  let id = name_to_u32(name);
   book.def(id, lnet_to_lnet(&do_parse_lnet(code)));
   return id;
 }
