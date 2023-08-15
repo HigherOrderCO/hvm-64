@@ -10,8 +10,7 @@
 // REFs; 2. omitting labels on nodes (as these are stored on their parent's pointers). This file
 // also includes REF pointers, which expand to pre-defined modules (closed nets with 1 free wire).
 // This expansion is performed on demand, and ERA-REF pointers are collected, allowing the runtime
-// to compute tail-recursive functions with constant memory usage. Differential pointers are used,
-// to allow REF expansions to be performed with a cheap memcpy.
+// to compute tail-recursive functions with constant memory usage.
 
 use std::collections::HashMap;
 
@@ -41,19 +40,11 @@ pub struct Ptr {
   pub data: u32,
 }
 
-
-// A delta pointer. When tag >= VR1, it stores a relative location instead.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
-pub struct DPtr {
-  pub data: u32,
-}
-
-
 // A node is just a pair of two delta pointers. It uses 64 bits.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Node {
-  pub p1: DPtr,
-  pub p2: DPtr,
+  pub p1: Ptr,
+  pub p2: Ptr,
 }
 
 // A net has:
@@ -93,48 +84,20 @@ impl Ptr {
     self.data & 0x0FFFFFFF
   }
 
-  // Converts a pointer to a delta pointer.
   #[inline(always)]
-  pub fn to_dptr(&self, val: Val) -> DPtr {
-    let tag = self.tag();
-    let dif = if tag >= VR1 { self.val().wrapping_sub(val) } else { self.val() };
-    DPtr::new(tag, dif)
+  pub fn mov(&mut self, add: u32) {
+    if self.tag() >= VR1 {
+      self.data = (self.data & 0xF0000000) | (self.data + add) & 0x0FFFFFFF;
+    }
   }
-
-}
-
-impl DPtr {
-  #[inline(always)]
-  pub fn new(tag: Tag, val: Val) -> Self {
-    DPtr { data: ((tag as u32) << 28) | (val & 0x0FFFFFFF) }
-  }
-
-  #[inline(always)]
-  pub fn tag(&self) -> Tag {
-    (self.data >> 28) as Tag
-  }
-
-  #[inline(always)]
-  pub fn val(&self) -> Val {
-    self.data & 0x0FFFFFFF
-  }
-
-  // Converts a delta pointer to a pointer.
-  #[inline(always)]
-  pub fn to_ptr(&self, val: Val) -> Ptr {
-    let tag = self.tag();
-    let loc = if tag >= VR1 { val.wrapping_add(self.val()) } else { self.val() };
-    Ptr::new(tag, loc)
-  }
-
 }
 
 impl Node {
   #[inline(always)]
   pub fn nil() -> Self {
     Node {
-      p1: DPtr::new(NIL, 0),
-      p2: DPtr::new(NIL, 0),
+      p1: Ptr::new(NIL, 0),
+      p2: Ptr::new(NIL, 0),
     }
   }
 }
@@ -203,19 +166,18 @@ impl Net {
   pub fn get(&self, val: Val, port: Port) -> Ptr {
     let node = unsafe { self.node.get_unchecked(val as usize) };
     match port {
-      Port::P1 => node.p1.to_ptr(val),
-      Port::P2 => node.p2.to_ptr(val),
+      Port::P1 => node.p1,
+      Port::P2 => node.p2,
     }
   }
 
   // Sets the pointer stored on the port 1 or 2 of a node.
   #[inline(always)]
   pub fn set(&mut self, val: Val, port: Port, value: Ptr) {
-    let dptr = value.to_dptr(val);
     let node = unsafe { self.node.get_unchecked_mut(val as usize) };
     match port {
-      Port::P1 => node.p1 = dptr,
-      Port::P2 => node.p2 = dptr,
+      Port::P1 => node.p1 = value,
+      Port::P2 => node.p2 = value,
     }
   }
 
@@ -340,20 +302,25 @@ impl Net {
         // Allocates enough space...
         let len = got.node.len();
         let val = self.alloc(len);
-        // Loads nodes with a memcpy (possible because of DPtrs)...
-        let rng = (val as usize) .. (val as usize + len);
-        self.node[rng].copy_from_slice(&got.node);
+        // Loads nodes, adjusting locations...
+        for i in 0 .. len as usize {
+          let mut node = got.node[i].clone();
+          node.p1.mov(val);
+          node.p2.mov(val);
+          unsafe {
+            *self.node.get_unchecked_mut(val as usize + i) = node;
+          };
+        }
         // Loads active wires, adjusting locations...
-        for &(p1, p2) in &got.acts {
-          let mut p1 = p1;
-          let mut p2 = p2;
-          if p1.tag() >= VR1 { p1 = Ptr::new(p1.tag(), p1.val() + val); }
-          if p2.tag() >= VR1 { p2 = Ptr::new(p2.tag(), p2.val() + val); }
-          self.acts.push((p1, p2));
+        for got in &got.acts {
+          let mut node = Node { p1: got.0, p2: got.1 };
+          node.p1.mov(val);
+          node.p2.mov(val);
+          self.acts.push((node.p1, node.p2));
         }
         // Overwrites 'ptr' with the loaded root pointer, adjusting locations...
         *ptr = got.root;
-        if got.root.tag() >= VR1 { *ptr = Ptr::new(ptr.tag(), ptr.val() + val); }
+        ptr.mov(val);
       }
     }
   }

@@ -142,11 +142,11 @@ fn main() {
   define(book, "ex2", "
     $ main
     & @run ~ (0 nie main)
-    & @c22 ~ (0 @I (0 @E nie))
+    & @c20 ~ (0 @I (0 @E nie))
   "); 
 
   // Initializes the net
-  let net = &mut Net::init(1 << 26, &book, name_to_u32("ex1"));
+  let net = &mut Net::init(1 << 26, &book, name_to_u32("ex2"));
   //println!("[net]\n{}", show_net(&net));
 
   // Computes its normal form
