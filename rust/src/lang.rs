@@ -347,10 +347,10 @@ pub fn alloc_ltree(net: &mut Net, tree: &LTree, vars: &mut HashMap<String, Paren
               net.root = Ptr::new(port_to_tag(port), val);
             }
             Parent::Root => {
-              net.root = Ptr::new(VRT, 0);
+              net.root = Ptr::new(VRR, 0);
             }
           }
-          return Ptr::new(VRT, 0);
+          return Ptr::new(VRR, 0);
         },
         Some(Parent::Node { val: other_val, port: other_port }) => {
           //println!("linked {} | set {} {:?} as {} {:?}", nam, other_val, other_port, val, port);
@@ -362,7 +362,7 @@ pub fn alloc_ltree(net: &mut Net, tree: &LTree, vars: &mut HashMap<String, Paren
               net.set(*other_val, *other_port, Ptr::new(port_to_tag(port), val))
             }
             Parent::Root => {
-              net.set(*other_val, *other_port, Ptr::new(VRT, 0))
+              net.set(*other_val, *other_port, Ptr::new(VRR, 0))
             }
           }
           return Ptr::new(port_to_tag(*other_port), *other_val);
@@ -401,11 +401,11 @@ pub fn readback_ltree(net: &Net, ptr: Ptr, parent: Parent, vars: &mut HashMap<Pa
     REF => {
       LTree::Ref { nam: ptr.val() }
     },
-    VRT | VR1 | VR2 => {
+    VRR | VR1 | VR2 => {
       let key = match ptr.tag() {
         VR1 => Parent::Node { val: ptr.val(), port: Port::P1 },
         VR2 => Parent::Node { val: ptr.val(), port: Port::P2 },
-        VRT => Parent::Root,
+        VRR => Parent::Root,
         _   => unreachable!(),
       };
       if let Some(nam) = vars.get(&key) {

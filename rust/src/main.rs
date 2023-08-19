@@ -146,17 +146,43 @@ fn main() {
   "); 
 
   // Initializes the net
-  let net = &mut Net::init(1 << 26, &book, name_to_u32("ex2"));
-  //println!("[net]\n{}", show_net(&net));
+  //let net = &mut Net::init(1 << 26, &book, name_to_u32("ex2"));
+  ////println!("[net]\n{}", show_net(&net));
 
-  // Computes its normal form
-  let iter = net.normal(book);
+  //// Computes its normal form
+  //let iter = net.normal(book);
 
-  // Shows results and stats
-  //println!("[net]\n{}", show_net(&net));
-  println!("size: {}", net.node.len());
-  println!("used: {}", net.used);
-  println!("rwts: {}", net.rwts);
-  println!("iter: {}", iter);
+  //// Shows results and stats
+  ////println!("[net]\n{}", show_net(&net));
+  //println!("size: {}", net.node.len());
+  //println!("used: {}", net.used);
+  //println!("rwts: {}", net.rwts);
+  //println!("iter: {}", iter);
+
+  //define(book, "term", "
+    //$ main
+    //& (0 (1 (0 b a) (0 a R)) (0 b R))
+    //~ (0 (0 x x) main)
+  //");
+
+  // (λfλx(f x) λa(a))
+  define(book, "term", "
+    $ main
+    & (0 (0 a R) (0 a R))
+    ~ (0 (0 x x) main)
+  ");
+
+
+  let got = book.defs.get(&name_to_u32("term")).unwrap();
+  println!("  u32 root      = 0x{:08x};", got.root.data);
+  for i in 0 .. got.acts.len() {
+    println!("  acts_data[{:2}] = (Wire) {{0x{:08x},0x{:08x}}};", i, got.acts[i].0.data, got.acts[i].1.data);
+  }
+  for i in 0 .. got.node.len() {
+    println!("  node_data[{:2}] = (Node) {{0x{:08x},0x{:08x}}};", i, got.node[i].p1.data, got.node[i].p2.data);
+  }
+
+  //println!("{:?}", &got.unwrap());
+
 
 }

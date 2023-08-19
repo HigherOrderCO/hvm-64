@@ -17,15 +17,18 @@ use std::collections::HashMap;
 pub type Tag = u8;
 pub type Val = u32;
 
-pub const NIL: Tag = 0; // empty node
-pub const REF: Tag = 1; // reference to a definition (closed net)
-pub const NUM: Tag = 2; // unboxed number
-pub const ERA: Tag = 3; // unboxed eraser
-pub const VRT: Tag = 4; // variable pointing to root
-pub const VR1: Tag = 5; // variable pointing to aux1 port of node
-pub const VR2: Tag = 6; // variable pointing to aux2 port of node
-pub const CON: Tag = 7; // points to main port of con node
-pub const DUP: Tag = 8; // points to main port of dup node; higher labels also dups
+pub const NIL: Tag = 0x0; // empty node
+pub const REF: Tag = 0x1; // reference to a definition (closed net)
+pub const NUM: Tag = 0x2; // unboxed number
+pub const ERA: Tag = 0x3; // unboxed eraser
+pub const VRR: Tag = 0x4; // variable pointing to root
+pub const VR1: Tag = 0x5; // variable pointing to aux1 port of node
+pub const VR2: Tag = 0x6; // variable pointing to aux2 port of node
+pub const GOT: Tag = 0x7; // redirection to root
+pub const GO1: Tag = 0x8; // redirection to aux1 port of node
+pub const GO2: Tag = 0x9; // redirection to aux2 port of node
+pub const CON: Tag = 0xA; // points to main port of con node
+pub const DUP: Tag = 0xB; // points to main port of dup node; higher labels also dups
 
 // A node port: 1 or 2. Main ports are omitted.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
@@ -54,6 +57,7 @@ pub struct Node {
 // - used: total nodes currently allocated on the graph.
 // - rwts: total graph rewrites performed inside this net.
 // - next: next pointer to allocate memory (internal).
+#[derive(Debug)]
 pub struct Net {
   pub root: Ptr,
   pub acts: Vec<(Ptr, Ptr)>,
@@ -188,7 +192,7 @@ impl Net {
   pub fn link(&mut self, a: Ptr, b: Ptr) {
     let a_tag = a.tag();
     let b_tag = b.tag();
-    if a_tag == VRT {
+    if a_tag == VRR {
       self.root = b;
     }
     if a_tag == VR1 {
@@ -197,7 +201,7 @@ impl Net {
     if a_tag == VR2 {
       self.set(a.val(), Port::P2, b);
     }
-    if b_tag == VRT {
+    if b_tag == VRR {
       self.root = a;
     }
     if b_tag == VR1 {
@@ -206,8 +210,8 @@ impl Net {
     if b_tag == VR2 {
       self.set(b.val(), Port::P2, a);
     }
-    if a_tag != VRT && a_tag != VR1 && a_tag != VR2
-    && b_tag != VRT && b_tag != VR1 && b_tag != VR2 {
+    if a_tag != VRR && a_tag != VR1 && a_tag != VR2
+    && b_tag != VRR && b_tag != VR1 && b_tag != VR2 {
       self.acts.push((a, b));
     }
   }
@@ -242,6 +246,8 @@ impl Net {
     // Dereference
     self.load_ref(book, a);
     self.load_ref(book, b);
+
+
     // Annihilation
     if a_tag >= CON && b_tag >= CON && a_tag == b_tag {
       let a1 = self.get(a.val(), Port::P1);
