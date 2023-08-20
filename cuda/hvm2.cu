@@ -8,11 +8,54 @@ typedef uint32_t u32;
 typedef uint64_t u64;
 typedef unsigned long long int a64;
 
-// Shared Memory Size = 128 KB
-const u32 SM_SIZE = 128 * 1024;
+// Configuration
+// -------------
 
-// Threads per Block = 128
-const u32 BLOCK_SIZE = 128;
+// This code is initially optimized for nVidia RTX 4090
+
+// Total number of SMs in a chip (fixed per GPU)
+const u32 SM_COUNT = 128;
+
+// Shared memory size, in bytes (fixed per GPU)
+const u32 SM_SIZE = 128 * 1024; // 128 KB
+
+// Number of threads per warp (fixed per GPU)
+const u32 WARP_SIZE = 32;
+
+// Warps per SM (adjustable: aim to max occupancy)
+const u32 WARPS_PER_SM = 4;
+
+// Number of threads per block (derived)
+const u32 BLOCK_SIZE = WARP_SIZE * WARPS_PER_SM;
+
+// Total number of active parallel threads (derived)
+const u32 TOTAL_THREADS = SM_COUNT * BLOCK_SIZE;
+
+// Total number of thread blocks
+const u32 TOTAL_BLOCKS = TOTAL_THREADS / BLOCK_SIZE;
+
+// Threads used per rewrite unit
+const u32 UNIT_SIZE = 4;
+
+// Total number of units
+const u32 TOTAL_UNITS = TOTAL_THREADS / UNIT_SIZE;
+
+// Total number of rewrite units (adjustable ratios)
+const u32 ANNI_SIZE = TOTAL_UNITS / 2;
+const u32 COMM_SIZE = TOTAL_UNITS / 2;
+
+// Total number of nodes (fixed due to 2^28 addressable space)
+const u32 NODE_SIZE = 1 << 28;
+
+// Spacing between units, in number of nodes
+const u32 UNIT_NODE_SPACE = NODE_SIZE / TOTAL_UNITS;
+
+// Unit types
+const u32 ANNI = 0;
+const u32 COMM = 1;
+
+// Types
+// -----
 
 // Pointer value (28-bit)
 typedef u32 Val;
@@ -29,11 +72,15 @@ const Tag VR2 = 0x6; // variable pointing to aux2 port of node
 const Tag GOR = 0x7; // redirection to root
 const Tag GO1 = 0x8; // redirection to aux1 port of node
 const Tag GO2 = 0x9; // redirection to aux2 port of node
-const Tag CON = 0xa; // points to main port of con node
-const Tag DUP = 0xb; // points to main port of dup node; higher labels also dups
+const Tag CON = 0xA; // points to main port of con node
+const Tag DUP = 0xB; // points to main port of dup node
+const Tag TRI = 0xC; // points to main port of tri node
+const Tag QUA = 0xD; // points to main port of qua node
+const Tag QUI = 0xE; // points to main port of qui node
+const Tag SEX = 0xF; // points to main port of sex node
 const u32 BSY = 0xFFFFFFFF; // value taken by another thread, will be replaced soon
 
-// Thread types
+// Thread shards
 const u32 A1 = 0;
 const u32 A2 = 1;
 const u32 B1 = 2;
@@ -60,31 +107,31 @@ typedef struct {
 
 // An interaction net 
 typedef struct {
-  Ptr    root;
-  Wire*  anni_data;
-  u32    anni_size;
-  Wire*  comm_data;
-  u32    comm_size;
-  Node*  node_data;
-  u32    node_size;
-  u32    used_mem;
-  u32    rewrites;
+  Ptr   root;
+  Wire* anni_data;
+  //u32   anni_size;
+  Wire* comm_data;
+  //u32   comm_size;
+  Node* node_data;
+  //u32   node_size;
+  u32   rewrites;
 } Net;
 
 // A worker local data
 typedef struct {
-  u32  tid;
-  u32  gid;
-  u32  alloc_at;
-  u32  new_anni;
-  u32  new_comm;
-  u32  rewrites;
-  u32  used_mem;
-  u32  type;
-  u32  port;
-  Ptr  a_ptr;
-  Ptr  b_ptr;
-  u32* shared;
+  u32   tid;       // local thread id (on the block)
+  u32   gid;       // global thread id (on the kernel)
+  u32   unit;      // unit id (index on acts array)
+  u32   type;      // unit type (ANNI|COMM)
+  u32   alloc_at;  // where to alloc next node
+  Wire* acts_data; // redex buffer we pull from
+  u32   acts_size; // max redexes in our buffer
+  u32   rewrites;  // total rewrites this performed
+  u32   shard;     // aimed shard (A1|A2|B1|B2)
+  u32   port;      // aimed port (P1|P2)
+  Ptr   a_ptr;     // left pointer of active wire
+  Ptr   b_ptr;     // right pointer of active wire
+  u32*  shared;    // shared memory for communication
 } Worker;
 
 // Runtime
@@ -147,28 +194,28 @@ __device__ inline Ptr* at(Net* net, Val idx, Port port) {
 }
 
 // Inserts a value in the first empty slot
-__device__ inline u32 insert(a64* arr, u32 len, u32* idx, a64 val) {
+__device__ inline u32 insert(a64* arr, u32 len, u32* idx, a64 val, u32 slot, u32 add) {
   while (true) {
-    if (atomicCAS(&arr[*idx], 0, val) == 0) {
-      return *idx;
+    if (atomicCAS(&arr[*idx + slot], 0, val) == 0) {
+      return *idx + slot;
     }
-    *idx = (*idx + 1) % len; 
+    *idx = (*idx + add) % len; 
   }
 }
 
 // Allocates a new node in memory
 __device__ inline u32 alloc(Worker *worker, Net *net) {
-  return insert((a64*)net->node_data, net->node_size, &worker->alloc_at, *((u64*)&mknode(BSY, BSY)));
+  return insert((a64*)net->node_data, NODE_SIZE, &worker->alloc_at, *((u64*)&mknode(BSY, BSY)), worker->shard, 4);
 }
 
 // Creates a new active pair
 __device__ inline void activ(Worker* worker, Net* net, Ptr a_ptr, Ptr b_ptr) {
   bool anni = tag(a_ptr) == tag(b_ptr);
   a64* data = anni ? (a64*)net->anni_data : (a64*)net->comm_data;
-  u32  size = anni ? net->anni_size       : net->comm_size;
-  u32* newx = anni ? &worker->new_anni    : &worker->new_comm;
+  u32  size = anni ? ANNI_SIZE : COMM_SIZE;
+  u32  aidx = worker->unit;
   Wire wire = {a_ptr, b_ptr};
-  insert(data, size, newx, *((u64*)&wire));
+  insert(data, size, &aidx, *((u64*)&wire), 0, 1);
 }
 
 // Empties a slot in memory
@@ -248,50 +295,12 @@ __device__ void subst(Worker* worker, Net* net, Ptr* self_ref, Ptr target_ptr) {
 // whenever possible. So, for example, in a commutation rule, all the 4 clones
 // would be allocated at the same time.
 
-__device__ Worker new_worker(Net* net) {
-  // Shared buffer for warp communication
-  __shared__ u32 shared[BLOCK_SIZE];
-
-  // Initializes local vars
-  Worker worker;
-  worker.tid      = threadIdx.x;
-  worker.gid      = blockIdx.x * blockDim.x + threadIdx.x;
-  worker.alloc_at = 0;
-  worker.new_anni = 0;
-  worker.new_comm = 0;
-  worker.rewrites = 0;
-  worker.used_mem = 0; 
-  worker.type     = worker.tid % 4;
-  worker.port     = worker.type % 2 == 0 ? P1 : P2;
-  worker.shared   = shared;
-
-  // Gets the active wire
-  Wire active_wire;
-  if (worker.type == 0) {
-    *((u64*)&active_wire)  = atomicExch((a64*)&net->anni_data[worker.gid / 4], 0);
-    shared[worker.tid + 0] = active_wire.lft;
-    shared[worker.tid + 1] = active_wire.rgt;
-    shared[worker.tid + 2] = active_wire.rgt;
-    shared[worker.tid + 3] = active_wire.lft;
-  }
-
-  // Synchronizes writes
-  __syncthreads();
-
-  // Gets main ports
-  worker.a_ptr = shared[worker.port == P1 ? worker.tid + 0 : worker.tid - 1];
-  worker.b_ptr = shared[worker.port == P1 ? worker.tid + 1 : worker.tid + 0];
-
-  return worker;
-}
-
 // Annihilation Interaction
-__global__ void anni(Net* net) {
-  // Creates the local worker object
-  Worker* self = &new_worker(net);
-
+__device__ void anni(Worker* self, Net* net) {
   // If there is nothing to do, return
   if (self->a_ptr == 0 || self->b_ptr == 0) { return; }
+
+  printf("[%d] anni: tid=%d unit=%d type=%d alloc_at=%d shard=%d port=%d\n", self->gid, self->tid, self->unit, self->type, self->alloc_at, self->shard, self->port);
 
   // Takes my aux port
   Ptr* ak_ref = at(net, val(self->a_ptr), self->port);
@@ -313,12 +322,11 @@ __global__ void anni(Net* net) {
 }
 
 // Commutation Interaction
-__global__ void comm(Net* net) {
-  // Creates the local worker object
-  Worker* self = &new_worker(net);
-
+__device__ void comm(Worker* self, Net* net) {
   // If there is nothing to do, return
   if (self->a_ptr == 0 || self->b_ptr == 0) { return; }
+
+  printf("[%d] comm: tid=%d unit=%d type=%d alloc_at=%d shard=%d port=%d\n", self->gid, self->tid, self->unit, self->type, self->alloc_at, self->shard, self->port);
 
   // Takes my aux port
   Ptr* ak_ref = at(net, val(self->a_ptr), self->port);
@@ -334,7 +342,7 @@ __global__ void comm(Net* net) {
   // Communicate alloc index to local threads
   self->shared[self->tid] = xk_loc;
   u32 yi;
-  switch (self->type) {
+  switch (self->shard) {
     case A1: yi = self->tid + 2; break;
     case A2: yi = self->tid + 1; break;
     case B1: yi = self->tid - 2; break;
@@ -343,6 +351,8 @@ __global__ void comm(Net* net) {
 
   // Receive alloc indices from local threads
   __syncthreads();
+
+  //printf("[%d] alloc %d | %d %d\n", self->gid, xk_loc, self->shared[yi+0], self->shared[yi+1]);
 
   // Fill the clone
   Ptr clone_p1 = mkptr(self->port == P1 ? VR1 : VR2, self->shared[yi+0]);
@@ -362,17 +372,62 @@ __global__ void comm(Net* net) {
   }
 }
 
+__global__ void work(Net* net) {
+  // Shared buffer for warp communication
+  __shared__ u32 shared[BLOCK_SIZE];
+
+  // Initializes local vars
+  Worker worker;
+  worker.tid        = threadIdx.x;
+  worker.gid        = blockIdx.x * blockDim.x + threadIdx.x;
+  worker.unit       = (worker.gid / UNIT_SIZE) % ANNI_SIZE;
+  worker.type       = worker.gid < TOTAL_THREADS/2 ? ANNI : COMM;
+  worker.acts_data  = worker.type == ANNI ? net->anni_data : net->comm_data;
+  worker.acts_size  = worker.type == ANNI ? ANNI_SIZE : COMM_SIZE;
+  worker.alloc_at   = UNIT_NODE_SPACE * (worker.gid / UNIT_SIZE);
+  //worker.new_anni = 0;
+  //worker.new_comm = 0;
+  worker.rewrites   = 0;
+  worker.shard      = worker.tid % 4;
+  worker.port       = worker.shard % 2 == 0 ? P1 : P2;
+  worker.shared     = shared;
+
+  //printf("[%d] ON: tid=%d unit=%d type=%d alloc_at=%d shard=%d port=%d\n", worker.gid, worker.tid, worker.unit, worker.type, worker.alloc_at, worker.shard, worker.port);
+
+  // Gets the active wire
+  Wire active_wire;
+  if (worker.shard == 0) {
+    *((u64*)&active_wire)  = atomicExch((a64*)&worker.acts_data[worker.unit], 0);
+    shared[worker.tid + 0] = active_wire.lft;
+    shared[worker.tid + 1] = active_wire.rgt;
+    shared[worker.tid + 2] = active_wire.rgt;
+    shared[worker.tid + 3] = active_wire.lft;
+  }
+
+  // Synchronizes writes
+  __syncthreads();
+
+  // Gets main ports
+  worker.a_ptr = shared[worker.port == P1 ? worker.tid + 0 : worker.tid - 1];
+  worker.b_ptr = shared[worker.port == P1 ? worker.tid + 1 : worker.tid + 0];
+
+  if (worker.type == ANNI) {
+    anni(&worker, net);
+  } else {
+    comm(&worker, net);
+  }
+}
+
 // Host<->Device
 // -------------
 
-__host__ Net* Net_new(Ptr root, Wire* anni_data, u32 anni_size, Wire* comm_data, u32 comm_size, Node* node_data, u32 node_size) {
+__host__ Net* Net_new(Ptr root, Wire* anni_data, Wire* comm_data, Node* node_data) {
   // Allocate and initialize a new Net object on the host
   Net* host_net       = (Net*)malloc(sizeof(Net));
   host_net->root      = root;
-  host_net->anni_size = anni_size;
-  host_net->comm_size = comm_size;
-  host_net->node_size = node_size;
-  host_net->used_mem  = 0;
+  //host_net->anni_size = anni_size;
+  //host_net->comm_size = comm_size;
+  //host_net->node_size = node_size;
   host_net->rewrites  = 0;
   host_net->anni_data = anni_data;
   host_net->comm_data = comm_data;
@@ -388,14 +443,14 @@ __host__ Net* Net_to_device(Net* host_net) {
   Node* device_node_data;
 
   cudaMalloc((void**)&device_net, sizeof(Net));
-  cudaMalloc((void**)&device_anni_data, host_net->anni_size * sizeof(Wire));
-  cudaMalloc((void**)&device_comm_data, host_net->comm_size * sizeof(Wire));
-  cudaMalloc((void**)&device_node_data, host_net->node_size * sizeof(Node));
+  cudaMalloc((void**)&device_anni_data, ANNI_SIZE * sizeof(Wire));
+  cudaMalloc((void**)&device_comm_data, COMM_SIZE * sizeof(Wire));
+  cudaMalloc((void**)&device_node_data, NODE_SIZE * sizeof(Node));
 
   // Copy the host data to the device memory
-  cudaMemcpy(device_anni_data, host_net->anni_data, host_net->anni_size * sizeof(Wire), cudaMemcpyHostToDevice);
-  cudaMemcpy(device_comm_data, host_net->comm_data, host_net->comm_size * sizeof(Wire), cudaMemcpyHostToDevice);
-  cudaMemcpy(device_node_data, host_net->node_data, host_net->node_size * sizeof(Node), cudaMemcpyHostToDevice);
+  cudaMemcpy(device_anni_data, host_net->anni_data, ANNI_SIZE * sizeof(Wire), cudaMemcpyHostToDevice);
+  cudaMemcpy(device_comm_data, host_net->comm_data, COMM_SIZE * sizeof(Wire), cudaMemcpyHostToDevice);
+  cudaMemcpy(device_node_data, host_net->node_data, NODE_SIZE * sizeof(Node), cudaMemcpyHostToDevice);
 
   // Create a temporary host Net object with device pointers
   Net temp_net = *host_net;
@@ -418,9 +473,9 @@ __host__ Net* Net_to_host(Net* device_net) {
   cudaMemcpy(host_net, device_net, sizeof(Net), cudaMemcpyDeviceToHost);
 
   // Allocate host memory for data
-  host_net->anni_data = (Wire*)malloc(host_net->anni_size * sizeof(Wire));
-  host_net->comm_data = (Wire*)malloc(host_net->comm_size * sizeof(Wire));
-  host_net->node_data = (Node*)malloc(host_net->node_size * sizeof(Node));
+  host_net->anni_data = (Wire*)malloc(ANNI_SIZE * sizeof(Wire));
+  host_net->comm_data = (Wire*)malloc(COMM_SIZE * sizeof(Wire));
+  host_net->node_data = (Node*)malloc(NODE_SIZE * sizeof(Node));
 
   // Retrieve the device pointers for data
   Wire* device_anni_data;
@@ -431,9 +486,9 @@ __host__ Net* Net_to_host(Net* device_net) {
   cudaMemcpy(&device_node_data, &(device_net->node_data), sizeof(Node*), cudaMemcpyDeviceToHost);
 
   // Copy the device data to the host memory
-  cudaMemcpy(host_net->anni_data, device_anni_data, host_net->anni_size * sizeof(Wire), cudaMemcpyDeviceToHost);
-  cudaMemcpy(host_net->comm_data, device_comm_data, host_net->comm_size * sizeof(Wire), cudaMemcpyDeviceToHost);
-  cudaMemcpy(host_net->node_data, device_node_data, host_net->node_size * sizeof(Node), cudaMemcpyDeviceToHost);
+  cudaMemcpy(host_net->anni_data, device_anni_data, ANNI_SIZE * sizeof(Wire), cudaMemcpyDeviceToHost);
+  cudaMemcpy(host_net->comm_data, device_comm_data, COMM_SIZE * sizeof(Wire), cudaMemcpyDeviceToHost);
+  cudaMemcpy(host_net->node_data, device_node_data, NODE_SIZE * sizeof(Node), cudaMemcpyDeviceToHost);
 
   return host_net;
 }
@@ -445,6 +500,9 @@ __host__ const char* Ptr_show(Ptr ptr, u32 slot) {
   static char buffer[8][12];
   if (ptr == 0) {
     strcpy(buffer[slot], "           ");
+    return buffer[slot];
+  } else if (ptr == BSY) {
+    strcpy(buffer[slot], "[.........]");
     return buffer[slot];
   } else {
     const char* tag_str = NULL;
@@ -461,8 +519,10 @@ __host__ const char* Ptr_show(Ptr ptr, u32 slot) {
       case GO2: tag_str = "GO2"; break;
       case CON: tag_str = "CON"; break;
       case DUP: tag_str = "DUP"; break;
-      case 0xF: tag_str = "BSY"; break;
-      default : tag_str = "UNK"; break;
+      case TRI: tag_str = "TRI"; break;
+      case QUA: tag_str = "QUA"; break;
+      case QUI: tag_str = "QUI"; break;
+      case SEX: tag_str = "SEX"; break;
     }
     snprintf(buffer[slot], sizeof(buffer[slot]), "%s:%07X", tag_str, val(ptr));
     return buffer[slot];
@@ -474,7 +534,7 @@ void Net_print(Net* net, u32 lim_size) {
   printf("Root:\n");
   printf("- %s\n", Ptr_show(net->root,0));
   printf("Anni:\n");
-  for (u32 i = 0; i < lim_size && i < net->anni_size; ++i) {
+  for (u32 i = 0; i < lim_size && i < ANNI_SIZE; ++i) {
     Ptr a = net->anni_data[i].lft;
     Ptr b = net->anni_data[i].rgt;
     if (a != 0 || b != 0) {
@@ -482,7 +542,7 @@ void Net_print(Net* net, u32 lim_size) {
     }
   }
   printf("Comm:\n");
-  for (u32 i = 0; i < lim_size && i < net->comm_size; ++i) {
+  for (u32 i = 0; i < lim_size && i < COMM_SIZE; ++i) {
     Ptr a = net->comm_data[i].lft;
     Ptr b = net->comm_data[i].rgt;
     if (a != 0 || b != 0) {
@@ -490,14 +550,14 @@ void Net_print(Net* net, u32 lim_size) {
     }
   }
   printf("Node:\n");
-  for (u32 i = 0; i < lim_size && i < net->node_size; ++i) {
+  for (u32 i = 0; i < lim_size && i < NODE_SIZE; ++i) {
     Ptr a = net->node_data[i].ports[P1];
     Ptr b = net->node_data[i].ports[P2];
     if (a != 0 || b != 0) {
       printf("- [%07X] %s %s\n", i, Ptr_show(a,0), Ptr_show(b,1));
     }
   }
-  printf("Used: %zu\n", net->used_mem);
+  //printf("Used: %zu\n", net->used_mem);
   printf("Rwts: %zu\n", net->rewrites);
 }
 
@@ -519,15 +579,15 @@ int main() {
   printf("CUDA Device: %s, Compute Capability: %d.%d\n", prop.name, prop.major, prop.minor);
 
   // Host data
-  u32 anni_size   = 32;
-  u32 comm_size   = 32;
-  u32 node_size   = 256;
-  Wire* anni_data = (Wire*)malloc(anni_size * sizeof(Wire));
-  Wire* comm_data = (Wire*)malloc(comm_size * sizeof(Wire));
-  Node* node_data = (Node*)malloc(node_size * sizeof(Node));
-  memset(anni_data, 0, anni_size * sizeof(Wire));
-  memset(comm_data, 0, comm_size * sizeof(Wire));
-  memset(node_data, 0, node_size * sizeof(Node));
+  //u32 anni_size   = 32;
+  //u32 comm_size   = 32;
+  //u32 node_size   = 256;
+  Wire* anni_data = (Wire*)malloc(ANNI_SIZE * sizeof(Wire));
+  Wire* comm_data = (Wire*)malloc(COMM_SIZE * sizeof(Wire));
+  Node* node_data = (Node*)malloc(NODE_SIZE * sizeof(Node));
+  memset(anni_data, 0, ANNI_SIZE * sizeof(Wire));
+  memset(comm_data, 0, COMM_SIZE * sizeof(Wire));
+  memset(node_data, 0, NODE_SIZE * sizeof(Node));
 
   // (λx(x) λy(y))
   //u32 root      = 0x60000001;
@@ -546,29 +606,49 @@ int main() {
   //node_data[ 4] = (Node) {0x60000004,0x50000004};
 
   // (λfλx(f (f x)) λx(x))
+  //u32 root      = 0x60000005;
+  //anni_data[ 0] = (Wire) {0xa0000000,0xa0000005};
+  //anni_data[ 0] = (Wire) {0xa0000005,0xa0000000};
+  //node_data[ 0] = (Node) {0xb0000001,0xa0000004};
+  //node_data[ 1] = (Node) {0xa0000002,0xa0000003};
+  //node_data[ 2] = (Node) {0x50000004,0x50000003};
+  //node_data[ 3] = (Node) {0x60000002,0x60000004};
+  //node_data[ 4] = (Node) {0x50000002,0x60000003};
+  //node_data[ 5] = (Node) {0xa0000006,0x40000000};
+  //node_data[ 6] = (Node) {0x60000006,0x50000006};
+
+  // (λfλx(f (f x)) λgλy(g (g y)))
   u32 root      = 0x60000005;
   anni_data[ 0] = (Wire) {0xa0000000,0xa0000005};
-  anni_data[ 0] = (Wire) {0xa0000005,0xa0000000};
   node_data[ 0] = (Node) {0xb0000001,0xa0000004};
   node_data[ 1] = (Node) {0xa0000002,0xa0000003};
   node_data[ 2] = (Node) {0x50000004,0x50000003};
   node_data[ 3] = (Node) {0x60000002,0x60000004};
   node_data[ 4] = (Node) {0x50000002,0x60000003};
   node_data[ 5] = (Node) {0xa0000006,0x40000000};
-  node_data[ 6] = (Node) {0x60000006,0x50000006};
+  node_data[ 6] = (Node) {0xc0000007,0xa000000a};
+  node_data[ 7] = (Node) {0xa0000008,0xa0000009};
+  node_data[ 8] = (Node) {0x5000000a,0x50000009};
+  node_data[ 9] = (Node) {0x60000008,0x6000000a};
+  node_data[10] = (Node) {0x50000008,0x60000009};
 
-  Net* h_net = Net_new(root, anni_data, anni_size, comm_data, comm_size, node_data, node_size);
-  Net_print(h_net, 32);
+
+  Net* h_net = Net_new(root, anni_data, comm_data, node_data);
+  Net_print(h_net, NODE_SIZE);
   printf("--------------\n");
 
   Net* d_net = Net_to_device(h_net);
 
-  anni<<<1,4>>>(d_net);
+  work<<<TOTAL_BLOCKS, BLOCK_SIZE>>>(d_net);
+  work<<<TOTAL_BLOCKS, BLOCK_SIZE>>>(d_net);
+  work<<<TOTAL_BLOCKS, BLOCK_SIZE>>>(d_net);
+  work<<<TOTAL_BLOCKS, BLOCK_SIZE>>>(d_net);
+  work<<<TOTAL_BLOCKS, BLOCK_SIZE>>>(d_net);
   //work<<<1,4>>>(d_net);
   //work<<<1,3>>>(d_net);
 
   Net* h_net2 = Net_to_host(d_net);
-  Net_print(h_net2, 32);
+  Net_print(h_net2, NODE_SIZE);
   printf("--------------\n");
 
   //// Free device memory

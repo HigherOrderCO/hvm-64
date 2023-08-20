@@ -168,8 +168,8 @@ fn main() {
   // (λfλx(f x) λa(a))
   define(book, "term", "
     $ main
-    & (0 (0 a R) (0 a R))
-    ~ (0 (0 x x) main)
+    &    (0 (1 (0 xb xa) (0 xa xR)) (0 xb xR))
+    ~ (0 (0 (2 (0 yb ya) (0 ya yR)) (0 yb yR)) main)
   ");
 
 
