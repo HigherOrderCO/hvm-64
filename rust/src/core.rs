@@ -230,6 +230,7 @@ impl Net {
     let mut loops = 0;
     while self.acts.len() > 0 {
       self.reduce(book);
+      println!("... {}", self.acts.len());
       loops = loops + 1;
     }
     return loops;

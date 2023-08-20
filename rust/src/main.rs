@@ -145,44 +145,54 @@ fn main() {
     & @c20 ~ (0 @I (0 @E nie))
   "); 
 
-  // Initializes the net
-  //let net = &mut Net::init(1 << 26, &book, name_to_u32("ex2"));
-  ////println!("[net]\n{}", show_net(&net));
-
-  //// Computes its normal form
-  //let iter = net.normal(book);
-
-  //// Shows results and stats
-  ////println!("[net]\n{}", show_net(&net));
-  //println!("size: {}", net.node.len());
-  //println!("used: {}", net.used);
-  //println!("rwts: {}", net.rwts);
-  //println!("iter: {}", iter);
-
   //define(book, "term", "
     //$ main
     //& (0 (1 (0 b a) (0 a R)) (0 b R))
     //~ (0 (0 x x) main)
   //");
 
-  // (λfλx(f x) λa(a))
+  // (λfλx(f x) λgλy(g (g y)))
+  //define(book, "term", "
+    //$ main
+    //&    (0 (1 (0 xb xa) (0 xa xR)) (0 xb xR))
+    //~ (0 (0 (2 (0 yb ya) (0 ya yR)) (0 yb yR)) main)
+  //");
+
+  // ((N @g_s) @g_z)
+  // c2  = (0 (1 (0 b a) (0 a R)) (0 b R))
+  // c3  = (0 (1 (1 (0 c b) (0 b a)) (0 a R)) (0 c R))
+  // c5  = (0 (1 (1 (1 (1 (0 e d) (0 d c)) (0 c b)) (0 b a)) (0 a R)) (0 e R))
+  // c12 = (0 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (0 l k) (0 k j)) (0 j i)) (0 i h)) (0 h g)) (0 g f)) (0 f e)) (0 e d)) (0 d c)) (0 c b)) (0 b a)) (0 a R)) (0 l R))
+  // c16 = (0 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (0 p o) (0 o n)) (0 n m)) (0 m l)) (0 l k)) (0 k j)) (0 j i)) (0 i h)) (0 h g)) (0 g f)) (0 f e)) (0 e d)) (0 d c)) (0 c b)) (0 b a)) (0 a R)) (0 p R))
   define(book, "term", "
-    $ main
-    &    (0 (1 (0 xb xa) (0 xa xR)) (0 xb xR))
-    ~ (0 (0 (2 (0 yb ya) (0 ya yR)) (0 yb yR)) main)
+    $ root
+    & (0 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (0 p o) (0 o n)) (0 n m)) (0 m l)) (0 l k)) (0 k j)) (0 j i)) (0 i h)) (0 h g)) (0 g f)) (0 f e)) (0 e d)) (0 d c)) (0 c b)) (0 b a)) (0 a R)) (0 p R))
+    ~ (0 (0 (2 ga gb) (0 (0 ga (0 gb gc)) gc)) (0 (0 gx gx) root))
   ");
 
-
   let got = book.defs.get(&name_to_u32("term")).unwrap();
-  println!("  u32 root      = 0x{:08x};", got.root.data);
+  println!("  net->root          = 0x{:08x};", got.root.data);
   for i in 0 .. got.acts.len() {
-    println!("  acts_data[{:2}] = (Wire) {{0x{:08x},0x{:08x}}};", i, got.acts[i].0.data, got.acts[i].1.data);
+    println!("  net->anni_data[{:2}] = (Wire) {{0x{:08x},0x{:08x}}};", i, got.acts[i].0.data, got.acts[i].1.data);
   }
   for i in 0 .. got.node.len() {
-    println!("  node_data[{:2}] = (Node) {{0x{:08x},0x{:08x}}};", i, got.node[i].p1.data, got.node[i].p2.data);
+    println!("  net->node_data[{:2}] = (Node) {{0x{:08x},0x{:08x}}};", i, got.node[i].p1.data, got.node[i].p2.data);
   }
 
-  //println!("{:?}", &got.unwrap());
+  // Initializes the net
+  let net = &mut Net::init(1 << 26, &book, name_to_u32("term"));
+  //println!("[net]\n{}", show_net(&net));
+
+  // Computes its normal form
+  let iter = net.normal(book);
+
+  // Shows results and stats
+  //println!("[net]\n{}", show_net(&net));
+  println!("size: {}", net.node.len());
+  println!("used: {}", net.used);
+  println!("rwts: {}", net.rwts);
+  println!("iter: {}", iter);
+
 
 
 }
