@@ -247,8 +247,6 @@ impl Net {
     // Dereference
     self.load_ref(book, a);
     self.load_ref(book, b);
-
-
     // Annihilation
     if a_tag >= CON && b_tag >= CON && a_tag == b_tag {
       let a1 = self.get(a.val(), Port::P1);
