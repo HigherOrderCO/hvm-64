@@ -15,12 +15,10 @@ typedef unsigned long long int a64;
 
 // Total number of SMs in a chip (fixed per GPU)
 const u32 SM_COUNT = 128;
+//const u32 SM_COUNT = 4;
 
 // Clock rate, in hertz
 const u32 CLOCK_RATE = 2520000000;
-
-// Active cycles before a worker halts
-const u32 CYCLES_TO_HALT = 1000000; // about 1/256 seconds on RTX 4090
 
 // Shared memory size, in bytes (fixed per GPU)
 const u32 SM_SIZE = 128 * 1024; // 128 KB
@@ -33,12 +31,10 @@ const u32 WARPS_PER_SM = 4;
 
 // Number of threads per block (derived)
 const u32 BLOCK_SIZE = WARP_SIZE * WARPS_PER_SM;
+//const u32 BLOCK_SIZE = 16;
 
 // Total number of active parallel threads (derived)
 const u32 TOTAL_THREADS = SM_COUNT * BLOCK_SIZE;
-
-// Total number of thread blocks
-const u32 TOTAL_BLOCKS = TOTAL_THREADS / BLOCK_SIZE;
 
 // Threads used per rewrite unit
 const u32 UNIT_SIZE = 4;
@@ -52,11 +48,17 @@ const u32 RBAG_AREA = 256;
 // Total number of bag redex entries 
 const u32 RBAG_SIZE = RBAG_AREA * TOTAL_UNITS;
 
+// Padding to avoid bank conflicts
+const u32 BANK_PAD = 32;
+
+// Total size of RPUT object
+const u32 RPUT_SIZE = BANK_PAD * TOTAL_UNITS;
+
 // Total number of nodes (fixed due to 2^28 addressable space)
 const u32 NODE_SIZE = 1 << 28;
 
 // Spacing between units, in number of nodes
-const u32 UNIT_NODE_SPACE = NODE_SIZE / TOTAL_UNITS;
+const u32 UNIT_ALLOC_PAD = NODE_SIZE / TOTAL_UNITS;
 
 // Types
 // -----
@@ -111,27 +113,36 @@ typedef struct {
 
 // An interaction net 
 typedef struct {
-  Ptr   root;
-  Wire* rbag_data;
-  Node* node_data;
-  u32   rwts;
+  Ptr   root; // root wire
+  Wire* rbag; // global redex bag (active pairs)
+  u32*  rput; // where given thread will alloc the next redex
+  Node* node; // global memory buffer with all nodes
+  u32   actv; // number of active threads
+  u32   rwts; // number of rewrites performed
 } Net;
 
 // A worker local data
 typedef struct {
-  u32  tid;   // local thread id (on the block)
-  u32  gid;   // global thread id (on the kernel)
-  u32  rid;   // worker id (index on acts array)
-  u32  frac;  // worker frac (A1|A2|B1|B2)
-  u32  port;  // worker port (P1|P2)
-  Ptr  a_ptr; // left pointer of active wire
-  Ptr  b_ptr; // right pointer of active wire
-  u32  aloc;  // where to alloc next node
-  u32  rwts;  // total rewrites this performed
+  u32 tid;   // local thread id (on the block)
+  u32 gid;   // global thread id (on the kernel)
+  u32 unit;  // unit id (index on redex array)
+  u32 frac;  // worker frac (A1|A2|B1|B2)
+  u32 port;  // worker port (P1|P2)
+  Ptr a_ptr; // left pointer of active wire
+  Ptr b_ptr; // right pointer of active wire
+  u32 tick;  // random number generator
+  u32 seed;  // random number generator
+  u32 aloc;  // where to alloc next node
+  u32 rpop;  // where to pop next redex
+  u32 rwts;  // total rewrites this performed
 } Worker;
 
 // Runtime
 // -------
+
+__device__ inline u32 rng(u32 seed) {
+  return seed * 16843009 + 3014898611;
+}
 
 // Creates a new pointer
 __host__ __device__ inline Ptr mkptr(Tag tag, Val val) {
@@ -158,9 +169,9 @@ __host__ __device__ inline Ptr* target(Net* net, Ptr ptr) {
   if (tag(ptr) == VRR || tag(ptr) == GOR) {
     return &net->root;
   } else if (tag(ptr) == VR1 || tag(ptr) == GO1) {
-    return &net->node_data[val(ptr)].ports[P1];
+    return &net->node[val(ptr)].ports[P1];
   } else if (tag(ptr) == VR2 || tag(ptr) == GO2) {
-    return &net->node_data[val(ptr)].ports[P2];
+    return &net->node[val(ptr)].ports[P2];
   } else {
     return NULL;
   }
@@ -195,49 +206,62 @@ __host__ __device__ inline Node Node_nil() {
 
 // Gets a reference to the index/port Ptr on the net
 __device__ inline Ptr* at(Net* net, Val idx, Port port) {
-  return &net->node_data[idx].ports[port];
+  return &net->node[idx].ports[port];
 }
 
 // Allocates a new node in memory
 __device__ inline u32 alloc(Worker *worker, Net *net) {
   while (true) {
-    a64* ref = &((a64*)net->node_data)[worker->aloc + worker->frac];
+    u32  idx = (worker->unit * UNIT_ALLOC_PAD + worker->aloc * 4 + worker->frac) % NODE_SIZE;
+    a64* ref = &((a64*)net->node)[idx];
     u64  exp = 0;
     u64  neo = *((u64*)&mknode(BSY, BSY));
     u64  got = atomicCAS(ref, exp, neo);
     if (got == 0) {
-      return worker->aloc + worker->frac;
+      //printf("[%d] alloc at %d\n", worker->gid, idx);
+      return idx;
     } else {
-      worker->aloc = (worker->aloc + 4) % NODE_SIZE;
+      worker->aloc = (worker->aloc + 1) % NODE_SIZE;
     }
   }
 }
 
 // Creates a new active pair
-__device__ inline void redux(Worker* worker, Net* net, Ptr a_ptr, Ptr b_ptr) {
-  u32 idx = 0;
+__device__ inline void put_redex(Worker* worker, Net* net, Ptr a_ptr, Ptr b_ptr) {
+  //bool rand = worker->seed % 4 == 0;
+  //u32  unit = (rand ? worker->seed : worker->unit) % TOTAL_UNITS;
+  worker->seed = rng(worker->seed);
+  bool rand    = (worker->seed % 7) == 0;
+  //printf("[%d|%d] ... seed=%u\n", worker->gid, worker->unit, worker->seed);
+  u32  unit    = (rand ? worker->seed : worker->unit) % TOTAL_UNITS;
+  //printf("[%d] seed=%d | pick=%d | %d\n", worker->gid, worker->seed, worker->seed % TOTAL_UNITS, rand);
+  //printf("[%d] unit: %d | %u\n", worker->gid, unit, worker->seed);
   while (true) {
-    a64* ref = (a64*)&net->rbag_data[worker->rid * RBAG_AREA + idx];
+    u32  idx = atomicAdd(&net->rput[unit * BANK_PAD], 1);
+    a64* ref = (a64*)&net->rbag[unit * RBAG_AREA + (idx % RBAG_AREA)];
     u64  exp = 0;
     u64  neo = *((u64*)&(Wire){a_ptr, b_ptr});
     u64  got = atomicCAS(ref, exp, neo);
     if (got == 0) {
+      //if (worker->gid == 1) {
+        //printf("[%d|%d] pushed at %d of %d | rand=%d seed=%u\n", worker->gid, worker->unit, idx, unit, rand, worker->seed);
+      //}
       return;
     } else {
-      idx = (idx + 1) % RBAG_AREA;
+      unit = rng(unit) % TOTAL_UNITS;
     }
   }
 }
 
 // Attempts to get an active pair
-__device__ inline Wire pop_redex(Worker* worker, Net* net, u32 rid) {
-  for (u32 idx = 0; idx < RBAG_AREA; ++idx) {
-    a64* ref = (a64*)&net->rbag_data[rid * RBAG_AREA + idx];
-    u64  neo = 0;
-    u64  got = atomicExch(ref, neo);
-    if (got != neo) {
-      return *((Wire*)&got);
-    }
+__device__ inline Wire pop_redex(Worker* worker, Net* net) {
+  a64* ref = (a64*)&net->rbag[worker->unit * RBAG_AREA + (worker->rpop % RBAG_AREA)];
+  u64  neo = 0;
+  u64  got = atomicExch(ref, neo);
+  if (got != neo) {
+    //printf("[%d] popped at %d\n", worker->gid, worker->rpop);
+    worker->rpop++;
+    return *((Wire*)&got);
   }
   return (Wire) { lft: 0, rgt: 0 };
 }
@@ -294,18 +318,18 @@ __device__ void subst(Worker* worker, Net* net, Ptr* self_ref, Ptr target_ptr) {
   Target targ = march(net, target_ptr);
   // If the final target is a var, move this node into it
   if (tag(targ.ptr) >= VRR && tag(targ.ptr) <= VR2) { 
-    Ptr* last_ref = targ.ref;         // save the var's ref
-    targ = march(net, targ.ptr);      // clear the backwards path
-    clear(self_ref);                  // clear our ref (here, targ.ref == self_ref)
+    Ptr* last_ref = targ.ref; // save the var's ref
+    targ = march(net, targ.ptr); // clear the backwards path
+    clear(self_ref); // clear our ref (here, targ.ref == self_ref)
     replace(last_ref, BSY, targ.ptr); // move our node to the last ref
   // Otherwise, create a new active pair. Since two marches reach this branch,
   // we priorize the one with largest ref, in order to avoid race conditions.
   } else if (self_ref < targ.ref) {
-    atomicExch((u32*)targ.ref, targ.ptr);// puts the other node back
+    atomicExch((u32*)targ.ref, targ.ptr); // puts the other node back
   } else {
-    replace(targ.ref, BSY, 0);                     // clear the other node
-    redux(worker, net, deref(self_ref), targ.ptr); // create redex
-    clear(self_ref);                               // clear our node
+    replace(targ.ref, BSY, 0); // clear the other node
+    put_redex(worker, net, deref(self_ref), targ.ptr); // create redex
+    clear(self_ref); // clear our node
   }
 }
 
@@ -319,108 +343,143 @@ __device__ void subst(Worker* worker, Net* net, Ptr* self_ref, Ptr target_ptr) {
 // This is organized so that local threads can perform the same instructions
 // whenever possible. So, for example, in a commutation rule, all the 4 clones
 // would be allocated at the same time.
-
 __global__ void work(Net* net) {
   // Shared buffer for warp communication
   __shared__ u32  XLOC[BLOCK_SIZE];
   __shared__ Wire WIRE[BLOCK_SIZE];
 
+  // Activity status
+  bool curr_active, last_active;
+
   // Initializes local vars
   Worker worker;
   worker.tid  = threadIdx.x;
   worker.gid  = blockIdx.x * blockDim.x + threadIdx.x;
-  worker.rid  = (worker.gid / UNIT_SIZE) % RBAG_SIZE;
-  worker.aloc = UNIT_NODE_SPACE * (worker.gid / UNIT_SIZE);
+  worker.unit = worker.gid / UNIT_SIZE;
+  worker.tick = 0;
+  worker.seed = (42 * (worker.gid + 1)) % UINT_MAX;
+  worker.aloc = 0;
+  worker.rpop = 0;
   worker.rwts = 0;
   worker.frac = worker.tid % 4;
   worker.port = worker.tid % 2;
 
-  for (u32 tick = 0; tick < 60; ++tick) {
+  // Broadcasts initial activity status
+  if (worker.frac == A1) {
+    curr_active = true;
+    last_active = true;
+    atomicAdd(&net->actv, 1);
+  }
 
-    // If group leader, attempts to pop an active wire
+  while (true) {
+    for (u32 tick = 0; tick < 256; ++tick) {
+      // If group leader, attempts to pop an active wire
+      if (worker.frac == A1) {
+        WIRE[worker.tid/4] = pop_redex(&worker, net);
+      }
+      __syncwarp();
+
+      // Reads redex ptrs
+      Wire wire    = WIRE[worker.tid/4];
+      worker.a_ptr = worker.frac <= A2 ? wire.lft : wire.rgt;
+      worker.b_ptr = worker.frac <= A2 ? wire.rgt : wire.lft;
+
+      // Checks if we got redex, and what type
+      bool rdex = worker.a_ptr != 0;
+      bool anni = rdex && tag(worker.a_ptr) == tag(worker.b_ptr);
+      bool comm = rdex && tag(worker.a_ptr) != tag(worker.b_ptr);
+
+      // Updates activity status
+      curr_active = rdex;
+
+      // Prints message
+      if (rdex) {
+        //printf("[%d] %u | rdex: %8X <-> %8X | %d | \n", worker.gid, tick, worker.a_ptr, worker.b_ptr, comm ? 1 : 0);
+        worker.rwts += 1;
+      }
+
+      // Local variables
+      Ptr *ak_ref; // ref to our aux port
+      Ptr *bk_ref; // ref to other aux port
+      Ptr  ak_ptr; // val of our aux port
+      u32  xk_loc; // loc of ptr to send to other side
+      Ptr  xk_ptr; // val of ptr to send to other side
+      u32  y0_idx; // idx of other clone idx
+
+      // Gets relevant ptrs and refs
+      if (rdex) {
+        ak_ref = at(net, val(worker.a_ptr), worker.port);
+        bk_ref = at(net, val(worker.b_ptr), worker.port);
+        ak_ptr = deref(ak_ref);
+      }
+
+      // If anni, send a redirection
+      if (anni) {
+        xk_ptr = redir(ak_ptr); // redirection ptr to send
+      }
+
+      // If comm, send a clone
+      if (comm) {
+        xk_loc = alloc(&worker, net); // alloc a clone
+        xk_ptr = mkptr(tag(worker.a_ptr),xk_loc); // cloned node ptr to send
+        XLOC[worker.tid] = xk_loc; // send cloned index to other threads
+      }
+
+      // Receive cloned indices from local threads
+      __syncwarp();
+
+      // If comm, create inner wires between clones
+      if (comm) {
+        const u32 ADD[4] = {2, 1, -2, -3}; // deltas to get the other clone index
+        const u32 VRK    = worker.port == P1 ? VR1 : VR2; // type of inner wire var
+        replace(at(net, xk_loc, P1), BSY, mkptr(VRK, XLOC[worker.tid + ADD[worker.frac] + 0]));
+        replace(at(net, xk_loc, P2), BSY, mkptr(VRK, XLOC[worker.tid + ADD[worker.frac] + 1]));
+      }
+
+      // Send ptr to other side
+      if (rdex) {
+        replace(bk_ref, BSY, xk_ptr);
+      }
+
+      // If anni and we sent a NOD, subst the node there, towards our port
+      // If comm and we have a VAR, subst the clone here, towards that var
+      if (anni && !var(ak_ptr) || comm && var(ak_ptr)) {
+        u32  GOK  = worker.port == P1 ? GO1 : GO2;
+        Ptr *self = comm ? ak_ref        : bk_ref;
+        Ptr  targ = comm ? redir(ak_ptr) : mkptr(GOK, val(worker.a_ptr)); 
+        subst(&worker, net, self, targ);
+      }
+
+      // If comm and we have a NOD, form an active pair with the clone we got
+      if (comm && !var(ak_ptr)) {
+        put_redex(&worker, net, ak_ptr, deref(ak_ref));
+        clear(ak_ref);
+      }
+    }
+
+    // Broadcasts updated activity status
     if (worker.frac == A1) {
-      WIRE[worker.tid/4] = pop_redex(&worker, net, worker.rid);
-    }
-    __syncwarp();
-
-    // Reads redex ptrs
-    Wire wire    = WIRE[worker.tid/4];
-    worker.a_ptr = worker.frac <= A2 ? wire.lft : wire.rgt;
-    worker.b_ptr = worker.frac <= A2 ? wire.rgt : wire.lft;
-
-    // Checks if we got redex, and what type
-    bool rdex = worker.a_ptr != 0;
-    bool anni = rdex && tag(worker.a_ptr) == tag(worker.b_ptr);
-    bool comm = rdex && tag(worker.a_ptr) != tag(worker.b_ptr);
-
-    // Prints message
-    if (rdex) {
-      printf("[%d] %u | rdex: %8X <-> %8X | %d | \n", worker.gid, tick, worker.a_ptr, worker.b_ptr, comm ? 1 : 0);
-      worker.rwts += 1;
+      if (curr_active && !last_active) {
+        //printf("[%d] active\n", worker.gid);
+        atomicAdd(&net->actv, 1);
+      }
+      if (!curr_active && last_active) {
+        //printf("[%d] inactive\n", worker.gid);
+        atomicSub(&net->actv, 1);
+      }
+      last_active = curr_active;
     }
 
-    // Local variables
-    Ptr *ak_ref; // ref to our aux port
-    Ptr *bk_ref; // ref to other aux port
-    Ptr  ak_ptr; // val of our aux port
-    u32  xk_loc; // loc of ptr to send to other side
-    Ptr  xk_ptr; // val of ptr to send to other side
-    u32  y0_idx; // idx of other clone idx
-
-    // Gets relevant ptrs and refs
-    if (rdex) {
-      ak_ref = at(net, val(worker.a_ptr), worker.port);
-      bk_ref = at(net, val(worker.b_ptr), worker.port);
-      ak_ptr = deref(ak_ref);
-    }
-
-    // If anni, send a redirection
-    if (anni) {
-      xk_ptr = redir(ak_ptr); // redirection ptr to send
-    }
-
-    // If comm, send a clone
-    if (comm) {
-      xk_loc = alloc(&worker, net); // alloc a clone
-      xk_ptr = mkptr(tag(worker.a_ptr),xk_loc); // cloned node ptr to send
-      XLOC[worker.tid] = xk_loc; // send cloned index to other threads
-    }
-
-    // Receive cloned indices from local threads
-    __syncwarp();
-
-    // If comm, create inner wires between clones
-    if (comm) {
-      const u32 ADD[4] = {2, 1, -2, -3}; // deltas to get the other clone index
-      const u32 VRK    = worker.port == P1 ? VR1 : VR2; // type of inner wire var
-      replace(at(net, xk_loc, P1), BSY, mkptr(VRK, XLOC[worker.tid + ADD[worker.frac] + 0]));
-      replace(at(net, xk_loc, P2), BSY, mkptr(VRK, XLOC[worker.tid + ADD[worker.frac] + 1]));
-    }
-
-    // Send ptr to other side
-    if (rdex) {
-      replace(bk_ref, BSY, xk_ptr);
-    }
-
-    // If anni and we sent a NOD, subst the node there, towards our port
-    // If comm and we have a VAR, subst the clone here, towards that var
-    if (anni && !var(ak_ptr) || comm && var(ak_ptr)) {
-      u32  GOK  = worker.port == P1 ? GO1 : GO2;
-      Ptr *self = comm ? ak_ref        : bk_ref;
-      Ptr  targ = comm ? redir(ak_ptr) : mkptr(GOK, val(worker.a_ptr)); 
-      subst(&worker, net, self, targ);
-    }
-
-    // If comm and we have a NOD, form an active pair with the clone we got
-    if (comm && !var(ak_ptr)) {
-      redux(&worker, net, ak_ptr, deref(ak_ref));
-      clear(ak_ref);
+    // Stops when all units are inactive
+    if (!curr_active && atomicAdd(&net->actv, 0) == 0) {
+      break;
     }
 
   }
 
   // When the work ends, sum stats
   if (worker.frac == A1) {
+    //printf("- %08X rwts [%d]\n", worker.rwts, worker.gid);
     atomicAdd(&net->rwts, worker.rwts);
   }
 }
@@ -429,34 +488,41 @@ __global__ void work(Net* net) {
 // -------------
 
 __host__ Net* mknet() {
-  Net* net       = (Net*)malloc(sizeof(Net));
-  net->root      = mkptr(NIL, 0);
-  net->rwts      = 0;
-  net->rbag_data = (Wire*)malloc(RBAG_SIZE * sizeof(Wire));
-  net->node_data = (Node*)malloc(NODE_SIZE * sizeof(Node));
-  memset(net->rbag_data, 0, RBAG_SIZE * sizeof(Wire));
-  memset(net->node_data, 0, NODE_SIZE * sizeof(Node));
+  Net* net  = (Net*)malloc(sizeof(Net));
+  net->root = mkptr(NIL, 0);
+  net->rwts = 0;
+  net->actv = 0;
+  net->rbag = (Wire*)malloc(RBAG_SIZE * sizeof(Wire));
+  net->rput = (u32*) malloc(RPUT_SIZE * sizeof(u32));
+  net->node = (Node*)malloc(NODE_SIZE * sizeof(Node));
+  memset(net->rbag, 0, RBAG_SIZE * sizeof(Wire));
+  memset(net->rput, 0, RPUT_SIZE * sizeof(u32));
+  memset(net->node, 0, NODE_SIZE * sizeof(Node));
   return net;
 }
 
 __host__ Net* net_to_device(Net* host_net) {
   // Allocate memory on the device for the Net object, and its data
-  Net* device_net;
-  Wire* device_rbag_data;
-  Node* device_node_data;
+  Net*  device_net;
+  Wire* device_rbag;
+  u32*  device_rput;
+  Node* device_node;
 
   cudaMalloc((void**)&device_net, sizeof(Net));
-  cudaMalloc((void**)&device_rbag_data, RBAG_SIZE * sizeof(Wire));
-  cudaMalloc((void**)&device_node_data, NODE_SIZE * sizeof(Node));
+  cudaMalloc((void**)&device_rbag, RBAG_SIZE * sizeof(Wire));
+  cudaMalloc((void**)&device_rput, RPUT_SIZE * sizeof(u32));
+  cudaMalloc((void**)&device_node, NODE_SIZE * sizeof(Node));
 
   // Copy the host data to the device memory
-  cudaMemcpy(device_rbag_data, host_net->rbag_data, RBAG_SIZE * sizeof(Wire), cudaMemcpyHostToDevice);
-  cudaMemcpy(device_node_data, host_net->node_data, NODE_SIZE * sizeof(Node), cudaMemcpyHostToDevice);
+  cudaMemcpy(device_rbag, host_net->rbag, RBAG_SIZE * sizeof(Wire), cudaMemcpyHostToDevice);
+  cudaMemcpy(device_rput, host_net->rput, RPUT_SIZE * sizeof(u32),  cudaMemcpyHostToDevice);
+  cudaMemcpy(device_node, host_net->node, NODE_SIZE * sizeof(Node), cudaMemcpyHostToDevice);
 
   // Create a temporary host Net object with device pointers
-  Net temp_net = *host_net;
-  temp_net.rbag_data = device_rbag_data;
-  temp_net.node_data = device_node_data;
+  Net temp_net  = *host_net;
+  temp_net.rbag = device_rbag;
+  temp_net.rput = device_rput;
+  temp_net.node = device_node;
 
   // Copy the temporary host Net object to the device memory
   cudaMemcpy(device_net, &temp_net, sizeof(Net), cudaMemcpyHostToDevice);
@@ -473,38 +539,46 @@ __host__ Net* net_to_host(Net* device_net) {
   cudaMemcpy(host_net, device_net, sizeof(Net), cudaMemcpyDeviceToHost);
 
   // Allocate host memory for data
-  host_net->rbag_data = (Wire*)malloc(RBAG_SIZE * sizeof(Wire));
-  host_net->node_data = (Node*)malloc(NODE_SIZE * sizeof(Node));
+  host_net->rbag = (Wire*)malloc(RBAG_SIZE * sizeof(Wire));
+  host_net->rput = (u32*) malloc(RPUT_SIZE * sizeof(u32));
+  host_net->node = (Node*)malloc(NODE_SIZE * sizeof(Node));
 
   // Retrieve the device pointers for data
-  Wire* device_rbag_data;
-  Node* device_node_data;
-  cudaMemcpy(&device_rbag_data, &(device_net->rbag_data), sizeof(Wire*), cudaMemcpyDeviceToHost);
-  cudaMemcpy(&device_node_data, &(device_net->node_data), sizeof(Node*), cudaMemcpyDeviceToHost);
+  Wire* device_rbag;
+  u32*  device_rput;
+  Node* device_node;
+  cudaMemcpy(&device_rbag, &(device_net->rbag), sizeof(Wire*), cudaMemcpyDeviceToHost);
+  cudaMemcpy(&device_rput, &(device_net->rput), sizeof(u32*),  cudaMemcpyDeviceToHost);
+  cudaMemcpy(&device_node, &(device_net->node), sizeof(Node*), cudaMemcpyDeviceToHost);
 
   // Copy the device data to the host memory
-  cudaMemcpy(host_net->rbag_data, device_rbag_data, RBAG_SIZE * sizeof(Wire), cudaMemcpyDeviceToHost);
-  cudaMemcpy(host_net->node_data, device_node_data, NODE_SIZE * sizeof(Node), cudaMemcpyDeviceToHost);
+  cudaMemcpy(host_net->rbag, device_rbag, RBAG_SIZE * sizeof(Wire), cudaMemcpyDeviceToHost);
+  cudaMemcpy(host_net->rput, device_rput, RPUT_SIZE * sizeof(u32),  cudaMemcpyDeviceToHost);
+  cudaMemcpy(host_net->node, device_node, NODE_SIZE * sizeof(Node), cudaMemcpyDeviceToHost);
 
   return host_net;
 }
 
 __host__ void net_free_on_device(Net* device_net) {
   // Retrieve the device pointers for data
-  Wire* device_rbag_data;
-  Node* device_node_data;
-  cudaMemcpy(&device_rbag_data, &(device_net->rbag_data), sizeof(Wire*), cudaMemcpyDeviceToHost);
-  cudaMemcpy(&device_node_data, &(device_net->node_data), sizeof(Node*), cudaMemcpyDeviceToHost);
+  Wire* device_rbag;
+  u32*  device_rput;
+  Node* device_node;
+  cudaMemcpy(&device_rbag, &(device_net->rbag), sizeof(Wire*), cudaMemcpyDeviceToHost);
+  cudaMemcpy(&device_rput, &(device_net->rput), sizeof(u32*),  cudaMemcpyDeviceToHost);
+  cudaMemcpy(&device_node, &(device_net->node), sizeof(Node*), cudaMemcpyDeviceToHost);
 
   // Free the device memory
-  cudaFree(device_rbag_data);
-  cudaFree(device_node_data);
+  cudaFree(device_rbag);
+  cudaFree(device_rput);
+  cudaFree(device_node);
   cudaFree(device_net);
 }
 
 __host__ void net_free_on_host(Net* host_net) {
-  free(host_net->rbag_data);
-  free(host_net->node_data);
+  free(host_net->rbag);
+  free(host_net->rput);
+  free(host_net->node);
   free(host_net);
 }
 
@@ -550,22 +624,22 @@ void print_net(Net* net) {
   printf("- %s\n", Ptr_show(net->root,0));
   printf("RBag:\n");
   for (u32 i = 0; i < RBAG_SIZE; ++i) {
-    Ptr a = net->rbag_data[i].lft;
-    Ptr b = net->rbag_data[i].rgt;
+    Ptr a = net->rbag[i].lft;
+    Ptr b = net->rbag[i].rgt;
     if (a != 0 || b != 0) {
       printf("- [%07X] %s %s\n", i, Ptr_show(a,0), Ptr_show(b,1));
     }
   }
   printf("Node:\n");
   for (u32 i = 0; i < NODE_SIZE; ++i) {
-    Ptr a = net->node_data[i].ports[P1];
-    Ptr b = net->node_data[i].ports[P2];
+    Ptr a = net->node[i].ports[P1];
+    Ptr b = net->node[i].ports[P2];
     if (a != 0 || b != 0) {
       printf("- [%07X] %s %s\n", i, Ptr_show(a,0), Ptr_show(b,1));
     }
   }
-  //printf("Used: %zu\n", net->used_mem);
-  printf("Rwts: %zu\n", net->rwts);
+  //printf("Used: %u\n", net->used_mem);
+  printf("Rwts: %u\n", net->rwts);
 }
 
 // Struct to represent a Map of entries using a simple array of (key,id) pairs
@@ -613,9 +687,9 @@ __host__ void print_tree_go(Net* net, Ptr ptr, Map* var_ids) {
         break;
       default:
         printf("(%d ", tag(ptr) - CON);
-        print_tree_go(net, net->node_data[val(ptr)].ports[P1], var_ids);
+        print_tree_go(net, net->node[val(ptr)].ports[P1], var_ids);
         printf(" ");
-        print_tree_go(net, net->node_data[val(ptr)].ports[P2], var_ids);
+        print_tree_go(net, net->node[val(ptr)].ports[P2], var_ids);
         printf(")");
     }
   }
@@ -639,204 +713,270 @@ __host__ void print_tree(Net* net, Ptr ptr) {
 
 // term_a = (λx(x) λy(y))
 __host__ void inject_term_a(Net* net) {
-  net->root          = 0x60000001;
-  net->rbag_data[ 0] = (Wire) {0xa0000000,0xa0000001};
-  net->node_data[ 0] = (Node) {0x60000000,0x50000000};
-  net->node_data[ 1] = (Node) {0xa0000002,0x40000000};
-  net->node_data[ 2] = (Node) {0x60000002,0x50000002};
+  net->root     = 0x60000001;
+  net->rput[ 0] = 1;
+  net->rbag[ 0] = (Wire) {0xa0000000,0xa0000001};
+  net->node[ 0] = (Node) {0x60000000,0x50000000};
+  net->node[ 1] = (Node) {0xa0000002,0x40000000};
+  net->node[ 2] = (Node) {0x60000002,0x50000002};
 }
 
 // term_b = (λfλx(f x) λy(y))
 __host__ void inject_term_b(Net* net) {
-  net->root          = 0x60000003;
-  net->rbag_data[ 0] = (Wire) {0xa0000000,0xa0000003};
-  net->node_data[ 0] = (Node) {0xa0000001,0xa0000002};
-  net->node_data[ 1] = (Node) {0x50000002,0x60000002};
-  net->node_data[ 2] = (Node) {0x50000001,0x60000001};
-  net->node_data[ 3] = (Node) {0xa0000004,0x40000000};
-  net->node_data[ 4] = (Node) {0x60000004,0x50000004};
+  net->root     = 0x60000003;
+  net->rput[ 0] = 1;
+  net->rbag[ 0] = (Wire) {0xa0000000,0xa0000003};
+  net->node[ 0] = (Node) {0xa0000001,0xa0000002};
+  net->node[ 1] = (Node) {0x50000002,0x60000002};
+  net->node[ 2] = (Node) {0x50000001,0x60000001};
+  net->node[ 3] = (Node) {0xa0000004,0x40000000};
+  net->node[ 4] = (Node) {0x60000004,0x50000004};
 }
 
 // term_c = (λfλx(f (f x)) λx(x))
 __host__ void inject_term_c(Net* net) {
-  net->root          = 0x60000005;
-  net->rbag_data[ 0] = (Wire) {0xa0000000,0xa0000005};
-  net->rbag_data[ 0] = (Wire) {0xa0000005,0xa0000000};
-  net->node_data[ 0] = (Node) {0xb0000001,0xa0000004};
-  net->node_data[ 1] = (Node) {0xa0000002,0xa0000003};
-  net->node_data[ 2] = (Node) {0x50000004,0x50000003};
-  net->node_data[ 3] = (Node) {0x60000002,0x60000004};
-  net->node_data[ 4] = (Node) {0x50000002,0x60000003};
-  net->node_data[ 5] = (Node) {0xa0000006,0x40000000};
-  net->node_data[ 6] = (Node) {0x60000006,0x50000006};
+  net->root     = 0x60000005;
+  net->rput[ 0] = 1;
+  net->rbag[ 0] = (Wire) {0xa0000000,0xa0000005};
+  net->node[ 0] = (Node) {0xb0000001,0xa0000004};
+  net->node[ 1] = (Node) {0xa0000002,0xa0000003};
+  net->node[ 2] = (Node) {0x50000004,0x50000003};
+  net->node[ 3] = (Node) {0x60000002,0x60000004};
+  net->node[ 4] = (Node) {0x50000002,0x60000003};
+  net->node[ 5] = (Node) {0xa0000006,0x40000000};
+  net->node[ 6] = (Node) {0x60000006,0x50000006};
 }
 
 // term_d = (λfλx(f (f x)) λgλy(g (g y)))
 __host__ void inject_term_d(Net* net) {
-  net->root          = 0x60000005;
-  net->rbag_data[ 0] = (Wire) {0xa0000000,0xa0000005};
-  net->node_data[ 0] = (Node) {0xb0000001,0xa0000004};
-  net->node_data[ 1] = (Node) {0xa0000002,0xa0000003};
-  net->node_data[ 2] = (Node) {0x50000004,0x50000003};
-  net->node_data[ 3] = (Node) {0x60000002,0x60000004};
-  net->node_data[ 4] = (Node) {0x50000002,0x60000003};
-  net->node_data[ 5] = (Node) {0xa0000006,0x40000000};
-  net->node_data[ 6] = (Node) {0xc0000007,0xa000000a};
-  net->node_data[ 7] = (Node) {0xa0000008,0xa0000009};
-  net->node_data[ 8] = (Node) {0x5000000a,0x50000009};
-  net->node_data[ 9] = (Node) {0x60000008,0x6000000a};
-  net->node_data[10] = (Node) {0x50000008,0x60000009};
+  net->root     = 0x60000005;
+  net->rput[ 0] = 1;
+  net->rbag[ 0] = (Wire) {0xa0000000,0xa0000005};
+  net->node[ 0] = (Node) {0xb0000001,0xa0000004};
+  net->node[ 1] = (Node) {0xa0000002,0xa0000003};
+  net->node[ 2] = (Node) {0x50000004,0x50000003};
+  net->node[ 3] = (Node) {0x60000002,0x60000004};
+  net->node[ 4] = (Node) {0x50000002,0x60000003};
+  net->node[ 5] = (Node) {0xa0000006,0x40000000};
+  net->node[ 6] = (Node) {0xc0000007,0xa000000a};
+  net->node[ 7] = (Node) {0xa0000008,0xa0000009};
+  net->node[ 8] = (Node) {0x5000000a,0x50000009};
+  net->node[ 9] = (Node) {0x60000008,0x6000000a};
+  net->node[10] = (Node) {0x50000008,0x60000009};
 }
 
 // term_e = (c2 g_s g_z)
 __host__ void inject_term_e(Net* net) {
-  net->root          = 0x6000000b;
-  net->rbag_data[ 0] = (Wire) {0xa0000000,0xa0000005};
-  net->node_data[ 0] = (Node) {0xb0000001,0xa0000004};
-  net->node_data[ 1] = (Node) {0xa0000002,0xa0000003};
-  net->node_data[ 2] = (Node) {0x50000004,0x50000003};
-  net->node_data[ 3] = (Node) {0x60000002,0x60000004};
-  net->node_data[ 4] = (Node) {0x50000002,0x60000003};
-  net->node_data[ 5] = (Node) {0xa0000006,0xa000000b};
-  net->node_data[ 6] = (Node) {0xc0000007,0xa0000008};
-  net->node_data[ 7] = (Node) {0x50000009,0x5000000a};
-  net->node_data[ 8] = (Node) {0xa0000009,0x6000000a};
-  net->node_data[ 9] = (Node) {0x50000007,0xa000000a};
-  net->node_data[10] = (Node) {0x60000007,0x60000008};
-  net->node_data[11] = (Node) {0xa000000c,0x40000000};
-  net->node_data[12] = (Node) {0x6000000c,0x5000000c};
+  net->root     = 0x6000000b;
+  net->rput[ 0] = 1;
+  net->rbag[ 0] = (Wire) {0xa0000000,0xa0000005};
+  net->node[ 0] = (Node) {0xb0000001,0xa0000004};
+  net->node[ 1] = (Node) {0xa0000002,0xa0000003};
+  net->node[ 2] = (Node) {0x50000004,0x50000003};
+  net->node[ 3] = (Node) {0x60000002,0x60000004};
+  net->node[ 4] = (Node) {0x50000002,0x60000003};
+  net->node[ 5] = (Node) {0xa0000006,0xa000000b};
+  net->node[ 6] = (Node) {0xc0000007,0xa0000008};
+  net->node[ 7] = (Node) {0x50000009,0x5000000a};
+  net->node[ 8] = (Node) {0xa0000009,0x6000000a};
+  net->node[ 9] = (Node) {0x50000007,0xa000000a};
+  net->node[10] = (Node) {0x60000007,0x60000008};
+  net->node[11] = (Node) {0xa000000c,0x40000000};
+  net->node[12] = (Node) {0x6000000c,0x5000000c};
 }
 
 // term_f = (c3 g_s g_z)
 __host__ void inject_term_f(Net* net) {
-  net->root          = 0x6000000d;
-  net->rbag_data[ 0] = (Wire) {0xa0000000,0xa0000007};
-  net->node_data[ 0] = (Node) {0xb0000001,0xa0000006};
-  net->node_data[ 1] = (Node) {0xb0000002,0xa0000005};
-  net->node_data[ 2] = (Node) {0xa0000003,0xa0000004};
-  net->node_data[ 3] = (Node) {0x50000006,0x50000004};
-  net->node_data[ 4] = (Node) {0x60000003,0x50000005};
-  net->node_data[ 5] = (Node) {0x60000004,0x60000006};
-  net->node_data[ 6] = (Node) {0x50000003,0x60000005};
-  net->node_data[ 7] = (Node) {0xa0000008,0xa000000d};
-  net->node_data[ 8] = (Node) {0xc0000009,0xa000000a};
-  net->node_data[ 9] = (Node) {0x5000000b,0x5000000c};
-  net->node_data[10] = (Node) {0xa000000b,0x6000000c};
-  net->node_data[11] = (Node) {0x50000009,0xa000000c};
-  net->node_data[12] = (Node) {0x60000009,0x6000000a};
-  net->node_data[13] = (Node) {0xa000000e,0x40000000};
-  net->node_data[14] = (Node) {0x6000000e,0x5000000e};
+  net->root     = 0x6000000d;
+  net->rput[ 0] = 1;
+  net->rbag[ 0] = (Wire) {0xa0000000,0xa0000007};
+  net->node[ 0] = (Node) {0xb0000001,0xa0000006};
+  net->node[ 1] = (Node) {0xb0000002,0xa0000005};
+  net->node[ 2] = (Node) {0xa0000003,0xa0000004};
+  net->node[ 3] = (Node) {0x50000006,0x50000004};
+  net->node[ 4] = (Node) {0x60000003,0x50000005};
+  net->node[ 5] = (Node) {0x60000004,0x60000006};
+  net->node[ 6] = (Node) {0x50000003,0x60000005};
+  net->node[ 7] = (Node) {0xa0000008,0xa000000d};
+  net->node[ 8] = (Node) {0xc0000009,0xa000000a};
+  net->node[ 9] = (Node) {0x5000000b,0x5000000c};
+  net->node[10] = (Node) {0xa000000b,0x6000000c};
+  net->node[11] = (Node) {0x50000009,0xa000000c};
+  net->node[12] = (Node) {0x60000009,0x6000000a};
+  net->node[13] = (Node) {0xa000000e,0x40000000};
+  net->node[14] = (Node) {0x6000000e,0x5000000e};
 }
 
-// term_g = (c5 g_s g_z)
+// term_g = (c8 g_s g_z)
 __host__ void inject_term_g(Net* net) {
-  net->root          = 0x60000011;
-  net->rbag_data[ 0] = (Wire) {0xa0000000,0xa000000b};
-  net->node_data[ 0] = (Node) {0xb0000001,0xa000000a};
-  net->node_data[ 1] = (Node) {0xb0000002,0xa0000009};
-  net->node_data[ 2] = (Node) {0xb0000003,0xa0000008};
-  net->node_data[ 3] = (Node) {0xb0000004,0xa0000007};
-  net->node_data[ 4] = (Node) {0xa0000005,0xa0000006};
-  net->node_data[ 5] = (Node) {0x5000000a,0x50000006};
-  net->node_data[ 6] = (Node) {0x60000005,0x50000007};
-  net->node_data[ 7] = (Node) {0x60000006,0x50000008};
-  net->node_data[ 8] = (Node) {0x60000007,0x50000009};
-  net->node_data[ 9] = (Node) {0x60000008,0x6000000a};
-  net->node_data[10] = (Node) {0x50000005,0x60000009};
-  net->node_data[11] = (Node) {0xa000000c,0xa0000011};
-  net->node_data[12] = (Node) {0xc000000d,0xa000000e};
-  net->node_data[13] = (Node) {0x5000000f,0x50000010};
-  net->node_data[14] = (Node) {0xa000000f,0x60000010};
-  net->node_data[15] = (Node) {0x5000000d,0xa0000010};
-  net->node_data[16] = (Node) {0x6000000d,0x6000000e};
-  net->node_data[17] = (Node) {0xa0000012,0x40000000};
-  net->node_data[18] = (Node) {0x60000012,0x50000012};
+  net->root     = 0x60000017;
+  net->rput[ 0] = 1;
+  net->rbag[ 0] = (Wire) {0xa0000000,0xa0000011};
+  net->node[ 0] = (Node) {0xb0000001,0xa0000010};
+  net->node[ 1] = (Node) {0xb0000002,0xa000000f};
+  net->node[ 2] = (Node) {0xb0000003,0xa000000e};
+  net->node[ 3] = (Node) {0xb0000004,0xa000000d};
+  net->node[ 4] = (Node) {0xb0000005,0xa000000c};
+  net->node[ 5] = (Node) {0xb0000006,0xa000000b};
+  net->node[ 6] = (Node) {0xb0000007,0xa000000a};
+  net->node[ 7] = (Node) {0xa0000008,0xa0000009};
+  net->node[ 8] = (Node) {0x50000010,0x50000009};
+  net->node[ 9] = (Node) {0x60000008,0x5000000a};
+  net->node[10] = (Node) {0x60000009,0x5000000b};
+  net->node[11] = (Node) {0x6000000a,0x5000000c};
+  net->node[12] = (Node) {0x6000000b,0x5000000d};
+  net->node[13] = (Node) {0x6000000c,0x5000000e};
+  net->node[14] = (Node) {0x6000000d,0x5000000f};
+  net->node[15] = (Node) {0x6000000e,0x60000010};
+  net->node[16] = (Node) {0x50000008,0x6000000f};
+  net->node[17] = (Node) {0xa0000012,0xa0000017};
+  net->node[18] = (Node) {0xc0000013,0xa0000014};
+  net->node[19] = (Node) {0x50000015,0x50000016};
+  net->node[20] = (Node) {0xa0000015,0x60000016};
+  net->node[21] = (Node) {0x50000013,0xa0000016};
+  net->node[22] = (Node) {0x60000013,0x60000014};
+  net->node[23] = (Node) {0xa0000018,0x40000000};
+  net->node[24] = (Node) {0x60000018,0x50000018};
 }
 
 // term_h = (c12 g_s g_z)
 __host__ void inject_term_h(Net* net) {
-  net->root          = 0x6000001f;
-  net->rbag_data[ 0] = (Wire) {0xa0000000,0xa0000019};
-  net->node_data[ 0] = (Node) {0xb0000001,0xa0000018};
-  net->node_data[ 1] = (Node) {0xb0000002,0xa0000017};
-  net->node_data[ 2] = (Node) {0xb0000003,0xa0000016};
-  net->node_data[ 3] = (Node) {0xb0000004,0xa0000015};
-  net->node_data[ 4] = (Node) {0xb0000005,0xa0000014};
-  net->node_data[ 5] = (Node) {0xb0000006,0xa0000013};
-  net->node_data[ 6] = (Node) {0xb0000007,0xa0000012};
-  net->node_data[ 7] = (Node) {0xb0000008,0xa0000011};
-  net->node_data[ 8] = (Node) {0xb0000009,0xa0000010};
-  net->node_data[ 9] = (Node) {0xb000000a,0xa000000f};
-  net->node_data[10] = (Node) {0xb000000b,0xa000000e};
-  net->node_data[11] = (Node) {0xa000000c,0xa000000d};
-  net->node_data[12] = (Node) {0x50000018,0x5000000d};
-  net->node_data[13] = (Node) {0x6000000c,0x5000000e};
-  net->node_data[14] = (Node) {0x6000000d,0x5000000f};
-  net->node_data[15] = (Node) {0x6000000e,0x50000010};
-  net->node_data[16] = (Node) {0x6000000f,0x50000011};
-  net->node_data[17] = (Node) {0x60000010,0x50000012};
-  net->node_data[18] = (Node) {0x60000011,0x50000013};
-  net->node_data[19] = (Node) {0x60000012,0x50000014};
-  net->node_data[20] = (Node) {0x60000013,0x50000015};
-  net->node_data[21] = (Node) {0x60000014,0x50000016};
-  net->node_data[22] = (Node) {0x60000015,0x50000017};
-  net->node_data[23] = (Node) {0x60000016,0x60000018};
-  net->node_data[24] = (Node) {0x5000000c,0x60000017};
-  net->node_data[25] = (Node) {0xa000001a,0xa000001f};
-  net->node_data[26] = (Node) {0xc000001b,0xa000001c};
-  net->node_data[27] = (Node) {0x5000001d,0x5000001e};
-  net->node_data[28] = (Node) {0xa000001d,0x6000001e};
-  net->node_data[29] = (Node) {0x5000001b,0xa000001e};
-  net->node_data[30] = (Node) {0x6000001b,0x6000001c};
-  net->node_data[31] = (Node) {0xa0000020,0x40000000};
-  net->node_data[32] = (Node) {0x60000020,0x50000020};
+  net->root     = 0x6000001f;
+  net->rput[ 0] = 1;
+  net->rbag[ 0] = (Wire) {0xa0000000,0xa0000019};
+  net->node[ 0] = (Node) {0xb0000001,0xa0000018};
+  net->node[ 1] = (Node) {0xb0000002,0xa0000017};
+  net->node[ 2] = (Node) {0xb0000003,0xa0000016};
+  net->node[ 3] = (Node) {0xb0000004,0xa0000015};
+  net->node[ 4] = (Node) {0xb0000005,0xa0000014};
+  net->node[ 5] = (Node) {0xb0000006,0xa0000013};
+  net->node[ 6] = (Node) {0xb0000007,0xa0000012};
+  net->node[ 7] = (Node) {0xb0000008,0xa0000011};
+  net->node[ 8] = (Node) {0xb0000009,0xa0000010};
+  net->node[ 9] = (Node) {0xb000000a,0xa000000f};
+  net->node[10] = (Node) {0xb000000b,0xa000000e};
+  net->node[11] = (Node) {0xa000000c,0xa000000d};
+  net->node[12] = (Node) {0x50000018,0x5000000d};
+  net->node[13] = (Node) {0x6000000c,0x5000000e};
+  net->node[14] = (Node) {0x6000000d,0x5000000f};
+  net->node[15] = (Node) {0x6000000e,0x50000010};
+  net->node[16] = (Node) {0x6000000f,0x50000011};
+  net->node[17] = (Node) {0x60000010,0x50000012};
+  net->node[18] = (Node) {0x60000011,0x50000013};
+  net->node[19] = (Node) {0x60000012,0x50000014};
+  net->node[20] = (Node) {0x60000013,0x50000015};
+  net->node[21] = (Node) {0x60000014,0x50000016};
+  net->node[22] = (Node) {0x60000015,0x50000017};
+  net->node[23] = (Node) {0x60000016,0x60000018};
+  net->node[24] = (Node) {0x5000000c,0x60000017};
+  net->node[25] = (Node) {0xa000001a,0xa000001f};
+  net->node[26] = (Node) {0xc000001b,0xa000001c};
+  net->node[27] = (Node) {0x5000001d,0x5000001e};
+  net->node[28] = (Node) {0xa000001d,0x6000001e};
+  net->node[29] = (Node) {0x5000001b,0xa000001e};
+  net->node[30] = (Node) {0x6000001b,0x6000001c};
+  net->node[31] = (Node) {0xa0000020,0x40000000};
+  net->node[32] = (Node) {0x60000020,0x50000020};
 }
 
 // term_h = (c16 g_s g_z)
 __host__ void inject_term_i(Net* net) {
-  net->root          = 0x60000027;
-  net->rbag_data[ 0] = (Wire) {0xa0000000,0xa0000021};
-  net->node_data[ 0] = (Node) {0xb0000001,0xa0000020};
-  net->node_data[ 1] = (Node) {0xb0000002,0xa000001f};
-  net->node_data[ 2] = (Node) {0xb0000003,0xa000001e};
-  net->node_data[ 3] = (Node) {0xb0000004,0xa000001d};
-  net->node_data[ 4] = (Node) {0xb0000005,0xa000001c};
-  net->node_data[ 5] = (Node) {0xb0000006,0xa000001b};
-  net->node_data[ 6] = (Node) {0xb0000007,0xa000001a};
-  net->node_data[ 7] = (Node) {0xb0000008,0xa0000019};
-  net->node_data[ 8] = (Node) {0xb0000009,0xa0000018};
-  net->node_data[ 9] = (Node) {0xb000000a,0xa0000017};
-  net->node_data[10] = (Node) {0xb000000b,0xa0000016};
-  net->node_data[11] = (Node) {0xb000000c,0xa0000015};
-  net->node_data[12] = (Node) {0xb000000d,0xa0000014};
-  net->node_data[13] = (Node) {0xb000000e,0xa0000013};
-  net->node_data[14] = (Node) {0xb000000f,0xa0000012};
-  net->node_data[15] = (Node) {0xa0000010,0xa0000011};
-  net->node_data[16] = (Node) {0x50000020,0x50000011};
-  net->node_data[17] = (Node) {0x60000010,0x50000012};
-  net->node_data[18] = (Node) {0x60000011,0x50000013};
-  net->node_data[19] = (Node) {0x60000012,0x50000014};
-  net->node_data[20] = (Node) {0x60000013,0x50000015};
-  net->node_data[21] = (Node) {0x60000014,0x50000016};
-  net->node_data[22] = (Node) {0x60000015,0x50000017};
-  net->node_data[23] = (Node) {0x60000016,0x50000018};
-  net->node_data[24] = (Node) {0x60000017,0x50000019};
-  net->node_data[25] = (Node) {0x60000018,0x5000001a};
-  net->node_data[26] = (Node) {0x60000019,0x5000001b};
-  net->node_data[27] = (Node) {0x6000001a,0x5000001c};
-  net->node_data[28] = (Node) {0x6000001b,0x5000001d};
-  net->node_data[29] = (Node) {0x6000001c,0x5000001e};
-  net->node_data[30] = (Node) {0x6000001d,0x5000001f};
-  net->node_data[31] = (Node) {0x6000001e,0x60000020};
-  net->node_data[32] = (Node) {0x50000010,0x6000001f};
-  net->node_data[33] = (Node) {0xa0000022,0xa0000027};
-  net->node_data[34] = (Node) {0xc0000023,0xa0000024};
-  net->node_data[35] = (Node) {0x50000025,0x50000026};
-  net->node_data[36] = (Node) {0xa0000025,0x60000026};
-  net->node_data[37] = (Node) {0x50000023,0xa0000026};
-  net->node_data[38] = (Node) {0x60000023,0x60000024};
-  net->node_data[39] = (Node) {0xa0000028,0x40000000};
-  net->node_data[40] = (Node) {0x60000028,0x50000028};
+  net->root     = 0x60000027;
+  net->rput[ 0] = 1;
+  net->rbag[ 0] = (Wire) {0xa0000000,0xa0000021};
+  net->node[ 0] = (Node) {0xb0000001,0xa0000020};
+  net->node[ 1] = (Node) {0xb0000002,0xa000001f};
+  net->node[ 2] = (Node) {0xb0000003,0xa000001e};
+  net->node[ 3] = (Node) {0xb0000004,0xa000001d};
+  net->node[ 4] = (Node) {0xb0000005,0xa000001c};
+  net->node[ 5] = (Node) {0xb0000006,0xa000001b};
+  net->node[ 6] = (Node) {0xb0000007,0xa000001a};
+  net->node[ 7] = (Node) {0xb0000008,0xa0000019};
+  net->node[ 8] = (Node) {0xb0000009,0xa0000018};
+  net->node[ 9] = (Node) {0xb000000a,0xa0000017};
+  net->node[10] = (Node) {0xb000000b,0xa0000016};
+  net->node[11] = (Node) {0xb000000c,0xa0000015};
+  net->node[12] = (Node) {0xb000000d,0xa0000014};
+  net->node[13] = (Node) {0xb000000e,0xa0000013};
+  net->node[14] = (Node) {0xb000000f,0xa0000012};
+  net->node[15] = (Node) {0xa0000010,0xa0000011};
+  net->node[16] = (Node) {0x50000020,0x50000011};
+  net->node[17] = (Node) {0x60000010,0x50000012};
+  net->node[18] = (Node) {0x60000011,0x50000013};
+  net->node[19] = (Node) {0x60000012,0x50000014};
+  net->node[20] = (Node) {0x60000013,0x50000015};
+  net->node[21] = (Node) {0x60000014,0x50000016};
+  net->node[22] = (Node) {0x60000015,0x50000017};
+  net->node[23] = (Node) {0x60000016,0x50000018};
+  net->node[24] = (Node) {0x60000017,0x50000019};
+  net->node[25] = (Node) {0x60000018,0x5000001a};
+  net->node[26] = (Node) {0x60000019,0x5000001b};
+  net->node[27] = (Node) {0x6000001a,0x5000001c};
+  net->node[28] = (Node) {0x6000001b,0x5000001d};
+  net->node[29] = (Node) {0x6000001c,0x5000001e};
+  net->node[30] = (Node) {0x6000001d,0x5000001f};
+  net->node[31] = (Node) {0x6000001e,0x60000020};
+  net->node[32] = (Node) {0x50000010,0x6000001f};
+  net->node[33] = (Node) {0xa0000022,0xa0000027};
+  net->node[34] = (Node) {0xc0000023,0xa0000024};
+  net->node[35] = (Node) {0x50000025,0x50000026};
+  net->node[36] = (Node) {0xa0000025,0x60000026};
+  net->node[37] = (Node) {0x50000023,0xa0000026};
+  net->node[38] = (Node) {0x60000023,0x60000024};
+  net->node[39] = (Node) {0xa0000028,0x40000000};
+  net->node[40] = (Node) {0x60000028,0x50000028};
+}
+
+// term_h = (c18 g_s g_z)
+__host__ void inject_term_j(Net* net) {
+  net->root    = 0x6000002b;
+  net->rput[ 0] = 1;
+  net->rbag[ 0] = (Wire) {0xa0000000,0xa0000025};
+  net->node[ 0] = (Node) {0xb0000001,0xa0000024};
+  net->node[ 1] = (Node) {0xb0000002,0xa0000023};
+  net->node[ 2] = (Node) {0xb0000003,0xa0000022};
+  net->node[ 3] = (Node) {0xb0000004,0xa0000021};
+  net->node[ 4] = (Node) {0xb0000005,0xa0000020};
+  net->node[ 5] = (Node) {0xb0000006,0xa000001f};
+  net->node[ 6] = (Node) {0xb0000007,0xa000001e};
+  net->node[ 7] = (Node) {0xb0000008,0xa000001d};
+  net->node[ 8] = (Node) {0xb0000009,0xa000001c};
+  net->node[ 9] = (Node) {0xb000000a,0xa000001b};
+  net->node[10] = (Node) {0xb000000b,0xa000001a};
+  net->node[11] = (Node) {0xb000000c,0xa0000019};
+  net->node[12] = (Node) {0xb000000d,0xa0000018};
+  net->node[13] = (Node) {0xb000000e,0xa0000017};
+  net->node[14] = (Node) {0xb000000f,0xa0000016};
+  net->node[15] = (Node) {0xb0000010,0xa0000015};
+  net->node[16] = (Node) {0xb0000011,0xa0000014};
+  net->node[17] = (Node) {0xa0000012,0xa0000013};
+  net->node[18] = (Node) {0x50000024,0x50000013};
+  net->node[19] = (Node) {0x60000012,0x50000014};
+  net->node[20] = (Node) {0x60000013,0x50000015};
+  net->node[21] = (Node) {0x60000014,0x50000016};
+  net->node[22] = (Node) {0x60000015,0x50000017};
+  net->node[23] = (Node) {0x60000016,0x50000018};
+  net->node[24] = (Node) {0x60000017,0x50000019};
+  net->node[25] = (Node) {0x60000018,0x5000001a};
+  net->node[26] = (Node) {0x60000019,0x5000001b};
+  net->node[27] = (Node) {0x6000001a,0x5000001c};
+  net->node[28] = (Node) {0x6000001b,0x5000001d};
+  net->node[29] = (Node) {0x6000001c,0x5000001e};
+  net->node[30] = (Node) {0x6000001d,0x5000001f};
+  net->node[31] = (Node) {0x6000001e,0x50000020};
+  net->node[32] = (Node) {0x6000001f,0x50000021};
+  net->node[33] = (Node) {0x60000020,0x50000022};
+  net->node[34] = (Node) {0x60000021,0x50000023};
+  net->node[35] = (Node) {0x60000022,0x60000024};
+  net->node[36] = (Node) {0x50000012,0x60000023};
+  net->node[37] = (Node) {0xa0000026,0xa000002b};
+  net->node[38] = (Node) {0xc0000027,0xa0000028};
+  net->node[39] = (Node) {0x50000029,0x5000002a};
+  net->node[40] = (Node) {0xa0000029,0x6000002a};
+  net->node[41] = (Node) {0x50000027,0xa000002a};
+  net->node[42] = (Node) {0x60000027,0x60000028};
+  net->node[43] = (Node) {0xa000002c,0x40000000};
+  net->node[44] = (Node) {0x6000002c,0x5000002c};
 }
 
 // Main
@@ -868,7 +1008,7 @@ int main() {
 
   // Allocates the initial net on device
   Net* h_net = mknet();
-  inject_term_d(h_net);
+  inject_term_g(h_net); // works up to j
 
   // Prints the initial net
   print_net(h_net);
@@ -877,15 +1017,22 @@ int main() {
   Net* d_net = net_to_device(h_net);
 
   // Performs parallel reductions
-  work<<<TOTAL_BLOCKS, BLOCK_SIZE>>>(d_net);
+  work<<<SM_COUNT, BLOCK_SIZE>>>(d_net);
+
+  // Add synchronization and error checking
+  cudaDeviceSynchronize();
+  cudaError_t error = cudaGetLastError();
+  if (error != cudaSuccess) {
+    printf("CUDA error: %s\n", cudaGetErrorString(error));
+  }
 
   // Reads the normalized net from device to host
   Net* norm = net_to_host(d_net);
 
   // Prints the normal form (raw data)
-  print_net(norm);
+  //print_net(norm);
 
-  // Prints the nromal form (as a tree)
+  // Prints the normal form (as a tree)
   printf("Norm:\n");
   //print_tree(norm, norm->root);
   printf("\n");
@@ -893,10 +1040,10 @@ int main() {
   // Prints just the rwts
   printf("Rwts: %d\n", norm->rwts);
 
-  //// Free device memory
+  // Free device memory
   net_free_on_device(d_net);
 
-  //// Free host memory
+  // Free host memory
   net_free_on_host(h_net);
   net_free_on_host(norm);
 
