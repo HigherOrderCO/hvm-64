@@ -24,9 +24,9 @@ pub const ERA: Tag = 0x3; // unboxed eraser
 pub const VRR: Tag = 0x4; // variable pointing to root
 pub const VR1: Tag = 0x5; // variable pointing to aux1 port of node
 pub const VR2: Tag = 0x6; // variable pointing to aux2 port of node
-pub const GOT: Tag = 0x7; // redirection to root
-pub const GO1: Tag = 0x8; // redirection to aux1 port of node
-pub const GO2: Tag = 0x9; // redirection to aux2 port of node
+pub const RDT: Tag = 0x7; // redirection to root
+pub const RD1: Tag = 0x8; // redirection to aux1 port of node
+pub const RD2: Tag = 0x9; // redirection to aux2 port of node
 pub const CON: Tag = 0xA; // points to main port of con node
 pub const DUP: Tag = 0xB; // points to main port of dup node; higher labels also dups
 
