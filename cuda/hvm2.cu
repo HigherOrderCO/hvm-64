@@ -13,17 +13,14 @@ typedef unsigned long long int a64;
 // -------------
 
 // This code is initially optimized for nVidia RTX 4090
-const u32 BLOCK_LOG2    = 8;                         // log2 of block size
-const u32 BLOCK_SIZE    = 1 << BLOCK_LOG2;           // threads per block
-const u32 TOTAL_BLOCKS  = BLOCK_SIZE;                // must be = BLOCK_SIZE
-const u32 TOTAL_THREADS = TOTAL_BLOCKS * BLOCK_SIZE; // total threads
-const u32 UNIT_SIZE     = 4;                         // threads per rewrite unit
-const u32 TOTAL_UNITS   = TOTAL_THREADS / UNIT_SIZE; // total rewrite units
-const u32 NODE_SIZE     = 1 << 28;                   // total nodes (2GB addressable)
-const u32 BAGS_SIZE     = TOTAL_BLOCKS * BLOCK_SIZE; // total parallel redexes
-const u32 GTMP_SIZE     = BLOCK_SIZE;                // TODO: rename
-const u32 GIDX_SIZE     = BAGS_SIZE;                 // TODO: rename
-const u32 ALLOC_PAD     = NODE_SIZE / TOTAL_UNITS;   // space between unit alloc areas
+const u32 BLOCK_LOG2    = 8;                                     // log2 of block size
+const u32 BLOCK_SIZE    = 1 << BLOCK_LOG2;                       // threads per block
+const u32 UNIT_SIZE     = 4;                                     // threads per rewrite unit
+const u32 NODE_SIZE     = 1 << 28;                               // max total nodes (2GB addressable)
+const u32 BAGS_SIZE     = BLOCK_SIZE * BLOCK_SIZE * BLOCK_SIZE;  // size of global redex bag
+const u32 GROUP_SIZE    = BLOCK_SIZE * BLOCK_SIZE;               // size os a group of bags
+const u32 GIDX_SIZE     = BAGS_SIZE + GROUP_SIZE + BLOCK_SIZE;   // aux object to hold scatter indices
+const u32 GMOV_SIZE     = BAGS_SIZE;                             // aux object to hold scatter indices
 
 // Types
 // -----
@@ -84,8 +81,9 @@ typedef struct {
   u32   blen; // total bag length (redex count)
   Wire* bags; // redex bags (active pairs)
   Node* node; // memory buffer with all nodes
-  u32*  gidx; // ............
-  u32*  gtmp; // aux obj for communication
+  u32*  gidx; // aux buffer used on scatter fns
+  Wire* gmov; // aux buffer used on scatter fns
+  u32   pbks; // last blocks count used
   u32   done; // number of completed threads
   u32   rwts; // number of rewrites performed
 } Net;
@@ -109,13 +107,13 @@ typedef struct {
 // -----
 
 __device__ __host__ void stop(const char* tag) {
-  //printf(tag);
-  //printf("\n");
+  printf(tag);
+  printf("\n");
 }
 
 __device__ __host__ bool dbug(u32* K, const char* tag) {
   *K += 1;
-  if (*K > 1000000) {
+  if (*K > 5000000) {
     stop(tag);
     return false;
   }
@@ -124,6 +122,16 @@ __device__ __host__ bool dbug(u32* K, const char* tag) {
 
 // Runtime
 // -------
+
+// Integer ceil division
+__host__ __device__ u32 div(u32 a, u32 b) {
+  return (a + b - 1) / b;
+}
+
+// Pseudorandom Number Generator
+__host__ __device__ u32 rng(u32 a) {
+  return a * 214013 + 2531011;
+}
 
 // Creates a new pointer
 __host__ __device__ inline Ptr mkptr(Tag tag, Val val) {
@@ -195,16 +203,21 @@ __device__ inline Ptr* at(Net* net, Val idx, Port port) {
 // Allocates a new node in memory
 __device__ inline u32 alloc(Worker *worker, Net *net) {
   u32 K = 0;
+  u32 fail = 0;
   while (true) {
     //dbug(&K, "alloc");
-    u32  idx = (worker->unit * ALLOC_PAD + worker->aloc * 4 + worker->frac) % NODE_SIZE;
+    u32  idx = (worker->aloc * 4 + worker->frac) % NODE_SIZE;
     a64* ref = &((a64*)net->node)[idx];
     u64  got = atomicCAS(ref, 0, ((u64)NEO << 32) | ((u64)NEO)); // Wire{NEO,NEO}
     if (got == 0) {
       //printf("[%d] alloc at %d\n", worker->gid, idx);
       return idx;
     } else {
+      //worker->aloc = ++fail % 16 == 0 ? rng(worker->aloc) : worker->aloc + 1;
       worker->aloc = (worker->aloc + 1) % NODE_SIZE;
+      if (++fail > 256) {
+        printf("[%d] can't alloc\n", worker->gid);
+      }
     }
   }
 }
@@ -235,10 +248,10 @@ __device__ void replace(u32 id, Ptr* ref, Ptr exp, Ptr neo) {
   }
 }
 
-// Links the node in 'nod_ref' towards the destination of 'dir_ptr'
-// - If the dest is a redirection => clear it and aim forwards
-// - If the dest is a variable    => pass the node into it and halt
-// - If the dest is a node        => create an active pair and halt
+// Atomically links the node in 'nod_ref' towards 'dir_ptr'
+// - If target is a redirection => clear it and move forwards
+// - If target is a variable    => pass the node into it and halt
+// - If target is a node        => form an active pair and halt
 __device__ void link(Worker* worker, Net* net, Ptr* nod_ref, Ptr dir_ptr) {
   //printf("[%d] linking node=%8X towards %8X\n", worker->gid, *nod_ref, dir_ptr);
 
@@ -323,7 +336,7 @@ __device__ void link(Worker* worker, Net* net, Ptr* nod_ref, Ptr dir_ptr) {
   }
 }
 
-// Kernels
+// Scatter
 // -------
 
 // Performs a local scan sum
@@ -386,58 +399,108 @@ __device__ void local_scatter(Net* net) {
 
   // Moves our wire to target location
   if (wire.lft != 0) {
-    u32 target  = (BLOCK_SIZE / bag_len) * loc[tid];
-    bag[target] = wire;
+    u32 serial_index = loc[tid];
+    u32 spread_index = (BLOCK_SIZE / bag_len) * serial_index;
+    bag[spread_index] = wire;
   }
   __syncthreads();
 }
 
-// Prepares a global scatter, step 0
+// Computes redex indices on blocks (and block lengths)
 __global__ void global_scatter_prepare_0(Net* net) {
   u32  tid = threadIdx.x;
   u32  bid = blockIdx.x;
   u32  gid = bid * blockDim.x + tid;
-  u32* loc = net->gidx + bid * BLOCK_SIZE;
-
-  // Initializes the index object
-  loc[tid] = net->bags[gid].lft > 0 ? 1 : 0;
+  u32* redex_indices = net->gidx + BLOCK_SIZE * bid;
+  u32* block_length  = net->gidx + BLOCK_SIZE * BLOCK_SIZE * BLOCK_SIZE + bid;
+  redex_indices[tid] = net->bags[gid].lft > 0 ? 1 : 0; __syncthreads();
+  *block_length      = scansum(redex_indices);
   __syncthreads();
-
-  // Computes our bag len
-  u32 bag_len = scansum(loc);
-  __syncthreads();
-
-  // Broadcasts our bag len 
-  net->gtmp[bid] = bag_len;
+  //printf("[%d on %d] scatter 0 | redex_index=%d block_length=[%d,%d,%d,%d,...]\n", gid, bid, redex_indices[tid], *block_length, *(block_length+1), *(block_length+2), *(block_length+3));
 }
 
-// Prepares a global scatter, step 1
+// Computes block indices on groups (and group lengths)
 __global__ void global_scatter_prepare_1(Net* net) {
-  net->blen = scansum(net->gtmp);
-}
-
-// Global scatter
-__global__ void global_scatter(Net* net) {
   u32 tid = threadIdx.x;
   u32 bid = blockIdx.x;
   u32 gid = bid * blockDim.x + tid;
+  u32* block_indices = net->gidx + BLOCK_SIZE * BLOCK_SIZE * BLOCK_SIZE + BLOCK_SIZE * bid;
+  u32* group_length  = net->gidx + BLOCK_SIZE * BLOCK_SIZE * BLOCK_SIZE + BLOCK_SIZE * BLOCK_SIZE + bid;
+  *group_length      = scansum(block_indices);
+  //printf("[%d on %d] scatter 1 | block_index=%d group_length=%d\n", gid, bid, block_indices[tid], *group_length);
+}
+
+// Computes group indices on bag (and bag length)
+__global__ void global_scatter_prepare_2(Net* net) {
+  u32* group_indices = net->gidx + BLOCK_SIZE * BLOCK_SIZE * BLOCK_SIZE + BLOCK_SIZE * BLOCK_SIZE;
+  u32* total_length  = &net->blen; __syncthreads();
+  *total_length      = scansum(group_indices);
+  //printf("[%d] scatter 2 | group_index=%d total_length=%d\n", threadIdx.x, group_indices[threadIdx.x], *total_length);
+}
+
+// Global scatter: takes redex from bag into aux buff
+__global__ void global_scatter_take(Net* net, u32 blocks) {
+  u32  tid = threadIdx.x;
+  u32  bid = blockIdx.x;
+  u32  gid = bid * blockDim.x + tid;
+  net->gmov[gid] = net->bags[gid];
+  net->bags[gid] = Wire{0,0};
+}
+
+// Global scatter: moves redex to target location
+__global__ void global_scatter_move(Net* net, u32 blocks) {
+  u32  tid = threadIdx.x;
+  u32  bid = blockIdx.x;
+  u32  gid = bid * blockDim.x + tid;
+
+  // Block and group indices
+  u32* block_index = net->gidx + BLOCK_SIZE * BLOCK_SIZE * BLOCK_SIZE + (gid / BLOCK_SIZE);
+  u32* group_index = net->gidx + BLOCK_SIZE * BLOCK_SIZE * BLOCK_SIZE + BLOCK_SIZE * BLOCK_SIZE + (gid / BLOCK_SIZE / BLOCK_SIZE);
 
   // Takes our wire
-  u64 wire = atomicExch((a64*)&net->bags[gid], 0);
+  Wire wire = net->gmov[gid];
+  net->gmov[gid] = Wire{0,0};
 
   // Moves wire to target location
-  if (wire != 0) {
-    u32 target = (BAGS_SIZE / net->blen) * (net->gidx[gid] + net->gtmp[bid]);
-    while (atomicCAS((a64*)&net->bags[target], 0, wire) != 0) {};
+  if (wire.lft != 0) {
+    u32 serial_index = net->gidx[gid+0] + (*block_index) + (*group_index);
+    u32 spread_index = (blocks * BLOCK_SIZE / net->blen) * serial_index;
+    net->bags[spread_index] = wire;
   }
 }
 
-// Performs a global scatter
-void do_global_scatter(Net* net) {
-  global_scatter_prepare_0<<<TOTAL_BLOCKS, BLOCK_SIZE>>>(net);
-  global_scatter_prepare_1<<<1, BLOCK_SIZE>>>(net);
-  global_scatter<<<TOTAL_BLOCKS, BLOCK_SIZE>>>(net);
+// Cleans up memory used by global scatter
+__global__ void global_scatter_cleanup(Net* net) {
+  u32  tid = threadIdx.x;
+  u32  bid = blockIdx.x;
+  u32  gid = bid * blockDim.x + tid;
+  u32* redex_index = net->gidx + BLOCK_SIZE * bid + tid;
+  u32* block_index = net->gidx + BLOCK_SIZE * BLOCK_SIZE * BLOCK_SIZE + bid + tid;
+  u32* group_index = net->gidx + BLOCK_SIZE * BLOCK_SIZE * BLOCK_SIZE + BLOCK_SIZE * BLOCK_SIZE + (bid / BLOCK_SIZE) + tid;
+  *redex_index = 0;
+  if (bid % BLOCK_SIZE == 0) {
+    *block_index = 0;
+  }
+  if (bid == 0) {
+    *group_index = 0;
+  }
+  //printf("[%d] clean %d %d %d\n", gid, BLOCK_SIZE * bid + tid, BLOCK_SIZE * BLOCK_SIZE * BLOCK_SIZE + bid, BLOCK_SIZE * BLOCK_SIZE * BLOCK_SIZE + BLOCK_SIZE * BLOCK_SIZE + (bid / BLOCK_SIZE));
 }
+
+__host__ Net* net_to_host(Net* device_net);
+
+// Performs a global scatter
+void do_global_scatter(Net* net, u32 prev_blocks, u32 next_blocks) {
+  global_scatter_prepare_0<<<prev_blocks, BLOCK_SIZE>>>(net);
+  global_scatter_prepare_1<<<div(prev_blocks, BLOCK_SIZE), BLOCK_SIZE>>>(net);
+  global_scatter_prepare_2<<<div(prev_blocks, BLOCK_SIZE * BLOCK_SIZE), BLOCK_SIZE>>>(net); // always == 1
+  global_scatter_take<<<prev_blocks, BLOCK_SIZE>>>(net, next_blocks);
+  global_scatter_move<<<prev_blocks, BLOCK_SIZE>>>(net, next_blocks);
+  global_scatter_cleanup<<<prev_blocks, BLOCK_SIZE>>>(net);
+}
+
+// Interactions
+// ------------
 
 // An active wire is reduced by 4 parallel threads, each one performing "1/4" of
 // the work. Each thread will be pointing to a node of the active pair, and an
@@ -449,7 +512,7 @@ void do_global_scatter(Net* net) {
 // This is organized so that local threads can perform the same instructions
 // whenever possible. So, for example, in a commutation rule, all the 4 clones
 // would be allocated at the same time.
-__global__ void global_rewrite(Net* net) {
+__global__ void global_rewrite(Net* net, u32 blocks) {
   __shared__ u32 XLOC[BLOCK_SIZE]; // aux arr for clone locs
 
   // Initializes local vars
@@ -457,7 +520,7 @@ __global__ void global_rewrite(Net* net) {
   worker.tid  = threadIdx.x;
   worker.bid  = blockIdx.x;
   worker.gid  = worker.bid * blockDim.x + worker.tid;
-  worker.aloc = 0;
+  worker.aloc = rng(clock() * (worker.gid + 1));
   worker.rwts = 0;
   worker.frac = worker.tid % 4;
   worker.port = worker.tid % 2;
@@ -564,8 +627,45 @@ __global__ void global_rewrite(Net* net) {
   }
 }
 
-void do_global_rewrite(Net* net) {
-  global_rewrite<<<TOTAL_BLOCKS, BLOCK_SIZE>>>(net);
+void do_global_rewrite(Net* net, u32 blocks) {
+  global_rewrite<<<blocks, BLOCK_SIZE>>>(net, blocks);
+}
+
+// Reduce
+// ------
+
+// Performs a global rewrite step.
+u32 do_reduce(Net* net) {
+  // Gets the total number of redexes
+  u32 bag_length;
+  u32 prev_blocks;
+  cudaMemcpy(&bag_length, &(net->blen), sizeof(u32), cudaMemcpyDeviceToHost);
+  cudaMemcpy(&prev_blocks, &(net->pbks), sizeof(u32), cudaMemcpyDeviceToHost);
+
+  // Blocks get stuck when they're 1/4 full.
+  // We give them room to grow 2x before that.
+  u32 next_blocks = div(bag_length, BLOCK_SIZE / 8);
+  if (next_blocks > BLOCK_SIZE * BLOCK_SIZE) {
+    next_blocks = BLOCK_SIZE * BLOCK_SIZE;
+  }
+
+  // Prints debug message
+  printf(">> reducing %d redexes with %d blocks\n", bag_length, next_blocks);
+
+  // Stores next_blocks on net.pbks
+  cudaMemcpy(&(net->pbks), &next_blocks, sizeof(u32), cudaMemcpyHostToDevice);
+  
+  // Scatters redexes evenly
+  do_global_scatter(net, prev_blocks, next_blocks);
+
+  // Performs global parallel rewrite
+  do_global_rewrite(net, next_blocks);
+
+  return bag_length;
+}
+
+void do_normalize(Net* net) {
+  while (do_reduce(net) != 0) {};
 }
 
 // Host<->Device
@@ -575,15 +675,16 @@ __host__ Net* mknet() {
   Net* net  = (Net*)malloc(sizeof(Net));
   net->root = mkptr(NIL, 0);
   net->rwts = 0;
+  net->pbks = 0;
   net->done = 0;
   net->blen = 0;
   net->bags = (Wire*)malloc(BAGS_SIZE * sizeof(Wire));
   net->gidx = (u32*) malloc(GIDX_SIZE * sizeof(u32));
-  net->gtmp = (u32*) malloc(GTMP_SIZE * sizeof(u32));
+  net->gmov = (Wire*)malloc(GMOV_SIZE * sizeof(Wire));
   net->node = (Node*)malloc(NODE_SIZE * sizeof(Node));
   memset(net->bags, 0, BAGS_SIZE * sizeof(Wire));
   memset(net->gidx, 0, GIDX_SIZE * sizeof(u32));
-  memset(net->gtmp, 0, GTMP_SIZE * sizeof(u32));
+  memset(net->gmov, 0, GMOV_SIZE * sizeof(Wire));
   memset(net->node, 0, NODE_SIZE * sizeof(Node));
   return net;
 }
@@ -593,26 +694,26 @@ __host__ Net* net_to_device(Net* host_net) {
   Net*  device_net;
   Wire* device_bags;
   u32*  device_gidx;
-  u32*  device_gtmp;
+  Wire* device_gmov;
   Node* device_node;
 
   cudaMalloc((void**)&device_net, sizeof(Net));
   cudaMalloc((void**)&device_bags, BAGS_SIZE * sizeof(Wire));
   cudaMalloc((void**)&device_gidx, GIDX_SIZE * sizeof(u32));
-  cudaMalloc((void**)&device_gtmp, GTMP_SIZE * sizeof(u32));
+  cudaMalloc((void**)&device_gmov, GMOV_SIZE * sizeof(Wire));
   cudaMalloc((void**)&device_node, NODE_SIZE * sizeof(Node));
 
   // Copy the host data to the device memory
   cudaMemcpy(device_bags, host_net->bags, BAGS_SIZE * sizeof(Wire), cudaMemcpyHostToDevice);
   cudaMemcpy(device_gidx, host_net->gidx, GIDX_SIZE * sizeof(u32),  cudaMemcpyHostToDevice);
-  cudaMemcpy(device_gtmp, host_net->gtmp, GTMP_SIZE * sizeof(u32),  cudaMemcpyHostToDevice);
+  cudaMemcpy(device_gmov, host_net->gmov, GMOV_SIZE * sizeof(Wire), cudaMemcpyHostToDevice);
   cudaMemcpy(device_node, host_net->node, NODE_SIZE * sizeof(Node), cudaMemcpyHostToDevice);
 
   // Create a temporary host Net object with device pointers
   Net temp_net  = *host_net;
   temp_net.bags = device_bags;
   temp_net.gidx = device_gidx;
-  temp_net.gtmp = device_gtmp;
+  temp_net.gmov = device_gmov;
   temp_net.node = device_node;
 
   // Copy the temporary host Net object to the device memory
@@ -632,23 +733,23 @@ __host__ Net* net_to_host(Net* device_net) {
   // Allocate host memory for data
   host_net->bags = (Wire*)malloc(BAGS_SIZE * sizeof(Wire));
   host_net->gidx = (u32*) malloc(GIDX_SIZE * sizeof(u32));
-  host_net->gtmp = (u32*) malloc(GTMP_SIZE * sizeof(u32));
+  host_net->gmov = (Wire*)malloc(GMOV_SIZE * sizeof(Wire));
   host_net->node = (Node*)malloc(NODE_SIZE * sizeof(Node));
 
   // Retrieve the device pointers for data
   Wire* device_bags;
   u32*  device_gidx;
-  u32*  device_gtmp;
+  Wire* device_gmov;
   Node* device_node;
   cudaMemcpy(&device_bags, &(device_net->bags), sizeof(Wire*), cudaMemcpyDeviceToHost);
   cudaMemcpy(&device_gidx, &(device_net->gidx), sizeof(u32*),  cudaMemcpyDeviceToHost);
-  cudaMemcpy(&device_gtmp, &(device_net->gtmp), sizeof(u32*),  cudaMemcpyDeviceToHost);
+  cudaMemcpy(&device_gmov, &(device_net->gmov), sizeof(Wire*), cudaMemcpyDeviceToHost);
   cudaMemcpy(&device_node, &(device_net->node), sizeof(Node*), cudaMemcpyDeviceToHost);
 
   // Copy the device data to the host memory
   cudaMemcpy(host_net->bags, device_bags, BAGS_SIZE * sizeof(Wire), cudaMemcpyDeviceToHost);
   cudaMemcpy(host_net->gidx, device_gidx, GIDX_SIZE * sizeof(u32),  cudaMemcpyDeviceToHost);
-  cudaMemcpy(host_net->gtmp, device_gtmp, GTMP_SIZE * sizeof(u32),  cudaMemcpyDeviceToHost);
+  cudaMemcpy(host_net->gmov, device_gmov, GMOV_SIZE * sizeof(Wire), cudaMemcpyDeviceToHost);
   cudaMemcpy(host_net->node, device_node, NODE_SIZE * sizeof(Node), cudaMemcpyDeviceToHost);
 
   return host_net;
@@ -658,28 +759,28 @@ __host__ void net_free_on_device(Net* device_net) {
   // Retrieve the device pointers for data
   Wire* device_bags;
   u32*  device_gidx;
-  u32*  device_gtmp;
+  Wire* device_gmov;
   Node* device_node;
   cudaMemcpy(&device_bags, &(device_net->bags), sizeof(Wire*), cudaMemcpyDeviceToHost);
   cudaMemcpy(&device_gidx, &(device_net->gidx), sizeof(u32*),  cudaMemcpyDeviceToHost);
-  cudaMemcpy(&device_gtmp, &(device_net->gtmp), sizeof(u32*),  cudaMemcpyDeviceToHost);
+  cudaMemcpy(&device_gmov, &(device_net->gmov), sizeof(Wire*), cudaMemcpyDeviceToHost);
   cudaMemcpy(&device_node, &(device_net->node), sizeof(Node*), cudaMemcpyDeviceToHost);
 
   // Free the device memory
   cudaFree(device_bags);
   cudaFree(device_gidx);
-  cudaFree(device_gtmp);
+  cudaFree(device_gmov);
   cudaFree(device_node);
   cudaFree(device_net);
 }
 
 __host__ void net_free_on_host(Net* host_net) {
   free(host_net->bags);
-  free(host_net->gidx);
-  free(host_net->gtmp);
+  free(host_net->gmov);
   free(host_net->node);
   free(host_net);
 }
+
 
 // Debugging
 // ---------
@@ -739,10 +840,6 @@ void print_net(Net* net) {
   }
   printf("BLen: %u\n", net->blen);
   printf("Rwts: %u\n", net->rwts);
-  //printf("GTMP: ");
-  //for (u32 i = 0; i < GTMP_SIZE; ++i) {
-    //printf("%d ", net->gtmp[i]);
-  //}
   printf("\n");
 
 }
@@ -819,6 +916,7 @@ __host__ void print_tree(Net* net, Ptr ptr) {
 // term_a = (λx(x) λy(y))
 __host__ void inject_term_a(Net* net) {
   net->root     = 0x60000001;
+  net->blen     = 1;
   net->bags[ 0] = (Wire) {0xa0000000,0xa0000001};
   net->node[ 0] = (Node) {0x60000000,0x50000000};
   net->node[ 1] = (Node) {0xa0000002,0x40000000};
@@ -828,6 +926,7 @@ __host__ void inject_term_a(Net* net) {
 // term_b = (λfλx(f x) λy(y))
 __host__ void inject_term_b(Net* net) {
   net->root     = 0x60000003;
+  net->blen     = 1;
   net->bags[ 0] = (Wire) {0xa0000000,0xa0000003};
   net->node[ 0] = (Node) {0xa0000001,0xa0000002};
   net->node[ 1] = (Node) {0x50000002,0x60000002};
@@ -839,6 +938,7 @@ __host__ void inject_term_b(Net* net) {
 // term_c = (λfλx(f (f x)) λx(x))
 __host__ void inject_term_c(Net* net) {
   net->root     = 0x60000005;
+  net->blen     = 1;
   net->bags[ 0] = (Wire) {0xa0000000,0xa0000005};
   net->node[ 0] = (Node) {0xb0000001,0xa0000004};
   net->node[ 1] = (Node) {0xa0000002,0xa0000003};
@@ -852,6 +952,7 @@ __host__ void inject_term_c(Net* net) {
 // term_d = (λfλx(f (f x)) λgλy(g (g y)))
 __host__ void inject_term_d(Net* net) {
   net->root     = 0x60000005;
+  net->blen     = 1;
   net->bags[ 0] = (Wire) {0xa0000000,0xa0000005};
   net->node[ 0] = (Node) {0xb0000001,0xa0000004};
   net->node[ 1] = (Node) {0xa0000002,0xa0000003};
@@ -869,6 +970,7 @@ __host__ void inject_term_d(Net* net) {
 // term_e = (c2 g_s g_z)
 __host__ void inject_term_e(Net* net) {
   net->root     = 0x6000000b;
+  net->blen     = 1;
   net->bags[ 0] = (Wire) {0xa0000000,0xa0000005};
   net->node[ 0] = (Node) {0xb0000001,0xa0000004};
   net->node[ 1] = (Node) {0xa0000002,0xa0000003};
@@ -888,6 +990,7 @@ __host__ void inject_term_e(Net* net) {
 // term_f = (c3 g_s g_z)
 __host__ void inject_term_f(Net* net) {
   net->root     = 0x6000000d;
+  net->blen     = 1;
   net->bags[ 0] = (Wire) {0xa0000000,0xa0000007};
   net->node[ 0] = (Node) {0xb0000001,0xa0000006};
   net->node[ 1] = (Node) {0xb0000002,0xa0000005};
@@ -909,6 +1012,7 @@ __host__ void inject_term_f(Net* net) {
 // term_g = (c8 g_s g_z)
 __host__ void inject_term_g(Net* net) {
   net->root     = 0x60000017;
+  net->blen     = 1;
   net->bags[ 0] = (Wire) {0xa0000000,0xa0000011};
   net->node[ 0] = (Node) {0xb0000001,0xa0000010};
   net->node[ 1] = (Node) {0xb0000002,0xa000000f};
@@ -940,6 +1044,7 @@ __host__ void inject_term_g(Net* net) {
 // term_h = (c12 g_s g_z)
 __host__ void inject_term_h(Net* net) {
   net->root     = 0x6000001f;
+  net->blen     = 1;
   net->bags[ 0] = (Wire) {0xa0000000,0xa0000019};
   net->node[ 0] = (Node) {0xb0000001,0xa0000018};
   net->node[ 1] = (Node) {0xb0000002,0xa0000017};
@@ -979,6 +1084,7 @@ __host__ void inject_term_h(Net* net) {
 // term_i = (c14 g_s g_z)
 __host__ void inject_term_i(Net* net) {
   net->root     = 0x60000023;
+  net->blen     = 1;
   net->bags[ 0] = (Wire) {0xa0000000,0xa000001d};
   net->node[ 0] = (Node) {0xb0000001,0xa000001c};
   net->node[ 1] = (Node) {0xb0000002,0xa000001b};
@@ -1019,9 +1125,58 @@ __host__ void inject_term_i(Net* net) {
   net->node[36] = (Node) {0x60000024,0x50000024};
 }
 
-// term_j = (c18 g_s g_z)
+// term_j = (c16 g_s g_z)
 __host__ void inject_term_j(Net* net) {
-  net->root    = 0x6000002b;
+  net->root     = 0x60000027;
+  net->blen     = 1;
+  net->bags[ 0] = (Wire) {0xa0000000,0xa0000021};
+  net->node[ 0] = (Node) {0xb0000001,0xa0000020};
+  net->node[ 1] = (Node) {0xb0000002,0xa000001f};
+  net->node[ 2] = (Node) {0xb0000003,0xa000001e};
+  net->node[ 3] = (Node) {0xb0000004,0xa000001d};
+  net->node[ 4] = (Node) {0xb0000005,0xa000001c};
+  net->node[ 5] = (Node) {0xb0000006,0xa000001b};
+  net->node[ 6] = (Node) {0xb0000007,0xa000001a};
+  net->node[ 7] = (Node) {0xb0000008,0xa0000019};
+  net->node[ 8] = (Node) {0xb0000009,0xa0000018};
+  net->node[ 9] = (Node) {0xb000000a,0xa0000017};
+  net->node[10] = (Node) {0xb000000b,0xa0000016};
+  net->node[11] = (Node) {0xb000000c,0xa0000015};
+  net->node[12] = (Node) {0xb000000d,0xa0000014};
+  net->node[13] = (Node) {0xb000000e,0xa0000013};
+  net->node[14] = (Node) {0xb000000f,0xa0000012};
+  net->node[15] = (Node) {0xa0000010,0xa0000011};
+  net->node[16] = (Node) {0x50000020,0x50000011};
+  net->node[17] = (Node) {0x60000010,0x50000012};
+  net->node[18] = (Node) {0x60000011,0x50000013};
+  net->node[19] = (Node) {0x60000012,0x50000014};
+  net->node[20] = (Node) {0x60000013,0x50000015};
+  net->node[21] = (Node) {0x60000014,0x50000016};
+  net->node[22] = (Node) {0x60000015,0x50000017};
+  net->node[23] = (Node) {0x60000016,0x50000018};
+  net->node[24] = (Node) {0x60000017,0x50000019};
+  net->node[25] = (Node) {0x60000018,0x5000001a};
+  net->node[26] = (Node) {0x60000019,0x5000001b};
+  net->node[27] = (Node) {0x6000001a,0x5000001c};
+  net->node[28] = (Node) {0x6000001b,0x5000001d};
+  net->node[29] = (Node) {0x6000001c,0x5000001e};
+  net->node[30] = (Node) {0x6000001d,0x5000001f};
+  net->node[31] = (Node) {0x6000001e,0x60000020};
+  net->node[32] = (Node) {0x50000010,0x6000001f};
+  net->node[33] = (Node) {0xa0000022,0xa0000027};
+  net->node[34] = (Node) {0xc0000023,0xa0000024};
+  net->node[35] = (Node) {0x50000025,0x50000026};
+  net->node[36] = (Node) {0xa0000025,0x60000026};
+  net->node[37] = (Node) {0x50000023,0xa0000026};
+  net->node[38] = (Node) {0x60000023,0x60000024};
+  net->node[39] = (Node) {0xa0000028,0x40000000};
+  net->node[40] = (Node) {0x60000028,0x50000028};
+}
+
+// term_k = (c18 g_s g_z)
+__host__ void inject_term_k(Net* net) {
+  net->root     = 0x6000002b;
+  net->blen     = 1;
   net->bags[ 0] = (Wire) {0xa0000000,0xa0000025};
   net->node[ 0] = (Node) {0xb0000001,0xa0000024};
   net->node[ 1] = (Node) {0xb0000002,0xa0000023};
@@ -1070,6 +1225,122 @@ __host__ void inject_term_j(Net* net) {
   net->node[44] = (Node) {0x6000002c,0x5000002c};
 }
 
+// term_l = (c20 g_s g_z)
+__host__ void inject_term_l(Net* net) {
+  net->root     = 0x6000002f;
+  net->blen     = 1;
+  net->bags[ 0] = (Wire) {0xa0000000,0xa0000029};
+  net->node[ 0] = (Node) {0xb0000001,0xa0000028};
+  net->node[ 1] = (Node) {0xb0000002,0xa0000027};
+  net->node[ 2] = (Node) {0xb0000003,0xa0000026};
+  net->node[ 3] = (Node) {0xb0000004,0xa0000025};
+  net->node[ 4] = (Node) {0xb0000005,0xa0000024};
+  net->node[ 5] = (Node) {0xb0000006,0xa0000023};
+  net->node[ 6] = (Node) {0xb0000007,0xa0000022};
+  net->node[ 7] = (Node) {0xb0000008,0xa0000021};
+  net->node[ 8] = (Node) {0xb0000009,0xa0000020};
+  net->node[ 9] = (Node) {0xb000000a,0xa000001f};
+  net->node[10] = (Node) {0xb000000b,0xa000001e};
+  net->node[11] = (Node) {0xb000000c,0xa000001d};
+  net->node[12] = (Node) {0xb000000d,0xa000001c};
+  net->node[13] = (Node) {0xb000000e,0xa000001b};
+  net->node[14] = (Node) {0xb000000f,0xa000001a};
+  net->node[15] = (Node) {0xb0000010,0xa0000019};
+  net->node[16] = (Node) {0xb0000011,0xa0000018};
+  net->node[17] = (Node) {0xb0000012,0xa0000017};
+  net->node[18] = (Node) {0xb0000013,0xa0000016};
+  net->node[19] = (Node) {0xa0000014,0xa0000015};
+  net->node[20] = (Node) {0x50000028,0x50000015};
+  net->node[21] = (Node) {0x60000014,0x50000016};
+  net->node[22] = (Node) {0x60000015,0x50000017};
+  net->node[23] = (Node) {0x60000016,0x50000018};
+  net->node[24] = (Node) {0x60000017,0x50000019};
+  net->node[25] = (Node) {0x60000018,0x5000001a};
+  net->node[26] = (Node) {0x60000019,0x5000001b};
+  net->node[27] = (Node) {0x6000001a,0x5000001c};
+  net->node[28] = (Node) {0x6000001b,0x5000001d};
+  net->node[29] = (Node) {0x6000001c,0x5000001e};
+  net->node[30] = (Node) {0x6000001d,0x5000001f};
+  net->node[31] = (Node) {0x6000001e,0x50000020};
+  net->node[32] = (Node) {0x6000001f,0x50000021};
+  net->node[33] = (Node) {0x60000020,0x50000022};
+  net->node[34] = (Node) {0x60000021,0x50000023};
+  net->node[35] = (Node) {0x60000022,0x50000024};
+  net->node[36] = (Node) {0x60000023,0x50000025};
+  net->node[37] = (Node) {0x60000024,0x50000026};
+  net->node[38] = (Node) {0x60000025,0x50000027};
+  net->node[39] = (Node) {0x60000026,0x60000028};
+  net->node[40] = (Node) {0x50000014,0x60000027};
+  net->node[41] = (Node) {0xa000002a,0xa000002f};
+  net->node[42] = (Node) {0xc000002b,0xa000002c};
+  net->node[43] = (Node) {0x5000002d,0x5000002e};
+  net->node[44] = (Node) {0xa000002d,0x6000002e};
+  net->node[45] = (Node) {0x5000002b,0xa000002e};
+  net->node[46] = (Node) {0x6000002b,0x6000002c};
+  net->node[47] = (Node) {0xa0000030,0x40000000};
+  net->node[48] = (Node) {0x60000030,0x50000030};
+}
+
+// term_m = (c22 g_s g_z)
+__host__ void inject_term_m(Net* net) {
+  net->root     = 0x60000033;
+  net->blen     = 1;
+  net->bags[ 0] = (Wire) {0xa0000000,0xa000002d};
+  net->node[ 0] = (Node) {0xb0000001,0xa000002c};
+  net->node[ 1] = (Node) {0xb0000002,0xa000002b};
+  net->node[ 2] = (Node) {0xb0000003,0xa000002a};
+  net->node[ 3] = (Node) {0xb0000004,0xa0000029};
+  net->node[ 4] = (Node) {0xb0000005,0xa0000028};
+  net->node[ 5] = (Node) {0xb0000006,0xa0000027};
+  net->node[ 6] = (Node) {0xb0000007,0xa0000026};
+  net->node[ 7] = (Node) {0xb0000008,0xa0000025};
+  net->node[ 8] = (Node) {0xb0000009,0xa0000024};
+  net->node[ 9] = (Node) {0xb000000a,0xa0000023};
+  net->node[10] = (Node) {0xb000000b,0xa0000022};
+  net->node[11] = (Node) {0xb000000c,0xa0000021};
+  net->node[12] = (Node) {0xb000000d,0xa0000020};
+  net->node[13] = (Node) {0xb000000e,0xa000001f};
+  net->node[14] = (Node) {0xb000000f,0xa000001e};
+  net->node[15] = (Node) {0xb0000010,0xa000001d};
+  net->node[16] = (Node) {0xb0000011,0xa000001c};
+  net->node[17] = (Node) {0xb0000012,0xa000001b};
+  net->node[18] = (Node) {0xb0000013,0xa000001a};
+  net->node[19] = (Node) {0xb0000014,0xa0000019};
+  net->node[20] = (Node) {0xb0000015,0xa0000018};
+  net->node[21] = (Node) {0xa0000016,0xa0000017};
+  net->node[22] = (Node) {0x5000002c,0x50000017};
+  net->node[23] = (Node) {0x60000016,0x50000018};
+  net->node[24] = (Node) {0x60000017,0x50000019};
+  net->node[25] = (Node) {0x60000018,0x5000001a};
+  net->node[26] = (Node) {0x60000019,0x5000001b};
+  net->node[27] = (Node) {0x6000001a,0x5000001c};
+  net->node[28] = (Node) {0x6000001b,0x5000001d};
+  net->node[29] = (Node) {0x6000001c,0x5000001e};
+  net->node[30] = (Node) {0x6000001d,0x5000001f};
+  net->node[31] = (Node) {0x6000001e,0x50000020};
+  net->node[32] = (Node) {0x6000001f,0x50000021};
+  net->node[33] = (Node) {0x60000020,0x50000022};
+  net->node[34] = (Node) {0x60000021,0x50000023};
+  net->node[35] = (Node) {0x60000022,0x50000024};
+  net->node[36] = (Node) {0x60000023,0x50000025};
+  net->node[37] = (Node) {0x60000024,0x50000026};
+  net->node[38] = (Node) {0x60000025,0x50000027};
+  net->node[39] = (Node) {0x60000026,0x50000028};
+  net->node[40] = (Node) {0x60000027,0x50000029};
+  net->node[41] = (Node) {0x60000028,0x5000002a};
+  net->node[42] = (Node) {0x60000029,0x5000002b};
+  net->node[43] = (Node) {0x6000002a,0x6000002c};
+  net->node[44] = (Node) {0x50000016,0x6000002b};
+  net->node[45] = (Node) {0xa000002e,0xa0000033};
+  net->node[46] = (Node) {0xc000002f,0xa0000030};
+  net->node[47] = (Node) {0x50000031,0x50000032};
+  net->node[48] = (Node) {0xa0000031,0x60000032};
+  net->node[49] = (Node) {0x5000002f,0xa0000032};
+  net->node[50] = (Node) {0x6000002f,0x60000030};
+  net->node[51] = (Node) {0xa0000034,0x40000000};
+  net->node[52] = (Node) {0x60000034,0x50000034};
+}
+
 // Main
 // ----
 
@@ -1099,7 +1370,7 @@ int main() {
 
   // Allocates the initial net on device
   Net* h_net = mknet();
-  inject_term_i(h_net);
+  inject_term_m(h_net);
 
   // Prints the initial net
   printf("\n");
@@ -1112,18 +1383,14 @@ int main() {
 
   // Performs parallel reductions
   printf("\n");
-  for (u64 i = 0; i < 64; ++i) {
-    do_global_rewrite(d_net);
-    do_global_scatter(d_net);
-  }
-  cudaDeviceSynchronize();
+  do_normalize(d_net);
 
   // Reads the normalized net from device to host
   Net* norm = net_to_host(d_net);
 
   // Prints the normal form (raw data)
   printf("\n");
-  printf("NORMAL (%d | %d)\n", norm->rwts, norm->blen);
+  printf("NORMAL ~ rewrites=%d redexes=%d\n", norm->rwts, norm->blen);
   printf("======\n\n");
   //print_tree(norm, norm->root);
   //print_net(norm);

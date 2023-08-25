@@ -171,12 +171,13 @@ fn main() {
   // c22 = (0 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (0 v u) (0 u t)) (0 t s)) (0 s r)) (0 r q)) (0 q p)) (0 p o)) (0 o n)) (0 n m)) (0 m l)) (0 l k)) (0 k j)) (0 j i)) (0 i h)) (0 h g)) (0 g f)) (0 f e)) (0 e d)) (0 d c)) (0 c b)) (0 b a)) (0 a R)) (0 v R))
   define(book, "term", "
     $ root
-    & (0 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (0 n m) (0 m l)) (0 l k)) (0 k j)) (0 j i)) (0 i h)) (0 h g)) (0 g f)) (0 f e)) (0 e d)) (0 d c)) (0 c b)) (0 b a)) (0 a R)) (0 n R))
+    & (0 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (0 v u) (0 u t)) (0 t s)) (0 s r)) (0 r q)) (0 q p)) (0 p o)) (0 o n)) (0 n m)) (0 m l)) (0 l k)) (0 k j)) (0 j i)) (0 i h)) (0 h g)) (0 g f)) (0 f e)) (0 e d)) (0 d c)) (0 c b)) (0 b a)) (0 a R)) (0 v R))
     ~ (0 (0 (2 ga gb) (0 (0 ga (0 gb gc)) gc)) (0 (0 gx gx) root))
   ");
 
   let got = book.defs.get(&name_to_u32("term")).unwrap();
   println!("  net->root     = 0x{:08x};", got.root.data);
+  println!("  net->blen     = 1;");
   for i in 0 .. got.acts.len() {
     println!("  net->bags[{:2}] = (Wire) {{0x{:08x},0x{:08x}}};", i, got.acts[i].0.data, got.acts[i].1.data);
   }
