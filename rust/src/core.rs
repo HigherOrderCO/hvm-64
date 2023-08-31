@@ -229,8 +229,8 @@ impl Net {
   pub fn normal(&mut self, book: &Book) -> usize {
     let mut loops = 0;
     while self.acts.len() > 0 {
+      println!("rewrite: {}", self.acts.len());
       self.reduce(book);
-      println!("... {}", self.acts.len());
       loops = loops + 1;
     }
     return loops;
@@ -239,14 +239,18 @@ impl Net {
   // Performs an interaction over an active wire.
   #[inline(always)]
   pub fn interact(&mut self, book: &Book, a: &mut Ptr, b: &mut Ptr) {
+    // Dereference
+    if a.tag() == REF && b.tag() != ERA {
+      self.load_ref(book, a);
+    }
+    if a.tag() != ERA && b.tag() == REF {
+      self.load_ref(book, b);
+    }
+    // Incs rewrites
+    self.rwts += 1;
+    // Gets tag
     let a_tag = a.tag();
     let b_tag = b.tag();
-    // Collect (for closed nets)
-    if a_tag == REF && b_tag == ERA { return; }
-    if a_tag == ERA && b_tag == REF { return; }
-    // Dereference
-    self.load_ref(book, a);
-    self.load_ref(book, b);
     // Annihilation
     if a_tag >= CON && b_tag >= CON && a_tag == b_tag {
       let a1 = self.get(a.val(), Port::P1);
@@ -257,7 +261,6 @@ impl Net {
       self.link(a2, b2);
       self.free(a.val());
       self.free(b.val());
-      self.rwts += 1;
     // Commutation
     } else if a_tag >= CON && b_tag >= CON && a_tag != b_tag {
       let x1 = self.alloc(1);
@@ -278,22 +281,16 @@ impl Net {
       self.link(self.get(b.val(), Port::P2), Ptr::new(a_tag, y2));
       self.free(a.val());
       self.free(b.val());
-      self.rwts += 1;
     // Erasure
     } else if a_tag >= CON && b_tag == ERA {
       self.link(self.get(a.val(), Port::P1), Ptr::new(ERA, 0));
       self.link(self.get(a.val(), Port::P2), Ptr::new(ERA, 0));
       self.free(a.val());
-      self.rwts += 1;
     // Erasure
     } else if a_tag == ERA && b_tag >= CON {
       self.link(self.get(b.val(), Port::P1), Ptr::new(ERA, 0));
       self.link(self.get(b.val(), Port::P2), Ptr::new(ERA, 0));
       self.free(b.val());
-      self.rwts += 1;
-    // Stuck
-    } else {
-      self.acts.push((*a,*b));
     }
   }
 

@@ -85,7 +85,8 @@ fn main() {
 
   // Generators for a big binary tree
   // λr. λt. ((t r) r)
-  define(book, "g_s", "$ (0 (100 (0 b c) b) c)");
+  //define(book, "g_s", "$ (0 (2 (0 b c) b) c)");
+  define(book, "g_s", "$ (0 (2 r0 r1) (0 (0 r0 (0 r1 r)) r))");
   define(book, "g_z", "$ (0 x x)");
 
   // BitString constructors
@@ -95,6 +96,16 @@ fn main() {
   define(book, "O", "$ (0 xs (0 (0 xs r) (0 * (0 * r))))");
   define(book, "I", "$ (0 xs (0 * (0 (0 xs r) (0 * r))))");
   define(book, "E", "$ (0 * (0 * (0 e e)))");
+
+  // Double
+  define(book, "nidS", "
+    $ (0 p ret)
+    & @S   ~ (0 nidp ret)
+    & @nid ~ (0 p nidp)
+  ");
+  define(book, "nid" , "
+    $ (0 (0 @nidS (0 @Z ret)) ret)
+  ");
 
   // Decrements a BitString
   // decO = λp(I (dec p))
@@ -155,7 +166,7 @@ fn main() {
   // ex0 = ((n S) Z)
   define(book, "ex0", "
     $ root
-    & @c1 ~ (0 @S (0 @Z root))
+    & @c2 ~ (0 @S (0 @Z root))
   ");
 
   // Allocates a big tree
@@ -175,7 +186,7 @@ fn main() {
   define(book, "ex2", "
     $ main
     & @run ~ (0 nie main)
-    & @c20 ~ (0 @I (0 @E nie))
+    & @c3  ~ (0 @I (0 @E nie))
   "); 
 
   //define(book, "term", "
@@ -219,7 +230,7 @@ fn main() {
 
 
   // Initializes the net
-  let net = &mut Net::init(1 << 26, &book, name_to_u32("main"));
+  let net = &mut Net::init(1 << 26, &book, name_to_u32("ex2"));
   //println!("[net]\n{}", show_net(&net));
 
   // Computes its normal form
@@ -232,6 +243,8 @@ fn main() {
   println!("rwts: {}", net.rwts);
   println!("iter: {}", iter);
 
+
+  println!("{}", u32_to_name(0x36E72));
   // Prints book to use on CUDA
   //print_book_to_cuda(&book);
 }

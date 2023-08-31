@@ -18,6 +18,7 @@ const u32 BLOCK_LOG2    = 8;                                     // log2 of bloc
 const u32 BLOCK_SIZE    = 1 << BLOCK_LOG2;                       // threads per block
 const u32 UNIT_SIZE     = 4;                                     // threads per rewrite unit
 const u32 NODE_SIZE     = 1 << 28;                               // max total nodes (2GB addressable)
+const u32 TERM_MAX_SIZE = 32;                                    // max number of nodes in a term
 const u32 BAGS_SIZE     = BLOCK_SIZE * BLOCK_SIZE * BLOCK_SIZE;  // size of global redex bag
 const u32 GROUP_SIZE    = BLOCK_SIZE * BLOCK_SIZE;               // size os a group of bags
 const u32 GIDX_SIZE     = BAGS_SIZE + GROUP_SIZE + BLOCK_SIZE;   // aux object to hold scatter indices
@@ -85,7 +86,6 @@ typedef struct {
   Wire* acts;
   u32   nlen;
   Node* node;
-  u32*  locs;
 } Term;
 
 // A book
@@ -119,6 +119,7 @@ typedef struct {
   u32   aloc;  // where to alloc next node
   u32   rwts;  // total rewrites this performed
   Wire* bag;   // local redex bag
+  u32*  locs;  // local alloc locs
 } Worker;
 
 // Debug
@@ -167,8 +168,23 @@ __host__ __device__ inline Val val(Ptr ptr) {
 }
 
 // Is this pointer a variable?
-__host__ __device__ inline bool var(Ptr ptr) {
+__host__ __device__ inline bool is_var(Ptr ptr) {
   return tag(ptr) >= VRR && tag(ptr) <= VR2;
+}
+
+// Is this pointer a constructor?
+__host__ __device__ inline bool is_ctr(Ptr ptr) {
+  return tag(ptr) >= CON && tag(ptr) <= QUI;
+}
+
+// Is this pointer an eraser?
+__host__ __device__ inline bool is_era(Ptr ptr) {
+  return tag(ptr) == ERA;
+}
+
+// Is this pointer a reference?
+__host__ __device__ inline bool is_ref(Ptr ptr) {
+  return tag(ptr) == REF;
 }
 
 // Gets the target ref of a var or redirection pointer
@@ -197,7 +213,7 @@ __host__ __device__ Ptr enter(Net* net, Ptr ptr) {
 
 // Transforms a variable into a redirection
 __host__ __device__ inline Ptr redir(Ptr ptr) {
-  return mkptr(tag(ptr) + (var(ptr) ? 3 : 0), val(ptr));
+  return mkptr(tag(ptr) + (is_var(ptr) ? 3 : 0), val(ptr));
 }
 
 // Creates a new node
@@ -221,21 +237,21 @@ __device__ inline Ptr* at(Net* net, Val idx, Port port) {
 // Allocates a new node in memory
 __device__ inline u32 alloc(Worker *worker, Net *net) {
   u32 K = 0;
-  u32 fail = 0;
+  //u32 fail = 0;
   while (true) {
     //dbug(&K, "alloc");
     u32  idx = (worker->aloc * 4 + worker->frac) % NODE_SIZE;
     a64* ref = &((a64*)net->node)[idx];
     u64  got = atomicCAS(ref, 0, ((u64)NEO << 32) | ((u64)NEO)); // Wire{NEO,NEO}
     if (got == 0) {
-      //printf("[%d] alloc at %d\n", worker->gid, idx);
+      //printf("[%04X] alloc at %d\n", worker->gid, idx);
       return idx;
     } else {
       //worker->aloc = ++fail % 16 == 0 ? rng(worker->aloc) : worker->aloc + 1;
       worker->aloc = (worker->aloc + 1) % NODE_SIZE;
-      if (++fail > 256) {
-        printf("[%d] can't alloc\n", worker->gid);
-      }
+      //if (++fail > 256) {
+        //printf("[%04X] can't alloc\n", worker->gid);
+      //}
     }
   }
 }
@@ -257,7 +273,7 @@ __device__ Ptr take(Ptr* ref) {
 }
 
 // Attempts to replace 'exp' by 'neo', until it succeeds
-__device__ void replace(u32 id, Ptr* ref, Ptr exp, Ptr neo) {
+__device__ void replace(Ptr* ref, Ptr exp, Ptr neo) {
   Ptr got = atomicCAS((u32*)ref, exp, neo);
   u32 K = 0;
   while (got != exp) {
@@ -271,12 +287,12 @@ __device__ void replace(u32 id, Ptr* ref, Ptr exp, Ptr neo) {
 // - If target is a variable    => pass the node into it and halt
 // - If target is a node        => form an active pair and halt
 __device__ void link(Worker* worker, Net* net, Ptr* nod_ref, Ptr dir_ptr) {
-  //printf("[%d] linking node=%8X towards %8X\n", worker->gid, *nod_ref, dir_ptr);
+  //printf("[%04X] linking node=%8X towards %8X\n", worker->gid, *nod_ref, dir_ptr);
 
   u32 K = 0;
   while (true) {
     //dbug(&K, "link");
-    //printf("[%d] step\n", worker->gid);
+    //printf("[%04X] step\n", worker->gid);
 
     // We must be careful to not cross boundaries. When 'trg_ptr' is a VAR, it
     // isn't owned by us. As such, we can't 'take()' it, and must peek instead.
@@ -285,7 +301,7 @@ __device__ void link(Worker* worker, Net* net, Ptr* nod_ref, Ptr dir_ptr) {
 
     // If trg_ptr is a redirection, clear it
     if (tag(trg_ptr) >= RDR && tag(trg_ptr) <= RD2) {
-      //printf("[%d] redir\n", worker->gid);
+      //printf("[%04X] redir\n", worker->gid);
       u32 cleared = atomicCAS((u32*)trg_ref, trg_ptr, 0);
       if (cleared == trg_ptr) {
         dir_ptr = trg_ptr;
@@ -295,7 +311,7 @@ __device__ void link(Worker* worker, Net* net, Ptr* nod_ref, Ptr dir_ptr) {
 
     // If trg_ptr is a var, try replacing it by the node
     else if (tag(trg_ptr) >= VRR && tag(trg_ptr) <= VR2) {
-      //printf("[%d] var\n", worker->gid);
+      //printf("[%04X] var\n", worker->gid);
       // Peeks our own node
       Ptr nod_ptr = atomicAdd((u32*)nod_ref, 0);
       // We don't own the var, so we must try replacing with a CAS
@@ -325,8 +341,8 @@ __device__ void link(Worker* worker, Net* net, Ptr* nod_ref, Ptr dir_ptr) {
 
     // If it is a node, two threads will reach this branch
     // The first to arrive makes a redex, the second exits
-    else if (tag(trg_ptr) >= CON && tag(trg_ptr) <= QUI || trg_ptr == GON) {
-      //printf("[%d] con (from %8X to %8X)\n", worker->gid, *nod_ref, trg_ptr);
+    else if (is_ctr(trg_ptr) || is_era(trg_ptr) || is_ref(trg_ptr) || trg_ptr == GON) {
+      //printf("[%04X] leap %8X - %8X\n", worker->gid, *fst_ref, *snd_ref);
       Ptr *fst_ref = nod_ref < trg_ref ? nod_ref : trg_ref;
       Ptr *snd_ref = nod_ref < trg_ref ? trg_ref : nod_ref;
       Ptr  fst_ptr = atomicExch((u32*)fst_ref, GON);
@@ -336,6 +352,7 @@ __device__ void link(Worker* worker, Net* net, Ptr* nod_ref, Ptr dir_ptr) {
         return;
       } else {
         Ptr snd_ptr = atomicExch((u32*)snd_ref, GON);
+        //printf("[%4X] putleap %08X %08X\n", worker->gid, fst_ptr, snd_ptr);
         put_redex(worker, fst_ptr, snd_ptr);
         return;
       }
@@ -343,12 +360,12 @@ __device__ void link(Worker* worker, Net* net, Ptr* nod_ref, Ptr dir_ptr) {
 
     // If it is busy, we wait
     else if (trg_ptr == BSY) {
-      //printf("[%d] waits\n", worker->gid);
+      //printf("[%04X] waits\n", worker->gid);
       continue;
     }
 
     else {
-      //printf("[%d] WTF?? ~ %8X\n", worker->gid, trg_ptr);
+      //printf("[%04X] WTF?? ~ %8X\n", worker->gid, trg_ptr);
       return;
     }
   }
@@ -434,7 +451,7 @@ __global__ void global_scatter_prepare_0(Net* net) {
   redex_indices[tid] = net->bags[gid].lft > 0 ? 1 : 0; __syncthreads();
   *block_length      = scansum(redex_indices);
   __syncthreads();
-  //printf("[%d on %d] scatter 0 | redex_index=%d block_length=[%d,%d,%d,%d,...]\n", gid, bid, redex_indices[tid], *block_length, *(block_length+1), *(block_length+2), *(block_length+3));
+  //printf("[%04X on %d] scatter 0 | redex_index=%d block_length=[%d,%d,%d,%d,...]\n", gid, bid, redex_indices[tid], *block_length, *(block_length+1), *(block_length+2), *(block_length+3));
 }
 
 // Computes block indices on groups (and group lengths)
@@ -445,7 +462,7 @@ __global__ void global_scatter_prepare_1(Net* net) {
   u32* block_indices = net->gidx + BLOCK_SIZE * BLOCK_SIZE * BLOCK_SIZE + BLOCK_SIZE * bid;
   u32* group_length  = net->gidx + BLOCK_SIZE * BLOCK_SIZE * BLOCK_SIZE + BLOCK_SIZE * BLOCK_SIZE + bid;
   *group_length      = scansum(block_indices);
-  //printf("[%d on %d] scatter 1 | block_index=%d group_length=%d\n", gid, bid, block_indices[tid], *group_length);
+  //printf("[%04X on %d] scatter 1 | block_index=%d group_length=%d\n", gid, bid, block_indices[tid], *group_length);
 }
 
 // Computes group indices on bag (and bag length)
@@ -453,7 +470,7 @@ __global__ void global_scatter_prepare_2(Net* net) {
   u32* group_indices = net->gidx + BLOCK_SIZE * BLOCK_SIZE * BLOCK_SIZE + BLOCK_SIZE * BLOCK_SIZE;
   u32* total_length  = &net->blen; __syncthreads();
   *total_length      = scansum(group_indices);
-  //printf("[%d] scatter 2 | group_index=%d total_length=%d\n", threadIdx.x, group_indices[threadIdx.x], *total_length);
+  //printf("[%04X] scatter 2 | group_index=%d total_length=%d\n", threadIdx.x, group_indices[threadIdx.x], *total_length);
 }
 
 // Global scatter: takes redex from bag into aux buff
@@ -502,7 +519,7 @@ __global__ void global_scatter_cleanup(Net* net) {
   if (bid == 0) {
     *group_index = 0;
   }
-  //printf("[%d] clean %d %d %d\n", gid, BLOCK_SIZE * bid + tid, BLOCK_SIZE * BLOCK_SIZE * BLOCK_SIZE + bid, BLOCK_SIZE * BLOCK_SIZE * BLOCK_SIZE + BLOCK_SIZE * BLOCK_SIZE + (bid / BLOCK_SIZE));
+  //printf("[%04X] clean %d %d %d\n", gid, BLOCK_SIZE * bid + tid, BLOCK_SIZE * BLOCK_SIZE * BLOCK_SIZE + bid, BLOCK_SIZE * BLOCK_SIZE * BLOCK_SIZE + BLOCK_SIZE * BLOCK_SIZE + (bid / BLOCK_SIZE));
 }
 
 __host__ Net* net_to_host(Net* device_net);
@@ -521,45 +538,50 @@ void do_global_scatter(Net* net, u32 prev_blocks, u32 next_blocks) {
 // ------------
 
 __device__ Ptr adjust(Worker* worker, Ptr ptr, u32* locs) {
-  //printf("[%d] adjust %d | %d to %x\n", worker->gid, tag(ptr) >= VR1, val(ptr), tag(ptr) >= VR1 ? locs[val(ptr)] : val(ptr));
+  //printf("[%04X] adjust %d | %d to %x\n", worker->gid, tag(ptr) >= VR1, val(ptr), tag(ptr) >= VR1 ? locs[val(ptr)] : val(ptr));
   return mkptr(tag(ptr), tag(ptr) >= VR1 ? locs[val(ptr)] : val(ptr));
 }
 
-__device__ void deref(Net* net, Worker* worker, Term* term, Ptr* dref) {
+__device__ void deref(Net* net, Worker* worker, Term* term, Ptr* dref, u32* locs) {
   // Allocates needed space
   if (term != NULL) {
+    //printf("[%04X] deref: %x\n", worker->gid, val(*dref));
     for (u32 i = 0; i < div(term->nlen, (u32)4); ++i) {
-      u32 j = i * 4 + worker->frac;
-      if (j < term->nlen) {
-        term->locs[j] = alloc(worker, net);
+      u32 loc = i * 4 + worker->frac;
+      if (loc < term->nlen) {
+        locs[loc] = alloc(worker, net);
       }
     }
   }
   __syncwarp();
-      
+
   // Loads dereferenced nodes, adjusted
   if (term != NULL) {
+    //printf("[%04X] deref B\n", worker->gid);
     for (u32 i = 0; i < div(term->nlen, (u32)4); ++i) {
-      u32 j = i * 4 + worker->frac;
-      if (j < term->nlen) {
-        Node node = term->node[j];
-        net->node[term->locs[j]].ports[P1] = adjust(worker, node.ports[P1], term->locs);
-        net->node[term->locs[j]].ports[P2] = adjust(worker, node.ports[P2], term->locs);
+      u32 loc = i * 4 + worker->frac;
+      if (loc < term->nlen) {
+        Node node = term->node[loc];
+        replace(at(net, locs[loc], P1), NEO, adjust(worker, node.ports[P1], locs));
+        replace(at(net, locs[loc], P2), NEO, adjust(worker, node.ports[P2], locs));
       }
     }
   }
 
   // Loads dereferenced redexes, adjusted
   if (term != NULL && worker->frac < term->alen) {
+    //printf("[%04X] deref C\n", worker->gid);
     Wire wire = term->acts[worker->frac];
-    wire.lft = adjust(worker, wire.lft, term->locs);
-    wire.rgt = adjust(worker, wire.rgt, term->locs);
+    wire.lft = adjust(worker, wire.lft, locs);
+    wire.rgt = adjust(worker, wire.rgt, locs);
+    //printf("[%4X] putdref %08X %08X\n", worker->gid, wire.lft, wire.rgt);
     put_redex(worker, wire.lft, wire.rgt);
   }
 
   // Loads dereferenced root, adjusted
   if (term != NULL) {
-    *dref = adjust(worker, term->root, term->locs);
+    //printf("[%04X] deref D\n", worker->gid);
+    *dref = adjust(worker, term->root, locs);
   }
   __syncwarp();
 }
@@ -574,8 +596,10 @@ __device__ void deref(Net* net, Worker* worker, Term* term, Ptr* dref) {
 // This is organized so that local threads can perform the same instructions
 // whenever possible. So, for example, in a commutation rule, all the 4 clones
 // would be allocated at the same time.
-__global__ void global_rewrite(Net* net, Book* book, u32 blocks) {
-  __shared__ u32 XLOC[BLOCK_SIZE]; // aux arr for clone locs
+__global__ void global_rewrite(Net* net, Book* book, u32 blocks, u32 tick) {
+  __shared__ u32 LOCS[BLOCK_SIZE / UNIT_SIZE * TERM_MAX_SIZE]; // aux arr for deref locs
+
+  //printf("ue %d tick=%d\n", threadIdx.x, tick);
 
   // Initializes local vars
   Worker worker;
@@ -587,9 +611,12 @@ __global__ void global_rewrite(Net* net, Book* book, u32 blocks) {
   worker.frac = worker.tid % 4;
   worker.port = worker.tid % 2;
   worker.bag  = (net->bags + worker.gid / UNIT_SIZE * UNIT_SIZE);
+  worker.locs = LOCS + worker.tid / UNIT_SIZE * TERM_MAX_SIZE;
+
+  //printf("[%04X] %d init\n", worker.gid, tick);
 
   // Scatters redexes
-  for (u32 repeat = 0; repeat < 8; ++repeat) {
+  for (u32 repeat = 0; repeat < 1; ++repeat) {
     local_scatter(net);
 
     // Gets the active wire
@@ -608,22 +635,48 @@ __global__ void global_rewrite(Net* net, Book* book, u32 blocks) {
       worker.bag[widx] = (Wire){0,0};
     }
 
+    //printf("[%04X] got %8X %8X\n", worker.gid, wire.lft, wire.rgt);
+
     // Reads redex ptrs
     worker.a_ptr = worker.frac <= A2 ? wire.lft : wire.rgt;
     worker.b_ptr = worker.frac <= A2 ? wire.rgt : wire.lft;
 
-    // Dereferences term
-    Ptr*  dptr = tag(worker.a_ptr) == REF ? &worker.a_ptr : tag(worker.b_ptr) == REF ? &worker.b_ptr : NULL;
-    Term* term = dptr != NULL ? book->defs[val(*dptr)] : NULL;
-    deref(net, &worker, term, dptr);
+    // Dereferences
+    Ptr*  dptr = NULL;
+    Term* term = NULL;
+    if (is_ref(worker.a_ptr) && !is_era(worker.b_ptr)) {
+      dptr = &worker.a_ptr;
+      term = book->defs[val(worker.a_ptr)];
+    }
+    if (is_ref(worker.b_ptr) && !is_era(worker.a_ptr)) {
+      dptr = &worker.b_ptr;
+      term = book->defs[val(worker.b_ptr)];
+    }
+    deref(net, &worker, term, dptr, worker.locs);
 
-    // Checks rewrite type
-    bool wait = term != NULL && term->alen > 0;
-    bool rdex = !wait && wlen == 1;
-    bool anni = rdex && tag(worker.a_ptr) == tag(worker.b_ptr);
-    bool comm = rdex && tag(worker.a_ptr) != tag(worker.b_ptr);
+    //printf("[%04X] C\n", worker.gid);
 
-    // Local variables
+    // Defines type of interaction
+    bool is_full = term != NULL && term->alen > 0;
+    bool rewrite = !is_full && wlen == 1;
+    bool era_ctr = rewrite && is_era(worker.a_ptr) && is_ctr(worker.b_ptr);
+    bool ctr_era = rewrite && is_ctr(worker.a_ptr) && is_era(worker.b_ptr);
+    bool con_con = rewrite && is_ctr(worker.a_ptr) && is_ctr(worker.b_ptr) && tag(worker.a_ptr) == tag(worker.b_ptr);
+    bool con_dup = rewrite && is_ctr(worker.a_ptr) && is_ctr(worker.b_ptr) && tag(worker.a_ptr) != tag(worker.b_ptr);
+
+    //printf("[%04X] D\n", worker.gid);
+
+    //if ((is_full || rewrite) && worker.frac == A1) {
+      //printf("[%04X] %d redex? | rewrite=%d is_full=%d era_ctr=%d ctr_era=%d con_con=%d con_dup=%d | %08X %08X\n", worker.gid, tick, rewrite, is_full, era_ctr, ctr_era, con_con, con_dup, worker.a_ptr, worker.b_ptr);
+    //}
+
+    // If is_full, put this redex back
+    if (is_full && worker.frac == B2) {
+      //printf("[%4X] putback %08X %08X\n", worker.gid, worker.a_ptr, worker.b_ptr);
+      put_redex(&worker, worker.a_ptr, worker.b_ptr);
+    }
+
+    // Local rewrite variables
     Ptr *ak_ref; // ref to our aux port
     Ptr *bk_ref; // ref to other aux port
     Ptr  ak_ptr; // val of our aux port
@@ -632,113 +685,96 @@ __global__ void global_rewrite(Net* net, Book* book, u32 blocks) {
     u32  y0_idx; // idx of other clone idx
 
     //if (worker.gid < 32) {
-      //printf("[%d] A\n", worker.gid);
+      //printf("[%04X] A\n", worker.gid);
     //}
 
-    // Prints message
-    if (rdex && worker.frac == A1) {
-      //printf("[%04X] redex: %8X ~ %8X | %d\n", worker.gid, worker.a_ptr, worker.b_ptr, comm ? 1 : 0);
+    // Inc rewrite count
+    if (rewrite && worker.frac == A1) {
       worker.rwts += 1;
+      //if (!(era_ctr || ctr_era || con_con || con_dup)) {
+        //printf("[%04X] %d %d %d %d %d %d | %08X %08X\n", worker.gid, is_full, rewrite, era_ctr, ctr_era, con_con, con_dup, worker.a_ptr, worker.b_ptr);
+      //}
     }
 
     //if (worker.gid < 32) {
-      //printf("[%d] B\n", worker.gid);
+      //printf("[%04X] B\n", worker.gid);
     //}
 
-    // If we dereferenced redexes, we can't reduce on this step
-    if (wait) {
-      put_redex(&worker, worker.a_ptr, worker.b_ptr);
-    }
-
-    // Gets relevant ptrs and refs
-    if (rdex && (comm || anni)) {
+    // Gets port here
+    if (rewrite && (ctr_era || con_con || con_dup)) {
       ak_ref = at(net, val(worker.a_ptr), worker.port);
-      bk_ref = at(net, val(worker.b_ptr), worker.port);
       ak_ptr = take(ak_ref);
     }
 
-    // If anni, send a redirection
-    if (rdex && anni) {
-      xk_ptr = redir(ak_ptr); // redirection ptr to send
+    // Gets port there
+    if (rewrite && (era_ctr || con_con || con_dup)) {
+      bk_ref = at(net, val(worker.b_ptr), worker.port);
     }
 
-    //if (worker.gid < 32) {
-      //printf("[%d] C\n", worker.gid);
-    //}
+    // If era_ctr, send an erasure
+    if (rewrite && era_ctr) {
+      xk_ptr = mkptr(ERA, 0);
+    }
 
-    // If comm, send a clone
-    if (rdex && comm) {
+    // If con_con, send a redirection
+    if (rewrite && con_con) {
+      xk_ptr = redir(ak_ptr);
+    }
+
+    // If con_dup, send a clone
+    if (rewrite && con_dup) {
       xk_loc = alloc(&worker, net); // alloc a clone
       xk_ptr = mkptr(tag(worker.a_ptr),xk_loc); // cloned node ptr to send
-      XLOC[worker.tid] = xk_loc; // send cloned index to other threads
+      worker.locs[worker.frac] = xk_loc; // send cloned index to other threads
     }
-
-    // Receive cloned indices from local threads
     __syncwarp();
 
-    //if (worker.gid < 32) {
-      //printf("[%d] D\n", worker.gid);
-    //}
-
-    // If comm, create inner wires between clones
-    if (rdex && comm) {
-      const u32 ADD[4] = {2, 1, -2, -3}; // deltas to get the other clone index
-      const u32 VRK    = worker.port == P1 ? VR1 : VR2; // type of inner wire var
-      replace(10, at(net, xk_loc, P1), NEO, mkptr(VRK, XLOC[worker.tid + ADD[worker.frac] + 0]));
-      replace(20, at(net, xk_loc, P2), NEO, mkptr(VRK, XLOC[worker.tid + ADD[worker.frac] + 1]));
+    // If con_dup, create inner wires between clones
+    if (rewrite && con_dup) {
+      //const u32 ADD[4] = {2, 1, -2, -3}; // deltas to get the other clone index
+      replace(at(net, xk_loc, P1), NEO, mkptr(worker.port == P1 ? VR1 : VR2, worker.locs[(worker.frac <= A2 ? 2 : 0) + 0]));
+      replace(at(net, xk_loc, P2), NEO, mkptr(worker.port == P1 ? VR1 : VR2, worker.locs[(worker.frac <= A2 ? 2 : 0) + 1]));
     }
     __syncwarp();
 
     // Send ptr to other side
-    if (rdex && (comm || anni)) {
-      replace(30, bk_ref, BSY, xk_ptr);
+    if (rewrite && (era_ctr || con_con || con_dup)) {
+      replace(bk_ref, BSY, xk_ptr);
     }
 
-    //if (worker.gid < 32) {
-      //printf("[%d] E\n", worker.gid);
-    //}
-
-    // If anni and we sent a NOD, link the node there, towards our port
-    // If comm and we have a VAR, link the clone here, towards that var
-    if (rdex && (anni && !var(ak_ptr) || comm && var(ak_ptr))) {
-      u32  RDK  = worker.port == P1 ? RD1 : RD2;
-      Ptr *self = comm ? ak_ref        : bk_ref;
-      Ptr  targ = comm ? redir(ak_ptr) : mkptr(RDK, val(worker.a_ptr)); 
-      link(&worker, net, self, targ);
+    // If con_con and we sent a NOD, link the node there, towards our port
+    // If ctr_era and we have a VAR, link the eraser here, towards that var
+    // If con_dup and we have a VAR, link the clone here, towards that var
+    // FIXME: con_con needs to be treated differently here; can we unify?
+    if (rewrite &&
+      (  con_con && !is_var(ak_ptr)
+      || ctr_era &&  is_var(ak_ptr)
+      || con_dup &&  is_var(ak_ptr))) {
+      Ptr targ, *node;
+      if (con_con) {
+        node = bk_ref;
+        targ = mkptr(worker.port == P1 ? RD1 : RD2, val(worker.a_ptr));
+      } else {
+        node = ak_ref;
+        targ = redir(ak_ptr);
+      }
+      link(&worker, net, node, targ);
     }
 
     //if (ref0 || ref1) {
-      //printf("[%d] E2 %d %d\n", worker.gid, rdex, (comm && !var(ak_ptr)));
+      //printf("[%04X] E2 %d %d\n", worker.gid, work, (con_dup && !is_var(ak_ptr)));
     //}
 
-    // If comm and we have a NOD, form an active pair with the clone we got
-    if (rdex && (comm && !var(ak_ptr))) {
+    // If con_dup and we have a NOD, form an active pair with the clone we got
+    if (rewrite && (con_dup && !is_var(ak_ptr))) {
+      //printf("[%4X] putdups %08X %08X\n", worker.gid, worker.a_ptr, worker.b_ptr);
       put_redex(&worker, ak_ptr, take(ak_ref));
       atomicCAS((u32*)ak_ref, BSY, 0);
     }
-
-    //if (worker.gid < 32) {
-      //printf("[%d] F\n", worker.gid);
-    //}
-
-    //if (ref0 || ref1) {
-      //printf("[%d] E3 %d %d\n", worker.gid);
-    //}
-
     __syncwarp();
 
-    //if (worker.gid < 32) {
-      //printf("[%d] G\n", worker.gid);
-    //}
 
-    //if (ref0 || ref1) {
-      //printf("[%d] E4 %d %d\n", worker.gid);
-    //}
-
-    //if (ref0 || ref1) {
-      //printf("[%d] F\n", worker.gid);
-    //}
-
+    //printf("[%04X] loop end\n", worker.gid);
   }
 
   //local_scatter(net);
@@ -747,17 +783,21 @@ __global__ void global_rewrite(Net* net, Book* book, u32 blocks) {
   if (worker.rwts > 0 && worker.frac == A1) {
     atomicAdd(&net->rwts, worker.rwts);
   }
+
+  //printf("[%04X] %d done\n", worker.gid, tick);
+
+  //printf("[%04X] done\n", worker.gid);
 }
 
-void do_global_rewrite(Net* net, Book* book, u32 blocks) {
-  global_rewrite<<<blocks, BLOCK_SIZE>>>(net, book, blocks);
+void do_global_rewrite(Net* net, Book* book, u32 blocks, u32 tick) {
+  global_rewrite<<<blocks, BLOCK_SIZE>>>(net, book, blocks, tick);
 }
 
 // Reduce
 // ------
 
 // Performs a global rewrite step.
-u32 do_reduce(Net* net, Book* book) {
+u32 do_reduce(Net* net, Book* book, u32 tick) {
   // Gets the total number of redexes
   u32 bag_length;
   u32 prev_blocks;
@@ -772,23 +812,34 @@ u32 do_reduce(Net* net, Book* book) {
   }
 
   // Prints debug message
-  printf(">> reducing %d redexes with %d blocks\n", bag_length, next_blocks);
+  printf(">> [%04X] reducing %d redexes with %d blocks\n", tick, bag_length, next_blocks);
 
   // Stores next_blocks on net.pbks
   cudaMemcpy(&(net->pbks), &next_blocks, sizeof(u32), cudaMemcpyHostToDevice);
-  
-  // Scatters redexes evenly
-  do_global_scatter(net, prev_blocks, next_blocks);
 
-  // Performs global parallel rewrite
-  do_global_rewrite(net, book, next_blocks);
+  if (next_blocks > 0) {
+    // Performs global parallel rewrite
+    do_global_rewrite(net, book, next_blocks, tick);
+  }
+
+  if (prev_blocks > 0) {
+    // Scatters redexes evenly
+    do_global_scatter(net, prev_blocks, next_blocks);
+  }
+
+  // synchronize and show errors using cudaGetLastError
+  cudaDeviceSynchronize();
+  cudaError_t error = cudaGetLastError();
+  if (error != cudaSuccess) {
+    printf("CUDA error: %s\n", cudaGetErrorString(error));
+  }
 
   return bag_length;
 }
 
 void do_normalize(Net* net, Book* book) {
-  u32 count = 0;
-  while (do_reduce(net, book) != 0 && ++count < 10) {};
+  u32 tick = 0;
+  while (do_reduce(net, book, tick) != 0 && ++tick < 500) {};
 }
 
 // Host<->Device
@@ -917,23 +968,19 @@ __host__ Term* term_to_device(Term* host_term) {
   Term* device_term;
   Wire* device_acts;
   Node* device_node;
-  u32*  device_locs;
 
   cudaMalloc((void**)&device_term, sizeof(Term));
   cudaMalloc((void**)&device_acts, host_term->alen * sizeof(Wire));
   cudaMalloc((void**)&device_node, host_term->nlen * sizeof(Node));
-  cudaMalloc((void**)&device_locs, host_term->nlen * sizeof(u32));
 
   // Copy the host data to the device memory
   cudaMemcpy(device_acts, host_term->acts, host_term->alen * sizeof(Wire), cudaMemcpyHostToDevice);
   cudaMemcpy(device_node, host_term->node, host_term->nlen * sizeof(Node), cudaMemcpyHostToDevice);
-  cudaMemcpy(device_locs, host_term->locs, host_term->nlen * sizeof(u32),  cudaMemcpyHostToDevice);
 
   // Create a temporary host Term object with device pointers
   Term temp_term = *host_term;
   temp_term.acts = device_acts;
   temp_term.node = device_node;
-  temp_term.locs = device_locs;
 
   // Copy the temporary host Term object to the device memory
   cudaMemcpy(device_term, &temp_term, sizeof(Term), cudaMemcpyHostToDevice);
@@ -952,20 +999,16 @@ __host__ Term* term_to_host(Term* device_term) {
   // Allocate host memory for data
   host_term->acts = (Wire*)malloc(host_term->alen * sizeof(Wire));
   host_term->node = (Node*)malloc(host_term->nlen * sizeof(Node));
-  host_term->locs = (u32*) malloc(host_term->nlen * sizeof(u32));
 
   // Retrieve the device pointers for data
   Wire* device_acts;
   Node* device_node;
-  u32*  device_locs;
   cudaMemcpy(&device_acts, &(device_term->acts), sizeof(Wire*), cudaMemcpyDeviceToHost);
   cudaMemcpy(&device_node, &(device_term->node), sizeof(Node*), cudaMemcpyDeviceToHost);
-  cudaMemcpy(&device_locs, &(device_term->locs), sizeof(u32*),  cudaMemcpyDeviceToHost);
 
   // Copy the device data to the host memory
   cudaMemcpy(host_term->acts, device_acts, host_term->alen * sizeof(Wire), cudaMemcpyDeviceToHost);
   cudaMemcpy(host_term->node, device_node, host_term->nlen * sizeof(Node), cudaMemcpyDeviceToHost);
-  cudaMemcpy(host_term->locs, device_locs, host_term->nlen * sizeof(u32),  cudaMemcpyDeviceToHost);
 
   return host_term;
 }
@@ -1114,7 +1157,7 @@ __host__ u32 map_lookup(Map* map, u32 key) {
 
 // Recursive function to print a term as a tree with unique variable IDs
 __host__ void print_tree_go(Net* net, Ptr ptr, Map* var_ids) {
-  if (var(ptr)) {
+  if (is_var(ptr)) {
     u32 got = map_lookup(var_ids, ptr);
     if (got == var_ids->size) {
       u32 name = var_ids->size;
@@ -1168,7 +1211,6 @@ __host__ void populate(Book* book) {
   book->defs[0x0000000f]->node[ 0] = (Node) {0x30000000,0xa0000001};
   book->defs[0x0000000f]->node[ 1] = (Node) {0x30000000,0xa0000002};
   book->defs[0x0000000f]->node[ 2] = (Node) {0x60000002,0x50000002};
-  book->defs[0x0000000f]->locs     = (u32*) malloc(3 * sizeof(u32));
   // F
   book->defs[0x00000010]           = (Term*) malloc(sizeof(Term));
   book->defs[0x00000010]->root     = 0xa0000000;
@@ -1178,7 +1220,6 @@ __host__ void populate(Book* book) {
   book->defs[0x00000010]->node     = (Node*) malloc(2 * sizeof(Node));
   book->defs[0x00000010]->node[ 0] = (Node) {0x30000000,0xa0000001};
   book->defs[0x00000010]->node[ 1] = (Node) {0x60000001,0x50000001};
-  book->defs[0x00000010]->locs     = (u32*) malloc(2 * sizeof(u32));
   // I
   book->defs[0x00000013]           = (Term*) malloc(sizeof(Term));
   book->defs[0x00000013]->root     = 0xa0000000;
@@ -1191,7 +1232,6 @@ __host__ void populate(Book* book) {
   book->defs[0x00000013]->node[ 2] = (Node) {0xa0000003,0xa0000004};
   book->defs[0x00000013]->node[ 3] = (Node) {0x50000000,0x60000004};
   book->defs[0x00000013]->node[ 4] = (Node) {0x30000000,0x60000003};
-  book->defs[0x00000013]->locs     = (u32*) malloc(5 * sizeof(u32));
   // O
   book->defs[0x00000019]           = (Term*) malloc(sizeof(Term));
   book->defs[0x00000019]->root     = 0xa0000000;
@@ -1204,7 +1244,6 @@ __host__ void populate(Book* book) {
   book->defs[0x00000019]->node[ 2] = (Node) {0x50000000,0x60000004};
   book->defs[0x00000019]->node[ 3] = (Node) {0x30000000,0xa0000004};
   book->defs[0x00000019]->node[ 4] = (Node) {0x30000000,0x60000002};
-  book->defs[0x00000019]->locs     = (u32*) malloc(5 * sizeof(u32));
   // S
   book->defs[0x0000001d]           = (Term*) malloc(sizeof(Term));
   book->defs[0x0000001d]->root     = 0xa0000000;
@@ -1216,7 +1255,6 @@ __host__ void populate(Book* book) {
   book->defs[0x0000001d]->node[ 1] = (Node) {0xa0000002,0xa0000003};
   book->defs[0x0000001d]->node[ 2] = (Node) {0x50000000,0x60000003};
   book->defs[0x0000001d]->node[ 3] = (Node) {0x30000000,0x60000002};
-  book->defs[0x0000001d]->locs     = (u32*) malloc(4 * sizeof(u32));
   // T
   book->defs[0x0000001e]           = (Term*) malloc(sizeof(Term));
   book->defs[0x0000001e]->root     = 0xa0000000;
@@ -1226,7 +1264,6 @@ __host__ void populate(Book* book) {
   book->defs[0x0000001e]->node     = (Node*) malloc(2 * sizeof(Node));
   book->defs[0x0000001e]->node[ 0] = (Node) {0x60000001,0xa0000001};
   book->defs[0x0000001e]->node[ 1] = (Node) {0x30000000,0x50000000};
-  book->defs[0x0000001e]->locs     = (u32*) malloc(2 * sizeof(u32));
   // Z
   book->defs[0x00000024]           = (Term*) malloc(sizeof(Term));
   book->defs[0x00000024]->root     = 0xa0000000;
@@ -1236,7 +1273,6 @@ __host__ void populate(Book* book) {
   book->defs[0x00000024]->node     = (Node*) malloc(2 * sizeof(Node));
   book->defs[0x00000024]->node[ 0] = (Node) {0x30000000,0xa0000001};
   book->defs[0x00000024]->node[ 1] = (Node) {0x60000001,0x50000001};
-  book->defs[0x00000024]->locs     = (u32*) malloc(2 * sizeof(u32));
   // c0
   book->defs[0x000009c1]           = (Term*) malloc(sizeof(Term));
   book->defs[0x000009c1]->root     = 0xa0000000;
@@ -1246,7 +1282,6 @@ __host__ void populate(Book* book) {
   book->defs[0x000009c1]->node     = (Node*) malloc(2 * sizeof(Node));
   book->defs[0x000009c1]->node[ 0] = (Node) {0x30000000,0xa0000001};
   book->defs[0x000009c1]->node[ 1] = (Node) {0x60000001,0x50000001};
-  book->defs[0x000009c1]->locs     = (u32*) malloc(2 * sizeof(u32));
   // c1
   book->defs[0x000009c2]           = (Term*) malloc(sizeof(Term));
   book->defs[0x000009c2]->root     = 0xa0000000;
@@ -1257,7 +1292,6 @@ __host__ void populate(Book* book) {
   book->defs[0x000009c2]->node[ 0] = (Node) {0xa0000001,0xa0000002};
   book->defs[0x000009c2]->node[ 1] = (Node) {0x50000002,0x60000002};
   book->defs[0x000009c2]->node[ 2] = (Node) {0x50000001,0x60000001};
-  book->defs[0x000009c2]->locs     = (u32*) malloc(3 * sizeof(u32));
   // c2
   book->defs[0x000009c3]           = (Term*) malloc(sizeof(Term));
   book->defs[0x000009c3]->root     = 0xa0000000;
@@ -1270,7 +1304,6 @@ __host__ void populate(Book* book) {
   book->defs[0x000009c3]->node[ 2] = (Node) {0x50000004,0x50000003};
   book->defs[0x000009c3]->node[ 3] = (Node) {0x60000002,0x60000004};
   book->defs[0x000009c3]->node[ 4] = (Node) {0x50000002,0x60000003};
-  book->defs[0x000009c3]->locs     = (u32*) malloc(5 * sizeof(u32));
   // c3
   book->defs[0x000009c4]           = (Term*) malloc(sizeof(Term));
   book->defs[0x000009c4]->root     = 0xa0000000;
@@ -1285,7 +1318,6 @@ __host__ void populate(Book* book) {
   book->defs[0x000009c4]->node[ 4] = (Node) {0x60000003,0x50000005};
   book->defs[0x000009c4]->node[ 5] = (Node) {0x60000004,0x60000006};
   book->defs[0x000009c4]->node[ 6] = (Node) {0x50000003,0x60000005};
-  book->defs[0x000009c4]->locs     = (u32*) malloc(7 * sizeof(u32));
   // c4
   book->defs[0x000009c5]           = (Term*) malloc(sizeof(Term));
   book->defs[0x000009c5]->root     = 0xa0000000;
@@ -1302,7 +1334,6 @@ __host__ void populate(Book* book) {
   book->defs[0x000009c5]->node[ 6] = (Node) {0x60000005,0x50000007};
   book->defs[0x000009c5]->node[ 7] = (Node) {0x60000006,0x60000008};
   book->defs[0x000009c5]->node[ 8] = (Node) {0x50000004,0x60000007};
-  book->defs[0x000009c5]->locs     = (u32*) malloc(9 * sizeof(u32));
   // c5
   book->defs[0x000009c6]           = (Term*) malloc(sizeof(Term));
   book->defs[0x000009c6]->root     = 0xa0000000;
@@ -1321,7 +1352,6 @@ __host__ void populate(Book* book) {
   book->defs[0x000009c6]->node[ 8] = (Node) {0x60000007,0x50000009};
   book->defs[0x000009c6]->node[ 9] = (Node) {0x60000008,0x6000000a};
   book->defs[0x000009c6]->node[10] = (Node) {0x50000005,0x60000009};
-  book->defs[0x000009c6]->locs     = (u32*) malloc(11 * sizeof(u32));
   // c6
   book->defs[0x000009c7]           = (Term*) malloc(sizeof(Term));
   book->defs[0x000009c7]->root     = 0xa0000000;
@@ -1342,7 +1372,6 @@ __host__ void populate(Book* book) {
   book->defs[0x000009c7]->node[10] = (Node) {0x60000009,0x5000000b};
   book->defs[0x000009c7]->node[11] = (Node) {0x6000000a,0x6000000c};
   book->defs[0x000009c7]->node[12] = (Node) {0x50000006,0x6000000b};
-  book->defs[0x000009c7]->locs     = (u32*) malloc(13 * sizeof(u32));
   // c7
   book->defs[0x000009c8]           = (Term*) malloc(sizeof(Term));
   book->defs[0x000009c8]->root     = 0xa0000000;
@@ -1365,7 +1394,6 @@ __host__ void populate(Book* book) {
   book->defs[0x000009c8]->node[12] = (Node) {0x6000000b,0x5000000d};
   book->defs[0x000009c8]->node[13] = (Node) {0x6000000c,0x6000000e};
   book->defs[0x000009c8]->node[14] = (Node) {0x50000007,0x6000000d};
-  book->defs[0x000009c8]->locs     = (u32*) malloc(15 * sizeof(u32));
   // c8
   book->defs[0x000009c9]           = (Term*) malloc(sizeof(Term));
   book->defs[0x000009c9]->root     = 0xa0000000;
@@ -1390,7 +1418,6 @@ __host__ void populate(Book* book) {
   book->defs[0x000009c9]->node[14] = (Node) {0x6000000d,0x5000000f};
   book->defs[0x000009c9]->node[15] = (Node) {0x6000000e,0x60000010};
   book->defs[0x000009c9]->node[16] = (Node) {0x50000008,0x6000000f};
-  book->defs[0x000009c9]->locs     = (u32*) malloc(17 * sizeof(u32));
   // c9
   book->defs[0x000009ca]           = (Term*) malloc(sizeof(Term));
   book->defs[0x000009ca]->root     = 0xa0000000;
@@ -1417,7 +1444,6 @@ __host__ void populate(Book* book) {
   book->defs[0x000009ca]->node[16] = (Node) {0x6000000f,0x50000011};
   book->defs[0x000009ca]->node[17] = (Node) {0x60000010,0x60000012};
   book->defs[0x000009ca]->node[18] = (Node) {0x50000009,0x60000011};
-  book->defs[0x000009ca]->locs     = (u32*) malloc(19 * sizeof(u32));
   // id
   book->defs[0x00000b68]           = (Term*) malloc(sizeof(Term));
   book->defs[0x00000b68]->root     = 0xa0000000;
@@ -1426,7 +1452,6 @@ __host__ void populate(Book* book) {
   book->defs[0x00000b68]->nlen     = 1;
   book->defs[0x00000b68]->node     = (Node*) malloc(1 * sizeof(Node));
   book->defs[0x00000b68]->node[ 0] = (Node) {0x60000000,0x50000000};
-  book->defs[0x00000b68]->locs     = (u32*) malloc(1 * sizeof(u32));
   // k0
   book->defs[0x00000bc1]           = (Term*) malloc(sizeof(Term));
   book->defs[0x00000bc1]->root     = 0xa0000000;
@@ -1436,7 +1461,6 @@ __host__ void populate(Book* book) {
   book->defs[0x00000bc1]->node     = (Node*) malloc(2 * sizeof(Node));
   book->defs[0x00000bc1]->node[ 0] = (Node) {0x30000000,0xa0000001};
   book->defs[0x00000bc1]->node[ 1] = (Node) {0x60000001,0x50000001};
-  book->defs[0x00000bc1]->locs     = (u32*) malloc(2 * sizeof(u32));
   // k1
   book->defs[0x00000bc2]           = (Term*) malloc(sizeof(Term));
   book->defs[0x00000bc2]->root     = 0xa0000000;
@@ -1447,7 +1471,6 @@ __host__ void populate(Book* book) {
   book->defs[0x00000bc2]->node[ 0] = (Node) {0xa0000001,0xa0000002};
   book->defs[0x00000bc2]->node[ 1] = (Node) {0x50000002,0x60000002};
   book->defs[0x00000bc2]->node[ 2] = (Node) {0x50000001,0x60000001};
-  book->defs[0x00000bc2]->locs     = (u32*) malloc(3 * sizeof(u32));
   // k2
   book->defs[0x00000bc3]           = (Term*) malloc(sizeof(Term));
   book->defs[0x00000bc3]->root     = 0xa0000000;
@@ -1460,7 +1483,6 @@ __host__ void populate(Book* book) {
   book->defs[0x00000bc3]->node[ 2] = (Node) {0x50000004,0x50000003};
   book->defs[0x00000bc3]->node[ 3] = (Node) {0x60000002,0x60000004};
   book->defs[0x00000bc3]->node[ 4] = (Node) {0x50000002,0x60000003};
-  book->defs[0x00000bc3]->locs     = (u32*) malloc(5 * sizeof(u32));
   // k3
   book->defs[0x00000bc4]           = (Term*) malloc(sizeof(Term));
   book->defs[0x00000bc4]->root     = 0xa0000000;
@@ -1475,7 +1497,6 @@ __host__ void populate(Book* book) {
   book->defs[0x00000bc4]->node[ 4] = (Node) {0x60000003,0x50000005};
   book->defs[0x00000bc4]->node[ 5] = (Node) {0x60000004,0x60000006};
   book->defs[0x00000bc4]->node[ 6] = (Node) {0x50000003,0x60000005};
-  book->defs[0x00000bc4]->locs     = (u32*) malloc(7 * sizeof(u32));
   // k4
   book->defs[0x00000bc5]           = (Term*) malloc(sizeof(Term));
   book->defs[0x00000bc5]->root     = 0xa0000000;
@@ -1492,7 +1513,6 @@ __host__ void populate(Book* book) {
   book->defs[0x00000bc5]->node[ 6] = (Node) {0x60000005,0x50000007};
   book->defs[0x00000bc5]->node[ 7] = (Node) {0x60000006,0x60000008};
   book->defs[0x00000bc5]->node[ 8] = (Node) {0x50000004,0x60000007};
-  book->defs[0x00000bc5]->locs     = (u32*) malloc(9 * sizeof(u32));
   // k5
   book->defs[0x00000bc6]           = (Term*) malloc(sizeof(Term));
   book->defs[0x00000bc6]->root     = 0xa0000000;
@@ -1511,7 +1531,6 @@ __host__ void populate(Book* book) {
   book->defs[0x00000bc6]->node[ 8] = (Node) {0x60000007,0x50000009};
   book->defs[0x00000bc6]->node[ 9] = (Node) {0x60000008,0x6000000a};
   book->defs[0x00000bc6]->node[10] = (Node) {0x50000005,0x60000009};
-  book->defs[0x00000bc6]->locs     = (u32*) malloc(11 * sizeof(u32));
   // k6
   book->defs[0x00000bc7]           = (Term*) malloc(sizeof(Term));
   book->defs[0x00000bc7]->root     = 0xa0000000;
@@ -1532,7 +1551,6 @@ __host__ void populate(Book* book) {
   book->defs[0x00000bc7]->node[10] = (Node) {0x60000009,0x5000000b};
   book->defs[0x00000bc7]->node[11] = (Node) {0x6000000a,0x6000000c};
   book->defs[0x00000bc7]->node[12] = (Node) {0x50000006,0x6000000b};
-  book->defs[0x00000bc7]->locs     = (u32*) malloc(13 * sizeof(u32));
   // k7
   book->defs[0x00000bc8]           = (Term*) malloc(sizeof(Term));
   book->defs[0x00000bc8]->root     = 0xa0000000;
@@ -1555,7 +1573,6 @@ __host__ void populate(Book* book) {
   book->defs[0x00000bc8]->node[12] = (Node) {0x6000000b,0x5000000d};
   book->defs[0x00000bc8]->node[13] = (Node) {0x6000000c,0x6000000e};
   book->defs[0x00000bc8]->node[14] = (Node) {0x50000007,0x6000000d};
-  book->defs[0x00000bc8]->locs     = (u32*) malloc(15 * sizeof(u32));
   // k8
   book->defs[0x00000bc9]           = (Term*) malloc(sizeof(Term));
   book->defs[0x00000bc9]->root     = 0xa0000000;
@@ -1580,7 +1597,6 @@ __host__ void populate(Book* book) {
   book->defs[0x00000bc9]->node[14] = (Node) {0x6000000d,0x5000000f};
   book->defs[0x00000bc9]->node[15] = (Node) {0x6000000e,0x60000010};
   book->defs[0x00000bc9]->node[16] = (Node) {0x50000008,0x6000000f};
-  book->defs[0x00000bc9]->locs     = (u32*) malloc(17 * sizeof(u32));
   // k9
   book->defs[0x00000bca]           = (Term*) malloc(sizeof(Term));
   book->defs[0x00000bca]->root     = 0xa0000000;
@@ -1607,7 +1623,6 @@ __host__ void populate(Book* book) {
   book->defs[0x00000bca]->node[16] = (Node) {0x6000000f,0x50000011};
   book->defs[0x00000bca]->node[17] = (Node) {0x60000010,0x60000012};
   book->defs[0x00000bca]->node[18] = (Node) {0x50000009,0x60000011};
-  book->defs[0x00000bca]->locs     = (u32*) malloc(19 * sizeof(u32));
   // c10
   book->defs[0x00027081]           = (Term*) malloc(sizeof(Term));
   book->defs[0x00027081]->root     = 0xa0000000;
@@ -1636,7 +1651,6 @@ __host__ void populate(Book* book) {
   book->defs[0x00027081]->node[18] = (Node) {0x60000011,0x50000013};
   book->defs[0x00027081]->node[19] = (Node) {0x60000012,0x60000014};
   book->defs[0x00027081]->node[20] = (Node) {0x5000000a,0x60000013};
-  book->defs[0x00027081]->locs     = (u32*) malloc(21 * sizeof(u32));
   // c11
   book->defs[0x00027082]           = (Term*) malloc(sizeof(Term));
   book->defs[0x00027082]->root     = 0xa0000000;
@@ -1667,7 +1681,6 @@ __host__ void populate(Book* book) {
   book->defs[0x00027082]->node[20] = (Node) {0x60000013,0x50000015};
   book->defs[0x00027082]->node[21] = (Node) {0x60000014,0x60000016};
   book->defs[0x00027082]->node[22] = (Node) {0x5000000b,0x60000015};
-  book->defs[0x00027082]->locs     = (u32*) malloc(23 * sizeof(u32));
   // c12
   book->defs[0x00027083]           = (Term*) malloc(sizeof(Term));
   book->defs[0x00027083]->root     = 0xa0000000;
@@ -1700,7 +1713,6 @@ __host__ void populate(Book* book) {
   book->defs[0x00027083]->node[22] = (Node) {0x60000015,0x50000017};
   book->defs[0x00027083]->node[23] = (Node) {0x60000016,0x60000018};
   book->defs[0x00027083]->node[24] = (Node) {0x5000000c,0x60000017};
-  book->defs[0x00027083]->locs     = (u32*) malloc(25 * sizeof(u32));
   // c13
   book->defs[0x00027084]           = (Term*) malloc(sizeof(Term));
   book->defs[0x00027084]->root     = 0xa0000000;
@@ -1735,7 +1747,6 @@ __host__ void populate(Book* book) {
   book->defs[0x00027084]->node[24] = (Node) {0x60000017,0x50000019};
   book->defs[0x00027084]->node[25] = (Node) {0x60000018,0x6000001a};
   book->defs[0x00027084]->node[26] = (Node) {0x5000000d,0x60000019};
-  book->defs[0x00027084]->locs     = (u32*) malloc(27 * sizeof(u32));
   // c14
   book->defs[0x00027085]           = (Term*) malloc(sizeof(Term));
   book->defs[0x00027085]->root     = 0xa0000000;
@@ -1772,7 +1783,6 @@ __host__ void populate(Book* book) {
   book->defs[0x00027085]->node[26] = (Node) {0x60000019,0x5000001b};
   book->defs[0x00027085]->node[27] = (Node) {0x6000001a,0x6000001c};
   book->defs[0x00027085]->node[28] = (Node) {0x5000000e,0x6000001b};
-  book->defs[0x00027085]->locs     = (u32*) malloc(29 * sizeof(u32));
   // c15
   book->defs[0x00027086]           = (Term*) malloc(sizeof(Term));
   book->defs[0x00027086]->root     = 0xa0000000;
@@ -1811,7 +1821,6 @@ __host__ void populate(Book* book) {
   book->defs[0x00027086]->node[28] = (Node) {0x6000001b,0x5000001d};
   book->defs[0x00027086]->node[29] = (Node) {0x6000001c,0x6000001e};
   book->defs[0x00027086]->node[30] = (Node) {0x5000000f,0x6000001d};
-  book->defs[0x00027086]->locs     = (u32*) malloc(31 * sizeof(u32));
   // c16
   book->defs[0x00027087]           = (Term*) malloc(sizeof(Term));
   book->defs[0x00027087]->root     = 0xa0000000;
@@ -1852,7 +1861,6 @@ __host__ void populate(Book* book) {
   book->defs[0x00027087]->node[30] = (Node) {0x6000001d,0x5000001f};
   book->defs[0x00027087]->node[31] = (Node) {0x6000001e,0x60000020};
   book->defs[0x00027087]->node[32] = (Node) {0x50000010,0x6000001f};
-  book->defs[0x00027087]->locs     = (u32*) malloc(33 * sizeof(u32));
   // c17
   book->defs[0x00027088]           = (Term*) malloc(sizeof(Term));
   book->defs[0x00027088]->root     = 0xa0000000;
@@ -1895,7 +1903,6 @@ __host__ void populate(Book* book) {
   book->defs[0x00027088]->node[32] = (Node) {0x6000001f,0x50000021};
   book->defs[0x00027088]->node[33] = (Node) {0x60000020,0x60000022};
   book->defs[0x00027088]->node[34] = (Node) {0x50000011,0x60000021};
-  book->defs[0x00027088]->locs     = (u32*) malloc(35 * sizeof(u32));
   // c18
   book->defs[0x00027089]           = (Term*) malloc(sizeof(Term));
   book->defs[0x00027089]->root     = 0xa0000000;
@@ -1940,7 +1947,6 @@ __host__ void populate(Book* book) {
   book->defs[0x00027089]->node[34] = (Node) {0x60000021,0x50000023};
   book->defs[0x00027089]->node[35] = (Node) {0x60000022,0x60000024};
   book->defs[0x00027089]->node[36] = (Node) {0x50000012,0x60000023};
-  book->defs[0x00027089]->locs     = (u32*) malloc(37 * sizeof(u32));
   // c19
   book->defs[0x0002708a]           = (Term*) malloc(sizeof(Term));
   book->defs[0x0002708a]->root     = 0xa0000000;
@@ -1987,7 +1993,6 @@ __host__ void populate(Book* book) {
   book->defs[0x0002708a]->node[36] = (Node) {0x60000023,0x50000025};
   book->defs[0x0002708a]->node[37] = (Node) {0x60000024,0x60000026};
   book->defs[0x0002708a]->node[38] = (Node) {0x50000013,0x60000025};
-  book->defs[0x0002708a]->locs     = (u32*) malloc(39 * sizeof(u32));
   // c20
   book->defs[0x000270c1]           = (Term*) malloc(sizeof(Term));
   book->defs[0x000270c1]->root     = 0xa0000000;
@@ -2036,7 +2041,6 @@ __host__ void populate(Book* book) {
   book->defs[0x000270c1]->node[38] = (Node) {0x60000025,0x50000027};
   book->defs[0x000270c1]->node[39] = (Node) {0x60000026,0x60000028};
   book->defs[0x000270c1]->node[40] = (Node) {0x50000014,0x60000027};
-  book->defs[0x000270c1]->locs     = (u32*) malloc(41 * sizeof(u32));
   // c21
   book->defs[0x000270c2]           = (Term*) malloc(sizeof(Term));
   book->defs[0x000270c2]->root     = 0xa0000000;
@@ -2087,7 +2091,6 @@ __host__ void populate(Book* book) {
   book->defs[0x000270c2]->node[40] = (Node) {0x60000027,0x50000029};
   book->defs[0x000270c2]->node[41] = (Node) {0x60000028,0x6000002a};
   book->defs[0x000270c2]->node[42] = (Node) {0x50000015,0x60000029};
-  book->defs[0x000270c2]->locs     = (u32*) malloc(43 * sizeof(u32));
   // c22
   book->defs[0x000270c3]           = (Term*) malloc(sizeof(Term));
   book->defs[0x000270c3]->root     = 0xa0000000;
@@ -2140,7 +2143,6 @@ __host__ void populate(Book* book) {
   book->defs[0x000270c3]->node[42] = (Node) {0x60000029,0x5000002b};
   book->defs[0x000270c3]->node[43] = (Node) {0x6000002a,0x6000002c};
   book->defs[0x000270c3]->node[44] = (Node) {0x50000016,0x6000002b};
-  book->defs[0x000270c3]->locs     = (u32*) malloc(45 * sizeof(u32));
   // c23
   book->defs[0x000270c4]           = (Term*) malloc(sizeof(Term));
   book->defs[0x000270c4]->root     = 0xa0000000;
@@ -2195,7 +2197,6 @@ __host__ void populate(Book* book) {
   book->defs[0x000270c4]->node[44] = (Node) {0x6000002b,0x5000002d};
   book->defs[0x000270c4]->node[45] = (Node) {0x6000002c,0x6000002e};
   book->defs[0x000270c4]->node[46] = (Node) {0x50000017,0x6000002d};
-  book->defs[0x000270c4]->locs     = (u32*) malloc(47 * sizeof(u32));
   // c24
   book->defs[0x000270c5]           = (Term*) malloc(sizeof(Term));
   book->defs[0x000270c5]->root     = 0xa0000000;
@@ -2252,7 +2253,6 @@ __host__ void populate(Book* book) {
   book->defs[0x000270c5]->node[46] = (Node) {0x6000002d,0x5000002f};
   book->defs[0x000270c5]->node[47] = (Node) {0x6000002e,0x60000030};
   book->defs[0x000270c5]->node[48] = (Node) {0x50000018,0x6000002f};
-  book->defs[0x000270c5]->locs     = (u32*) malloc(49 * sizeof(u32));
   // c_s
   book->defs[0x00027ff7]           = (Term*) malloc(sizeof(Term));
   book->defs[0x00027ff7]->root     = 0xa0000000;
@@ -2267,7 +2267,6 @@ __host__ void populate(Book* book) {
   book->defs[0x00027ff7]->node[ 4] = (Node) {0xa0000005,0x50000001};
   book->defs[0x00027ff7]->node[ 5] = (Node) {0x60000002,0x60000006};
   book->defs[0x00027ff7]->node[ 6] = (Node) {0x50000002,0x60000005};
-  book->defs[0x00027ff7]->locs     = (u32*) malloc(7 * sizeof(u32));
   // c_z
   book->defs[0x00027ffe]           = (Term*) malloc(sizeof(Term));
   book->defs[0x00027ffe]->root     = 0xa0000000;
@@ -2277,7 +2276,6 @@ __host__ void populate(Book* book) {
   book->defs[0x00027ffe]->node     = (Node*) malloc(2 * sizeof(Node));
   book->defs[0x00027ffe]->node[ 0] = (Node) {0x30000000,0xa0000001};
   book->defs[0x00027ffe]->node[ 1] = (Node) {0x60000001,0x50000001};
-  book->defs[0x00027ffe]->locs     = (u32*) malloc(2 * sizeof(u32));
   // dec
   book->defs[0x00028a67]           = (Term*) malloc(sizeof(Term));
   book->defs[0x00028a67]->root     = 0xa0000000;
@@ -2289,18 +2287,16 @@ __host__ void populate(Book* book) {
   book->defs[0x00028a67]->node[ 1] = (Node) {0x10a299d9,0xa0000002};
   book->defs[0x00028a67]->node[ 2] = (Node) {0x10a299d3,0xa0000003};
   book->defs[0x00028a67]->node[ 3] = (Node) {0x1000000f,0x60000000};
-  book->defs[0x00028a67]->locs     = (u32*) malloc(4 * sizeof(u32));
   // ex0
   book->defs[0x00029f01]           = (Term*) malloc(sizeof(Term));
   book->defs[0x00029f01]->root     = 0x60000001;
   book->defs[0x00029f01]->alen     = 1;
   book->defs[0x00029f01]->acts     = (Wire*) malloc(1 * sizeof(Wire));
-  book->defs[0x00029f01]->acts[ 0] = (Wire) {0x100009c2,0xa0000000};
+  book->defs[0x00029f01]->acts[ 0] = (Wire) {0x100009c3,0xa0000000};
   book->defs[0x00029f01]->nlen     = 2;
   book->defs[0x00029f01]->node     = (Node*) malloc(2 * sizeof(Node));
   book->defs[0x00029f01]->node[ 0] = (Node) {0x1000001d,0xa0000001};
   book->defs[0x00029f01]->node[ 1] = (Node) {0x10000024,0x40000000};
-  book->defs[0x00029f01]->locs     = (u32*) malloc(2 * sizeof(u32));
   // ex1
   book->defs[0x00029f02]           = (Term*) malloc(sizeof(Term));
   book->defs[0x00029f02]->root     = 0x60000001;
@@ -2311,31 +2307,30 @@ __host__ void populate(Book* book) {
   book->defs[0x00029f02]->node     = (Node*) malloc(2 * sizeof(Node));
   book->defs[0x00029f02]->node[ 0] = (Node) {0x1002bff7,0xa0000001};
   book->defs[0x00029f02]->node[ 1] = (Node) {0x1002bffe,0x40000000};
-  book->defs[0x00029f02]->locs     = (u32*) malloc(2 * sizeof(u32));
   // ex2
   book->defs[0x00029f03]           = (Term*) malloc(sizeof(Term));
   book->defs[0x00029f03]->root     = 0x60000000;
   book->defs[0x00029f03]->alen     = 2;
   book->defs[0x00029f03]->acts     = (Wire*) malloc(2 * sizeof(Wire));
   book->defs[0x00029f03]->acts[ 0] = (Wire) {0x10036e72,0xa0000000};
-  book->defs[0x00029f03]->acts[ 1] = (Wire) {0x100270c1,0xa0000001};
+  book->defs[0x00029f03]->acts[ 1] = (Wire) {0x100009c4,0xa0000001};
   book->defs[0x00029f03]->nlen     = 3;
   book->defs[0x00029f03]->node     = (Node*) malloc(3 * sizeof(Node));
   book->defs[0x00029f03]->node[ 0] = (Node) {0x60000002,0x40000000};
   book->defs[0x00029f03]->node[ 1] = (Node) {0x10000013,0xa0000002};
   book->defs[0x00029f03]->node[ 2] = (Node) {0x1000000f,0x50000000};
-  book->defs[0x00029f03]->locs     = (u32*) malloc(3 * sizeof(u32));
   // g_s
   book->defs[0x0002bff7]           = (Term*) malloc(sizeof(Term));
   book->defs[0x0002bff7]->root     = 0xa0000000;
   book->defs[0x0002bff7]->alen     = 0;
   book->defs[0x0002bff7]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x0002bff7]->nlen     = 3;
-  book->defs[0x0002bff7]->node     = (Node*) malloc(3 * sizeof(Node));
-  book->defs[0x0002bff7]->node[ 0] = (Node) {0xe0000001,0x60000002};
-  book->defs[0x0002bff7]->node[ 1] = (Node) {0xa0000002,0x50000002};
-  book->defs[0x0002bff7]->node[ 2] = (Node) {0x60000001,0x60000000};
-  book->defs[0x0002bff7]->locs     = (u32*) malloc(3 * sizeof(u32));
+  book->defs[0x0002bff7]->nlen     = 5;
+  book->defs[0x0002bff7]->node     = (Node*) malloc(5 * sizeof(Node));
+  book->defs[0x0002bff7]->node[ 0] = (Node) {0xc0000001,0xa0000002};
+  book->defs[0x0002bff7]->node[ 1] = (Node) {0x50000003,0x50000004};
+  book->defs[0x0002bff7]->node[ 2] = (Node) {0xa0000003,0x60000004};
+  book->defs[0x0002bff7]->node[ 3] = (Node) {0x50000001,0xa0000004};
+  book->defs[0x0002bff7]->node[ 4] = (Node) {0x60000001,0x60000002};
   // g_z
   book->defs[0x0002bffe]           = (Term*) malloc(sizeof(Term));
   book->defs[0x0002bffe]->root     = 0xa0000000;
@@ -2344,7 +2339,6 @@ __host__ void populate(Book* book) {
   book->defs[0x0002bffe]->nlen     = 1;
   book->defs[0x0002bffe]->node     = (Node*) malloc(1 * sizeof(Node));
   book->defs[0x0002bffe]->node[ 0] = (Node) {0x60000000,0x50000000};
-  book->defs[0x0002bffe]->locs     = (u32*) malloc(1 * sizeof(u32));
   // k10
   book->defs[0x0002f081]           = (Term*) malloc(sizeof(Term));
   book->defs[0x0002f081]->root     = 0xa0000000;
@@ -2373,7 +2367,6 @@ __host__ void populate(Book* book) {
   book->defs[0x0002f081]->node[18] = (Node) {0x60000011,0x50000013};
   book->defs[0x0002f081]->node[19] = (Node) {0x60000012,0x60000014};
   book->defs[0x0002f081]->node[20] = (Node) {0x5000000a,0x60000013};
-  book->defs[0x0002f081]->locs     = (u32*) malloc(21 * sizeof(u32));
   // k11
   book->defs[0x0002f082]           = (Term*) malloc(sizeof(Term));
   book->defs[0x0002f082]->root     = 0xa0000000;
@@ -2404,7 +2397,6 @@ __host__ void populate(Book* book) {
   book->defs[0x0002f082]->node[20] = (Node) {0x60000013,0x50000015};
   book->defs[0x0002f082]->node[21] = (Node) {0x60000014,0x60000016};
   book->defs[0x0002f082]->node[22] = (Node) {0x5000000b,0x60000015};
-  book->defs[0x0002f082]->locs     = (u32*) malloc(23 * sizeof(u32));
   // k12
   book->defs[0x0002f083]           = (Term*) malloc(sizeof(Term));
   book->defs[0x0002f083]->root     = 0xa0000000;
@@ -2437,7 +2429,6 @@ __host__ void populate(Book* book) {
   book->defs[0x0002f083]->node[22] = (Node) {0x60000015,0x50000017};
   book->defs[0x0002f083]->node[23] = (Node) {0x60000016,0x60000018};
   book->defs[0x0002f083]->node[24] = (Node) {0x5000000c,0x60000017};
-  book->defs[0x0002f083]->locs     = (u32*) malloc(25 * sizeof(u32));
   // k13
   book->defs[0x0002f084]           = (Term*) malloc(sizeof(Term));
   book->defs[0x0002f084]->root     = 0xa0000000;
@@ -2472,7 +2463,6 @@ __host__ void populate(Book* book) {
   book->defs[0x0002f084]->node[24] = (Node) {0x60000017,0x50000019};
   book->defs[0x0002f084]->node[25] = (Node) {0x60000018,0x6000001a};
   book->defs[0x0002f084]->node[26] = (Node) {0x5000000d,0x60000019};
-  book->defs[0x0002f084]->locs     = (u32*) malloc(27 * sizeof(u32));
   // k14
   book->defs[0x0002f085]           = (Term*) malloc(sizeof(Term));
   book->defs[0x0002f085]->root     = 0xa0000000;
@@ -2509,7 +2499,6 @@ __host__ void populate(Book* book) {
   book->defs[0x0002f085]->node[26] = (Node) {0x60000019,0x5000001b};
   book->defs[0x0002f085]->node[27] = (Node) {0x6000001a,0x6000001c};
   book->defs[0x0002f085]->node[28] = (Node) {0x5000000e,0x6000001b};
-  book->defs[0x0002f085]->locs     = (u32*) malloc(29 * sizeof(u32));
   // k15
   book->defs[0x0002f086]           = (Term*) malloc(sizeof(Term));
   book->defs[0x0002f086]->root     = 0xa0000000;
@@ -2548,7 +2537,6 @@ __host__ void populate(Book* book) {
   book->defs[0x0002f086]->node[28] = (Node) {0x6000001b,0x5000001d};
   book->defs[0x0002f086]->node[29] = (Node) {0x6000001c,0x6000001e};
   book->defs[0x0002f086]->node[30] = (Node) {0x5000000f,0x6000001d};
-  book->defs[0x0002f086]->locs     = (u32*) malloc(31 * sizeof(u32));
   // k16
   book->defs[0x0002f087]           = (Term*) malloc(sizeof(Term));
   book->defs[0x0002f087]->root     = 0xa0000000;
@@ -2589,7 +2577,6 @@ __host__ void populate(Book* book) {
   book->defs[0x0002f087]->node[30] = (Node) {0x6000001d,0x5000001f};
   book->defs[0x0002f087]->node[31] = (Node) {0x6000001e,0x60000020};
   book->defs[0x0002f087]->node[32] = (Node) {0x50000010,0x6000001f};
-  book->defs[0x0002f087]->locs     = (u32*) malloc(33 * sizeof(u32));
   // k17
   book->defs[0x0002f088]           = (Term*) malloc(sizeof(Term));
   book->defs[0x0002f088]->root     = 0xa0000000;
@@ -2632,7 +2619,6 @@ __host__ void populate(Book* book) {
   book->defs[0x0002f088]->node[32] = (Node) {0x6000001f,0x50000021};
   book->defs[0x0002f088]->node[33] = (Node) {0x60000020,0x60000022};
   book->defs[0x0002f088]->node[34] = (Node) {0x50000011,0x60000021};
-  book->defs[0x0002f088]->locs     = (u32*) malloc(35 * sizeof(u32));
   // k18
   book->defs[0x0002f089]           = (Term*) malloc(sizeof(Term));
   book->defs[0x0002f089]->root     = 0xa0000000;
@@ -2677,7 +2663,6 @@ __host__ void populate(Book* book) {
   book->defs[0x0002f089]->node[34] = (Node) {0x60000021,0x50000023};
   book->defs[0x0002f089]->node[35] = (Node) {0x60000022,0x60000024};
   book->defs[0x0002f089]->node[36] = (Node) {0x50000012,0x60000023};
-  book->defs[0x0002f089]->locs     = (u32*) malloc(37 * sizeof(u32));
   // k19
   book->defs[0x0002f08a]           = (Term*) malloc(sizeof(Term));
   book->defs[0x0002f08a]->root     = 0xa0000000;
@@ -2724,7 +2709,6 @@ __host__ void populate(Book* book) {
   book->defs[0x0002f08a]->node[36] = (Node) {0x60000023,0x50000025};
   book->defs[0x0002f08a]->node[37] = (Node) {0x60000024,0x60000026};
   book->defs[0x0002f08a]->node[38] = (Node) {0x50000013,0x60000025};
-  book->defs[0x0002f08a]->locs     = (u32*) malloc(39 * sizeof(u32));
   // k20
   book->defs[0x0002f0c1]           = (Term*) malloc(sizeof(Term));
   book->defs[0x0002f0c1]->root     = 0xa0000000;
@@ -2773,7 +2757,6 @@ __host__ void populate(Book* book) {
   book->defs[0x0002f0c1]->node[38] = (Node) {0x60000025,0x50000027};
   book->defs[0x0002f0c1]->node[39] = (Node) {0x60000026,0x60000028};
   book->defs[0x0002f0c1]->node[40] = (Node) {0x50000014,0x60000027};
-  book->defs[0x0002f0c1]->locs     = (u32*) malloc(41 * sizeof(u32));
   // k21
   book->defs[0x0002f0c2]           = (Term*) malloc(sizeof(Term));
   book->defs[0x0002f0c2]->root     = 0xa0000000;
@@ -2824,7 +2807,6 @@ __host__ void populate(Book* book) {
   book->defs[0x0002f0c2]->node[40] = (Node) {0x60000027,0x50000029};
   book->defs[0x0002f0c2]->node[41] = (Node) {0x60000028,0x6000002a};
   book->defs[0x0002f0c2]->node[42] = (Node) {0x50000015,0x60000029};
-  book->defs[0x0002f0c2]->locs     = (u32*) malloc(43 * sizeof(u32));
   // k22
   book->defs[0x0002f0c3]           = (Term*) malloc(sizeof(Term));
   book->defs[0x0002f0c3]->root     = 0xa0000000;
@@ -2877,7 +2859,6 @@ __host__ void populate(Book* book) {
   book->defs[0x0002f0c3]->node[42] = (Node) {0x60000029,0x5000002b};
   book->defs[0x0002f0c3]->node[43] = (Node) {0x6000002a,0x6000002c};
   book->defs[0x0002f0c3]->node[44] = (Node) {0x50000016,0x6000002b};
-  book->defs[0x0002f0c3]->locs     = (u32*) malloc(45 * sizeof(u32));
   // k23
   book->defs[0x0002f0c4]           = (Term*) malloc(sizeof(Term));
   book->defs[0x0002f0c4]->root     = 0xa0000000;
@@ -2932,7 +2913,6 @@ __host__ void populate(Book* book) {
   book->defs[0x0002f0c4]->node[44] = (Node) {0x6000002b,0x5000002d};
   book->defs[0x0002f0c4]->node[45] = (Node) {0x6000002c,0x6000002e};
   book->defs[0x0002f0c4]->node[46] = (Node) {0x50000017,0x6000002d};
-  book->defs[0x0002f0c4]->locs     = (u32*) malloc(47 * sizeof(u32));
   // k24
   book->defs[0x0002f0c5]           = (Term*) malloc(sizeof(Term));
   book->defs[0x0002f0c5]->root     = 0xa0000000;
@@ -2989,7 +2969,6 @@ __host__ void populate(Book* book) {
   book->defs[0x0002f0c5]->node[46] = (Node) {0x6000002d,0x5000002f};
   book->defs[0x0002f0c5]->node[47] = (Node) {0x6000002e,0x60000030};
   book->defs[0x0002f0c5]->node[48] = (Node) {0x50000018,0x6000002f};
-  book->defs[0x0002f0c5]->locs     = (u32*) malloc(49 * sizeof(u32));
   // low
   book->defs[0x00030cfb]           = (Term*) malloc(sizeof(Term));
   book->defs[0x00030cfb]->root     = 0xa0000000;
@@ -3001,7 +2980,16 @@ __host__ void populate(Book* book) {
   book->defs[0x00030cfb]->node[ 1] = (Node) {0x10c33ed9,0xa0000002};
   book->defs[0x00030cfb]->node[ 2] = (Node) {0x10c33ed3,0xa0000003};
   book->defs[0x00030cfb]->node[ 3] = (Node) {0x1000000f,0x60000000};
-  book->defs[0x00030cfb]->locs     = (u32*) malloc(4 * sizeof(u32));
+  // nid
+  book->defs[0x00032b68]           = (Term*) malloc(sizeof(Term));
+  book->defs[0x00032b68]->root     = 0xa0000000;
+  book->defs[0x00032b68]->alen     = 0;
+  book->defs[0x00032b68]->acts     = (Wire*) malloc(0 * sizeof(Wire));
+  book->defs[0x00032b68]->nlen     = 3;
+  book->defs[0x00032b68]->node     = (Node*) malloc(3 * sizeof(Node));
+  book->defs[0x00032b68]->node[ 0] = (Node) {0xa0000001,0x60000002};
+  book->defs[0x00032b68]->node[ 1] = (Node) {0x10cada1d,0xa0000002};
+  book->defs[0x00032b68]->node[ 2] = (Node) {0x10000024,0x60000000};
   // not
   book->defs[0x00032cf8]           = (Term*) malloc(sizeof(Term));
   book->defs[0x00032cf8]->root     = 0xa0000000;
@@ -3014,7 +3002,6 @@ __host__ void populate(Book* book) {
   book->defs[0x00032cf8]->node[ 2] = (Node) {0x50000003,0x60000004};
   book->defs[0x00032cf8]->node[ 3] = (Node) {0x50000002,0xa0000004};
   book->defs[0x00032cf8]->node[ 4] = (Node) {0x50000001,0x60000002};
-  book->defs[0x00032cf8]->locs     = (u32*) malloc(5 * sizeof(u32));
   // run
   book->defs[0x00036e72]           = (Term*) malloc(sizeof(Term));
   book->defs[0x00036e72]->root     = 0xa0000000;
@@ -3026,7 +3013,6 @@ __host__ void populate(Book* book) {
   book->defs[0x00036e72]->node[ 1] = (Node) {0x10db9c99,0xa0000002};
   book->defs[0x00036e72]->node[ 2] = (Node) {0x10db9c93,0xa0000003};
   book->defs[0x00036e72]->node[ 3] = (Node) {0x1000000f,0x60000000};
-  book->defs[0x00036e72]->locs     = (u32*) malloc(4 * sizeof(u32));
   // decI
   book->defs[0x00a299d3]           = (Term*) malloc(sizeof(Term));
   book->defs[0x00a299d3]->root     = 0xa0000000;
@@ -3037,7 +3023,6 @@ __host__ void populate(Book* book) {
   book->defs[0x00a299d3]->node     = (Node*) malloc(2 * sizeof(Node));
   book->defs[0x00a299d3]->node[ 0] = (Node) {0x50000001,0x60000001};
   book->defs[0x00a299d3]->node[ 1] = (Node) {0x50000000,0x60000000};
-  book->defs[0x00a299d3]->locs     = (u32*) malloc(2 * sizeof(u32));
   // decO
   book->defs[0x00a299d9]           = (Term*) malloc(sizeof(Term));
   book->defs[0x00a299d9]->root     = 0xa0000000;
@@ -3050,7 +3035,6 @@ __host__ void populate(Book* book) {
   book->defs[0x00a299d9]->node[ 0] = (Node) {0x50000002,0x60000001};
   book->defs[0x00a299d9]->node[ 1] = (Node) {0x60000002,0x60000000};
   book->defs[0x00a299d9]->node[ 2] = (Node) {0x50000000,0x50000001};
-  book->defs[0x00a299d9]->locs     = (u32*) malloc(3 * sizeof(u32));
   // lowI
   book->defs[0x00c33ed3]           = (Term*) malloc(sizeof(Term));
   book->defs[0x00c33ed3]->root     = 0xa0000000;
@@ -3063,7 +3047,6 @@ __host__ void populate(Book* book) {
   book->defs[0x00c33ed3]->node[ 0] = (Node) {0x50000001,0x60000002};
   book->defs[0x00c33ed3]->node[ 1] = (Node) {0x50000000,0x50000002};
   book->defs[0x00c33ed3]->node[ 2] = (Node) {0x60000001,0x60000000};
-  book->defs[0x00c33ed3]->locs     = (u32*) malloc(3 * sizeof(u32));
   // lowO
   book->defs[0x00c33ed9]           = (Term*) malloc(sizeof(Term));
   book->defs[0x00c33ed9]->root     = 0xa0000000;
@@ -3076,7 +3059,6 @@ __host__ void populate(Book* book) {
   book->defs[0x00c33ed9]->node[ 0] = (Node) {0x50000001,0x60000002};
   book->defs[0x00c33ed9]->node[ 1] = (Node) {0x50000000,0x50000002};
   book->defs[0x00c33ed9]->node[ 2] = (Node) {0x60000001,0x60000000};
-  book->defs[0x00c33ed9]->locs     = (u32*) malloc(3 * sizeof(u32));
   // main
   book->defs[0x00c65b72]           = (Term*) malloc(sizeof(Term));
   book->defs[0x00c65b72]->root     = 0x60000000;
@@ -3086,7 +3068,18 @@ __host__ void populate(Book* book) {
   book->defs[0x00c65b72]->nlen     = 1;
   book->defs[0x00c65b72]->node     = (Node*) malloc(1 * sizeof(Node));
   book->defs[0x00c65b72]->node[ 0] = (Node) {0x10000bc4,0x40000000};
-  book->defs[0x00c65b72]->locs     = (u32*) malloc(1 * sizeof(u32));
+  // nidS
+  book->defs[0x00cada1d]           = (Term*) malloc(sizeof(Term));
+  book->defs[0x00cada1d]->root     = 0xa0000000;
+  book->defs[0x00cada1d]->alen     = 2;
+  book->defs[0x00cada1d]->acts     = (Wire*) malloc(2 * sizeof(Wire));
+  book->defs[0x00cada1d]->acts[ 0] = (Wire) {0x1000001d,0xa0000001};
+  book->defs[0x00cada1d]->acts[ 1] = (Wire) {0x10032b68,0xa0000002};
+  book->defs[0x00cada1d]->nlen     = 3;
+  book->defs[0x00cada1d]->node     = (Node*) malloc(3 * sizeof(Node));
+  book->defs[0x00cada1d]->node[ 0] = (Node) {0x50000002,0x60000001};
+  book->defs[0x00cada1d]->node[ 1] = (Node) {0x60000002,0x60000000};
+  book->defs[0x00cada1d]->node[ 2] = (Node) {0x50000000,0x50000001};
   // runI
   book->defs[0x00db9c93]           = (Term*) malloc(sizeof(Term));
   book->defs[0x00db9c93]->root     = 0xa0000000;
@@ -3101,7 +3094,6 @@ __host__ void populate(Book* book) {
   book->defs[0x00db9c93]->node[ 1] = (Node) {0x60000002,0x60000000};
   book->defs[0x00db9c93]->node[ 2] = (Node) {0x60000003,0x50000001};
   book->defs[0x00db9c93]->node[ 3] = (Node) {0x50000000,0x50000002};
-  book->defs[0x00db9c93]->locs     = (u32*) malloc(4 * sizeof(u32));
   // runO
   book->defs[0x00db9c99]           = (Term*) malloc(sizeof(Term));
   book->defs[0x00db9c99]->root     = 0xa0000000;
@@ -3116,7 +3108,6 @@ __host__ void populate(Book* book) {
   book->defs[0x00db9c99]->node[ 1] = (Node) {0x60000002,0x60000000};
   book->defs[0x00db9c99]->node[ 2] = (Node) {0x60000003,0x50000001};
   book->defs[0x00db9c99]->node[ 3] = (Node) {0x50000000,0x50000002};
-  book->defs[0x00db9c99]->locs     = (u32*) malloc(4 * sizeof(u32));
   // test
   book->defs[0x00e29df8]           = (Term*) malloc(sizeof(Term));
   book->defs[0x00e29df8]->root     = 0x6000001b;
@@ -3154,7 +3145,6 @@ __host__ void populate(Book* book) {
   book->defs[0x00e29df8]->node[26] = (Node) {0x6000001a,0x5000001a};
   book->defs[0x00e29df8]->node[27] = (Node) {0xa000001c,0x40000000};
   book->defs[0x00e29df8]->node[28] = (Node) {0x6000001c,0x5000001c};
-  book->defs[0x00e29df8]->locs     = (u32*) malloc(29 * sizeof(u32));
 }
 
 __host__ void boot(Net* net, Book* book, u32 id) {
@@ -3632,10 +3622,9 @@ int main() {
   // Allocates the initial book on device
   Book* h_book = mkbook();
   populate(h_book);
-  printf("ptr at 9C6 is: %llu\n", h_book->defs[0x9C6]);
 
   // Boots the net with an initial term
-  boot(h_net, h_book, 0x00c65b72); // main
+  boot(h_net, h_book, 0x00029f03);
 
   // Prints the initial net
   printf("\n");
@@ -3648,7 +3637,12 @@ int main() {
 
   // Sends the book from host to device
   Book* d_book = book_to_device(h_book);
-  //Book* H_book = book_to_host(d_book);
+  Book* H_book = book_to_host(d_book);
+
+  // FIXME: seems like this isn't working properly...?
+  //printf(">>> %p %p\n", h_book->defs[0x9c2], H_book->defs[0x9c2]);
+  //printf(">>> %p %p\n", h_book->defs[0x36E72], H_book->defs[0x36E72]);
+  //return;
 
   // Performs parallel reductions
   printf("\n");
