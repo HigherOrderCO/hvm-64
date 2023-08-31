@@ -16,6 +16,7 @@ use std::collections::HashMap;
 
 pub type Tag = u8;
 pub type Val = u32;
+pub type Col = u16;
 
 pub const NIL: Tag = 0x0; // empty node
 pub const REF: Tag = 0x1; // reference to a definition (closed net)
@@ -46,13 +47,14 @@ pub struct Ptr {
 // A node is just a pair of two delta pointers. It uses 64 bits.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Node {
+  pub cl: Col,
   pub p1: Ptr,
   pub p2: Ptr,
 }
 
 // A net has:
 // - root: a single free wire, used as the entrancy point.
-// - acts: a vector of active wires, updated automatically.
+// - acts: a vector of redexes, updated automatically.
 // - node: a vector of nodes, with main ports omitted.
 // - used: total nodes currently allocated on the graph.
 // - rwts: total graph rewrites performed inside this net.
@@ -100,6 +102,7 @@ impl Node {
   #[inline(always)]
   pub fn nil() -> Self {
     Node {
+      cl: 1,
       p1: Ptr::new(NIL, 0),
       p2: Ptr::new(NIL, 0),
     }
@@ -132,7 +135,7 @@ impl Net {
   // Creates a net and boots from a REF.
   pub fn init(size: usize, book: &Book, ref_id: u32) -> Self {
     let mut net = Net::new(size);
-    net.boot(book, ref_id);
+    net.root = Ptr::new(REF, ref_id);
     return net;
   }
 
@@ -165,6 +168,22 @@ impl Net {
     self.node[val as usize] = Node::nil();
   }
 
+  // Gets the color of a node
+  #[inline(always)]
+  pub fn col(&self, val: Val) -> Col {
+    return unsafe { self.node.get_unchecked(val as usize) }.cl;
+  }
+
+  // Gets a reference to the port 1 or 2 of a node.
+  #[inline(always)]
+  pub fn get_mut(&mut self, val: Val, port: Port) -> &mut Ptr {
+    let node = unsafe { self.node.get_unchecked_mut(val as usize) };
+    match port {
+      Port::P1 => &mut node.p1,
+      Port::P2 => &mut node.p2,
+    }
+  }
+
   // Gets the pointer stored on the port 1 or 2 of a node.
   #[inline(always)]
   pub fn get(&self, val: Val, port: Port) -> Ptr {
@@ -187,7 +206,7 @@ impl Net {
 
   // Links two pointers, forming a new wire.
   // - If one of the pointers is a variable, it will move the other value.
-  // - Otherwise, this is an active pair, so we add it to 'acts'.
+  // - Otherwise, this is an redexes, so we add it to 'acts'.
   #[inline(always)]
   pub fn link(&mut self, a: Ptr, b: Ptr) {
     let a_tag = a.tag();
@@ -216,43 +235,26 @@ impl Net {
     }
   }
 
-  // Reduces all active wires at the same time.
-  pub fn reduce(&mut self, book: &Book) {
-    let acts = std::mem::replace(&mut self.acts, vec![]);
-    // This loop can be parallelized!
-    for (mut a, mut b) in acts {
-      self.interact(book, &mut a, &mut b);
-    }
-  }
-
-  // Reduces a net to full normal form.
-  pub fn normal(&mut self, book: &Book) -> usize {
-    let mut loops = 0;
-    while self.acts.len() > 0 {
-      println!("rewrite: {}", self.acts.len());
-      self.reduce(book);
-      loops = loops + 1;
-    }
-    return loops;
-  }
-
-  // Performs an interaction over an active wire.
+  // Performs an interaction over a redex.
   #[inline(always)]
   pub fn interact(&mut self, book: &Book, a: &mut Ptr, b: &mut Ptr) {
     // Dereference
     if a.tag() == REF && b.tag() != ERA {
-      self.load_ref(book, a);
+      *a = self.deref(book, *a);
     }
     if a.tag() != ERA && b.tag() == REF {
-      self.load_ref(book, b);
+      *b = self.deref(book, *b);
     }
     // Incs rewrites
     self.rwts += 1;
     // Gets tag
     let a_tag = a.tag();
     let b_tag = b.tag();
+    // Variable
+    if a_tag >= VRR && a_tag <= VR2 || b_tag >= VRR && b_tag <= VR2 {
+      self.link(*a, *b);
     // Annihilation
-    if a_tag >= CON && b_tag >= CON && a_tag == b_tag {
+    } else if a_tag >= CON && b_tag >= CON && a_tag == b_tag {
       let a1 = self.get(a.val(), Port::P1);
       let b1 = self.get(b.val(), Port::P1);
       self.link(a1, b1);
@@ -294,9 +296,55 @@ impl Net {
     }
   }
 
+  // Reduces all redexes at the same time.
+  pub fn reduce(&mut self, book: &Book) -> usize {
+    let rwts = self.acts.len();
+    let acts = std::mem::replace(&mut self.acts, vec![]);
+    // This loop can be parallelized!
+    for (mut a, mut b) in acts {
+      self.interact(book, &mut a, &mut b);
+    }
+    return rwts;
+  }
+
+  // Reduces all redexes, until there is none.
+  pub fn reduce_all(&mut self, book: &Book) -> usize {
+    let mut loops = 0;
+    while self.acts.len() > 0 {
+      //println!("rewrite: {}", self.acts.len());
+      loops = loops + 1;
+      self.reduce(book);
+    }
+    return loops;
+  }
+
+  // Reduces a term to normal form, expanding references.
+  pub fn normal(&mut self, book: &Book) {
+    self.reduce_all(book);
+    let mut stack = vec![Ptr::new(VRR,0)];
+    while let Some(loc) = stack.pop() {
+      let trg = match loc.tag() {
+        VRR => self.root,
+        VR1 => self.get(loc.val(), Port::P1),
+        VR2 => self.get(loc.val(), Port::P2),
+        _   => panic!(),
+      };
+      if trg.tag() >= CON {
+        stack.push(Ptr::new(VR1, trg.val()));
+        stack.push(Ptr::new(VR2, trg.val()));
+      } else if trg.tag() == REF {
+        let res = self.deref(book, trg);
+        self.link(res, loc);
+        self.reduce_all(book);
+        stack.push(loc);
+      }
+    }
+  }
+
   // Expands a REF into its definition (a closed net).
   #[inline(always)]
-  pub fn load_ref(&mut self, book: &Book, ptr: &mut Ptr) {
+  pub fn deref(&mut self, book: &Book, ptr: Ptr) -> Ptr {
+    let mut ptr = ptr;
     // White ptr is still a REF...
     while ptr.tag() == REF {
       // Loads the referenced definition...
@@ -313,25 +361,23 @@ impl Net {
             *self.node.get_unchecked_mut(val as usize + i) = node;
           };
         }
-        // Loads active wires, adjusting locations...
+        // Loads redexes, adjusting locations...
         for got in &got.acts {
-          let mut node = Node { p1: got.0, p2: got.1 };
+          let mut node = Node {
+            cl: 1,
+            p1: got.0,
+            p2: got.1,
+          };
           node.p1.mov(val);
           node.p2.mov(val);
           self.acts.push((node.p1, node.p2));
         }
         // Overwrites 'ptr' with the loaded root pointer, adjusting locations...
-        *ptr = got.root;
+        ptr = got.root;
         ptr.mov(val);
       }
     }
-  }
-
-  // Initializes the net by loading a specific REF
-  pub fn boot(&mut self, book: &Book, ref_id: u32) {
-    let mut root = Ptr::new(REF, ref_id);
-    self.load_ref(&book, &mut root);
-    self.root = root;
+    return ptr;
   }
 
 }

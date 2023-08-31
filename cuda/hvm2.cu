@@ -18,11 +18,12 @@ const u32 BLOCK_LOG2    = 8;                                     // log2 of bloc
 const u32 BLOCK_SIZE    = 1 << BLOCK_LOG2;                       // threads per block
 const u32 UNIT_SIZE     = 4;                                     // threads per rewrite unit
 const u32 NODE_SIZE     = 1 << 28;                               // max total nodes (2GB addressable)
-const u32 TERM_MAX_SIZE = 32;                                    // max number of nodes in a term
 const u32 BAGS_SIZE     = BLOCK_SIZE * BLOCK_SIZE * BLOCK_SIZE;  // size of global redex bag
 const u32 GROUP_SIZE    = BLOCK_SIZE * BLOCK_SIZE;               // size os a group of bags
 const u32 GIDX_SIZE     = BAGS_SIZE + GROUP_SIZE + BLOCK_SIZE;   // aux object to hold scatter indices
 const u32 GMOV_SIZE     = BAGS_SIZE;                             // aux object to hold scatter indices
+const u32 REPEAT_RATE   = 256;                                   // local rewrites per global rewrite
+const u32 MAX_TERM_SIZE = 16;                                    // max number of nodes in a term
 
 // Types
 // -----
@@ -101,7 +102,6 @@ typedef struct {
   Node* node; // memory buffer with all nodes
   u32*  gidx; // aux buffer used on scatter fns
   Wire* gmov; // aux buffer used on scatter fns
-  u32   pbks; // last blocks count used
   u32   done; // number of completed threads
   u32   rwts; // number of rewrites performed
 } Net;
@@ -172,6 +172,11 @@ __host__ __device__ inline bool is_var(Ptr ptr) {
   return tag(ptr) >= VRR && tag(ptr) <= VR2;
 }
 
+// Is this pointer a redirection?
+__host__ __device__ inline bool is_red(Ptr ptr) {
+  return tag(ptr) >= RDR && tag(ptr) <= RD2;
+}
+
 // Is this pointer a constructor?
 __host__ __device__ inline bool is_ctr(Ptr ptr) {
   return tag(ptr) >= CON && tag(ptr) <= QUI;
@@ -185,6 +190,11 @@ __host__ __device__ inline bool is_era(Ptr ptr) {
 // Is this pointer a reference?
 __host__ __device__ inline bool is_ref(Ptr ptr) {
   return tag(ptr) == REF;
+}
+
+// Is this pointer a main port?
+__host__ __device__ inline bool is_nod(Ptr ptr) {
+  return is_ctr(ptr) || is_era(ptr) || is_ref(ptr);
 }
 
 // Gets the target ref of a var or redirection pointer
@@ -201,14 +211,12 @@ __host__ __device__ inline Ptr* target(Net* net, Ptr ptr) {
 }
 
 // Traverses to the other side of a wire
-__host__ __device__ Ptr enter(Net* net, Ptr ptr) {
-  ptr = *target(net, ptr);
-  u32 K = 0;
-  while (tag(ptr) >= RDR && tag(ptr) <= RD2) {
-    //dbug(&K, "enter");
-    ptr = *target(net, ptr);
+__host__ __device__ Ptr* enter(Net* net, Ptr ptr) {
+  Ptr* ref = target(net, ptr);
+  while (tag(*ref) >= RDR && tag(*ref) <= RD2) {
+    ref = target(net, *ref);
   }
-  return ptr;
+  return ref;
 }
 
 // Transforms a variable into a redirection
@@ -237,21 +245,14 @@ __device__ inline Ptr* at(Net* net, Val idx, Port port) {
 // Allocates a new node in memory
 __device__ inline u32 alloc(Worker *worker, Net *net) {
   u32 K = 0;
-  //u32 fail = 0;
   while (true) {
-    //dbug(&K, "alloc");
     u32  idx = (worker->aloc * 4 + worker->frac) % NODE_SIZE;
     a64* ref = &((a64*)net->node)[idx];
     u64  got = atomicCAS(ref, 0, ((u64)NEO << 32) | ((u64)NEO)); // Wire{NEO,NEO}
     if (got == 0) {
-      //printf("[%04X] alloc at %d\n", worker->gid, idx);
       return idx;
     } else {
-      //worker->aloc = ++fail % 16 == 0 ? rng(worker->aloc) : worker->aloc + 1;
       worker->aloc = (worker->aloc + 1) % NODE_SIZE;
-      //if (++fail > 256) {
-        //printf("[%04X] can't alloc\n", worker->gid);
-      //}
     }
   }
 }
@@ -300,7 +301,7 @@ __device__ void link(Worker* worker, Net* net, Ptr* nod_ref, Ptr dir_ptr) {
     Ptr  trg_ptr = atomicAdd(trg_ref, 0);
 
     // If trg_ptr is a redirection, clear it
-    if (tag(trg_ptr) >= RDR && tag(trg_ptr) <= RD2) {
+    if (is_red(trg_ptr)) {
       //printf("[%04X] redir\n", worker->gid);
       u32 cleared = atomicCAS((u32*)trg_ref, trg_ptr, 0);
       if (cleared == trg_ptr) {
@@ -310,7 +311,7 @@ __device__ void link(Worker* worker, Net* net, Ptr* nod_ref, Ptr dir_ptr) {
     }
 
     // If trg_ptr is a var, try replacing it by the node
-    else if (tag(trg_ptr) >= VRR && tag(trg_ptr) <= VR2) {
+    else if (is_var(trg_ptr)) {
       //printf("[%04X] var\n", worker->gid);
       // Peeks our own node
       Ptr nod_ptr = atomicAdd((u32*)nod_ref, 0);
@@ -341,7 +342,7 @@ __device__ void link(Worker* worker, Net* net, Ptr* nod_ref, Ptr dir_ptr) {
 
     // If it is a node, two threads will reach this branch
     // The first to arrive makes a redex, the second exits
-    else if (is_ctr(trg_ptr) || is_era(trg_ptr) || is_ref(trg_ptr) || trg_ptr == GON) {
+    else if (is_nod(trg_ptr) || trg_ptr == GON) {
       //printf("[%04X] leap %8X - %8X\n", worker->gid, *fst_ref, *snd_ref);
       Ptr *fst_ref = nod_ref < trg_ref ? nod_ref : trg_ref;
       Ptr *snd_ref = nod_ref < trg_ref ? trg_ref : nod_ref;
@@ -525,13 +526,30 @@ __global__ void global_scatter_cleanup(Net* net) {
 __host__ Net* net_to_host(Net* device_net);
 
 // Performs a global scatter
-void do_global_scatter(Net* net, u32 prev_blocks, u32 next_blocks) {
+u32 do_global_scatter(Net* net, u32 prev_blocks) {
+  u32 bag_length, next_blocks;
+
+  if (prev_blocks == -1) {
+    prev_blocks = BLOCK_SIZE;
+  }
+
+  // Prepares scatter
   global_scatter_prepare_0<<<prev_blocks, BLOCK_SIZE>>>(net);
   global_scatter_prepare_1<<<div(prev_blocks, BLOCK_SIZE), BLOCK_SIZE>>>(net);
   global_scatter_prepare_2<<<div(prev_blocks, BLOCK_SIZE * BLOCK_SIZE), BLOCK_SIZE>>>(net); // always == 1
+
+  // Gets bag length
+  cudaMemcpy(&bag_length, &(net->blen), sizeof(u32), cudaMemcpyDeviceToHost);
+
+  // Computes next block count
+  next_blocks = min(div(bag_length, BLOCK_SIZE / 8), BLOCK_SIZE * BLOCK_SIZE);
+
+  // Performs the scatter
   global_scatter_take<<<prev_blocks, BLOCK_SIZE>>>(net, next_blocks);
   global_scatter_move<<<prev_blocks, BLOCK_SIZE>>>(net, next_blocks);
   global_scatter_cleanup<<<prev_blocks, BLOCK_SIZE>>>(net);
+
+  return next_blocks;
 }
 
 // Interactions
@@ -542,7 +560,13 @@ __device__ Ptr adjust(Worker* worker, Ptr ptr, u32* locs) {
   return mkptr(tag(ptr), tag(ptr) >= VR1 ? locs[val(ptr)] : val(ptr));
 }
 
-__device__ void deref(Net* net, Worker* worker, Term* term, Ptr* dref, u32* locs) {
+__device__ bool deref(Worker* worker, Net* net, Book* book, Ptr* dptr, u32* locs) {
+  // Loads definition
+  Term* term = NULL;
+  if (dptr != NULL) {
+    term = book->defs[val(*dptr)];
+  }
+
   // Allocates needed space
   if (term != NULL) {
     //printf("[%04X] deref: %x\n", worker->gid, val(*dref));
@@ -581,9 +605,11 @@ __device__ void deref(Net* net, Worker* worker, Term* term, Ptr* dref, u32* locs
   // Loads dereferenced root, adjusted
   if (term != NULL) {
     //printf("[%04X] deref D\n", worker->gid);
-    *dref = adjust(worker, term->root, locs);
+    *dptr = adjust(worker, term->root, locs);
   }
   __syncwarp();
+
+  return term != NULL && term->alen > 0;
 }
 
 // An active wire is reduced by 4 parallel threads, each one performing "1/4" of
@@ -596,10 +622,8 @@ __device__ void deref(Net* net, Worker* worker, Term* term, Ptr* dref, u32* locs
 // This is organized so that local threads can perform the same instructions
 // whenever possible. So, for example, in a commutation rule, all the 4 clones
 // would be allocated at the same time.
-__global__ void global_rewrite(Net* net, Book* book, u32 blocks, u32 tick) {
-  __shared__ u32 LOCS[BLOCK_SIZE / UNIT_SIZE * TERM_MAX_SIZE]; // aux arr for deref locs
-
-  //printf("ue %d tick=%d\n", threadIdx.x, tick);
+__global__ void global_rewrite(Net* net, Book* book, u32 blocks) {
+  __shared__ u32 LOCS[BLOCK_SIZE / UNIT_SIZE * MAX_TERM_SIZE]; // aux arr for deref locs
 
   // Initializes local vars
   Worker worker;
@@ -611,60 +635,54 @@ __global__ void global_rewrite(Net* net, Book* book, u32 blocks, u32 tick) {
   worker.frac = worker.tid % 4;
   worker.port = worker.tid % 2;
   worker.bag  = (net->bags + worker.gid / UNIT_SIZE * UNIT_SIZE);
-  worker.locs = LOCS + worker.tid / UNIT_SIZE * TERM_MAX_SIZE;
-
-  //printf("[%04X] %d init\n", worker.gid, tick);
+  worker.locs = LOCS + worker.tid / UNIT_SIZE * MAX_TERM_SIZE;
 
   // Scatters redexes
-  for (u32 repeat = 0; repeat < 1; ++repeat) {
+  for (u32 tick = 0; tick < REPEAT_RATE; ++tick) {
+
+    // Performs local scatter
     local_scatter(net);
 
-    // Gets the active wire
-    Wire wire = Wire{0,0};
-    u32  widx = 0;
-    u32  wlen = 0;
-    for (u32 r = 0; r < 4; ++r) {
-      if (worker.bag[r].lft > 0) {
-        wire = worker.bag[r];
-        widx = r;
+    // Counts unit redexes
+    u32 wlen = 0;
+    u32 widx = 0;
+    for (u32 i = 0; i < 4; ++i) {
+      if (worker.bag[i].lft != 0) {
         wlen += 1;
+        widx = i;
       }
     }
+
+    // Gets unit redex
+    Wire wire = wlen == 1 ? worker.bag[widx] : Wire{0,0};
     __syncwarp();
-    if (wlen == 1) {
-      worker.bag[widx] = (Wire){0,0};
+
+    // Clears unit redex
+    if (wlen == 1 && worker.frac == widx) {
+      worker.bag[widx] = Wire{0,0};
     }
 
-    //printf("[%04X] got %8X %8X\n", worker.gid, wire.lft, wire.rgt);
-
-    // Reads redex ptrs
+    // Gets redex endpoints
     worker.a_ptr = worker.frac <= A2 ? wire.lft : wire.rgt;
     worker.b_ptr = worker.frac <= A2 ? wire.rgt : wire.lft;
 
     // Dereferences
-    Ptr*  dptr = NULL;
-    Term* term = NULL;
-    if (is_ref(worker.a_ptr) && !is_era(worker.b_ptr)) {
+    Ptr* dptr = NULL;
+    if (is_ref(worker.a_ptr) && is_ctr(worker.b_ptr)) {
       dptr = &worker.a_ptr;
-      term = book->defs[val(worker.a_ptr)];
     }
-    if (is_ref(worker.b_ptr) && !is_era(worker.a_ptr)) {
+    if (is_ref(worker.b_ptr) && is_ctr(worker.a_ptr)) {
       dptr = &worker.b_ptr;
-      term = book->defs[val(worker.b_ptr)];
     }
-    deref(net, &worker, term, dptr, worker.locs);
-
-    //printf("[%04X] C\n", worker.gid);
+    bool is_full = deref(&worker, net, book, dptr, worker.locs);
 
     // Defines type of interaction
-    bool is_full = term != NULL && term->alen > 0;
-    bool rewrite = !is_full && wlen == 1;
+    bool rewrite = !is_full && worker.a_ptr != 0 && worker.b_ptr != 0;
+    bool var_nod = rewrite && is_var(worker.a_ptr) && is_nod(worker.b_ptr) && worker.frac == A1;
     bool era_ctr = rewrite && is_era(worker.a_ptr) && is_ctr(worker.b_ptr);
     bool ctr_era = rewrite && is_ctr(worker.a_ptr) && is_era(worker.b_ptr);
     bool con_con = rewrite && is_ctr(worker.a_ptr) && is_ctr(worker.b_ptr) && tag(worker.a_ptr) == tag(worker.b_ptr);
     bool con_dup = rewrite && is_ctr(worker.a_ptr) && is_ctr(worker.b_ptr) && tag(worker.a_ptr) != tag(worker.b_ptr);
-
-    //printf("[%04X] D\n", worker.gid);
 
     //if ((is_full || rewrite) && worker.frac == A1) {
       //printf("[%04X] %d redex? | rewrite=%d is_full=%d era_ctr=%d ctr_era=%d con_con=%d con_dup=%d | %08X %08X\n", worker.gid, tick, rewrite, is_full, era_ctr, ctr_era, con_con, con_dup, worker.a_ptr, worker.b_ptr);
@@ -672,7 +690,6 @@ __global__ void global_rewrite(Net* net, Book* book, u32 blocks, u32 tick) {
 
     // If is_full, put this redex back
     if (is_full && worker.frac == B2) {
-      //printf("[%4X] putback %08X %08X\n", worker.gid, worker.a_ptr, worker.b_ptr);
       put_redex(&worker, worker.a_ptr, worker.b_ptr);
     }
 
@@ -684,21 +701,10 @@ __global__ void global_rewrite(Net* net, Book* book, u32 blocks, u32 tick) {
     Ptr  xk_ptr; // val of ptr to send to other side
     u32  y0_idx; // idx of other clone idx
 
-    //if (worker.gid < 32) {
-      //printf("[%04X] A\n", worker.gid);
-    //}
-
     // Inc rewrite count
     if (rewrite && worker.frac == A1) {
       worker.rwts += 1;
-      //if (!(era_ctr || ctr_era || con_con || con_dup)) {
-        //printf("[%04X] %d %d %d %d %d %d | %08X %08X\n", worker.gid, is_full, rewrite, era_ctr, ctr_era, con_con, con_dup, worker.a_ptr, worker.b_ptr);
-      //}
     }
-
-    //if (worker.gid < 32) {
-      //printf("[%04X] B\n", worker.gid);
-    //}
 
     // Gets port here
     if (rewrite && (ctr_era || con_con || con_dup)) {
@@ -742,6 +748,11 @@ __global__ void global_rewrite(Net* net, Book* book, u32 blocks, u32 tick) {
       replace(bk_ref, BSY, xk_ptr);
     }
 
+    // If var_nod, the var is a deref root, so we just inject the node
+    if (rewrite && var_nod) {
+      atomicExch((u32*)target(net, worker.a_ptr), worker.b_ptr);
+    }
+
     // If con_con and we sent a NOD, link the node there, towards our port
     // If ctr_era and we have a VAR, link the eraser here, towards that var
     // If con_dup and we have a VAR, link the clone here, towards that var
@@ -761,70 +772,94 @@ __global__ void global_rewrite(Net* net, Book* book, u32 blocks, u32 tick) {
       link(&worker, net, node, targ);
     }
 
-    //if (ref0 || ref1) {
-      //printf("[%04X] E2 %d %d\n", worker.gid, work, (con_dup && !is_var(ak_ptr)));
-    //}
-
+    // If ctr_era and we have a NOD, form an active pair with the eraser we got
     // If con_dup and we have a NOD, form an active pair with the clone we got
-    if (rewrite && (con_dup && !is_var(ak_ptr))) {
-      //printf("[%4X] putdups %08X %08X\n", worker.gid, worker.a_ptr, worker.b_ptr);
+    if (rewrite && ((ctr_era && !is_var(ak_ptr)) || (con_dup && !is_var(ak_ptr)))) {
+      //printf("[%4X] ~ %8X %8X\n", worker.gid, ak_ptr, *ak_ref);
       put_redex(&worker, ak_ptr, take(ak_ref));
       atomicCAS((u32*)ak_ref, BSY, 0);
     }
     __syncwarp();
 
-
-    //printf("[%04X] loop end\n", worker.gid);
   }
-
-  //local_scatter(net);
 
   // When the work ends, sum stats
   if (worker.rwts > 0 && worker.frac == A1) {
     atomicAdd(&net->rwts, worker.rwts);
   }
-
-  //printf("[%04X] %d done\n", worker.gid, tick);
-
-  //printf("[%04X] done\n", worker.gid);
 }
 
-void do_global_rewrite(Net* net, Book* book, u32 blocks, u32 tick) {
-  global_rewrite<<<blocks, BLOCK_SIZE>>>(net, book, blocks, tick);
+void do_global_rewrite(Net* net, Book* book, u32 blocks) {
+  global_rewrite<<<blocks, BLOCK_SIZE>>>(net, book, blocks);
+}
+
+// Expand
+// ------
+
+// Performs a parallel expansion of tip references.
+// FIXME: currently HARDCODED for perfect binary trees; must improve
+__global__ void global_expand(Net* net, Book* book, u32 depth) {
+  __shared__ u32 LOCS[BLOCK_SIZE / UNIT_SIZE * MAX_TERM_SIZE];
+  // Initializes local vars
+  Worker worker;
+  worker.tid  = threadIdx.x;
+  worker.bid  = blockIdx.x;
+  worker.gid  = worker.bid * blockDim.x + worker.tid;
+  worker.aloc = rng(clock() * (worker.gid + 1));
+  worker.rwts = 0;
+  worker.frac = worker.tid % 4;
+  worker.port = worker.tid % 2;
+  worker.bag  = (net->bags + worker.gid / UNIT_SIZE * UNIT_SIZE);
+  worker.locs = LOCS + worker.tid / UNIT_SIZE * MAX_TERM_SIZE;
+  u32 div = 1 << (depth - 1);
+  u32 uni = worker.gid / UNIT_SIZE;
+  u32 key = worker.gid / UNIT_SIZE;
+  Ptr dir = mkptr(VRR, 0);
+  for (u32 d = 0; d < depth; ++d) {
+    Ptr* ref = target(net, dir);
+    if (is_ctr(*ref)) {
+      dir = mkptr(key < div ? VR2 : VR1, val(*ref));
+      key = key & (~div);
+      div = div >> 1;
+    }
+  }
+  Ptr* ref = target(net, dir);
+  if (is_ref(*ref)) {
+    //if (worker.frac == A1) {
+      //printf("[%4X] expand %08X at dir=%08X\n", worker.gid, *ref, dir);
+    //}
+    deref(&worker, net, book, ref, worker.locs);
+    if (is_var(*ref)) { // FIXME: can be simplified?
+      atomicExch(target(net, *ref), dir);
+      //printf("[%4X] linking\n", worker.gid);
+    }
+  }
+}
+
+void do_global_expand(Net* net, Book* book, u32 depth) {
+  u32 block_size = UNIT_SIZE * (1 << depth);
+  u32 block_numb = 1;
+  while (block_size > 256) {
+    block_size = block_size / 2;
+    block_numb = block_numb * 2;
+  }
+  global_expand<<<block_numb, block_size>>>(net, book, depth);
 }
 
 // Reduce
 // ------
 
 // Performs a global rewrite step.
-u32 do_reduce(Net* net, Book* book, u32 tick) {
-  // Gets the total number of redexes
-  u32 bag_length;
-  u32 prev_blocks;
-  cudaMemcpy(&bag_length, &(net->blen), sizeof(u32), cudaMemcpyDeviceToHost);
-  cudaMemcpy(&prev_blocks, &(net->pbks), sizeof(u32), cudaMemcpyDeviceToHost);
-
-  // Blocks get stuck when they're 1/4 full.
-  // We give them room to grow 2x before that.
-  u32 next_blocks = div(bag_length, BLOCK_SIZE / 8);
-  if (next_blocks > BLOCK_SIZE * BLOCK_SIZE) {
-    next_blocks = BLOCK_SIZE * BLOCK_SIZE;
-  }
+u32 do_reduce(Net* net, Book* book, u32* blocks) {
+  // Scatters redexes evenly
+  *blocks = do_global_scatter(net, *blocks);
 
   // Prints debug message
-  printf(">> [%04X] reducing %d redexes with %d blocks\n", tick, bag_length, next_blocks);
+  printf(">> reducing with %d blocks\n", *blocks);
 
-  // Stores next_blocks on net.pbks
-  cudaMemcpy(&(net->pbks), &next_blocks, sizeof(u32), cudaMemcpyHostToDevice);
-
-  if (next_blocks > 0) {
-    // Performs global parallel rewrite
-    do_global_rewrite(net, book, next_blocks, tick);
-  }
-
-  if (prev_blocks > 0) {
-    // Scatters redexes evenly
-    do_global_scatter(net, prev_blocks, next_blocks);
+  // Performs global parallel rewrite
+  if (*blocks > 0) {
+    do_global_rewrite(net, book, *blocks);
   }
 
   // synchronize and show errors using cudaGetLastError
@@ -834,12 +869,13 @@ u32 do_reduce(Net* net, Book* book, u32 tick) {
     printf("CUDA error: %s\n", cudaGetErrorString(error));
   }
 
-  return bag_length;
+  return *blocks;
 }
 
-void do_normalize(Net* net, Book* book) {
-  u32 tick = 0;
-  while (do_reduce(net, book, tick) != 0 && ++tick < 500) {};
+void do_reduce_all(Net* net, Book* book) {
+  printf(">> reduce_all\n");
+  u32 blocks = -1;
+  while (do_reduce(net, book, &blocks) != 0) {};
 }
 
 // Host<->Device
@@ -849,7 +885,6 @@ __host__ Net* mknet() {
   Net* net  = (Net*)malloc(sizeof(Net));
   net->root = mkptr(NIL, 0);
   net->rwts = 0;
-  net->pbks = 0;
   net->done = 0;
   net->blen = 0;
   net->bags = (Wire*)malloc(BAGS_SIZE * sizeof(Wire));
@@ -1161,12 +1196,14 @@ __host__ void print_tree_go(Net* net, Ptr ptr, Map* var_ids) {
     u32 got = map_lookup(var_ids, ptr);
     if (got == var_ids->size) {
       u32 name = var_ids->size;
-      Ptr targ = enter(net, ptr);
+      Ptr targ = *enter(net, ptr);
       map_insert(var_ids, targ, name);
       printf("x%d", name);
     } else {
       printf("x%d", got);
     }
+  } else if (is_ref(ptr)) {
+    printf("{%x}", val(ptr));
   } else if (tag(ptr) == ERA) {
     printf("*");
   } else {
@@ -1196,9 +1233,6 @@ __host__ void print_tree(Net* net, Ptr ptr) {
 
 // Tests
 // -----
-
-// For each test case below, create a function 'make_test_X', which injects the
-// values of the respective test on the net. Start with 'term_a', then do all.
 
 __host__ void populate(Book* book) {
   // E
@@ -1623,6 +1657,16 @@ __host__ void populate(Book* book) {
   book->defs[0x00000bca]->node[16] = (Node) {0x6000000f,0x50000011};
   book->defs[0x00000bca]->node[17] = (Node) {0x60000010,0x60000012};
   book->defs[0x00000bca]->node[18] = (Node) {0x50000009,0x60000011};
+  // brn
+  book->defs[0x00026db2]           = (Term*) malloc(sizeof(Term));
+  book->defs[0x00026db2]->root     = 0xa0000000;
+  book->defs[0x00026db2]->alen     = 0;
+  book->defs[0x00026db2]->acts     = (Wire*) malloc(0 * sizeof(Wire));
+  book->defs[0x00026db2]->nlen     = 3;
+  book->defs[0x00026db2]->node     = (Node*) malloc(3 * sizeof(Node));
+  book->defs[0x00026db2]->node[ 0] = (Node) {0xa0000001,0x60000002};
+  book->defs[0x00026db2]->node[ 1] = (Node) {0x109b6c9d,0xa0000002};
+  book->defs[0x00026db2]->node[ 2] = (Node) {0x109b6ca4,0x60000000};
   // c10
   book->defs[0x00027081]           = (Term*) malloc(sizeof(Term));
   book->defs[0x00027081]->root     = 0xa0000000;
@@ -2302,7 +2346,7 @@ __host__ void populate(Book* book) {
   book->defs[0x00029f02]->root     = 0x60000001;
   book->defs[0x00029f02]->alen     = 1;
   book->defs[0x00029f02]->acts     = (Wire*) malloc(1 * sizeof(Wire));
-  book->defs[0x00029f02]->acts[ 0] = (Wire) {0x100270c3,0xa0000000};
+  book->defs[0x00029f02]->acts[ 0] = (Wire) {0x100270c4,0xa0000000};
   book->defs[0x00029f02]->nlen     = 2;
   book->defs[0x00029f02]->node     = (Node*) malloc(2 * sizeof(Node));
   book->defs[0x00029f02]->node[ 0] = (Node) {0x1002bff7,0xa0000001};
@@ -2313,12 +2357,24 @@ __host__ void populate(Book* book) {
   book->defs[0x00029f03]->alen     = 2;
   book->defs[0x00029f03]->acts     = (Wire*) malloc(2 * sizeof(Wire));
   book->defs[0x00029f03]->acts[ 0] = (Wire) {0x10036e72,0xa0000000};
-  book->defs[0x00029f03]->acts[ 1] = (Wire) {0x100009c4,0xa0000001};
+  book->defs[0x00029f03]->acts[ 1] = (Wire) {0x100009c7,0xa0000001};
   book->defs[0x00029f03]->nlen     = 3;
   book->defs[0x00029f03]->node     = (Node*) malloc(3 * sizeof(Node));
   book->defs[0x00029f03]->node[ 0] = (Node) {0x60000002,0x40000000};
   book->defs[0x00029f03]->node[ 1] = (Node) {0x10000013,0xa0000002};
   book->defs[0x00029f03]->node[ 2] = (Node) {0x1000000f,0x50000000};
+  // ex3
+  book->defs[0x00029f04]           = (Term*) malloc(sizeof(Term));
+  book->defs[0x00029f04]->root     = 0x60000000;
+  book->defs[0x00029f04]->alen     = 2;
+  book->defs[0x00029f04]->acts     = (Wire*) malloc(2 * sizeof(Wire));
+  book->defs[0x00029f04]->acts[ 0] = (Wire) {0x10026db2,0xa0000000};
+  book->defs[0x00029f04]->acts[ 1] = (Wire) {0x10027085,0xa0000001};
+  book->defs[0x00029f04]->nlen     = 3;
+  book->defs[0x00029f04]->node     = (Node*) malloc(3 * sizeof(Node));
+  book->defs[0x00029f04]->node[ 0] = (Node) {0x60000002,0x40000000};
+  book->defs[0x00029f04]->node[ 1] = (Node) {0x1000001d,0xa0000002};
+  book->defs[0x00029f04]->node[ 2] = (Node) {0x10000024,0x50000000};
   // g_s
   book->defs[0x0002bff7]           = (Term*) malloc(sizeof(Term));
   book->defs[0x0002bff7]->root     = 0xa0000000;
@@ -3013,6 +3069,32 @@ __host__ void populate(Book* book) {
   book->defs[0x00036e72]->node[ 1] = (Node) {0x10db9c99,0xa0000002};
   book->defs[0x00036e72]->node[ 2] = (Node) {0x10db9c93,0xa0000003};
   book->defs[0x00036e72]->node[ 3] = (Node) {0x1000000f,0x60000000};
+  // brnS
+  book->defs[0x009b6c9d]           = (Term*) malloc(sizeof(Term));
+  book->defs[0x009b6c9d]->root     = 0xa0000000;
+  book->defs[0x009b6c9d]->alen     = 2;
+  book->defs[0x009b6c9d]->acts     = (Wire*) malloc(2 * sizeof(Wire));
+  book->defs[0x009b6c9d]->acts[ 0] = (Wire) {0x10026db2,0xa0000003};
+  book->defs[0x009b6c9d]->acts[ 1] = (Wire) {0x10026db2,0xa0000004};
+  book->defs[0x009b6c9d]->nlen     = 5;
+  book->defs[0x009b6c9d]->node     = (Node*) malloc(5 * sizeof(Node));
+  book->defs[0x009b6c9d]->node[ 0] = (Node) {0xb0000001,0xa0000002};
+  book->defs[0x009b6c9d]->node[ 1] = (Node) {0x50000003,0x50000004};
+  book->defs[0x009b6c9d]->node[ 2] = (Node) {0x60000003,0x60000004};
+  book->defs[0x009b6c9d]->node[ 3] = (Node) {0x50000001,0x50000002};
+  book->defs[0x009b6c9d]->node[ 4] = (Node) {0x60000001,0x60000002};
+  // brnZ
+  book->defs[0x009b6ca4]           = (Term*) malloc(sizeof(Term));
+  book->defs[0x009b6ca4]->root     = 0x60000000;
+  book->defs[0x009b6ca4]->alen     = 2;
+  book->defs[0x009b6ca4]->acts     = (Wire*) malloc(2 * sizeof(Wire));
+  book->defs[0x009b6ca4]->acts[ 0] = (Wire) {0x10036e72,0xa0000000};
+  book->defs[0x009b6ca4]->acts[ 1] = (Wire) {0x10027081,0xa0000001};
+  book->defs[0x009b6ca4]->nlen     = 3;
+  book->defs[0x009b6ca4]->node     = (Node*) malloc(3 * sizeof(Node));
+  book->defs[0x009b6ca4]->node[ 0] = (Node) {0x60000002,0x40000000};
+  book->defs[0x009b6ca4]->node[ 1] = (Node) {0x10000013,0xa0000002};
+  book->defs[0x009b6ca4]->node[ 2] = (Node) {0x1000000f,0x50000000};
   // decI
   book->defs[0x00a299d3]           = (Term*) malloc(sizeof(Term));
   book->defs[0x00a299d3]->root     = 0xa0000000;
@@ -3615,6 +3697,11 @@ int main() {
   printf("Device Overlap: %s\n", prop.deviceOverlap ? "Yes" : "No");
   printf("Multiprocessor Count: %d\n", prop.multiProcessorCount);
 
+  // Increase L1 cache to 75%
+
+  const u32 MAIN  = 0x00029f04;
+  const u32 DEPTH = 14; // FIXME: currently hardcoded
+
   // Allocates the initial net on device
   Net* h_net = mknet();
   //inject_term_m(h_net);
@@ -3624,7 +3711,7 @@ int main() {
   populate(h_book);
 
   // Boots the net with an initial term
-  boot(h_net, h_book, 0x00029f03);
+  boot(h_net, h_book, MAIN);
 
   // Prints the initial net
   printf("\n");
@@ -3653,7 +3740,10 @@ int main() {
   clock_gettime(CLOCK_MONOTONIC_RAW, &start);
 
   // Normalizes
-  do_normalize(d_net, d_book);
+  do_reduce_all(d_net, d_book);
+  do_global_expand(d_net, d_book, DEPTH);
+  do_reduce_all(d_net, d_book);
+
   cudaMemcpy(&rwts, &(d_net->rwts), sizeof(u32), cudaMemcpyDeviceToHost);
   cudaDeviceSynchronize();
 
@@ -3671,7 +3761,7 @@ int main() {
   printf("NORMAL ~ rewrites=%d redexes=%d\n", norm->rwts, norm->blen);
   printf("======\n\n");
   //print_tree(norm, norm->root);
-  print_net(norm);
+  //print_net(norm);
   printf("\n");
 
   // ----

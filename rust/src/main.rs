@@ -162,6 +162,24 @@ fn main() {
     $ (0 (0 @runO (0 @runI (0 @E ret))) ret)
   ");
 
+  // Decrements 2^N BitStrings until they reach zero
+  // brnZ = (run (c8 S Z))
+  // brnS = λp {(brn p) (brn p)}
+  // brn  = λn ((n brnS) brnZ)
+  define(book, "brnZ", "
+    $ ret
+    & @run ~ (0 val ret)
+    & @c8  ~ (0 @I (0 @E val))
+  ");
+  define(book, "brnS", "
+    $ (0 (1 p0 p1) (0 r0 r1))
+    & @brn ~ (0 p0 r0)
+    & @brn ~ (0 p1 r1)
+  ");
+  define(book, "brn", "
+    $ (0 (0 @brnS (0 @brnZ r)) r)
+  ");
+
   // Creates a nat, for testing
   // ex0 = ((n S) Z)
   define(book, "ex0", "
@@ -173,7 +191,7 @@ fn main() {
   // ex1 = ((n g_s) g_z)
   define(book, "ex1", "
     $ root
-    & @c22 ~ (0 @g_s (0 @g_z root))
+    & @c23 ~ (0 @g_s (0 @g_z root))
   ");
 
   // This example decreases a binary counter until it reaches 0. It uses recursion, based on
@@ -186,7 +204,14 @@ fn main() {
   define(book, "ex2", "
     $ main
     & @run ~ (0 nie main)
-    & @c3  ~ (0 @I (0 @E nie))
+    & @c6  ~ (0 @I (0 @E nie))
+  "); 
+
+  // Decreases many binary counters until they reach 0
+  define(book, "ex3", "
+    $ res
+    & @brn ~ (0 dep res)
+    & @c14 ~ (0 @S (0 @Z dep))
   "); 
 
   //define(book, "term", "
@@ -230,22 +255,20 @@ fn main() {
 
 
   // Initializes the net
-  let net = &mut Net::init(1 << 26, &book, name_to_u32("ex2"));
+  let net = &mut Net::init(1 << 26, &book, name_to_u32("ex3"));
   //println!("[net]\n{}", show_net(&net));
 
   // Computes its normal form
-  let iter = net.normal(book);
+  net.normal(book);
 
   // Shows results and stats
   //println!("[net]\n{}", show_net(&net));
   println!("size: {}", net.node.len());
   println!("used: {}", net.used);
   println!("rwts: {}", net.rwts);
-  println!("iter: {}", iter);
-
 
   println!("{}", u32_to_name(0x36E72));
-  // Prints book to use on CUDA
+  //Prints book to use on CUDA
   //print_book_to_cuda(&book);
 }
 
@@ -265,11 +288,7 @@ fn print_book_to_cuda(book: &Book) {
     println!("  book->defs[0x{:08x}]->nlen     = {};", key, def.node.len());
     println!("  book->defs[0x{:08x}]->node     = (Node*) malloc({} * sizeof(Node));", key, def.node.len());
     for i in 0..def.node.len() {
-        println!("  book->defs[0x{:08x}]->node[{:2}] = (Node) {{0x{:08x},0x{:08x}}};", key, i, def.node[i].p1.data, def.node[i].p2.data);
+      println!("  book->defs[0x{:08x}]->node[{:2}] = (Node) {{0x{:08x},0x{:08x}}};", key, i, def.node[i].p1.data, def.node[i].p2.data);
     }
-    println!("  book->defs[0x{:08x}]->locs     = (u32*) malloc({} * sizeof(u32));", key, def.node.len());
   }
 }
-
-
-
