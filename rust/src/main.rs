@@ -9,8 +9,6 @@ mod lang;
 use crate::core::*;
 use crate::lang::*;
 
-
-
 fn main() {
   // Initializes the book
   let book = &mut Book::new();
@@ -169,7 +167,7 @@ fn main() {
   define(book, "brnZ", "
     $ ret
     & @run ~ (0 val ret)
-    & @c8  ~ (0 @I (0 @E val))
+    & @c10 ~ (0 @I (0 @E val))
   ");
   define(book, "brnS", "
     $ (0 (1 p0 p1) (0 r0 r1))
@@ -255,7 +253,7 @@ fn main() {
 
 
   // Initializes the net
-  let net = &mut Net::init(1 << 26, &book, name_to_u32("ex3"));
+  let net = &mut Net::init(1 << 26, &book, name_to_u64("ex3"));
   //println!("[net]\n{}", show_net(&net));
 
   // Computes its normal form
@@ -267,17 +265,17 @@ fn main() {
   println!("used: {}", net.used);
   println!("rwts: {}", net.rwts);
 
-  println!("{}", u32_to_name(0x36E72));
+  println!("{}", u64_to_name(0x36E72));
   //Prints book to use on CUDA
-  //print_book_to_cuda(&book);
+  print_book_to_cuda(&book);
 }
 
 fn print_book_to_cuda(book: &Book) {
   println!("Term* term;");
-  let mut sorted_defs: Vec<(&u32, &Net)> = book.defs.iter().collect();
+  let mut sorted_defs: Vec<(&u64, &Net)> = book.defs.iter().collect();
   sorted_defs.sort_by_key(|&(key, _)| key);
   for (key, def) in sorted_defs {
-    println!("  // {}", u32_to_name(*key));
+    println!("  // {}", u64_to_name(*key));
     println!("  book->defs[0x{:08x}]           = (Term*) malloc(sizeof(Term));", key);
     println!("  book->defs[0x{:08x}]->root     = 0x{:08x};", key, def.root.data);
     println!("  book->defs[0x{:08x}]->alen     = {};", key, def.acts.len());

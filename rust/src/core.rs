@@ -14,9 +14,9 @@
 
 use std::collections::HashMap;
 
-pub type Tag = u8;
-pub type Val = u32;
-pub type Col = u16;
+pub type Tag = u16;
+pub type Val = u64;
+//pub type Col = u16;
 
 pub const NIL: Tag = 0x0; // empty node
 pub const REF: Tag = 0x1; // reference to a definition (closed net)
@@ -25,7 +25,7 @@ pub const ERA: Tag = 0x3; // unboxed eraser
 pub const VRR: Tag = 0x4; // variable pointing to root
 pub const VR1: Tag = 0x5; // variable pointing to aux1 port of node
 pub const VR2: Tag = 0x6; // variable pointing to aux2 port of node
-pub const RDT: Tag = 0x7; // redirection to root
+pub const RDR: Tag = 0x7; // redirection to root
 pub const RD1: Tag = 0x8; // redirection to aux1 port of node
 pub const RD2: Tag = 0x9; // redirection to aux2 port of node
 pub const CON: Tag = 0xA; // points to main port of con node
@@ -41,13 +41,12 @@ pub enum Port {
 // A tagged pointer. When tag >= VR1, it stores an absolute target location (node index).
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Ptr {
-  pub data: u32,
+  pub data: Val,
 }
 
 // A node is just a pair of two delta pointers. It uses 64 bits.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Node {
-  pub cl: Col,
   pub p1: Ptr,
   pub p2: Ptr,
 }
@@ -71,29 +70,29 @@ pub struct Net {
 
 // A book is just a map of definitions, mapping ids to closed nets.
 pub struct Book {
-  pub defs: HashMap<u32, Net>,
+  pub defs: HashMap<u64, Net>,
 }
 
 impl Ptr {
   #[inline(always)]
   pub fn new(tag: Tag, val: Val) -> Self {
-    Ptr { data: ((tag as u32) << 28) | (val & 0x0FFFFFFF) }
+    Ptr { data: (((tag as u64) << 48) | (val & 0xFFFF_FFFF_FFFF)) }
   }
 
   #[inline(always)]
   pub fn tag(&self) -> Tag {
-    (self.data >> 28) as Tag
+    (self.data >> 48) as Tag
   }
 
   #[inline(always)]
   pub fn val(&self) -> Val {
-    self.data & 0x0FFFFFFF
+    (self.data & 0xFFFF_FFFF_FFFF) as Val
   }
 
   #[inline(always)]
-  pub fn mov(&mut self, add: u32) {
+  pub fn mov(&mut self, add: u64) {
     if self.tag() >= VR1 {
-      self.data = (self.data & 0xF0000000) | (self.data + add) & 0x0FFFFFFF;
+      self.data = (self.data & 0xFFFF_0000_0000_0000) | (self.data + add as u64) & 0xFFFF_FFFF_FFFF;
     }
   }
 }
@@ -102,7 +101,7 @@ impl Node {
   #[inline(always)]
   pub fn nil() -> Self {
     Node {
-      cl: 1,
+      //cl: 1,
       p1: Ptr::new(NIL, 0),
       p2: Ptr::new(NIL, 0),
     }
@@ -114,7 +113,7 @@ impl Book {
     Book { defs: HashMap::new() }
   }
 
-  pub fn def(&mut self, id: u32, net: Net) {
+  pub fn def(&mut self, id: u64, net: Net) {
     self.defs.insert(id, net);
   }
 }
@@ -133,7 +132,7 @@ impl Net {
   }
 
   // Creates a net and boots from a REF.
-  pub fn init(size: usize, book: &Book, ref_id: u32) -> Self {
+  pub fn init(size: usize, book: &Book, ref_id: u64) -> Self {
     let mut net = Net::new(size);
     net.root = Ptr::new(REF, ref_id);
     return net;
@@ -166,22 +165,6 @@ impl Net {
   pub fn free(&mut self, val: Val) {
     self.used -= 1;
     self.node[val as usize] = Node::nil();
-  }
-
-  // Gets the color of a node
-  #[inline(always)]
-  pub fn col(&self, val: Val) -> Col {
-    return unsafe { self.node.get_unchecked(val as usize) }.cl;
-  }
-
-  // Gets a reference to the port 1 or 2 of a node.
-  #[inline(always)]
-  pub fn get_mut(&mut self, val: Val, port: Port) -> &mut Ptr {
-    let node = unsafe { self.node.get_unchecked_mut(val as usize) };
-    match port {
-      Port::P1 => &mut node.p1,
-      Port::P2 => &mut node.p2,
-    }
   }
 
   // Gets the pointer stored on the port 1 or 2 of a node.
@@ -364,7 +347,7 @@ impl Net {
         // Loads redexes, adjusting locations...
         for got in &got.acts {
           let mut node = Node {
-            cl: 1,
+            //cl: 1,
             p1: got.0,
             p2: got.1,
           };
