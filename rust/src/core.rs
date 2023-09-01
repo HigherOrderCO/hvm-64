@@ -12,31 +12,28 @@
 // This expansion is performed on demand, and ERA-REF pointers are collected, allowing the runtime
 // to compute tail-recursive functions with constant memory usage.
 
-use std::collections::HashMap;
+use std::{collections::HashMap, hash::BuildHasherDefault};
 
 pub type Tag = u16;
 pub type Val = u64;
-//pub type Col = u16;
 
-pub const NIL: Tag = 0x0; // empty node
-pub const REF: Tag = 0x1; // reference to a definition (closed net)
-pub const NUM: Tag = 0x2; // unboxed number
-pub const ERA: Tag = 0x3; // unboxed eraser
-pub const VRR: Tag = 0x4; // variable pointing to root
-pub const VR1: Tag = 0x5; // variable pointing to aux1 port of node
-pub const VR2: Tag = 0x6; // variable pointing to aux2 port of node
-pub const RDR: Tag = 0x7; // redirection to root
-pub const RD1: Tag = 0x8; // redirection to aux1 port of node
-pub const RD2: Tag = 0x9; // redirection to aux2 port of node
-pub const CON: Tag = 0xA; // points to main port of con node
-pub const DUP: Tag = 0xB; // points to main port of dup node; higher labels also dups
+pub const NIL: Tag = 0x00; // empty node
+pub const REF: Tag = 0x01; // reference to a definition (closed net)
+pub const NUM: Tag = 0x02; // unboxed number
+pub const ERA: Tag = 0x03; // unboxed eraser
+pub const VRR: Tag = 0x04; // variable pointing to root
+pub const VR1: Tag = 0x05; // variable pointing to aux1 port of node
+pub const VR2: Tag = 0x06; // variable pointing to aux2 port of node
+pub const RDR: Tag = 0x07; // redirection to root
+pub const RD1: Tag = 0x08; // redirection to aux1 port of node
+pub const RD2: Tag = 0x09; // redirection to aux2 port of node
+pub const CON: Tag = 0x0A; // points to main port of con node
+pub const DUP: Tag = 0x0B; // points to main port of dup node; higher labels also dups
 
 // A node port: 1 or 2. Main ports are omitted.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
-pub enum Port {
-  P1,
-  P2,
-}
+pub type Port = usize;
+pub const P1 : Port = 0;
+pub const P2 : Port = 1;
 
 // A tagged pointer. When tag >= VR1, it stores an absolute target location (node index).
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
@@ -47,8 +44,7 @@ pub struct Ptr {
 // A node is just a pair of two delta pointers. It uses 64 bits.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Node {
-  pub p1: Ptr,
-  pub p2: Ptr,
+  pub ports: [Ptr; 2],
 }
 
 // A net has:
@@ -66,11 +62,12 @@ pub struct Net {
   pub used: usize,
   pub rwts: usize,
       next: usize,
+      locs: [u64; 1 << 16],
 }
 
 // A book is just a map of definitions, mapping ids to closed nets.
 pub struct Book {
-  pub defs: HashMap<u64, Net>,
+  pub defs: HashMap<u64, Net, std::hash::BuildHasherDefault<nohash::NoHashHasher<u64>>>,
 }
 
 impl Ptr {
@@ -90,27 +87,72 @@ impl Ptr {
   }
 
   #[inline(always)]
-  pub fn mov(&mut self, add: u64) {
-    if self.tag() >= VR1 {
-      self.data = (self.data & 0xFFFF_0000_0000_0000) | (self.data + add as u64) & 0xFFFF_FFFF_FFFF;
+  pub fn is_var(&self) -> bool {
+    return self.tag() >= VRR && self.tag() <= VR2;
+  }
+
+  #[inline(always)]
+  pub fn is_era(&self) -> bool {
+    return self.tag() == ERA;
+  }
+
+  #[inline(always)]
+  pub fn is_ctr(&self) -> bool {
+    return self.tag() >= CON;
+  }
+
+  #[inline(always)]
+  pub fn has_location(&self) -> bool {
+    return self.tag() >= VR1;
+  }
+
+  #[inline(always)]
+  pub fn target<'a>(&'a self, net: &'a mut Net) -> Option<&mut Ptr> {
+    match self.tag() {
+      VRR => { Some(&mut net.root) }
+      VR1 => { Some(net.at_mut(self.val()).port_mut(P1)) }
+      VR2 => { Some(net.at_mut(self.val()).port_mut(P2)) }
+      _   => { None }
+    }
+  }
+
+  #[inline(always)]
+  pub fn adjust(&self, locs: &[u64]) -> Ptr {
+    unsafe {
+      return Ptr::new(self.tag(), if self.has_location() { *locs.get_unchecked(self.val() as usize) } else { self.val() });
     }
   }
 }
 
 impl Node {
   #[inline(always)]
+  pub fn new(p1: Ptr, p2: Ptr) -> Self {
+    Node { ports: [p1, p2] }
+  }
+
+  #[inline(always)]
   pub fn nil() -> Self {
-    Node {
-      //cl: 1,
-      p1: Ptr::new(NIL, 0),
-      p2: Ptr::new(NIL, 0),
+    Self::new(Ptr::new(NIL,0), Ptr::new(NIL,0))
+  }
+
+  #[inline(always)]
+  pub fn port(&self, port: Port) -> &Ptr {
+    unsafe {
+      return self.ports.get_unchecked(port as usize);
+    }
+  }
+
+  #[inline(always)]
+  pub fn port_mut(&mut self, port: Port) -> &mut Ptr {
+    unsafe {
+      return self.ports.get_unchecked_mut(port as usize);
     }
   }
 }
 
 impl Book {
   pub fn new() -> Self {
-    Book { defs: HashMap::new() }
+    Book { defs: HashMap::with_hasher(std::hash::BuildHasherDefault::default()) }
   }
 
   pub fn def(&mut self, id: u64, net: Net) {
@@ -128,35 +170,28 @@ impl Net {
       next: 0,
       used: 0,
       rwts: 0,
+      locs: [0; 1 << 16], // FIXME: should be field of Worker, not Net
     }
   }
 
   // Creates a net and boots from a REF.
-  pub fn init(size: usize, book: &Book, ref_id: u64) -> Self {
-    let mut net = Net::new(size);
-    net.root = Ptr::new(REF, ref_id);
-    return net;
+  pub fn init(&mut self, root_id: u64) {
+    self.root = Ptr::new(REF, root_id);
   }
 
   // Allocates a consecutive chunk of 'size' nodes. Returns the index.
   #[inline(always)]
   pub fn alloc(&mut self, size: usize) -> Val {
-    let mut space = 0;
     loop {
       if self.next >= self.node.len() {
-        space = 0;
         self.next = 0;
       }
-      if self.get(self.next as Val, Port::P1).tag() == NIL {
-        space += 1;
-      } else {
-        space = 0;
+      if self.get(self.next as Val, P1).tag() == NIL {
+        self.next += 1;
+        self.used += 1;
+        return (self.next - 1) as Val;
       }
       self.next += 1;
-      if space == size {
-        self.used += size;
-        return (self.next - space) as Val;
-      }
     }
   }
 
@@ -167,24 +202,32 @@ impl Net {
     self.node[val as usize] = Node::nil();
   }
 
+  // Gets node at given index.
+  #[inline(always)]
+  pub fn at(&self, index: u64) -> &Node {
+    unsafe {
+      return self.node.get_unchecked(index as usize);
+    }
+  }
+
+  // Gets node at given index, mutable.
+  #[inline(always)]
+  pub fn at_mut(&mut self, index: u64) -> &mut Node {
+    unsafe {
+      return self.node.get_unchecked_mut(index as usize);
+    }
+  }
+
   // Gets the pointer stored on the port 1 or 2 of a node.
   #[inline(always)]
-  pub fn get(&self, val: Val, port: Port) -> Ptr {
-    let node = unsafe { self.node.get_unchecked(val as usize) };
-    match port {
-      Port::P1 => node.p1,
-      Port::P2 => node.p2,
-    }
+  pub fn get(&self, index: Val, port: Port) -> Ptr {
+    return *self.at(index).port(port);
   }
 
   // Sets the pointer stored on the port 1 or 2 of a node.
   #[inline(always)]
-  pub fn set(&mut self, val: Val, port: Port, value: Ptr) {
-    let node = unsafe { self.node.get_unchecked_mut(val as usize) };
-    match port {
-      Port::P1 => node.p1 = value,
-      Port::P2 => node.p2 = value,
-    }
+  pub fn set(&mut self, index: Val, port: Port, value: Ptr) {
+    *self.at_mut(index).port_mut(port) = value;
   }
 
   // Links two pointers, forming a new wire.
@@ -192,89 +235,101 @@ impl Net {
   // - Otherwise, this is an redexes, so we add it to 'acts'.
   #[inline(always)]
   pub fn link(&mut self, a: Ptr, b: Ptr) {
-    let a_tag = a.tag();
-    let b_tag = b.tag();
-    if a_tag == VRR {
-      self.root = b;
+    if let Some(a_trg) = a.target(self) {
+      *a_trg = b;
     }
-    if a_tag == VR1 {
-      self.set(a.val(), Port::P1, b);
+    if let Some(b_trg) = b.target(self) {
+      *b_trg = a;
     }
-    if a_tag == VR2 {
-      self.set(a.val(), Port::P2, b);
-    }
-    if b_tag == VRR {
-      self.root = a;
-    }
-    if b_tag == VR1 {
-      self.set(b.val(), Port::P1, a);
-    }
-    if b_tag == VR2 {
-      self.set(b.val(), Port::P2, a);
-    }
-    if a_tag != VRR && a_tag != VR1 && a_tag != VR2
-    && b_tag != VRR && b_tag != VR1 && b_tag != VR2 {
+    if !a.is_var() && !b.is_var() {
       self.acts.push((a, b));
     }
+  }
+
+  // Expands a REF into its definition (a closed net).
+  #[inline(always)]
+  pub fn deref(&mut self, book: &Book, ptr: Ptr) -> Ptr {
+    let mut ptr = ptr;
+    // White ptr is still a REF...
+    while ptr.tag() == REF {
+      // Loads the referenced definition...
+      if let Some(got) = book.defs.get(&ptr.val()) {
+        // Allocates enough space...
+        for i in 0 .. got.node.len() {
+          unsafe {
+            *self.locs.get_unchecked_mut(i) = self.alloc(1);
+          }
+        }
+        // Loads nodes, adjusting locations...
+        for i in 0 .. got.node.len() {
+          unsafe {
+            let got = got.node.get_unchecked(i).clone();
+            let neo = Node::new(got.port(P1).adjust(&self.locs), got.port(P2).adjust(&self.locs));
+            *self.at_mut(*self.locs.get_unchecked(i)) = neo;
+          }
+        }
+        // Loads redexes, adjusting locations...
+        for got in &got.acts {
+          self.acts.push((got.0.adjust(&self.locs), got.1.adjust(&self.locs)));
+        }
+        // Overwrites 'ptr' with the loaded root pointer, adjusting locations...
+        ptr = got.root;
+        ptr = ptr.adjust(&self.locs);
+      }
+    }
+    return ptr;
   }
 
   // Performs an interaction over a redex.
   #[inline(always)]
   pub fn interact(&mut self, book: &Book, a: &mut Ptr, b: &mut Ptr) {
     // Dereference
-    if a.tag() == REF && b.tag() != ERA {
-      *a = self.deref(book, *a);
-    }
-    if a.tag() != ERA && b.tag() == REF {
-      *b = self.deref(book, *b);
-    }
+    if a.tag() == REF && b.tag() != ERA { *a = self.deref(book, *a); }
+    if a.tag() != ERA && b.tag() == REF { *b = self.deref(book, *b); }
     // Incs rewrites
     self.rwts += 1;
-    // Gets tag
-    let a_tag = a.tag();
-    let b_tag = b.tag();
     // Variable
-    if a_tag >= VRR && a_tag <= VR2 || b_tag >= VRR && b_tag <= VR2 {
+    if a.is_var() || b.is_var() {
       self.link(*a, *b);
     // Annihilation
-    } else if a_tag >= CON && b_tag >= CON && a_tag == b_tag {
-      let a1 = self.get(a.val(), Port::P1);
-      let b1 = self.get(b.val(), Port::P1);
+    } else if a.is_ctr() && b.is_ctr() && a.tag() == b.tag() {
+      let a1 = self.get(a.val(), P1);
+      let b1 = self.get(b.val(), P1);
       self.link(a1, b1);
-      let a2 = self.get(a.val(), Port::P2);
-      let b2 = self.get(b.val(), Port::P2);
+      let a2 = self.get(a.val(), P2);
+      let b2 = self.get(b.val(), P2);
       self.link(a2, b2);
       self.free(a.val());
       self.free(b.val());
     // Commutation
-    } else if a_tag >= CON && b_tag >= CON && a_tag != b_tag {
+    } else if a.is_ctr() && b.is_ctr() && a.tag() != b.tag() {
       let x1 = self.alloc(1);
       let x2 = self.alloc(1);
       let y1 = self.alloc(1);
       let y2 = self.alloc(1);
-      self.set(x1, Port::P1, Ptr::new(VR1, y1));
-      self.set(x1, Port::P2, Ptr::new(VR1, y2));
-      self.set(x2, Port::P1, Ptr::new(VR2, y1));
-      self.set(x2, Port::P2, Ptr::new(VR2, y2));
-      self.set(y1, Port::P1, Ptr::new(VR1, x1));
-      self.set(y1, Port::P2, Ptr::new(VR1, x2));
-      self.set(y2, Port::P1, Ptr::new(VR2, x1));
-      self.set(y2, Port::P2, Ptr::new(VR2, x2));
-      self.link(self.get(a.val(), Port::P1), Ptr::new(b_tag, x1));
-      self.link(self.get(a.val(), Port::P2), Ptr::new(b_tag, x2));
-      self.link(self.get(b.val(), Port::P1), Ptr::new(a_tag, y1));
-      self.link(self.get(b.val(), Port::P2), Ptr::new(a_tag, y2));
+      self.set(x1, P1, Ptr::new(VR1, y1));
+      self.set(x1, P2, Ptr::new(VR1, y2));
+      self.set(x2, P1, Ptr::new(VR2, y1));
+      self.set(x2, P2, Ptr::new(VR2, y2));
+      self.set(y1, P1, Ptr::new(VR1, x1));
+      self.set(y1, P2, Ptr::new(VR1, x2));
+      self.set(y2, P1, Ptr::new(VR2, x1));
+      self.set(y2, P2, Ptr::new(VR2, x2));
+      self.link(self.get(a.val(), P1), Ptr::new(b.tag(), x1));
+      self.link(self.get(a.val(), P2), Ptr::new(b.tag(), x2));
+      self.link(self.get(b.val(), P1), Ptr::new(a.tag(), y1));
+      self.link(self.get(b.val(), P2), Ptr::new(a.tag(), y2));
       self.free(a.val());
       self.free(b.val());
     // Erasure
-    } else if a_tag >= CON && b_tag == ERA {
-      self.link(self.get(a.val(), Port::P1), Ptr::new(ERA, 0));
-      self.link(self.get(a.val(), Port::P2), Ptr::new(ERA, 0));
+    } else if a.is_ctr() && b.is_era() {
+      self.link(self.get(a.val(), P1), Ptr::new(ERA, 0));
+      self.link(self.get(a.val(), P2), Ptr::new(ERA, 0));
       self.free(a.val());
     // Erasure
-    } else if a_tag == ERA && b_tag >= CON {
-      self.link(self.get(b.val(), Port::P1), Ptr::new(ERA, 0));
-      self.link(self.get(b.val(), Port::P2), Ptr::new(ERA, 0));
+    } else if a.is_era() && b.is_ctr() {
+      self.link(self.get(b.val(), P1), Ptr::new(ERA, 0));
+      self.link(self.get(b.val(), P2), Ptr::new(ERA, 0));
       self.free(b.val());
     }
   }
@@ -291,28 +346,19 @@ impl Net {
   }
 
   // Reduces all redexes, until there is none.
-  pub fn reduce_all(&mut self, book: &Book) -> usize {
-    let mut loops = 0;
+  pub fn reduce_all(&mut self, book: &Book) {
     while self.acts.len() > 0 {
-      //println!("rewrite: {}", self.acts.len());
-      loops = loops + 1;
       self.reduce(book);
     }
-    return loops;
   }
 
-  // Reduces a term to normal form, expanding references.
-  pub fn normal(&mut self, book: &Book) {
+  // Expands all references in a term.
+  pub fn normalize(&mut self, book: &Book) {
     self.reduce_all(book);
     let mut stack = vec![Ptr::new(VRR,0)];
     while let Some(loc) = stack.pop() {
-      let trg = match loc.tag() {
-        VRR => self.root,
-        VR1 => self.get(loc.val(), Port::P1),
-        VR2 => self.get(loc.val(), Port::P2),
-        _   => panic!(),
-      };
-      if trg.tag() >= CON {
+      let trg = *loc.target(self).unwrap();
+      if trg.is_ctr() {
         stack.push(Ptr::new(VR1, trg.val()));
         stack.push(Ptr::new(VR2, trg.val()));
       } else if trg.tag() == REF {
@@ -322,45 +368,6 @@ impl Net {
         stack.push(loc);
       }
     }
-  }
-
-  // Expands a REF into its definition (a closed net).
-  #[inline(always)]
-  pub fn deref(&mut self, book: &Book, ptr: Ptr) -> Ptr {
-    let mut ptr = ptr;
-    // White ptr is still a REF...
-    while ptr.tag() == REF {
-      // Loads the referenced definition...
-      if let Some(got) = book.defs.get(&ptr.val()) {
-        // Allocates enough space...
-        let len = got.node.len();
-        let val = self.alloc(len);
-        // Loads nodes, adjusting locations...
-        for i in 0 .. len as usize {
-          let mut node = got.node[i].clone();
-          node.p1.mov(val);
-          node.p2.mov(val);
-          unsafe {
-            *self.node.get_unchecked_mut(val as usize + i) = node;
-          };
-        }
-        // Loads redexes, adjusting locations...
-        for got in &got.acts {
-          let mut node = Node {
-            //cl: 1,
-            p1: got.0,
-            p2: got.1,
-          };
-          node.p1.mov(val);
-          node.p2.mov(val);
-          self.acts.push((node.p1, node.p2));
-        }
-        // Overwrites 'ptr' with the loaded root pointer, adjusting locations...
-        ptr = got.root;
-        ptr.mov(val);
-      }
-    }
-    return ptr;
   }
 
 }

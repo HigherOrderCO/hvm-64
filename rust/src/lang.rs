@@ -224,16 +224,17 @@ pub fn num_to_str(num: usize) -> String {
 
 pub fn tag_to_port(tag: Tag) -> Port {
   match tag {
-    VR1 => Port::P1,
-    VR2 => Port::P2,
+    VR1 => P1,
+    VR2 => P2,
     _   => unreachable!(),
   }
 }
 
 pub fn port_to_tag(port: Port) -> Tag {
   match port {
-    Port::P1 => VR1,
-    Port::P2 => VR2,
+    P1 => VR1,
+    P2 => VR2,
+    _  => unreachable!(),
   }
 }
 
@@ -324,10 +325,10 @@ pub fn alloc_ltree(net: &mut Net, tree: &LTree, vars: &mut HashMap<String, Paren
     },
     LTree::Nod { tag, lft, rgt } => {
       let val = net.alloc(1);
-      let p1 = alloc_ltree(net, &*lft, vars, Parent::Node { val, port: Port::P1 });
-      net.set(val, Port::P1, p1);
-      let p2 = alloc_ltree(net, &*rgt, vars, Parent::Node { val, port: Port::P2 });
-      net.set(val, Port::P2, p2);
+      let p1 = alloc_ltree(net, &*lft, vars, Parent::Node { val, port: P1 });
+      net.set(val, P1, p1);
+      let p2 = alloc_ltree(net, &*rgt, vars, Parent::Node { val, port: P2 });
+      net.set(val, P2, p2);
       Ptr::new(*tag, val)
     },
     LTree::Var { nam } => {
@@ -403,8 +404,8 @@ pub fn readback_ltree(net: &Net, ptr: Ptr, parent: Parent, vars: &mut HashMap<Pa
     },
     VRR | VR1 | VR2 => {
       let key = match ptr.tag() {
-        VR1 => Parent::Node { val: ptr.val(), port: Port::P1 },
-        VR2 => Parent::Node { val: ptr.val(), port: Port::P2 },
+        VR1 => Parent::Node { val: ptr.val(), port: P1 },
+        VR2 => Parent::Node { val: ptr.val(), port: P2 },
         VRR => Parent::Root,
         _   => unreachable!(),
       };
@@ -418,8 +419,8 @@ pub fn readback_ltree(net: &Net, ptr: Ptr, parent: Parent, vars: &mut HashMap<Pa
       }
     },
     _ => {
-      let lft = readback_ltree(net, net.get(ptr.val(), Port::P1), Parent::Node { val: ptr.val(), port: Port::P1 }, vars, fresh);
-      let rgt = readback_ltree(net, net.get(ptr.val(), Port::P2), Parent::Node { val: ptr.val(), port: Port::P2 }, vars, fresh);
+      let lft = readback_ltree(net, net.get(ptr.val(), P1), Parent::Node { val: ptr.val(), port: P1 }, vars, fresh);
+      let rgt = readback_ltree(net, net.get(ptr.val(), P2), Parent::Node { val: ptr.val(), port: P2 }, vars, fresh);
       LTree::Nod { tag: ptr.tag(), lft: Box::new(lft), rgt: Box::new(rgt) }
     },
   }

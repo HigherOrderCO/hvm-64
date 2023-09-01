@@ -209,7 +209,7 @@ fn main() {
   define(book, "ex3", "
     $ res
     & @brn ~ (0 dep res)
-    & @c14 ~ (0 @S (0 @Z dep))
+    & @c12 ~ (0 @S (0 @Z dep))
   "); 
 
   //define(book, "term", "
@@ -251,13 +251,12 @@ fn main() {
     & @c3 ~ (0 @k3 root)
   ");
 
-
   // Initializes the net
-  let net = &mut Net::init(1 << 26, &book, name_to_u64("ex3"));
-  //println!("[net]\n{}", show_net(&net));
+  let net = &mut Net::new(1 << 26);
+  net.init(name_to_u64("ex3"));
 
   // Computes its normal form
-  net.normal(book);
+  net.normalize(book);
 
   // Shows results and stats
   //println!("[net]\n{}", show_net(&net));
@@ -267,7 +266,7 @@ fn main() {
 
   println!("{}", u64_to_name(0x36E72));
   //Prints book to use on CUDA
-  print_book_to_cuda(&book);
+  //print_book_to_cuda(&book);
 }
 
 fn print_book_to_cuda(book: &Book) {
@@ -286,7 +285,7 @@ fn print_book_to_cuda(book: &Book) {
     println!("  book->defs[0x{:08x}]->nlen     = {};", key, def.node.len());
     println!("  book->defs[0x{:08x}]->node     = (Node*) malloc({} * sizeof(Node));", key, def.node.len());
     for i in 0..def.node.len() {
-      println!("  book->defs[0x{:08x}]->node[{:2}] = (Node) {{0x{:08x},0x{:08x}}};", key, i, def.node[i].p1.data, def.node[i].p2.data);
+      println!("  book->defs[0x{:08x}]->node[{:2}] = (Node) {{0x{:08x},0x{:08x}}};", key, i, def.node[i].ports[P1].data, def.node[i].ports[P2].data);
     }
   }
 }
