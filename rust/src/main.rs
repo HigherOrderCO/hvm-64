@@ -2,6 +2,7 @@
 #![allow(unused_variables)]
 #![allow(unused_imports)]
 #![allow(non_snake_case)]
+#![feature(exclusive_range_pattern)]
 
 mod core;
 mod lang;
@@ -212,54 +213,21 @@ fn main() {
     & @c12 ~ (0 @S (0 @Z dep))
   "); 
 
-  //define(book, "term", "
-    //$ main
-    //& (0 (1 (0 b a) (0 a R)) (0 b R))
-    //~ (0 (0 x x) main)
-  //");
-
-  // (λfλx(f x) λgλy(g (g y)))
-  //define(book, "term", "
-    //$ main
-    //&    (0 (1 (0 xb xa) (0 xa xR)) (0 xb xR))
-    //~ (0 (0 (2 (0 yb ya) (0 ya yR)) (0 yb yR)) main)
-  //");
-
-  // ((N @g_s) @g_z)
-  // c2  = (0 (1 (0 b a) (0 a R)) (0 b R))
-  // c3  = (0 (1 (1 (0 c b) (0 b a)) (0 a R)) (0 c R))
-  // c5  = (0 (1 (1 (1 (1 (0 e d) (0 d c)) (0 c b)) (0 b a)) (0 a R)) (0 e R))
-  // c8  = (0 (1 (1 (1 (1 (1 (1 (1 (0 h g) (0 g f)) (0 f e)) (0 e d)) (0 d c)) (0 c b)) (0 b a)) (0 a R)) (0 h R))
-  // c12 = (0 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (0 l k) (0 k j)) (0 j i)) (0 i h)) (0 h g)) (0 g f)) (0 f e)) (0 e d)) (0 d c)) (0 c b)) (0 b a)) (0 a R)) (0 l R))
-  // c14 = (0 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (0 n m) (0 m l)) (0 l k)) (0 k j)) (0 j i)) (0 i h)) (0 h g)) (0 g f)) (0 f e)) (0 e d)) (0 d c)) (0 c b)) (0 b a)) (0 a R)) (0 n R))
-  // c16 = (0 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (0 p o) (0 o n)) (0 n m)) (0 m l)) (0 l k)) (0 k j)) (0 j i)) (0 i h)) (0 h g)) (0 g f)) (0 f e)) (0 e d)) (0 d c)) (0 c b)) (0 b a)) (0 a R)) (0 p R))
-  // c18 = (0 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (0 r q) (0 q p)) (0 p o)) (0 o n)) (0 n m)) (0 m l)) (0 l k)) (0 k j)) (0 j i)) (0 i h)) (0 h g)) (0 g f)) (0 f e)) (0 e d)) (0 d c)) (0 c b)) (0 b a)) (0 a R)) (0 r R))
-  // c20 = (0 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (0 t s) (0 s r)) (0 r q)) (0 q p)) (0 p o)) (0 o n)) (0 n m)) (0 m l)) (0 l k)) (0 k j)) (0 j i)) (0 i h)) (0 h g)) (0 g f)) (0 f e)) (0 e d)) (0 d c)) (0 c b)) (0 b a)) (0 a R)) (0 t R))
-  // c22 = (0 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (0 v u) (0 u t)) (0 t s)) (0 s r)) (0 r q)) (0 q p)) (0 p o)) (0 o n)) (0 n m)) (0 m l)) (0 l k)) (0 k j)) (0 j i)) (0 i h)) (0 h g)) (0 g f)) (0 f e)) (0 e d)) (0 d c)) (0 c b)) (0 b a)) (0 a R)) (0 v R))
-  // c24 = (0 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (0 w v) (0 v u)) (0 u t)) (0 t s)) (0 s r)) (0 r q)) (0 q p)) (0 p o)) (0 o n)) (0 n m)) (0 m l)) (0 l k)) (0 k j)) (0 j i)) (0 i h)) (0 h g)) (0 g f)) (0 f e)) (0 e d)) (0 d c)) (0 c b)) (0 b a)) (0 a R)) (0 w R))
-  define(book, "test", "
-    $ root
-    & (0 (1 (1 (1 (1 (1 (1 (1 (0 h g) (0 g f)) (0 f e)) (0 e d)) (0 d c)) (0 c b)) (0 b a)) (0 a R)) (0 h R))
-    ~ (0 (0 (2 (0 c2b c2a) (0 c2a c2R)) (0 c2b c2R))
-      (0 (0 (0 (0 uk uk) ur) ur)
-      (0 (0 ix ix)
-         root)))
-  ");
-
-  define(book, "main", "
-    $ root
-    & @c3 ~ (0 @k3 root)
-  ");
+  // Operator test
+  define(book, "ex4", "
+    $ res
+    & 123 ~ {+ 111 res}
+  "); 
 
   // Initializes the net
   let net = &mut Net::new(1 << 26);
-  net.init(name_to_u64("ex3"));
+  net.init(name_to_u64("ex4"));
 
   // Computes its normal form
   net.normalize(book);
 
   // Shows results and stats
-  //println!("[net]\n{}", show_net(&net));
+  println!("[net]\n{}", show_net(&net));
   println!("size: {}", net.node.len());
   println!("used: {}", net.used);
   println!("rwts: {}", net.rwts);

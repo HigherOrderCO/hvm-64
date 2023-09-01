@@ -17,18 +17,30 @@ use std::{collections::HashMap, hash::BuildHasherDefault};
 pub type Tag = u16;
 pub type Val = u64;
 
-pub const NIL: Tag = 0x00; // empty node
-pub const REF: Tag = 0x01; // reference to a definition (closed net)
-pub const NUM: Tag = 0x02; // unboxed number
-pub const ERA: Tag = 0x03; // unboxed eraser
-pub const VRR: Tag = 0x04; // variable pointing to root
-pub const VR1: Tag = 0x05; // variable pointing to aux1 port of node
-pub const VR2: Tag = 0x06; // variable pointing to aux2 port of node
-pub const RDR: Tag = 0x07; // redirection to root
-pub const RD1: Tag = 0x08; // redirection to aux1 port of node
-pub const RD2: Tag = 0x09; // redirection to aux2 port of node
-pub const CON: Tag = 0x0A; // points to main port of con node
-pub const DUP: Tag = 0x0B; // points to main port of dup node; higher labels also dups
+pub const NIL: Tag = 0x000F; // empty node
+pub const REF: Tag = 0x001F; // reference to a definition (closed net)
+pub const ERA: Tag = 0x003F; // unboxed eraser
+pub const VRR: Tag = 0x004F; // variable pointing to root
+pub const VR1: Tag = 0x005F; // variable pointing to aux1 port of node
+pub const VR2: Tag = 0x006F; // variable pointing to aux2 port of node
+pub const RDR: Tag = 0x007F; // redirection to root
+pub const RD1: Tag = 0x008F; // redirection to aux1 port of node
+pub const RD2: Tag = 0x009F; // redirection to aux2 port of node
+pub const NUM: Tag = 0x010F; // unboxed u48
+pub const ADX: Tag = 0x020F; // ...
+pub const SBX: Tag = 0x021F; // ...
+pub const MLX: Tag = 0x022F; // ...
+pub const DVX: Tag = 0x023F; // ...
+pub const ADY: Tag = 0x030F; // ...
+pub const SBY: Tag = 0x031F; // ...
+pub const MLY: Tag = 0x032F; // ...
+pub const DVY: Tag = 0x033F; // ...
+pub const CON: Tag = 0x0A0F; // points to main port of con node
+pub const DUP: Tag = 0x0A1F; // points to main port of dup node; higher labels also dups
+
+pub const OPX: Tag = ADX;
+pub const OPY: Tag = ADY;
+pub const OPZ: Tag = DVY+1;
 
 // A node port: 1 or 2. Main ports are omitted.
 pub type Port = usize;
@@ -92,8 +104,28 @@ impl Ptr {
   }
 
   #[inline(always)]
+  pub fn is_red(&self) -> bool {
+    return self.tag() >= RDR && self.tag() <= RD2;
+  }
+
+  #[inline(always)]
   pub fn is_era(&self) -> bool {
     return self.tag() == ERA;
+  }
+
+  #[inline(always)]
+  pub fn is_num(&self) -> bool {
+    return self.tag() == NUM;
+  }
+
+  #[inline(always)]
+  pub fn is_opx(&self) -> bool {
+    return self.tag() >= OPX && self.tag() < OPY;
+  }
+
+  #[inline(always)]
+  pub fn is_opy(&self) -> bool {
+    return self.tag() >= OPY && self.tag() < OPZ;
   }
 
   #[inline(always)]
@@ -102,8 +134,12 @@ impl Ptr {
   }
 
   #[inline(always)]
-  pub fn has_location(&self) -> bool {
-    return self.tag() >= VR1;
+  pub fn is_loc(&self) -> bool {
+    return self.is_ctr()
+        || self.is_opx()
+        || self.is_opy()
+        || self.is_var()
+        || self.is_red();
   }
 
   #[inline(always)]
@@ -119,7 +155,7 @@ impl Ptr {
   #[inline(always)]
   pub fn adjust(&self, locs: &[u64]) -> Ptr {
     unsafe {
-      return Ptr::new(self.tag(), if self.has_location() { *locs.get_unchecked(self.val() as usize) } else { self.val() });
+      return Ptr::new(self.tag(), if self.is_loc() { *locs.get_unchecked(self.val() as usize) } else { self.val() });
     }
   }
 }
@@ -288,10 +324,71 @@ impl Net {
     if a.tag() != ERA && b.tag() == REF { *b = self.deref(book, *b); }
     // Incs rewrites
     self.rwts += 1;
-    // Variable
+    // VAR
     if a.is_var() || b.is_var() {
       self.link(*a, *b);
-    // Annihilation
+    // OPX-NUM
+    } else if a.is_opx() && b.is_num() { // TODO: test
+      let v1 = self.get(a.val(), P1);
+      let rt = self.get(a.val(), P2);
+      self.set(a.val(), P1, *b);
+      self.link(Ptr::new(OPY, a.val()), v1);
+    // NUM-OPX
+    } else if a.is_num() && b.is_opx() { // TODO: test
+      self.interact(book, b, a);
+    // OPY-NUM
+    } else if a.is_opy() && b.is_num() { // TODO: test
+      let v0 = self.get(a.val(), P1);
+      let rt = self.get(a.val(), P2);
+      self.link(Ptr::new(NUM, v0.val() + b.val()), rt);
+      self.free(a.val());
+    // NUM-OPY
+    } else if a.is_num() && b.is_opy() { // TODO: test
+      self.interact(book, a, b);
+    // OPX-CTR
+    } else if a.is_opx() && b.is_ctr() { // TODO: test
+      let x1 = self.alloc(1);
+      let x2 = self.alloc(1);
+      let y1 = self.alloc(1);
+      let y2 = self.alloc(1);
+      self.set(x1, P1, Ptr::new(VR1, y1));
+      self.set(x1, P2, Ptr::new(VR1, y2));
+      self.set(x2, P1, Ptr::new(VR2, y1));
+      self.set(x2, P2, Ptr::new(VR2, y2));
+      self.set(y1, P1, Ptr::new(VR1, x1));
+      self.set(y1, P2, Ptr::new(VR1, x2));
+      self.set(y2, P1, Ptr::new(VR2, x1));
+      self.set(y2, P2, Ptr::new(VR2, x2));
+      self.link(self.get(a.val(), P1), Ptr::new(b.tag(), x1));
+      self.link(self.get(a.val(), P2), Ptr::new(b.tag(), x2));
+      self.link(self.get(b.val(), P1), Ptr::new(a.tag(), y1));
+      self.link(self.get(b.val(), P2), Ptr::new(a.tag(), y2));
+      self.free(a.val());
+      self.free(b.val());
+    // CTR-OPX
+    } else if a.is_ctr() && b.is_opx() { // TODO: test
+      self.interact(book, b, a);
+    // OPY-CTR
+    } else if a.is_opy() && b.is_ctr() { // TODO: test
+      let x1 = self.alloc(1);
+      let y1 = self.alloc(1);
+      let y2 = self.alloc(1);
+      let av = self.get(a.val(), P1);
+      self.set(x1, P1, Ptr::new(VR2, y1));
+      self.set(x1, P2, Ptr::new(VR2, y2));
+      self.set(y1, P2, Ptr::new(VR1, x1));
+      self.set(y2, P2, Ptr::new(VR2, x1));
+      self.set(y1, P1, av);
+      self.set(y2, P1, av);
+      self.link(self.get(b.val(), P1), Ptr::new(a.tag(), y1));
+      self.link(self.get(b.val(), P2), Ptr::new(a.tag(), y2));
+      self.link(self.get(a.val(), P2), Ptr::new(b.tag(), x1));
+      self.free(a.val());
+      self.free(b.val());
+    // CTR-OPX
+    } else if a.is_ctr() && b.is_opy() { // TODO: test
+      self.interact(book, b, a);
+    // CON-CON
     } else if a.is_ctr() && b.is_ctr() && a.tag() == b.tag() {
       let a1 = self.get(a.val(), P1);
       let b1 = self.get(b.val(), P1);
@@ -301,7 +398,7 @@ impl Net {
       self.link(a2, b2);
       self.free(a.val());
       self.free(b.val());
-    // Commutation
+    // CON-DUP
     } else if a.is_ctr() && b.is_ctr() && a.tag() != b.tag() {
       let x1 = self.alloc(1);
       let x2 = self.alloc(1);
@@ -321,12 +418,20 @@ impl Net {
       self.link(self.get(b.val(), P2), Ptr::new(a.tag(), y2));
       self.free(a.val());
       self.free(b.val());
-    // Erasure
+    // CTR-NUM
+    } else if a.is_ctr() && b.is_num() { // TODO: test
+      self.link(self.get(a.val(), P1), Ptr::new(NUM, b.val()));
+      self.link(self.get(a.val(), P2), Ptr::new(NUM, b.val()));
+      self.free(a.val());
+    // NUM-CTR
+    } else if a.is_num() && b.is_ctr() { // TODO: test
+      self.interact(book, b, a);
+    // CON-ERA
     } else if a.is_ctr() && b.is_era() {
       self.link(self.get(a.val(), P1), Ptr::new(ERA, 0));
       self.link(self.get(a.val(), P2), Ptr::new(ERA, 0));
       self.free(a.val());
-    // Erasure
+    // ERA-CON
     } else if a.is_era() && b.is_ctr() {
       self.link(self.get(b.val(), P1), Ptr::new(ERA, 0));
       self.link(self.get(b.val(), P2), Ptr::new(ERA, 0));
