@@ -209,7 +209,7 @@ fn main() {
   define(book, "ex3", "
     $ res
     & @brn ~ (0 dep res)
-    & @c12 ~ (0 @S (0 @Z dep))
+    & @c14 ~ (0 @S (0 @Z dep))
   "); 
 
   // Operator test
@@ -220,7 +220,7 @@ fn main() {
 
   // Initializes the net
   let net = &mut Net::new(1 << 26);
-  net.init(name_to_u64("ex4"));
+  net.init(name_to_u64("ex3"));
 
   // Computes its normal form
   net.normalize(book);
@@ -228,7 +228,7 @@ fn main() {
   //net.normalize(book);
 
   // Shows results and stats
-  println!("[net]\n{}", show_net(&net));
+  //println!("[net]\n{}", show_net(&net));
   println!("size: {}", net.node.len());
   println!("used: {}", net.used);
   println!("rwts: {}", net.rwts);

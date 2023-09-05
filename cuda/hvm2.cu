@@ -598,7 +598,7 @@ u64 do_global_scatter(Net* net, u64 prev_blocks) {
 // ------------
 
 __device__ Ptr adjust(Worker* worker, Ptr ptr, u64* locs) {
-  printf("[%04X] adjust %d | %d to %x\n", worker->gid, has_loc(ptr), val(ptr), has_loc(ptr) ? locs[val(ptr)] : val(ptr));
+  //printf("[%04X] adjust %d | %d to %x\n", worker->gid, has_loc(ptr), val(ptr), has_loc(ptr) ? locs[val(ptr)] : val(ptr));
   return mkptr(tag(ptr), has_loc(ptr) ? locs[val(ptr)] : val(ptr));
 }
 
@@ -3350,7 +3350,7 @@ int main() {
   populate(h_book);
 
   // Boots the net with an initial term
-  boot(h_net, h_book, 0x00029f05);
+  boot(h_net, h_book, 0x00029f04);
 
   // Prints the initial net
   printf("\nINPUT\n=====\n\n");
@@ -3370,8 +3370,8 @@ int main() {
 
   // Normalizes
   do_reduce_all(d_net, d_book);
-  //do_global_expand(d_net, d_book, DEPTH);
-  //do_reduce_all(d_net, d_book);
+  do_global_expand(d_net, d_book, 14);
+  do_reduce_all(d_net, d_book);
 
   cudaMemcpy(&rwts, &(d_net->rwts), sizeof(u64), cudaMemcpyDeviceToHost);
   cudaDeviceSynchronize();
@@ -3388,7 +3388,7 @@ int main() {
   // Prints the normal form (raw data)
   printf("\nNORMAL ~ rewrites=%d redexes=%d\n======\n\n", norm->rwts, norm->blen);
   //print_tree(norm, norm->root);
-  print_net(norm);
+  //print_net(norm);
 
   // ----
   

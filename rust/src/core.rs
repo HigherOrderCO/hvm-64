@@ -78,7 +78,7 @@ pub struct Net {
   pub used: usize,
   pub rwts: usize,
       next: usize,
-      locs: [u64; 1 << 16],
+      locs: Vec<u64>,
 }
 
 // A book is just a map of definitions, mapping ids to closed nets.
@@ -225,7 +225,7 @@ impl Net {
       next: 0,
       used: 0,
       rwts: 0,
-      locs: [0; 1 << 16], // FIXME: should be field of Worker, not Net
+      locs: vec![0; 1 << 16], // FIXME: should be field of Worker, not Net
     }
   }
 
