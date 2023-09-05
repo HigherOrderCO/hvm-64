@@ -488,7 +488,7 @@ pub fn readback_ltree(net: &Net, ptr: Ptr, parent: Parent, vars: &mut HashMap<Pa
       println!("back {}", ptr.val());
       LTree::NUM { val: ptr.val() }
     },
-    OPX..OPY => {
+    OPX..=OPZ => {
       let lft = readback_ltree(net, net.get(ptr.val(), P1), Parent::Node { val: ptr.val(), port: P1 }, vars, fresh);
       let rgt = readback_ltree(net, net.get(ptr.val(), P2), Parent::Node { val: ptr.val(), port: P2 }, vars, fresh);
       LTree::Opx { opx: tag_to_opx(ptr.tag()), lft: Box::new(lft), rgt: Box::new(rgt) }

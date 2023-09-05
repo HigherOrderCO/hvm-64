@@ -2,7 +2,6 @@
 #![allow(unused_variables)]
 #![allow(unused_imports)]
 #![allow(non_snake_case)]
-#![feature(exclusive_range_pattern)]
 
 mod core;
 mod lang;
