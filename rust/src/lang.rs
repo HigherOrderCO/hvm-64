@@ -15,7 +15,6 @@
 //   <var>  ::= <str_lit>
 //   <num>  ::= <num_lit>
 //   <ref>  ::= "@" <str_lit>
-//   <op2>  ::= "{" <op2_lit> " " <tree> " " <tree> "}"
 //
 // For example, below is the church nat 2, encoded as an interaction net:
 //
@@ -44,14 +43,6 @@ use std::str::Chars;
 // ---
 
 #[derive(Debug)]
-pub enum OP { 
-  ADD,
-  MUL,
-  DIV,
-  SUB,
-}
-
-#[derive(Debug)]
 pub enum LTree {
   Era,
   Nod { 
@@ -67,11 +58,6 @@ pub enum LTree {
   },
   NUM {
     val: Val
-  },
-  Opx {
-    opx: OP,
-    lft: Box<LTree>,
-    rgt: Box<LTree>,
   },
 }
 
@@ -128,19 +114,6 @@ pub fn parse_str_lit(chars: &mut Peekable<Chars>) -> String {
   str
 }
 
-fn parse_opx_lit(chars: &mut Peekable<Chars>) -> String {
-  let mut opx = String::new();
-  skip_spaces(chars);
-  while let Some(c) = chars.peek() {
-    if !"+-=*/%<>|&^!?".contains(*c) {
-      break;
-    }
-    opx.push(*c);
-    chars.next();
-  }
-  opx
-}
-
 pub fn parse_ltree(chars: &mut Peekable<Chars>) -> LTree {
   skip_spaces(chars);
   match chars.peek() {
@@ -164,14 +137,6 @@ pub fn parse_ltree(chars: &mut Peekable<Chars>) -> LTree {
     },
     Some(c) if c.is_digit(10) => {
       LTree::NUM { val: parse_num_lit(chars) }
-    },
-    Some('{') => {
-      chars.next();
-      let opx = string_to_opx(&parse_opx_lit(chars));
-      let lft = Box::new(parse_ltree(chars));
-      let rgt = Box::new(parse_ltree(chars));
-      consume(chars, "}");
-      LTree::Opx { opx, lft, rgt }
     },
     _ => {
       LTree::Var { nam: parse_str_lit(chars) }
@@ -226,9 +191,6 @@ pub fn show_ltree(tree: &LTree) -> String {
     },
     LTree::NUM { val } => {
       val.to_string()
-    },
-    LTree::Opx { opx, lft, rgt } => {
-      format!("{{{} {} {}}}", opx_to_string(opx), show_ltree(&*lft), show_ltree(&*rgt))
     },
   }
 }
@@ -346,44 +308,6 @@ pub fn u64_to_name(num: u64) -> String {
   letters_to_name(u64_to_letters(num))
 }
 
-fn string_to_opx(opx: &str) -> OP {
-  match opx {
-    "+" => OP::ADD,
-    "-" => OP::SUB,
-    "*" => OP::MUL,
-    "/" => OP::DIV,
-    _   => panic!("Invalid operator"),
-  }
-}
-
-fn opx_to_string(opx: &OP) -> String {
-  match opx {
-    OP::ADD => "+".to_string(),
-    OP::SUB => "-".to_string(),
-    OP::MUL => "*".to_string(),
-    OP::DIV => "/".to_string(),
-  }
-}
-
-fn opx_to_tag(opx: &OP) -> Tag {
-  match opx {
-    OP::ADD => ADX,
-    OP::SUB => SBX,
-    OP::MUL => MLX,
-    OP::DIV => DVX,
-  }
-}
-
-fn tag_to_opx(tag: Tag) -> OP {
-  match tag {
-    ADX => OP::ADD,
-    SBX => OP::SUB,
-    MLX => OP::MUL,
-    DVX => OP::DIV,
-    _   => panic!("Invalid tag"),
-  }
-}
-
 // Injection and Readback
 // ----------------------
 
@@ -457,15 +381,6 @@ pub fn alloc_ltree(net: &mut Net, tree: &LTree, vars: &mut HashMap<String, Paren
     LTree::NUM { val } => {
       Ptr::new(NUM, *val)
     },
-    LTree::Opx { opx, lft, rgt } => {
-      let tag = opx_to_tag(opx);
-      let val = net.alloc(1);
-      let p1 = alloc_ltree(net, &*lft, vars, Parent::Node { val, port: P1 });
-      net.set(val, P1, p1);
-      let p2 = alloc_ltree(net, &*rgt, vars, Parent::Node { val, port: P2 });
-      net.set(val, P2, p2);
-      Ptr::new(tag, val)
-    },
   }
 }
 
@@ -486,11 +401,6 @@ pub fn readback_ltree(net: &Net, ptr: Ptr, parent: Parent, vars: &mut HashMap<Pa
     },
     NUM => {
       LTree::NUM { val: ptr.val() }
-    },
-    OPX..=OPZ => {
-      let lft = readback_ltree(net, net.get(ptr.val(), P1), Parent::Node { val: ptr.val(), port: P1 }, vars, fresh);
-      let rgt = readback_ltree(net, net.get(ptr.val(), P2), Parent::Node { val: ptr.val(), port: P2 }, vars, fresh);
-      LTree::Opx { opx: tag_to_opx(ptr.tag()), lft: Box::new(lft), rgt: Box::new(rgt) }
     },
     VRR | VR1 | VR2 => {
       let key = match ptr.tag() {

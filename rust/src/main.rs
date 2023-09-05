@@ -212,12 +212,6 @@ fn main() {
     & @c14 ~ (0 @S (0 @Z dep))
   "); 
 
-  // Operator test
-  define(book, "ex4", "
-    $ res
-    & 123 ~ {+ 111 res}
-  "); 
-
   // Initializes the net
   let net = &mut Net::new(1 << 26);
   net.init(name_to_u64("ex3"));

@@ -33,19 +33,6 @@ pub const DUP: Tag = 0x1001; // points to main port of dup node; higher labels a
 // Numeric terms
 pub const NUM: Tag = 0x0100; // unboxed u48
 
-pub const ADX: Tag = 0x0200; // ...
-pub const SBX: Tag = 0x0201; // ...
-pub const MLX: Tag = 0x0202; // ...
-pub const DVX: Tag = 0x0203; // ...
-
-pub const ADY: Tag = 0x0300; // ...
-pub const SBY: Tag = 0x0301; // ...
-pub const MLY: Tag = 0x0302; // ...
-pub const DVY: Tag = 0x0303; // ...
-pub const OPX: Tag = ADX;
-pub const OPY: Tag = ADY;
-pub const OPZ: Tag = DVY+1;
-
 // A node port: 1 or 2. Main ports are omitted.
 pub type Port = usize;
 pub const P1 : Port = 0;
@@ -123,16 +110,6 @@ impl Ptr {
   }
 
   #[inline(always)]
-  pub fn is_opx(&self) -> bool {
-    return self.tag() >= OPX && self.tag() < OPY;
-  }
-
-  #[inline(always)]
-  pub fn is_opy(&self) -> bool {
-    return self.tag() >= OPY && self.tag() < OPZ;
-  }
-
-  #[inline(always)]
   pub fn is_ctr(&self) -> bool {
     return self.tag() >= CON;
   }
@@ -147,16 +124,12 @@ impl Ptr {
     return self.is_era()
         || self.is_ctr()
         || self.is_ref()
-        || self.is_num()
-        || self.is_opx()
-        || self.is_opy();
+        || self.is_num();
   }
 
   #[inline(always)]
   pub fn has_loc(&self) -> bool {
     return self.is_ctr()
-        || self.is_opx()
-        || self.is_opy()
         || self.is_var() && self.tag() != VRR
         || self.is_red() && self.tag() != RDR;
   }
@@ -311,66 +284,6 @@ impl Net {
     // VAR
     if a.is_var() || b.is_var() {
       self.link(*a, *b);
-    // OPX-NUM
-    } else if a.is_opx() && b.is_num() { // TODO: test
-      let v1 = self.get(a.val(), P1);
-      self.set(a.val(), P1, *b);
-      self.link(Ptr::new(OPY, a.val()), v1);
-    // NUM-OPX
-    } else if a.is_num() && b.is_opx() { // TODO: test
-      self.interact(book, b, a);
-    // OPY-NUM
-    } else if a.is_opy() && b.is_num() { // TODO: test
-      let v0 = self.get(a.val(), P1);
-      let rt = self.get(a.val(), P2);
-      self.link(Ptr::new(NUM, v0.val() + b.val()), rt);
-      self.free(a.val());
-    // NUM-OPY
-    } else if a.is_num() && b.is_opy() { // TODO: test
-      self.interact(book, a, b);
-    // OPX-CTR
-    } else if a.is_opx() && b.is_ctr() { // TODO: test
-      let x1 = self.alloc(1);
-      let x2 = self.alloc(1);
-      let y1 = self.alloc(1);
-      let y2 = self.alloc(1);
-      self.set(x1, P1, Ptr::new(VR1, y1));
-      self.set(x1, P2, Ptr::new(VR1, y2));
-      self.set(x2, P1, Ptr::new(VR2, y1));
-      self.set(x2, P2, Ptr::new(VR2, y2));
-      self.set(y1, P1, Ptr::new(VR1, x1));
-      self.set(y1, P2, Ptr::new(VR1, x2));
-      self.set(y2, P1, Ptr::new(VR2, x1));
-      self.set(y2, P2, Ptr::new(VR2, x2));
-      self.link(self.get(a.val(), P1), Ptr::new(b.tag(), x1));
-      self.link(self.get(a.val(), P2), Ptr::new(b.tag(), x2));
-      self.link(self.get(b.val(), P1), Ptr::new(a.tag(), y1));
-      self.link(self.get(b.val(), P2), Ptr::new(a.tag(), y2));
-      self.free(a.val());
-      self.free(b.val());
-    // CTR-OPX
-    } else if a.is_ctr() && b.is_opx() { // TODO: test
-      self.interact(book, b, a);
-    // OPY-CTR
-    } else if a.is_opy() && b.is_ctr() { // TODO: test
-      let x1 = self.alloc(1);
-      let y1 = self.alloc(1);
-      let y2 = self.alloc(1);
-      let av = self.get(a.val(), P1);
-      self.set(x1, P1, Ptr::new(VR2, y1));
-      self.set(x1, P2, Ptr::new(VR2, y2));
-      self.set(y1, P2, Ptr::new(VR1, x1));
-      self.set(y2, P2, Ptr::new(VR2, x1));
-      self.set(y1, P1, av);
-      self.set(y2, P1, av);
-      self.link(self.get(b.val(), P1), Ptr::new(a.tag(), y1));
-      self.link(self.get(b.val(), P2), Ptr::new(a.tag(), y2));
-      self.link(self.get(a.val(), P2), Ptr::new(b.tag(), x1));
-      self.free(a.val());
-      self.free(b.val());
-    // CTR-OPX
-    } else if a.is_ctr() && b.is_opy() { // TODO: test
-      self.interact(book, b, a);
     // CON-CON
     } else if a.is_ctr() && b.is_ctr() && a.tag() == b.tag() {
       let a1 = self.get(a.val(), P1);
