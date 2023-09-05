@@ -747,6 +747,7 @@ __global__ void global_rewrite(Net* net, Book* book, u64 blocks) {
     Ptr *ak_ref; // ref to our aux port
     Ptr *bk_ref; // ref to other aux port
     Ptr  ak_ptr; // val of our aux port
+    u64  mv_tag; // tag of ptr to send to other side
     u64  mv_loc; // loc of ptr to send to other side
     Ptr  mv_ptr; // val of ptr to send to other side
     u64  y0_idx; // idx of other clone idx
@@ -757,13 +758,13 @@ __global__ void global_rewrite(Net* net, Book* book, u64 blocks) {
     }
 
     // Gets port here
-    if (rewrite && (ctr_era || opx_num || opy_num || con_con || con_dup)) {
+    if (rewrite && (ctr_era || opx_num || opy_num || con_con || con_dup || opx_ctr || ctr_opx || opy_ctr || ctr_opy)) {
       ak_ref = at(net, val(worker.a_ptr), worker.port);
       ak_ptr = take(ak_ref);
     }
 
     // Gets port there
-    if (rewrite && (era_ctr || num_opx || num_opy || con_con || con_dup)) {
+    if (rewrite && (era_ctr || num_opx || num_opy || con_con || con_dup || opx_ctr || ctr_opx || opy_ctr || ctr_opy)) {
       bk_ref = at(net, val(worker.b_ptr), worker.port);
     }
 
@@ -782,11 +783,16 @@ __global__ void global_rewrite(Net* net, Book* book, u64 blocks) {
       mv_ptr = redir(ak_ptr);
     }
 
-    // If con_dup, send clone
-    // If num_opx, send OPY
-    if (rewrite && (con_dup || num_opx)) {
+    // If con_dup, send clone (CON)
+    // If opx_ctr, send clone (OPX) - TODO TEST
+    // If ctr_opx, send clone (CTR) - TODO TEST
+    // If opy_ctr, send clone (OPY) - TODO TEST
+    // If ctr_opy, send clone (CTR) - TODO TEST
+    // If num_opx, send new OPY
+    if (rewrite && (con_dup || opx_ctr || ctr_opx || ctr_opy && worker.port == P2 || opy_ctr || num_opx)) {
+      mv_tag = num_opx ? tag(worker.b_ptr)-OPX+OPY : tag(worker.a_ptr);
       mv_loc = alloc(&worker, net); // alloc a clone
-      mv_ptr = mkptr(con_dup ? tag(worker.a_ptr) : tag(worker.b_ptr) - OPX + OPY, mv_loc); // cloned ptr to send
+      mv_ptr = mkptr(mv_tag, mv_loc); // cloned ptr to send
       worker.locs[worker.frac] = mv_loc; // pass cloned index to other threads
     }
     // If opx_num or opy_num, pass own ptrs
@@ -795,15 +801,29 @@ __global__ void global_rewrite(Net* net, Book* book, u64 blocks) {
     }
     __syncwarp();
 
+    // TODO: merge branches below
     // If con_dup, create inner wires between clones
-    if (rewrite && con_dup) {
-      Ptr p1, p2;
-      p1 = worker.locs[(worker.frac <= A2 ? 2 : 0) + 0];
-      p2 = worker.locs[(worker.frac <= A2 ? 2 : 0) + 1];
-      p1 = mkptr(worker.port == P1 ? VR1 : VR2, p1);
-      p2 = mkptr(worker.port == P1 ? VR1 : VR2, p2);
-      replace(at(net, mv_loc, P1), NEO, p1);
-      replace(at(net, mv_loc, P2), NEO, p2);
+    // If opx_ctr, create inner wires between clones
+    // If ctr_opx, create inner wires between clones
+    // If ctr_opy, create inner wires between clones
+    if (rewrite && (con_dup || opx_ctr || ctr_opx || ctr_opy && worker.port == P2)) {
+      u64 c1_loc = worker.locs[(worker.frac <= A2 ? 2 : 0) + 0];
+      u64 c2_loc = worker.locs[(worker.frac <= A2 ? 2 : 0) + 1];
+      replace(at(net, mv_loc, P1), NEO, mkptr(worker.port == P1 ? VR1 : VR2, c1_loc));
+      replace(at(net, mv_loc, P2), NEO, mkptr(worker.port == P1 ? VR1 : VR2, c2_loc));
+    }
+    // If opy_ctr and P1, fill OPY numbers - TODO TEST
+    if (rewrite && opy_ctr && worker.port == P1) {
+      u64 co_loc = worker.locs[(worker.frac <= A2 ? 1 : 3)];
+      replace(at(net, mv_loc, P1), NEO, ak_ptr);
+      replace(at(net, co_loc, P1), NEO, ak_ptr);
+    }
+    // If opy_ctr and P2, fill OPY returns - TODO TEST
+    if (rewrite && opy_ctr && worker.port == P2) {
+      u64 co_loc = worker.locs[worker.frac <= A2 ? 0 : 2];
+      u64 c2_loc = worker.locs[worker.frac <= A2 ? 3 : 1];
+      replace(at(net, co_loc, P2), NEO, mkptr(VR1, c2_loc));
+      replace(at(net, mv_loc, P2), NEO, mkptr(VR2, c2_loc));
     }
     // If num_opx, create OPY wires
     if (rewrite && num_opx) {
@@ -833,7 +853,7 @@ __global__ void global_rewrite(Net* net, Book* book, u64 blocks) {
     }
 
     // Send ptr to other side
-    if (rewrite && (era_ctr || num_opx || num_opy || con_con || con_dup)) {
+    if (rewrite && (era_ctr || num_opx || num_opy || con_con || con_dup || opx_ctr || ctr_opx || ctr_opy && worker.port == P2 || opy_ctr)) {
       replace(bk_ref, BSY, mv_ptr);
       //printf("send %llx\n", mv_ptr);
     }
@@ -848,13 +868,21 @@ __global__ void global_rewrite(Net* net, Book* book, u64 blocks) {
     // If opx_num and we have a VAR, link the OPY  here, towards that var
     // If opy_num and we have a VAR, link the NUM  here, towards that var
     // If con_dup and we have a VAR, link the CPY  here, towards that var
+    // If opx_ctr and we have a VAR, link the CTR  here, towards that var - TODO TEST
+    // If ctr_opx and we have a VAR, link the OPX  here, towards that var - TODO TEST
+    // If opy_ctr and we have a VAR, link the CTR  here, towards that var - TODO TEST
+    // If ctr_opy and we have a VAR, link the OPY  here, towards that var - TODO TEST
     // FIXME: con_con needs to be treated differently here; can we unify?
     if (rewrite &&
       (  con_con && is_pri(ak_ptr)
       || ctr_era && is_var(ak_ptr)
       || opx_num && is_var(ak_ptr) && worker.port == P1
       || opy_num && is_var(ak_ptr) && worker.port == P2
-      || con_dup && is_var(ak_ptr))) {
+      || con_dup && is_var(ak_ptr)
+      || opx_ctr && is_var(ak_ptr)
+      || ctr_opx && is_var(ak_ptr)
+      || opy_ctr && is_var(ak_ptr) && worker.port == P2
+      || ctr_opy && is_var(ak_ptr))) {
       Ptr targ, *node;
       if (con_con) {
         node = bk_ref;
@@ -878,11 +906,19 @@ __global__ void global_rewrite(Net* net, Book* book, u64 blocks) {
     // - if con_dup, form an active pair with the clone we got
     // - if opx_num, form an active pair with the OPY we got
     // - if opy_num, form an active pair with the NUM we got
-    if (rewrite && is_pri(ak_ptr) &&
-      (  ctr_era
-      || con_dup
-      || opx_num && worker.port == P1
-      || opy_num && worker.port == P2)) {
+    // - if opx_ctr, form an active pair with the CTR we got - TODO TEST
+    // - if ctr_opx, form an active pair with the OPX we got - TODO TEST
+    // - if opy_ctr, form an active pair with the CTR we got - TODO TEST
+    // - if ctr_opy, form an active pair with the OPY we got - TODO TEST
+    if (rewrite &&
+      (  ctr_era && is_pri(ak_ptr)
+      || con_dup && is_pri(ak_ptr)
+      || opx_num && is_pri(ak_ptr) && worker.port == P1
+      || opy_num && is_pri(ak_ptr) && worker.port == P2
+      || opx_ctr && is_pri(ak_ptr)
+      || ctr_opx && is_pri(ak_ptr)
+      || opy_ctr && is_pri(ak_ptr) && worker.port == P2
+      || ctr_opy && is_pri(ak_ptr))) {
       //printf("[%4X] ~ %8X %8X\n", worker.gid, ak_ptr, *ak_ref);
       put_redex(&worker, ak_ptr, take(ak_ref));
       atomicCAS((a64*)ak_ref, BSY, 0);
