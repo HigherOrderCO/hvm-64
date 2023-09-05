@@ -485,7 +485,6 @@ pub fn readback_ltree(net: &Net, ptr: Ptr, parent: Parent, vars: &mut HashMap<Pa
       LTree::Ref { nam: ptr.val() }
     },
     NUM => {
-      println!("back {}", ptr.val());
       LTree::NUM { val: ptr.val() }
     },
     OPX..=OPZ => {

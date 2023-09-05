@@ -189,7 +189,7 @@ fn main() {
   // ex1 = ((n g_s) g_z)
   define(book, "ex1", "
     $ root
-    & @c23 ~ (0 @g_s (0 @g_z root))
+    & @c20 ~ (0 @g_s (0 @g_z root))
   ");
 
   // This example decreases a binary counter until it reaches 0. It uses recursion, based on
@@ -224,6 +224,8 @@ fn main() {
 
   // Computes its normal form
   net.normalize(book);
+  //net.expand(book);
+  //net.normalize(book);
 
   // Shows results and stats
   println!("[net]\n{}", show_net(&net));
