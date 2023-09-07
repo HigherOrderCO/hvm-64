@@ -211,19 +211,19 @@ fn main() {
   define(book, "ex3", "
     $ res
     & @brn ~ (0 dep res)
-    & @c4  ~ (0 @S (0 @Z dep))
+    & @c14 ~ (0 @S (0 @Z dep))
   "); 
 
   // Initializes the net
   let net = &mut Net::new(1 << 26);
-  net.init(name_to_u64("ex3"));
+  net.boot(name_to_u64("ex3"));
 
   // Computes its normal form
-  net.normalize(book);
+  net.normal(book);
 
   // Shows results and stats
-  println!("[net]\n{}", show_net(&net));
-  println!("{}", net.head.iter().map(|x| format!("{:016x}", x.data)).collect::<Vec<String>>().join(" "));
+  //println!("[net]\n{}", show_net(&net));
+  //println!("{}", net.head.iter().map(|x| format!("{:016x}", x.data)).collect::<Vec<String>>().join(" "));
   println!("size: {}", net.node.len());
   println!("used: {}", net.used);
   println!("rwts: {}", net.rwts);

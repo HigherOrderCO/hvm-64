@@ -206,8 +206,8 @@ impl Net {
   }
 
   // Creates a net and boots from a REF.
-  pub fn init(&mut self, root_id: u64) {
-    self.link(Ptr::new(VRR, 0), Ptr::new(REF, root_id));
+  pub fn boot(&mut self, root_id: u64) {
+    self.root = Ptr::new(REF, root_id);
     self.head.push(Ptr::new(VRR, 0));
   }
 
@@ -282,8 +282,8 @@ impl Net {
   #[inline(always)]
   pub fn interact(&mut self, book: &Book, a: &mut Ptr, b: &mut Ptr) {
     // Dereference
-    if a.tag() == REF && b.tag() != ERA { *a = self.deref(book, *a); }
-    if a.tag() != ERA && b.tag() == REF { *b = self.deref(book, *b); }
+    if a.tag() == REF && b.tag() != ERA { *a = self.deref(book, *a, Ptr::new(NIL,0)); }
+    if a.tag() != ERA && b.tag() == REF { *b = self.deref(book, *b, Ptr::new(NIL,0)); }
     self.rwts += 1;
     // VAR
     if a.is_var() || b.is_var() {
@@ -341,7 +341,7 @@ impl Net {
 
   // Expands a REF into its definition (a closed net).
   #[inline(always)]
-  pub fn deref(&mut self, book: &Book, ptr: Ptr) -> Ptr {
+  pub fn deref(&mut self, book: &Book, ptr: Ptr, parent: Ptr) -> Ptr {
     let mut ptr = ptr;
     // White ptr is still a REF...
     while ptr.is_ref() {
@@ -368,6 +368,12 @@ impl Net {
         // Overwrites 'ptr' with the loaded root pointer, adjusting locations...
         ptr = got.root;
         ptr = ptr.adjust(&self.locs);
+        // Links root
+        if ptr.is_var() {
+          if let Some(trg) = ptr.target(self) {
+            *trg = parent;
+          }
+        }
       }
     }
     return ptr;
@@ -401,8 +407,7 @@ impl Net {
         self.head.push(Ptr::new(VR1, ptr.val()));
         self.head.push(Ptr::new(VR2, ptr.val()));
       } else if ptr.is_ref() {
-        let deref = self.deref(book, ptr);
-        self.link(deref, dir);
+        *dir.target(self).unwrap() = self.deref(book, ptr, dir);
         self.head.push(dir);
       }
     }
