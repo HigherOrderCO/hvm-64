@@ -48,8 +48,8 @@ const Tag NUM = 0x0100; // unboxed number
 
 // Special values
 const u64 NEO = 0xFFFFFFFFFFFFFFFD; // recently allocated value
-const u64 GON = 0xFFFFFFFFFFFFFFFE; // node has been moved to redex bag
-const u64 BSY = 0xFFFFFFFFFFFFFFFF; // value taken by another thread, will be replaced soon
+const u64 TMP = 0xFFFFFFFFFFFFFFFE; // node has been moved to redex bag
+const u64 TKN = 0xFFFFFFFFFFFFFFFF; // value taken by another thread, will be replaced soon
 
 // Worker types
 const u64 A1 = 0; // focuses on the A node, P1 port
@@ -277,13 +277,13 @@ __device__ inline void put_redex(Worker* worker, Ptr a_ptr, Ptr b_ptr) {
   worker->bag[worker->type] = (Wire){a_ptr, b_ptr};
 }
 
-// Gets the value of a ref; waits if busy
+// Gets the value of a ref; waits if taken.
 __device__ Ptr take(Ptr* ref) {
-  Ptr got = atomicExch((u64*)ref, BSY);
+  Ptr got = atomicExch((u64*)ref, TKN);
   u64 K = 0;
-  while (got == BSY) {
+  while (got == TKN) {
     //dbug(&K, "take");
-    got = atomicExch((u64*)ref, BSY);
+    got = atomicExch((u64*)ref, TKN);
   }
   return got;
 }
@@ -298,90 +298,76 @@ __device__ void replace(Ptr* ref, Ptr exp, Ptr neo) {
   }
 }
 
-// Atomically links the principal in 'pri_ref' towards 'dir_ptr'
-// - If target is a redirection => clear it and move forwards
-// - If target is a variable    => pass the node into it and halt
-// - If target is a node        => form an active pair and halt
-__device__ void link(Worker* worker, Net* net, Ptr* pri_ref, Ptr dir_ptr) {
-  //printf("[%04X] linking node=%8X towards %8X\n", worker->gid, *pri_ref, dir_ptr);
-
-  u64 K = 0;
+// Atomically links the node in 'src_ref' towards 'trg_ptr'.
+__device__ void link(Worker* worker, Net* net, Ptr* src_ref, Ptr dir_ptr) {
   while (true) {
-    //dbug(&K, "link");
-    //printf("[%04X] step\n", worker->gid);
-
-    // We must be careful to not cross boundaries. When 'trg_ptr' is a VAR, it
-    // isn't owned by us. As such, we can't 'take()' it, and must peek instead.
+    // Peek the target, which may not be owned by us.
     Ptr* trg_ref = target(net, dir_ptr);
     Ptr  trg_ptr = atomicAdd((u64*)trg_ref, 0);
 
-    // If trg_ptr is a redirection, clear it
+    // If target is a redirection, clear and move forward.
     if (is_red(trg_ptr)) {
-      //printf("[%04X] redir\n", worker->gid);
-      u64 cleared = atomicCAS((u64*)trg_ref, trg_ptr, 0);
-      if (cleared == trg_ptr) {
-        dir_ptr = trg_ptr;
-      }
+      // We own the redirection, so we can mutate it.
+      *trg_ref = 0;
+      dir_ptr = trg_ptr;
       continue;
     }
 
-    // If trg_ptr is a var, try replacing it by the principal
+    // If target is a variable, try replacing it by the node.
     else if (is_var(trg_ptr)) {
-      //printf("[%04X] var\n", worker->gid);
-      // Peeks our own principal
-      Ptr pri_ptr = atomicAdd((u64*)pri_ref, 0);
-      // We don't own the var, so we must try replacing with a CAS
-      u64 replaced = atomicCAS((u64*)trg_ref, trg_ptr, pri_ptr);
-      // If it worked, we successfully moved our principal to another region
-      if (replaced == trg_ptr) {
-        // Collects the backwards path, which is now orphan
+      // Peeks the source node.
+      Ptr src_ptr = *src_ref;
+
+      // We don't own the var, so we must try replacing with a CAS.
+      if (atomicCAS((u64*)trg_ref, trg_ptr, src_ptr) == trg_ptr) {
+        // Collect the orphaned backward path.
         trg_ref = target(net, trg_ptr);
-        trg_ptr = atomicAdd((u64*)trg_ref, 0);
-        u64 K2 = 0;
-        while (tag(trg_ptr) >= RDR && tag(trg_ptr) <= RD2) {
-          //dbug(&K2, "inner-link");
-          u64 cleared = atomicCAS((u64*)trg_ref, trg_ptr, 0);
-          if (cleared == trg_ptr) {
-            trg_ref = target(net, trg_ptr);
-            trg_ptr = atomicAdd((u64*)trg_ref, 0);
-          }
+        trg_ptr = *trg_ref;
+        while (is_red(trg_ptr)) {
+          *trg_ref = 0;
+          trg_ref = target(net, trg_ptr);
+          trg_ptr = *trg_ref;
         }
-        // Clear our principal
-        atomicCAS((u64*)pri_ref, pri_ptr, 0);
+        // Clear source location.
+        *src_ref = 0;
         return;
-      // Otherwise, things probably changed, so we step back and try again
-      } else {
-        continue;
       }
+
+      // If the CAS failed, the var changed, so we try again.
+      continue;
     }
 
-    // If it is a principal, two threads will reach this branch
-    // The first to arrive makes a redex, the second exits
-    else if (is_pri(trg_ptr) || trg_ptr == GON) {
-      //printf("[%04X] leap %8X - %8X\n", worker->gid, *fst_ref, *snd_ref);
-      Ptr *fst_ref = pri_ref < trg_ref ? pri_ref : trg_ref;
-      Ptr *snd_ref = pri_ref < trg_ref ? trg_ref : pri_ref;
-      Ptr  fst_ptr = atomicExch((u64*)fst_ref, GON);
-      if (fst_ptr == GON) {
-        atomicCAS((u64*)fst_ref, GON, 0);
-        replace((u64*)snd_ref, GON, 0);
-        return;
-      } else {
-        Ptr snd_ptr = atomicExch((u64*)snd_ref, GON);
-        //printf("[%4X] putleap %08X %08X\n", worker->gid, fst_ptr, snd_ptr);
+    // If it is a node, two threads will reach this branch.
+    else if (is_pri(trg_ptr) || trg_ptr == TMP) {
+
+      // Sort references, to avoid deadlocks.
+      Ptr *fst_ref = src_ref < trg_ref ? src_ref : trg_ref;
+      Ptr *snd_ref = src_ref < trg_ref ? trg_ref : src_ref;
+
+      // Swap first reference by TMP placeholder.
+      Ptr fst_ptr = atomicExch((u64*)fst_ref, TMP);
+
+      // First to arrive creates a redex.
+      if (fst_ptr != TMP) {
+        Ptr snd_ptr = atomicExch((u64*)snd_ref, TMP);
         put_redex(worker, fst_ptr, snd_ptr);
         return;
+
+      // Second to arrive clears up the memory.
+      } else {
+        *fst_ref = 0;
+        replace((u64*)snd_ref, TMP, 0);
+        return;
       }
     }
 
-    // If it is busy, we wait
-    else if (trg_ptr == BSY) {
-      //printf("[%04X] waits\n", worker->gid);
+    // If it is taken, we wait.
+    else if (trg_ptr == TKN) {
       continue;
     }
 
+    // Shouldn't be reached.
     else {
-      //printf("[%04X] WTF?? ~ %8X\n", worker->gid, trg_ptr);
       return;
     }
   }
@@ -779,7 +765,7 @@ __global__ void global_rewrite(Net* net, Book* book, u64 blocks) {
 
     // Send ptr to other side
     if (rewrite && (era_ctr || con_con || con_dup )) {
-      replace(bk_ref, BSY, mv_ptr);
+      replace(bk_ref, TKN, mv_ptr);
     }
 
     // If var_pri, the var is a deref root, so we just inject the node
@@ -813,7 +799,7 @@ __global__ void global_rewrite(Net* net, Book* book, u64 blocks) {
       || con_dup && is_pri(ak_ptr))) {
       //printf("[%4X] ~ %8X %8X\n", worker.gid, ak_ptr, *ak_ref);
       put_redex(&worker, ak_ptr, take(ak_ref));
-      atomicCAS((u64*)ak_ref, BSY, 0);
+      atomicCAS((u64*)ak_ref, TKN, 0);
     }
     __syncwarp();
 
@@ -1202,7 +1188,7 @@ __host__ const char* show_ptr(Ptr ptr, u64 slot) {
   if (ptr == 0) {
     strcpy(buffer[slot], "                ");
     return buffer[slot];
-  } else if (ptr == BSY) {
+  } else if (ptr == TKN) {
     strcpy(buffer[slot], "[..............]");
     return buffer[slot];
   } else {
@@ -3318,7 +3304,7 @@ int main() {
   // Prints the output
   //print_tree(norm, norm->root);
   printf("\nNORMAL ~ rewrites=%d redexes=%d\n======\n\n", norm->rwts, norm->blen);
-  print_net(norm);
+  //print_net(norm);
   printf("Time: %llu ms\n", delta_time);
 
   // Clears CPU memory
