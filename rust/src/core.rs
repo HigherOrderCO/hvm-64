@@ -54,6 +54,7 @@ pub struct Node {
 // - root: a single free wire, used as the entrancy point.
 // - acts: a vector of redexes, updated automatically.
 // - node: a vector of nodes, with main ports omitted.
+// - head: a vector of unomralized heads
 // - used: total nodes currently allocated on the graph.
 // - rwts: total graph rewrites performed inside this net.
 // - next: next pointer to allocate memory (internal).
@@ -62,6 +63,7 @@ pub struct Net {
   pub root: Ptr,
   pub acts: Vec<(Ptr, Ptr)>,
   pub node: Vec<Node>,
+  pub head: Vec<Ptr>,
   pub used: usize,
   pub rwts: usize,
       next: usize,
@@ -195,6 +197,7 @@ impl Net {
       root: Ptr::new(NIL, 0),
       acts: vec![],
       node: vec![Node::nil(); size],
+      head: vec![],
       next: 0,
       used: 0,
       rwts: 0,
@@ -205,6 +208,7 @@ impl Net {
   // Creates a net and boots from a REF.
   pub fn init(&mut self, root_id: u64) {
     self.link(Ptr::new(VRR, 0), Ptr::new(REF, root_id));
+    self.head.push(Ptr::new(VRR, 0));
   }
 
   // Allocates a consecutive chunk of 'size' nodes. Returns the index.
@@ -369,8 +373,8 @@ impl Net {
     return ptr;
   }
 
-  // Reduces all redexes at the same time.
-  pub fn reduce(&mut self, book: &Book) -> usize {
+  // Performs a global parallel rewrite.
+  pub fn rewrite(&mut self, book: &Book) -> usize {
     let rwts = self.acts.len();
     let acts = std::mem::replace(&mut self.acts, vec![]);
     // This loop can be parallelized!
@@ -380,28 +384,35 @@ impl Net {
     return rwts;
   }
 
-  // Reduces all redexes, until there is none.
-  pub fn reduce_all(&mut self, book: &Book) {
+  // Reduces all redexes until there is none.
+  pub fn reduce(&mut self, book: &Book) {
     while self.acts.len() > 0 {
-      self.reduce(book);
+      self.rewrite(book);
     }
   }
 
-  // Expands all references in a term.
-  pub fn normalize(&mut self, book: &Book) {
-    self.reduce_all(book);
-    let mut stack = vec![Ptr::new(VRR,0)];
-    while let Some(loc) = stack.pop() {
-      let trg = *loc.target(self).unwrap();
-      if trg.is_ctr() {
-        stack.push(Ptr::new(VR1, trg.val()));
-        stack.push(Ptr::new(VR2, trg.val()));
-      } else if trg.tag() == REF {
-        let res = self.deref(book, trg);
-        self.link(res, loc);
-        self.reduce_all(book);
-        stack.push(loc);
+  // Expands all unormalized heads.
+  pub fn expand(&mut self, book: &Book) {
+    let head = std::mem::replace(&mut self.head, vec![]);
+    // This loop can be parallelized!
+    for dir in head {
+      let ptr = *dir.target(self).unwrap();
+      if ptr.is_ctr() {
+        self.head.push(Ptr::new(VR1, ptr.val()));
+        self.head.push(Ptr::new(VR2, ptr.val()));
+      } else if ptr.is_ref() {
+        let deref = self.deref(book, ptr);
+        self.link(deref, dir);
+        self.head.push(dir);
       }
+    }
+  }
+
+  // Reduces a net to normal form.
+  pub fn normal(&mut self, book: &Book) {
+    while self.head.len() > 0 {
+      self.reduce(book);
+      self.expand(book);
     }
   }
 
