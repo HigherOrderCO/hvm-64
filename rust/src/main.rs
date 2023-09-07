@@ -182,7 +182,7 @@ fn main() {
   // ex0 = ((n S) Z)
   define(book, "ex0", "
     $ root
-    & @c2 ~ (0 @k2 root)
+    & @c2 ~ (0 @S (0 @Z root))
   ");
 
   // Allocates a big tree
@@ -209,12 +209,12 @@ fn main() {
   define(book, "ex3", "
     $ res
     & @brn ~ (0 dep res)
-    & @c12 ~ (0 @S (0 @Z dep))
+    & @c14 ~ (0 @S (0 @Z dep))
   "); 
 
   // Initializes the net
-  let net = &mut Net::new(1 << 28);
-  net.init(name_to_u32("ex3"));
+  let net = &mut Net::new(1 << 26);
+  net.init(name_to_u64("ex3"));
 
   // Computes its normal form
   net.normalize(book);
@@ -227,17 +227,19 @@ fn main() {
   println!("used: {}", net.used);
   println!("rwts: {}", net.rwts);
 
+  println!("{}", u64_to_name(0x36E72));
   //Prints book to use on CUDA
-  //populate(&book);
+  //print_book_to_cuda(&book);
 }
 
-fn populate(book: &Book) {
+fn print_book_to_cuda(book: &Book) {
   println!("Term* term;");
-  let mut sorted_defs: Vec<(&u32, &Net)> = book.defs.iter().collect();
+  let mut sorted_defs: Vec<(&u64, &Net)> = book.defs.iter().collect();
   sorted_defs.sort_by_key(|&(key, _)| key);
   for (key, def) in sorted_defs {
-    println!("  // {}", u32_to_name(*key));
+    println!("  // {}", u64_to_name(*key));
     println!("  book->defs[0x{:08x}]           = (Term*) malloc(sizeof(Term));", key);
+    println!("  book->defs[0x{:08x}]->root     = 0x{:08x};", key, def.root.data);
     println!("  book->defs[0x{:08x}]->alen     = {};", key, def.acts.len());
     println!("  book->defs[0x{:08x}]->acts     = (Wire*) malloc({} * sizeof(Wire));", key, def.acts.len());
     for i in 0..def.acts.len() {
@@ -246,7 +248,7 @@ fn populate(book: &Book) {
     println!("  book->defs[0x{:08x}]->nlen     = {};", key, def.node.len());
     println!("  book->defs[0x{:08x}]->node     = (Node*) malloc({} * sizeof(Node));", key, def.node.len());
     for i in 0..def.node.len() {
-      println!("  book->defs[0x{:08x}]->node[{:2}] = (Node) {{0x{:04x},0x{:08x},0x{:08x}}};", key, i, def.node[i].color, def.node[i].ports[P1 as usize].data, def.node[i].ports[P2 as usize].data);
+      println!("  book->defs[0x{:08x}]->node[{:2}] = (Node) {{0x{:08x},0x{:08x}}};", key, i, def.node[i].ports[P1].data, def.node[i].ports[P2].data);
     }
   }
 }

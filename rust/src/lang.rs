@@ -9,10 +9,11 @@
 // <net>    ::= <root> <acts>
 //   <root> ::= "$" <tree>
 //   <acts> ::= "&" <tree> "~" <tree> <net>
-// <tree>   ::= <ctr> | <var> | <val>
-//   <ctr>  ::= "(" <val_lit> " " <tree> " " <tree> ")"
+// <tree>   ::= <era> | <nod> | <var> | <num>
+//   <era>  ::= "*"
+//   <nod>  ::= "(" <num_lit> " " <tree> " " <tree> ")"
 //   <var>  ::= <str_lit>
-//   <val>  ::= <val_lit>
+//   <num>  ::= <num_lit>
 //   <ref>  ::= "@" <str_lit>
 //
 // For example, below is the church nat 2, encoded as an interaction net:
@@ -43,20 +44,20 @@ use std::str::Chars;
 
 #[derive(Debug)]
 pub enum LTree {
-  Var {
-    nam: String,
-  },
   Era,
-  Ctr { 
-    col: u8,
+  Nod { 
+    tag: Tag,
     lft: Box<LTree>,
     rgt: Box<LTree>,
   },
-  //Num {
-    //val: Val
-  //},
+  Var {
+    nam: String,
+  },
   Ref {
     nam: Val
+  },
+  NUM {
+    val: Val
   },
 }
 
@@ -87,17 +88,17 @@ fn consume(chars: &mut Peekable<Chars>, text: &str) {
   }
 }
 
-pub fn parse_val_lit(chars: &mut Peekable<Chars>) -> u32 {
-  let mut val : u32 = 0;
+pub fn parse_num_lit(chars: &mut Peekable<Chars>) -> u64 {
+  let mut num : u64 = 0;
   skip_spaces(chars);
   while let Some(c) = chars.peek() {
     if !c.is_digit(10) {
       break;
     }
-    val = val * 10 + c.to_digit(10).unwrap() as u32;
+    num = num * 10 + c.to_digit(10).unwrap() as u64;
     chars.next();
   }
-  val
+  num
 }
 
 pub fn parse_str_lit(chars: &mut Peekable<Chars>) -> String {
@@ -122,21 +123,21 @@ pub fn parse_ltree(chars: &mut Peekable<Chars>) -> LTree {
     },
     Some('(') => {
       chars.next();
-      let col = parse_val_lit(chars) as u8;
+      let tag = CON + (parse_num_lit(chars) as u16);
       let lft = Box::new(parse_ltree(chars));
       let rgt = Box::new(parse_ltree(chars));
       consume(chars, ")");
-      LTree::Ctr { col, lft, rgt }
+      LTree::Nod { tag, lft, rgt }
     },
     Some('@') => {
       chars.next();
       skip_spaces(chars);
       let name = parse_str_lit(chars);
-      LTree::Ref { nam: name_to_u32(&name) }
+      LTree::Ref { nam: name_to_u64(&name) }
     },
-    //Some(c) if c.is_digit(10) => {
-      //LTree::Num { val: parse_val_lit(chars) }
-    //},
+    Some(c) if c.is_digit(10) => {
+      LTree::NUM { val: parse_num_lit(chars) }
+    },
     _ => {
       LTree::Var { nam: parse_str_lit(chars) }
     },
@@ -176,21 +177,21 @@ pub fn do_parse_lnet(code: &str) -> LNet {
 
 pub fn show_ltree(tree: &LTree) -> String {
   match tree {
+    LTree::Era => {
+      "*".to_string()
+    },
+    LTree::Nod { tag, lft, rgt } => {
+      format!("({} {} {})", tag - CON, show_ltree(&*lft), show_ltree(&*rgt))
+    },
     LTree::Var { nam } => {
       nam.clone()
     },
-    LTree::Era => {
-      format!("*")
-    },
-    LTree::Ctr { col, lft, rgt } => {
-      format!("({} {} {})", col, show_ltree(&*lft), show_ltree(&*rgt))
-    },
     LTree::Ref { nam } => {
-      format!("@{}", u32_to_name(*nam))
+      format!("@{}", u64_to_name(*nam))
     },
-    //LTree::Num { val } => {
-      //val.to_string()
-    //},
+    LTree::NUM { val } => {
+      val.to_string()
+    },
   }
 }
 
@@ -210,15 +211,44 @@ pub fn show_net(net: &Net) -> String {
 // Conversion
 // ----------
 
-pub fn val_to_str(val: usize) -> String {
-  let mut val = val + 1;
+pub fn num_to_str(num: usize) -> String {
+  let mut num = num + 1;
   let mut str = String::new();
-  while val > 0 {
-    let c = ((val % 26) as u8 + b'a') as char;
+  while num > 0 {
+    let c = ((num % 26) as u8 + b'a' - 1) as char;
     str.push(c);
-    val /= 26;
+    num /= 26;
   }
   return str.chars().rev().collect();
+}
+
+pub fn tag_to_port(tag: Tag) -> Port {
+  match tag {
+    VR1 => P1,
+    VR2 => P2,
+    _   => unreachable!(),
+  }
+}
+
+pub fn port_to_tag(port: Port) -> Tag {
+  match port {
+    P1 => VR1,
+    P2 => VR2,
+    _  => unreachable!(),
+  }
+}
+
+pub fn lnet_to_net(lnet: &LNet) -> Net {
+  let mut vars = HashMap::new();
+  let mut net = Net::new(1 << 16);
+  net.root = alloc_ltree(&mut net, &lnet.root, &mut vars, Parent::Root);
+  for (tree1, tree2) in &lnet.acts {
+    let ptr1 = alloc_ltree(&mut net, tree1, &mut vars, Parent::Acts);
+    let ptr2 = alloc_ltree(&mut net, tree2, &mut vars, Parent::Acts);
+    net.acts.push((ptr1, ptr2));
+  }
+  net.node = net.node[0 .. net.used].to_vec();
+  return net;
 }
 
 pub fn name_to_letters(name: &str) -> Vec<u8> {
@@ -251,31 +281,31 @@ pub fn letters_to_name(letters: Vec<u8>) -> String {
   return name;
 }
 
-pub fn u32_to_letters(val: u32) -> Vec<u8> {
+pub fn u64_to_letters(num: u64) -> Vec<u8> {
   let mut letters = Vec::new();
-  let mut val = val;
-  while val > 0 {
-    letters.push((val % 64) as u8);
-    val /= 64;
+  let mut num = num;
+  while num > 0 {
+    letters.push((num % 64) as u8);
+    num /= 64;
   }
   letters.reverse();
   return letters;
 }
 
-pub fn letters_to_u32(letters: Vec<u8>) -> u32 {
-  let mut val = 0;
+pub fn letters_to_u64(letters: Vec<u8>) -> u64 {
+  let mut num = 0;
   for letter in letters {
-    val = val * 64 + letter as u32;
+    num = num * 64 + letter as u64;
   }
-  return val;
+  return num;
 }
 
-pub fn name_to_u32(name: &str) -> u32 {
-  letters_to_u32(name_to_letters(name))
+pub fn name_to_u64(name: &str) -> u64 {
+  letters_to_u64(name_to_letters(name))
 }
 
-pub fn u32_to_name(val: u32) -> String {
-  letters_to_name(u32_to_letters(val))
+pub fn u64_to_name(num: u64) -> String {
+  letters_to_name(u64_to_letters(num))
 }
 
 // Injection and Readback
@@ -285,14 +315,25 @@ pub fn u32_to_name(val: u32) -> String {
 pub enum Parent {
   Acts,
   Root,
-  Node { loc: Val, port: Port },
+  Node { val: Val, port: Port },
 }
 
 pub fn alloc_ltree(net: &mut Net, tree: &LTree, vars: &mut HashMap<String, Parent>, parent: Parent) -> Ptr {
   match tree {
+    LTree::Era => {
+      Ptr::new(ERA, 0)
+    },
+    LTree::Nod { tag, lft, rgt } => {
+      let val = net.alloc(1);
+      let p1 = alloc_ltree(net, &*lft, vars, Parent::Node { val, port: P1 });
+      net.set(val, P1, p1);
+      let p2 = alloc_ltree(net, &*rgt, vars, Parent::Node { val, port: P2 });
+      net.set(val, P2, p2);
+      Ptr::new(*tag, val)
+    },
     LTree::Var { nam } => {
       if let Parent::Acts = parent {
-        panic!("Can't have variable on active pairs.");
+        panic!("By definition, can't have variable on active pairs.");
       };
       match vars.get(nam) {
         Some(Parent::Acts) => {
@@ -303,54 +344,42 @@ pub fn alloc_ltree(net: &mut Net, tree: &LTree, vars: &mut HashMap<String, Paren
             Parent::Acts => {
               unreachable!();
             }
-            Parent::Node { loc, port } => {
-              *net.mut_root() = if port == P1 { Ptr::new_vr1(loc) } else { Ptr::new_vr2(loc) };
+            Parent::Node { val, port } => {
+              net.root = Ptr::new(port_to_tag(port), val);
             }
             Parent::Root => {
-              *net.mut_root() = Ptr::new_vrr();
+              net.root = Ptr::new(VRR, 0);
             }
           }
-          return Ptr::new_vrr();
+          return Ptr::new(VRR, 0);
         },
-        Some(Parent::Node { loc: other_loc, port: other_port }) => {
-          //println!("linked {} | set {} {:?} as {} {:?}", nam, other_loc, other_port, loc, port);
+        Some(Parent::Node { val: other_val, port: other_port }) => {
+          //println!("linked {} | set {} {:?} as {} {:?}", nam, other_val, other_port, val, port);
           match parent {
             Parent::Acts => {
               unreachable!();
             }
-            Parent::Node { loc, port } => {
-              net.set_port(*other_loc, *other_port, if port == P1 { Ptr::new_vr1(loc) } else { Ptr::new_vr2(loc) })
+            Parent::Node { val, port } => {
+              net.set(*other_val, *other_port, Ptr::new(port_to_tag(port), val))
             }
             Parent::Root => {
-              net.set_port(*other_loc, *other_port, Ptr::new_vrr())
+              net.set(*other_val, *other_port, Ptr::new(VRR, 0))
             }
           }
-          return if *other_port == P1 { Ptr::new_vr1(*other_loc) } else { Ptr::new_vr2(*other_loc) };
+          return Ptr::new(port_to_tag(*other_port), *other_val);
         }
         None => {
-          //println!("linkin {} | iam {} {:?}", nam, loc, port);
+          //println!("linkin {} | iam {} {:?}", nam, val, port);
           vars.insert(nam.clone(), parent);
-          return NIL;
+          Ptr::new(NIL, 0)
         }
       }
     },
-    LTree::Era => {
-      Ptr::new_era()
-    },
-    LTree::Ctr { col, lft, rgt } => {
-      let loc = net.alloc();
-      net.set_color(loc, *col);
-      let p1 = alloc_ltree(net, &*lft, vars, Parent::Node { loc, port: P1 });
-      net.set_port(loc, P1, p1);
-      let p2 = alloc_ltree(net, &*rgt, vars, Parent::Node { loc, port: P2 });
-      net.set_port(loc, P2, p2);
-      Ptr::new_ctr(loc)
-    },
-    //LTree::Num { val } => {
-      //Ptr::new_num(*val)
-    //},
     LTree::Ref { nam } => {
-      Ptr::new_ref(*nam)
+      Ptr::new(REF, *nam)
+    },
+    LTree::NUM { val } => {
+      Ptr::new(NUM, *val)
     },
   }
 }
@@ -361,43 +390,38 @@ pub fn do_alloc_ltree(net: &mut Net, tree: &LTree) -> Ptr {
 
 pub fn readback_ltree(net: &Net, ptr: Ptr, parent: Parent, vars: &mut HashMap<Parent,String>, fresh: &mut usize) -> LTree {
   match ptr.tag() {
-    VR1 | VR2 => {
-      let key = if ptr.is_vrr() {
-        Parent::Root
-      } else if ptr.is_vr1() {
-        Parent::Node { loc: ptr.val(), port: P1 }
-      } else if ptr.is_vr2() {
-        Parent::Node { loc: ptr.val(), port: P2 }
-      } else {
-        unreachable!()
+    NIL => {
+      LTree::Era
+    },
+    ERA => {
+      LTree::Era
+    },
+    REF => {
+      LTree::Ref { nam: ptr.val() }
+    },
+    NUM => {
+      LTree::NUM { val: ptr.val() }
+    },
+    VRR | VR1 | VR2 => {
+      let key = match ptr.tag() {
+        VR1 => Parent::Node { val: ptr.val(), port: P1 },
+        VR2 => Parent::Node { val: ptr.val(), port: P2 },
+        VRR => Parent::Root,
+        _   => unreachable!(),
       };
       if let Some(nam) = vars.get(&key) {
         LTree::Var { nam: nam.clone() }
       } else {
-        let nam = val_to_str(*fresh);
+        let nam = num_to_str(*fresh);
         *fresh += 1;
         vars.insert(parent, nam.clone());
         LTree::Var { nam }
       }
     },
-    CTR => {
-      if ptr.is_era() {
-        LTree::Era
-      } else {
-        let col = net.get_color(ptr.val());
-        let lft = readback_ltree(net, net.get_port(ptr.val(), P1), Parent::Node { loc: ptr.val(), port: P1 }, vars, fresh);
-        let rgt = readback_ltree(net, net.get_port(ptr.val(), P2), Parent::Node { loc: ptr.val(), port: P2 }, vars, fresh);
-        LTree::Ctr { col, lft: Box::new(lft), rgt: Box::new(rgt) }
-      }
-    },
-    //NUM => {
-      //LTree::Num { val: ptr.val() }
-    //},
-    REF => {
-      LTree::Ref { nam: ptr.val() }
-    },
     _ => {
-      panic!()
+      let lft = readback_ltree(net, net.get(ptr.val(), P1), Parent::Node { val: ptr.val(), port: P1 }, vars, fresh);
+      let rgt = readback_ltree(net, net.get(ptr.val(), P2), Parent::Node { val: ptr.val(), port: P2 }, vars, fresh);
+      LTree::Nod { tag: ptr.tag(), lft: Box::new(lft), rgt: Box::new(rgt) }
     },
   }
 }
@@ -406,7 +430,7 @@ pub fn readback_lnet(net: &Net) -> LNet {
   let mut vars = HashMap::new();
   let mut fresh = 0;
   let mut acts = Vec::new();
-  let root = readback_ltree(net, *net.ref_root(), Parent::Root, &mut vars, &mut fresh);
+  let root = readback_ltree(net, net.root, Parent::Root, &mut vars, &mut fresh);
   for &(a, b) in &net.acts {
     let tree_a = readback_ltree(net, a, Parent::Acts, &mut vars, &mut fresh);
     let tree_b = readback_ltree(net, b, Parent::Acts, &mut vars, &mut fresh);
@@ -415,26 +439,11 @@ pub fn readback_lnet(net: &Net) -> LNet {
   LNet { root, acts }
 }
 
-pub fn lnet_to_net(lnet: &LNet) -> Net {
-  let mut vars = HashMap::new();
-  let mut net = Net::new(1 << 16);
-  *net.mut_root() = alloc_ltree(&mut net, &lnet.root, &mut vars, Parent::Root);
-  for (tree1, tree2) in &lnet.acts {
-    let ptr1 = alloc_ltree(&mut net, tree1, &mut vars, Parent::Acts);
-    let ptr2 = alloc_ltree(&mut net, tree2, &mut vars, Parent::Acts);
-    net.acts.push((ptr1, ptr2));
-  }
-  net.node = net.node[0 .. net.used + 1].to_vec();
-  //println!("result: {}", show_lnet(&lnet));
-  //println!("result: {}", show_net(&net));
-  return net;
-}
-
 // Utils
 // -----
 
-pub fn define(book: &mut Book, name: &str, code: &str) -> u32 {
-  let id = name_to_u32(name);
+pub fn define(book: &mut Book, name: &str, code: &str) -> u64 {
+  let id = name_to_u64(name);
   book.def(id, lnet_to_net(&do_parse_lnet(code)));
   return id;
 }
