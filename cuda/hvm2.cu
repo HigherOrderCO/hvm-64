@@ -108,15 +108,15 @@ typedef struct {
 
 // A worker local data
 typedef struct {
-  u64   tid;   // thread id
-  u64   bid;   // block id 
-  u64   gid;   // global id
-  u64   type;  // worker type (A1|A2|B1|B2)
-  u64   port;  // worker port (P1|P2)
-  u64   aloc;  // where to alloc next node
-  u64   rwts;  // local rewrites performed
-  Wire* bag;   // local redex bag
-  u64*  locs;  // local alloc locs
+  u64   tid;  // thread id
+  u64   bid;  // block id 
+  u64   gid;  // global id
+  u64   type; // worker type (A1|A2|B1|B2)
+  u64   port; // worker port (P1|P2)
+  u64   aloc; // where to alloc next node
+  u64   rwts; // local rewrites performed
+  Wire* bag;  // local redex bag
+  u64*  locs; // local alloc locs
 } Worker;
 
 // Debug
@@ -3318,3 +3318,37 @@ int main() {
 
   return 0;
 }
+
+// Possible issues (auto-detected):
+// 1. In the function `rng`, there is no seed provided for the random number generator. This could lead to generating the same sequence of numbers every time the program runs.
+// 2. In the function `mkptr`, there is no check if the value `val` exceeds the limit of 48 bits. If it does, this would lead to incorrect results due to overflow.
+// 3. In the function `div`, there is no check for division by zero. This could lead to a runtime error.
+// 4. In the function `alloc`, there is an infinite loop with no exit condition if all nodes are occupied. This could lead to a deadlock.
+// 5. In the function `replace`, there is an infinite loop if the expected value never matches the current value at the reference. This could lead to a deadlock.
+// 6. In the function `link`, there is no check if the target reference is NULL before dereferencing it. This could lead to a segmentation fault.
+// 7. In the function `scansum`, there is no check if the array size is a power of two. If it's not, this could lead to incorrect results or out-of-bounds access.
+// 8. In the function `global_scatter_prepare_0`, there is no check if the block index exceeds the maximum block size. This could lead to out-of-bounds access.
+// 9. In the function `global_rewrite`, there is no check if the thread id exceeds the maximum thread count. This could lead to out-of-bounds access.
+// 10. In the function `do_global_scatter`, there is no check if the total length of bags exceeds the maximum bag size. This could lead to out-of-bounds access.
+// 11. In the function `do_global_expand`, there is no check if the head length exceeds the maximum head size. This could lead to out-of-bounds access.
+// 12. In the function `do_rewrite`, there is no check if the number of blocks exceeds the maximum block size. This could lead to out-of-bounds access.
+// 13. In the function `map_insert`, there is no check if the map size exceeds the maximum map size. This could lead to out-of-bounds access.
+// 14. In the function `print_tree_go`, there is no check if the pointer is NULL before dereferencing it. This could lead to a segmentation fault.
+// 15. In the function `populate`, the implementation is missing. This could lead to undefined behavior.
+// 16. In the function `boot`, there is no check if the reference id is valid. This could lead to incorrect results.
+// 17. In the function `net_to_gpu`, there is no check if the memory allocation on the device was successful. This could lead to a segmentation fault.
+// 18. In the function `net_to_cpu`, there is no check if the memory allocation on the host was successful. This could lead to a segmentation fault.
+// 19. In the function `book_to_gpu`, there is no check if the memory allocation on the device was successful. This could lead to a segmentation fault.
+// 20. In the function `book_to_cpu`, there is no check if the memory allocation on the host was successful. This could lead to a segmentation fault.
+
+// Optimization suggestions:
+// 1. Use shared memory: Shared memory is faster than global memory and can be used to store data that will be accessed multiple times by threads in the same block. For example, in the `global_rewrite` function, the `Worker` struct could be stored in shared memory.
+// 2. Coalesced memory access: Ensure that memory accesses are coalesced for optimal performance. This means that consecutive threads should access consecutive memory locations whenever possible.
+// 3. Avoid divergent control flow: In several places, different threads within a warp take different control paths (e.g., in the `global_rewrite` function). This can lead to warp divergence, which slows down execution. Try to restructure the code to minimize this.
+// 4. Use atomic operations sparingly: Atomic operations such as `atomicAdd` and `atomicCAS` are used frequently throughout the code. These operations can be slow because they need to ensure exclusive access to memory locations. Consider alternative strategies that reduce the need for atomic operations.
+// 5. Optimize constant memory usage: The constants defined at the beginning of the file could be placed in constant memory using the `__constant__` keyword. This could potentially speed up access to these values.
+// 6. Minimize data transfers between host and device: Data transfers between the host and the device can be slow. It's better to perform as much computation on the device as possible before transferring results back to the host.
+// 7. Use streams for overlapping computation and data transfer: CUDA streams can be used to overlap data transfers with computation, which can lead to performance improvements.
+// 8. Use texture or surface memory for irregular access patterns: If the access pattern to the data is not regular, using texture or surface memory can provide caching benefits.
+// 9. Use efficient data structures: Some data structures used in the code (like simple arrays for maps) may not be the most efficient choice. Consider using more efficient data structures like hash maps.
+// 10. Optimize kernel launch configuration: The number of threads per block and the number of blocks are important parameters that can affect performance. These should be tuned for optimal performance based on the GPU architecture and problem size.
