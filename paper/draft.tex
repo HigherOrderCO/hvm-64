@@ -287,9 +287,6 @@ The lock-free evaluator algorithm has been implemented in CUDA~\cite{taelin2022l
 
 In this paper, we have presented a lock-free evaluator for interaction combinators that achieves near-ideal speedup on modern GPUs. Our approach leverages the inherent parallelism of interaction combinators and avoids the pitfalls of lock-based evaluators. We also introduced an optimization that further increases the potential for parallelism by breaking down rewrites into smaller sequential chunks. Our CUDA implementation demonstrates the practicality and efficiency of our approach, as well as suggesting its correctness. Future work includes further optimizations, exploring other applications of our lock-free evaluator, and providing formal proofs of correctness.
 
-\bibliographystyle{plain}
-\bibliography{references}
-
 \begin{thebibliography}{9}
 \bibitem{girard1987linear} 
 Girard, J. Y. (1987). Linear logic. Theoretical computer science, 50(1), 1-101.
@@ -308,5 +305,6 @@ Sato, S. (2014). Design and implementation of a low-level language for interacti
 
 \bibitem{taelin2022lock} 
 Taelin, V. (2022). Higher-order Virtual Machine [Online]. Available at: https://github.com/HigherOrderCO/hvm-core
+\end{thebibliography}
 
 \end{document}
