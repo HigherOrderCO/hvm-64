@@ -31,7 +31,7 @@
     showtabs=false,                  
     tabsize=2,
     frame=single,
-    backgroundcolor=\color{backcolour}
+    backgroundcolor=\color{white}
 }
 
 \title{A Lock-Free Interaction Combinator Evaluator}
@@ -43,7 +43,7 @@
 \maketitle
 
 \begin{abstract}
-We present a lock-free evaluator for interaction combinators, a simple yet powerful model of distributed computation. The proposed algorithm is based on the concept of implicit ownership regions and redirectors, allowing for efficient parallel evaluation without race conditions or deadlocks. We provide detailed pseudocode for the core procedures and illustrations. We have implemented our lock-free evaluator in CUDA and achieved successful reductions of large graphs on GPUs with thousands of concurrent threads, demonstrating the practicality and efficiency of our approach.
+We present a lock-free evaluator for interaction combinators, a simple yet powerful model of distributed computation. The proposed algorithm is based on the concept of implicit ownership regions and redirectors, allowing for efficient parallel evaluation without race conditions or deadlocks. We provide detailed illustrations, and the pseudocode for the core procedures can be found in the appendix. We have implemented our lock-free evaluator in CUDA and achieved successful reductions of large graphs on GPUs with thousands of concurrent threads, demonstrating the practicality and efficiency of our approach.
 \end{abstract}
 
 \section{Introduction}\label{s:introduction}
@@ -52,7 +52,11 @@ Interaction nets are a graphical model of computation designed as a generalizati
 
 A specific type of interaction nets is the system called \textit{interaction combinators}, introduced by Lafont~\cite{lafont1997interaction}. These are built from three types of nodes: constructor (CON), duplicator (DUP), and eraser (ERA). Each node has a principal port and two auxiliary ports. The nodes interact according to six rules, divided into two categories: commutation and annihilation. Commutation rules apply when two different types of nodes are connected through their principal ports, while annihilation rules apply when two nodes of the same type are connected through their principal ports. In this paper, we use the symmetric interaction combinator variant, which has been described by Mazza~\cite{mazza2007denotational}, and is illustrated below:
 
+\begin{figure}[h!]
+\centering
 \includegraphics[width=1.0\textwidth,margin=4 4 4 4]{interaction_rules.png}
+\caption{Interaction rules}
+\end{figure}
 
 Interaction combinators possess several key properties such as determinism, locality, strong confluence (diamond property), and universality. These properties make them particularly suitable for modeling distributed and parallel computations~\cite{lafont1997interaction}. Yet, despite that theoretical appeal, there has been limited practical exploration of their potential for massive parallel computation on modern hardware. In this paper, we propose a lock-free evaluator for interaction combinators that achieves near-ideal speedup on modern GPUs, with several thousand concurrent threads. The heart of our implementation is a lock-free \texttt{link()} procedure, which we describe in detail.
 
@@ -69,9 +73,23 @@ Another approach, the ingpu evaluator~\cite{jiresch2014towards} was introduced a
 
 The naive approach to reducing interaction combinators in parallel is to represent nets as vectors of nodes, with ports holding pointers to their destinations, and maintain a set of redexes (active pairs) to process concurrently. However, this can lead to race conditions due to overlapping regions. To address this, the affected regions, which include two active nodes and up to 4 surrounding nodes, must be locked. This approach is illustrated below:
 
+\begin{figure}[h!]
+\centering
 \includegraphics[width=1.0\textwidth,margin=4 4 4 4]{lock_based_evaluator_1.png}
+\caption{Lock-based evaluator step 1}
+\end{figure}
+
+\begin{figure}[h!]
+\centering
 \includegraphics[width=1.0\textwidth,margin=4 4 4 4]{lock_based_evaluator_2.png}
+\caption{Lock-based evaluator step 2}
+\end{figure}
+
+\begin{figure}[h!]
+\centering
 \includegraphics[width=1.0\textwidth,margin=4 4 4 4]{lock_based_evaluator_3.png}
+\caption{Lock-based evaluator step 3}
+\end{figure}
 
 While this strategy works, locking the 6 surrounding nodes can be challenging, potentially leading to a deadlock. For example, consider thread R locking active nodes A and B, while thread G locks active nodes C and D. To proceed with the reduction, thread R must lock C, and thread G must lock B, which is impossible in this situation.
 
@@ -89,17 +107,97 @@ When a thread obtains a redex, it assumes ownership of its two active nodes. It 
 
 2. If it is a main port, the thread has found a new active pair and coordinates with the opposing thread — which will traverse the backward path — to create a new redex.
 
-Below is a complete illustration of this process:
+The following illustrations showcase this process:
 
+\begin{figure}[h!]
+\centering
 \includegraphics[width=1.0\textwidth,margin=4 4 4 4]{lock_free_evaluator_1.png}
-\includegraphics[width=1.0\textwidth,margin=4 4 4 4]{lock_free_evaluator_2.png}
-\includegraphics[width=1.0\textwidth,margin=4 4 4 4]{lock_free_evaluator_3.png}
-\includegraphics[width=1.0\textwidth,margin=4 4 4 4]{lock_free_evaluator_4.png}
-\includegraphics[width=1.0\textwidth,margin=4 4 4 4]{lock_free_evaluator_5.png}
-\includegraphics[width=1.0\textwidth,margin=4 4 4 4]{lock_free_evaluator_6.png}
-\includegraphics[width=1.0\textwidth,margin=4 4 4 4]{lock_free_evaluator_7.png}
+\caption{Lock-free evaluator step 1}
+\end{figure}
 
-Note that in Image 2, the reduction is semantically complete, with ports X1-W0 and Y0-Z0 indirectly connected. Each thread independently performs this reduction, without impacting surrounding nodes, by converting the auxiliary ports of their owned nodes to redirectors and then swapping opposing ports (e.g., A1 goes to B1, B2 goes to A2, etc.). This approach entirely avoids locks. The link() procedure is then only needed to clear the memory occupied by redirectors and to identify new active pairs. As this clean-up process may cross ownership regions, caution is required to deploy atomics when necessary. The following is a comprehensive pseudocode:
+\begin{figure}[h!]
+\centering
+\includegraphics[width=1.0\textwidth,margin=4 4 4 4]{lock_free_evaluator_2.png}
+\caption{Lock-free evaluator step 2}
+\end{figure}
+
+\begin{figure}[h!]
+\centering
+\includegraphics[width=1.0\textwidth,margin=4 4 4 4]{lock_free_evaluator_3.png}
+\caption{Lock-free evaluator step 3}
+\end{figure}
+
+\begin{figure}[h!]
+\centering
+\includegraphics[width=1.0\textwidth,margin=4 4 4 4]{lock_free_evaluator_4.png}
+\caption{Lock-free evaluator step 4}
+\end{figure}
+
+\begin{figure}[h!]
+\centering
+\includegraphics[width=1.0\textwidth,margin=4 4 4 4]{lock_free_evaluator_5.png}
+\caption{Lock-free evaluator step 5}
+\end{figure}
+
+\begin{figure}[h!]
+\centering
+\includegraphics[width=1.0\textwidth,margin=4 4 4 4]{lock_free_evaluator_6.png}
+\caption{Lock-free evaluator step 6}
+\end{figure}
+
+\begin{figure}[h!]
+\centering
+\includegraphics[width=1.0\textwidth,margin=4 4 4 4]{lock_free_evaluator_7.png}
+\caption{Lock-free evaluator step 7}
+\end{figure}
+
+Note that in Image 2, the reduction is semantically complete, with ports X1-W0 and Y0-Z0 indirectly connected. Each thread independently performs this reduction, without impacting surrounding nodes, by converting the auxiliary ports of their owned nodes to redirectors and then swapping opposing ports (e.g., A1 goes to B1, B2 goes to A2, etc.). This approach entirely avoids locks. The link() procedure in the appendix is then only needed to clear the memory occupied by redirectors and to identify new active pairs. As this clean-up process may cross ownership regions, caution is required to deploy atomics when necessary.
+
+\section{Optimization: 1/4 rewrites}\label{s:lockfree}
+
+The lock-free evaluator procedure above reveals a symmetry that can be exploited to further increase the parallelism of the algorithm. Notice how thread R performs the same logic 4 times:
+
+\begin{itemize}
+  \item Move A1 as redirector to B1; if target is main, link B1 towards A1.
+  \item Move A2 as redirector to B2; if target is main, link B2 towards A2.
+  \item Move B1 as redirector to A1; if target is main, link A1 towards B1.
+  \item Move B2 as redirector to A2; if target is main, link A2 towards B2.
+\end{itemize}
+
+These 4 segments are, themselves, independent, and can be performed in parallel. This allows a single interaction to be processed by 4 threads, each one performing 1/4 of a rewrite. According to Amdahl's law, the maximum speedup achievable through parallelization is limited by the fraction of the program that must be executed sequentially. By dividing the rewrite process into 4 smaller sequential chunks, we effectively reduce the sequential portion of the algorithm, increasing the maximum potential speedup by 4x. The pseudocode for this optimized approach can be found in the appendix, completing the algorithm and allowing for efficient parallel execution of interaction combinators.
+
+\section{Implementation}\label{s:implementation}
+
+The lock-free evaluator algorithm has been implemented in CUDA~\cite{taelin2022lock} and has successfully reduced large graphs on GPUs with thousands of concurrent threads, suggesting the algorithm's correctness, even though a formal proof is not provided yet. Moreover, our CUDA implementation demonstrates efficient performance, reaching 900 million rewrites per second on an RTX 4090, which is 15 times more than a single-core CPU evaluator. This significant speedup confirms the practical applicability and efficiency of our approach.
+
+\section{Conclusion}\label{s:conclusion}
+
+In this paper, we have presented a lock-free evaluator for interaction combinators that achieves near-ideal speedup on modern GPUs. Our approach leverages the inherent parallelism of interaction combinators and avoids the pitfalls of lock-based evaluators. We also introduced an optimization that further increases the potential for parallelism by breaking down rewrites into smaller sequential chunks. Our CUDA implementation demonstrates the practicality and efficiency of our approach, as well as suggesting its correctness. Future work includes further optimizations, exploring other applications of our lock-free evaluator, and providing formal proofs of correctness.
+
+\begin{thebibliography}{9}
+\bibitem{girard1987linear} 
+Girard, J. Y. (1987). Linear logic. Theoretical computer science, 50(1), 1-101.
+
+\bibitem{lafont1997interaction} 
+Lafont, Y. (1997). Interaction combinators. Information and Computation, 137(1), 69-101.
+
+\bibitem{jiresch2014towards} 
+Jiresch, E. (2014). Towards a GPU-based implementation of interaction nets. arXiv preprint arXiv:1404.0076.
+
+\bibitem{mazza2007denotational} 
+Mazza, D. (2007). A denotational semantics for the symmetric interaction combinators. Mathematical Structures in Computer Science, 17(3), 527-562.
+
+\bibitem{sato2014implementation}
+Sato, S. (2014). Design and implementation of a low-level language for interaction nets. Ph.D. Thesis, University of Sussex.
+
+\bibitem{taelin2022lock} 
+Taelin, V. (2022). Higher-order Virtual Machine [Online]. Available at: https://github.com/HigherOrderCO/hvm-core
+\end{thebibliography}
+
+\appendix
+\section{Pseudocode}\label{app:pseudocode}
+
+In this appendix, we provide the complete pseudocode for the lock-free evaluator algorithm and the 1/4 rewrites optimization.
 
 \begin{lstlisting}
 # Atomically links the node in 'src_ref' towards 'dir_ptr'.
@@ -167,20 +265,6 @@ def link(src_ref: &Pointer, dir_ptr: Pointer):
     else:
       continue
 \end{lstlisting}
-
-\section{Optimization: 1/4 rewrites}\label{s:lockfree}
-
-The lock-free evaluator procedure above reveals a symmetry that can be exploited to further increase the parallelism of the algorithm. Notice how thread R performs the same logic 4 times:
-
-- Move A1 as redirector to B1; if target is main, link B1 towards A1.
-
-- Move A2 as redirector to B2; if target is main, link B2 towards A2.
-
-- Move B1 as redirector to A1; if target is main, link A1 towards B1.
-
-- Move B2 as redirector to A2; if target is main, link A2 towards B2.
-
-These 4 segments are, themselves, independent, and can be performed in parallel. This allows a single interaction to be processed by 4 threads, each one performing 1/4 of a rewrite. According to Amdahl's law, the maximum speedup achievable through parallelization is limited by the fraction of the program that must be executed sequentially. By dividing the rewrite process into 4 smaller sequential chunks, we effectively reduce the sequential portion of the algorithm, increasing the maximum potential speedup by 4x. The code below demonstrates the implementation of this optimized approach, completing the algorithm and allowing for efficient parallel execution of interaction combinators.
 
 \begin{lstlisting}
 # Performs 1/4 con-con interaction
@@ -278,33 +362,5 @@ def rewrite(net):
         (ERA, DUP) => era_dup(b, b, port)
         (ERA, ERA) => era_era(a, b, port)
 \end{lstlisting}
-
-\section{Implementation}\label{s:implementation}
-
-The lock-free evaluator algorithm has been implemented in CUDA~\cite{taelin2022lock} and has successfully reduced large graphs on GPUs with thousands of concurrent threads, suggesting the algorithm's correctness, even though a formal proof is not provided yet. Moreover, our CUDA implementation demonstrates efficient performance, reaching 900 million rewrites per second on an RTX 4090, which is 15 times more than a single-core CPU evaluator. This significant speedup confirms the practical applicability and efficiency of our approach.
-
-\section{Conclusion}\label{s:conclusion}
-
-In this paper, we have presented a lock-free evaluator for interaction combinators that achieves near-ideal speedup on modern GPUs. Our approach leverages the inherent parallelism of interaction combinators and avoids the pitfalls of lock-based evaluators. We also introduced an optimization that further increases the potential for parallelism by breaking down rewrites into smaller sequential chunks. Our CUDA implementation demonstrates the practicality and efficiency of our approach, as well as suggesting its correctness. Future work includes further optimizations, exploring other applications of our lock-free evaluator, and providing formal proofs of correctness.
-
-\begin{thebibliography}{9}
-\bibitem{girard1987linear} 
-Girard, J. Y. (1987). Linear logic. Theoretical computer science, 50(1), 1-101.
-
-\bibitem{lafont1997interaction} 
-Lafont, Y. (1997). Interaction combinators. Information and Computation, 137(1), 69-101.
-
-\bibitem{jiresch2014towards} 
-Jiresch, E. (2014). Towards a GPU-based implementation of interaction nets. arXiv preprint arXiv:1404.0076.
-
-\bibitem{mazza2007denotational} 
-Mazza, D. (2007). A denotational semantics for the symmetric interaction combinators. Mathematical Structures in Computer Science, 17(3), 527-562.
-
-\bibitem{sato2014implementation}
-Sato, S. (2014). Design and implementation of a low-level language for interaction nets. Ph.D. Thesis, University of Sussex.
-
-\bibitem{taelin2022lock} 
-Taelin, V. (2022). Higher-order Virtual Machine [Online]. Available at: https://github.com/HigherOrderCO/hvm-core
-\end{thebibliography}
 
 \end{document}
