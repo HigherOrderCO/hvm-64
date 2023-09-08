@@ -65,8 +65,8 @@ type LActs = Vec<(LTree,LTree)>;
 
 #[derive(Debug)]
 pub struct LNet {
-  root: LTree,
-  acts: LActs,
+  pub root: LTree,
+  pub acts: LActs,
 }
 
 // Parser
