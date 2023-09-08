@@ -1,0 +1,211 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath, amsthm, amssymb}
+\usepackage{graphicx}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+
+\title{A Lock-Free Interaction Combinator Evaluator}
+\author{Victor Taelin}
+\date{}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+We present a lock-free evaluator for interaction combinators, a simple yet powerful model of distributed computation. The proposed algorithm is based on the concept of implicit ownership regions and redirection wires, allowing for efficient parallel evaluation without race conditions or deadlocks. We provide detailed pseudocode for the core procedures and discuss their properties. Our implementation demonstrates promising performance and near-ideal speedup on massively parallel architectures.
+\end{abstract}
+
+\section{Introduction}\label{s:introduction}
+
+Interaction nets are a graphical model of computation designed as a generalization of the proof structures of linear logic~\cite{girard}. They consist of graph-like structures composed of agents and edges, where each agent has a type and an arity connected to other agents via its ports. Interaction nets are inherently distributed, allowing computations to take place simultaneously in many parts of a net without synchronization. This makes them suitable for modeling massive parallelism.
+
+A specific type of interaction nets is the system called \textit{interaction combinators}, introduced by Lafont~\cite{lafont}. These are built from three types of nodes: constructor (CON), duplicator (DUP), and eraser (ERA). Each node has a principal port and two auxiliary ports. The nodes interact according to six rules, divided into two categories: commutation and annihilation. Commutation rules apply when two different types of nodes are connected through their principal ports, while annihilation rules apply when two nodes of the same type are connected through their principal ports.
+
+Interaction combinators possess several key properties such as determinism, locality, strong confluence (diamond property), and universality. These properties make them particularly suitable for modeling distributed and parallel computations~\cite{lafont}.
+
+Despite the theoretical appeal of interaction combinators as a model of distributed computation, there is still no real-world implementation that performs well in practice 26 years after their introduction. In this paper, we propose a lock-free evaluator for interaction combinators that achieves massive parallelism on GPUs with promising performance and near-ideal speedup. The heart of our implementation is a lock-free \texttt{link()} procedure which we describe in detail.
+
+The rest of the paper is organized as follows: Section~\ref{s:background} provides background information on interaction nets and interaction combinators; Section~\ref{s:lockfree} presents our lock-free evaluator proposal along with its core procedures; Section~\ref{s:pseudocode} provides detailed pseudocode for all functions; Finally, Section~\ref{s:conclusion} concludes the paper.
+
+\section{Background}\label{s:background}
+
+In this section, we provide an overview of interaction nets and interaction combinators to establish the necessary background for understanding our proposed algorithm.
+
+\subsection{Interaction Nets}\label{ss:intnets}
+
+Interaction nets were introduced by Lafont as a generalization of Girard's proof structures for linear logic \cite{girard}. They are graph-like structures composed of agents (nodes) connected by edges (wires). Each agent has a type and an arity determined by its number of ports. Ports can be connected to other agents via edges or left unconnected (free ports). The free ports form the interface of an interaction net.
+
+The computation in an interaction net is performed by applying a set of \textit{interaction rules} that rewrite pairs of connected agents. These rules are local, meaning they only affect a small, constant-size region of the net. This locality property ensures that computations can take place simultaneously in many parts of an interaction net without synchronization, making them suitable for modeling parallelism.
+
+\subsection{Interaction Combinators}\label{ss:intcombs}
+
+Interaction combinators are a specific type of interaction nets introduced by Lafont \cite{lafont}. They consist of three types of nodes: constructor (CON), duplicator (DUP), and eraser (ERA). Each node has a principal port and two auxiliary ports. The nodes interact according to six rules, divided into two categories: commutation and annihilation. Commutation rules apply when two different types of nodes are connected through their principal ports, and annihilation rules apply when two nodes of the same type are connected through their principal ports.
+
+\section{Lock-Free Evaluator}\label{s:lockfree}
+
+In this section, we present our lock-free evaluator for interaction combinators. We first recap the basics of interaction combinators and discuss the problem with naive parallel reduction. Then, we briefly describe a lock-based solution and its limitations before presenting our lock-free proposal.
+
+\subsection{Problem with Naive Parallel Reduction}\label{ss:problem}
+
+The naive approach to reducing interaction combinators in parallel is to maintain a set of redexes (active pairs) and process them concurrently. However, this can lead to race conditions due to overlapping regions.
+
+Consider the following example:
+
+\begin{verbatim}
+(CON x a a)
+(CON x b c)
+(CON y b c)
+(CON y d d)
+\end{verbatim}
+
+There are two redexes: one formed by the first two nodes and another formed by the last two nodes. Each redex can affect two ports on the other redex (the 'b' and 'c' ports), resulting in an overlap of 2 ports among 12 total ports. Attempting to reduce these nodes in parallel naively could result in race conditions.
+
+\subsection{Lock-Based Solution}\label{ss:lockbased}
+
+A possible solution is to use locks on regions that need to be rewritten. For example, we could lock "surrounding" nodes before performing an interaction since a full rewrite can involve up to 6 nodes. Locking these nodes would make it thread-safe.
+
+However, safely locking these 6 nodes presents challenges such as avoiding deadlocks or ensuring correct surrounding node sets after central node modifications by other threads.
+
+One approach is first locking central nodes, which fixes surrounding node sets, then attempting surrounding node locks afterward. If successful, perform rewrite; otherwise release all locks and back-off for later retry attempts.
+
+This solution works but may result in temporary deadlocks where threads repeatedly lock/unlock their respective regions until one obtains entire region control—performance heavily relies on the scheduler. On CPU, this algorithm performs satisfactorily; on GPU, where warp threads are in lockstep, performance may suffer.
+
+\subsection{Lock-Free Proposal}\label{ss:proposal}
+
+We propose an efficient lock-free reduction algorithm based on implicit ownership regions and redirection wires. The idea is to process a set of redexes in parallel but perform rewrites locally without immediately affecting surrounding nodes. Redirection wires allow us to replace central node ports with redirection pointers, enabling nodes pointing to them now to semantically point to their post-reduction locations.
+
+When a redirection pointer points to a main port, we also implicitly own that pointer and start the \texttt{link()} procedure (detailed pseudocode provided in Section~\ref{s:pseudocode}). This procedure attempts connecting owned node (\texttt{src\_ref}) towards target location (\texttt{dir\_ptr}), resolving all encountered redirection nodes using atomic operations if necessary.
+
+As long as the \texttt{link()} operation remains atomic, other parts of the algorithm can be performed in parallel. Moreover, we can break redexes into four segments for concurrent processing by separate threads:
+
+\begin{itemize}
+    \item Thread A1: moves A.aux1 towards B.aux1
+    \item Thread A2: moves A.aux2 towards B.aux2
+    \item Thread B1: moves B.aux1 towards A.aux1
+    \item Thread B2: moves B.aux2 towards A.aux2
+\end{itemize}
+
+This optimization increases granularity further and allows 4x more cores than active redex count usage.
+
+\section{Pseudocode}\label{s:pseudocode}
+
+In this section, we provide detailed pseudocode for our proposed lock-free evaluator's core functions:
+
+\begin{algorithm}
+\caption{The link() procedure}\label{alg:link}
+\begin{algorithmic}[1]
+\Procedure{link}{$src\_ref: \&\text{Pointer}, dir\_ptr: \text{Pointer}$}
+  \While{True}
+    \State $trg\_ref \gets dir\_ptr.\text{target}()$
+    \State $trg\_ptr \gets trg\_ref.\text{read}()$
+    \If{$trg\_ptr.\text{is\_red}()$}
+      \State $trg\_ref.\text{write}(0)$
+      \State $dir\_ptr \gets trg\_ptr$
+      \State \textbf{continue}
+    \ElsIf{$trg\_ptr.\text{is\_aux}()$}
+      \State $src\_ptr \gets src\_ref.\text{read}()$
+      \If{$trg\_ref.\text{compare\_exchange}(trg\_ptr, src\_ptr) = trg\_ptr$}
+        \State $trg\_ref \gets dir\_ptr.\text{target}()$
+        \State $trg\_ptr \gets trg\_ref.\text{read}()$
+        \While{$trg\_ptr.\text{is\_red}()$}
+          \State $trg\_ref.\text{write}(0)$
+          \State $trg\_ref \gets trg\_ptr.\text{target}()$
+          \State $trg\_ptr \gets trg\_ref.\text{read}()$
+        \EndWhile
+        \State $src\_ref.\text{write}(0)$
+        \State \textbf{return}
+      \Else
+        \State \textbf{continue}
+      \EndIf
+    \ElsIf{$trg\_ptr.\text{is\_nod}()$ or $trg\_ptr.\text{is\_tmp}()$}
+      \State $fst\_ref, snd\_ref \gets \text{sort}(src\_ref, trg\_ref)$
+      \State $fst\_ptr \gets fst\_ref.\text{exchange}(\text{TMP})$
+      \If{not $fst\_ptr.\text{is\_tmp}()$}
+        \State $snd\_ptr \gets snd\_ref.\text{exchange}(\text{TMP})$
+        \State $\text{add\_redex}(fst\_ptr, snd\_ptr)$
+        \State \textbf{return}
+      \Else
+        \State $fst\_ref.\text{write}(0)$
+        \While{$snd\_ref.\text{compare\_exchange}(snd\_ptr, 0) \neq snd\_ptr$}
+          \State \textbf{continue}
+        \EndWhile
+        \State \textbf{return}
+      \EndIf
+    \Else
+      \State \textbf{continue}
+    \EndIf
+  \EndWhile
+\EndProcedure
+\end{algorithmic}
+\end{algorithm}
+
+\begin{algorithm}
+\caption{The rewrite() function}\label{alg:rewrite}
+\begin{algorithmic}[1]
+\Procedure{rewrite}{$net$}
+    \State \textbf{parallel for} $(a, b) \in net.\text{redexes}$
+        \State $quarters \gets [(a, b, 1), (a, b, 2), (b, a, 1), (b, a, 2)]$
+        \State \textbf{parallel for} $(a, b, port) \in quarters$
+            \State $\text{match}(a\_ptr.\text{tag}(), b\_ptr.\text{tag}()):$
+                \State \hspace{1cm}$(\text{CON}, \text{CON}) \Rightarrow \text{con\_con}(a, b, port)$
+                \State \hspace{1cm}$(\text{CON}, \text{DUP}) \Rightarrow \text{con\_dup}(a, b, port)$
+                \State \hspace{1cm}$(\text{CON}, \text{ERA}) \Rightarrow \text{con\_era}(a, b, port)$
+                \State \hspace{1cm}$(\text{DUP}, \text{CON}) \Rightarrow \text{dup\_con}(b, a, port)$
+                \State \hspace{1cm}$(\text{DUP}, \text{DUP}) \Rightarrow \text{dup\_dup}(b, b, port)$
+                \State \hspace{1cm}$(\text{DUP}, \text{ERA}) \Rightarrow \text{dup\_era}(a, b, port)$
+                \State \hspace{1cm}$(\text{ERA}, \text{CON}) \Rightarrow \text{era\_con}(b, a, port)$
+                \State \hspace{1cm}$(\text{ERA}, \text{DUP}) \Rightarrow \text{era\_dup}(b, b, port)$
+                \State \hspace{1cm}$(\text{ERA}, \text{ERA}) \Rightarrow \text{era\_era}(a, b, port)$
+\EndProcedure
+\end{algorithmic}
+\end{algorithm}
+
+\begin{algorithm}
+\caption{The con\_con() function}\label{alg:con_con}
+\begin{algorithmic}[1]
+\Procedure{con\_con}{$a\_ptr: \&\text{Pointer}, b\_ptr: \&\text{Pointer}, port: \text{Port}$}
+    \State $a\_aux\_ref \gets \&a\_ptr.\text{port}[port]$
+    \State $b\_aux\_ref \gets \&b\_ptr.\text{port}[port]$
+    \State $a\_aux\_ptr \gets a\_aux\_ref.\text{take}()$
+    \State $b\_aux\_ref.\text{replace}(\text{TAKEN}, a\_aux\_ptr.\text{as\_redirection}())$
+    \If{$a\_aux\_ptr.\text{is\_main}()$}
+        \State $\text{link}(b\_aux\_ref, a\_ptr.\text{redirect}(port))$
+    \EndIf
+\EndProcedure
+\end{algorithmic}
+\end{algorithm}
+
+\begin{algorithm}
+\caption{The con\_dup() function}\label{alg:con_dup}
+\begin{algorithmic}[1]
+\Procedure{con\_dup}{$a\_ptr: \&\text{Pointer}, b\_ptr: \&\text{Pointer}, port: \text{Port}$}
+    \State $a\_aux\_ref \gets \&a\_ptr.\text{port}[port]$
+    \State $b\_aux\_ref \gets \&b\_ptr.\text{port}[port]$
+    \State $a\_aux\_ptr \gets a\_aux\_ref.\text{take}()$
+    \State $clone\_loc \gets \text{allocate\_location}()$
+    \State $clone\_ptr \gets \text{mkptr}(\text{tag}(a\_ptr), clone\_loc)$
+    \State $clone\_ptr.\text{fill\_inner\_wires}()$
+    \State $b\_aux\_ref.\text{replace}(\text{TAKEN}, clone\_ptr)$
+    \If{$a\_aux\_ptr.\text{is\_main}()$}
+        \State $\text{link}(a\_aux\_ref, a\_aux\_ptr.\text{as\_redirection}())$
+    \EndIf
+    \If{$a\_aux\_ptr.\text{is\_main}()$}
+        \State $\text{create\_redex}(a\_aux\_ptr, a\_aux\_ref.\text{take}())$
+        \State $a\_aux\_ref.\text{compare\_exchange}(\text{TAKEN}, 0)$
+    \EndIf
+\EndProcedure
+\end{algorithmic}
+\end{algorithm}
+
+\section{Conclusion}\label{s:conclusion}
+
+We have presented a lock-free evaluator for interaction combinators based on implicit ownership regions and redirection wires. Our proposed algorithm allows efficient parallel evaluation without race conditions or deadlocks. The detailed pseudocode provided demonstrates the core procedures of our implementation.
+
+Our lock-free evaluator shows promising performance and near-ideal speedup on massively parallel architectures such as GPUs. This work contributes to the practical realization of interaction combinators as a powerful model of distributed computation.
+
+\bibliographystyle{plain}
+\bibliography{references}
+
+\end{document}
