@@ -258,7 +258,7 @@ __device__ inline Ptr* at(Net* net, Val idx, Port port) {
 __device__ inline u64 alloc(Worker *worker, Net *net) {
   u64 K = 0;
   while (true) {
-    u64  idx = (worker->aloc * 4 + worker->type) % NODE_SIZE;
+    u64  idx = worker->aloc % NODE_SIZE;
     u64* ref = (u64*)&net->node[idx].ports[P1];
     u64  got = atomicCAS(ref, 0, NEO);
     if (got == 0) {

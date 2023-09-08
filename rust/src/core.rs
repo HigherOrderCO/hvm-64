@@ -12,7 +12,7 @@
 // This expansion is performed on demand, and ERA-REF pointers are collected, allowing the runtime
 // to compute tail-recursive functions with constant memory usage.
 
-use std::{collections::HashMap, hash::BuildHasherDefault};
+use std::collections::HashMap;
 
 pub type Tag = u16;
 pub type Val = u64;
@@ -213,7 +213,7 @@ impl Net {
 
   // Allocates a consecutive chunk of 'size' nodes. Returns the index.
   #[inline(always)]
-  pub fn alloc(&mut self, size: usize) -> Val {
+  pub fn alloc(&mut self) -> Val {
     loop {
       if self.next >= self.node.len() {
         self.next = 0;
@@ -300,10 +300,10 @@ impl Net {
       self.free(b.val());
     // CON-DUP
     } else if a.is_ctr() && b.is_ctr() && a.tag() != b.tag() {
-      let x1 = self.alloc(1);
-      let x2 = self.alloc(1);
-      let y1 = self.alloc(1);
-      let y2 = self.alloc(1);
+      let x1 = self.alloc();
+      let x2 = self.alloc();
+      let y1 = self.alloc();
+      let y2 = self.alloc();
       self.set(x1, P1, Ptr::new(VR1, y1));
       self.set(x1, P2, Ptr::new(VR1, y2));
       self.set(x2, P1, Ptr::new(VR2, y1));
@@ -350,7 +350,7 @@ impl Net {
         // Allocates enough space...
         for i in 0 .. got.node.len() {
           unsafe {
-            *self.locs.get_unchecked_mut(i) = self.alloc(1);
+            *self.locs.get_unchecked_mut(i) = self.alloc();
           }
         }
         // Loads nodes, adjusting locations...

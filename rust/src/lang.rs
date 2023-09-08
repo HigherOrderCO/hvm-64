@@ -324,7 +324,7 @@ pub fn alloc_ltree(net: &mut Net, tree: &LTree, vars: &mut HashMap<String, Paren
       Ptr::new(ERA, 0)
     },
     LTree::Nod { tag, lft, rgt } => {
-      let val = net.alloc(1);
+      let val = net.alloc();
       let p1 = alloc_ltree(net, &*lft, vars, Parent::Node { val, port: P1 });
       net.set(val, P1, p1);
       let p2 = alloc_ltree(net, &*rgt, vars, Parent::Node { val, port: P2 });
