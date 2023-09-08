@@ -151,7 +151,7 @@ The following illustrations showcase this process:
 \caption{Lock-free evaluator step 7}
 \end{figure}
 
-Note that in Image 2, the reduction is semantically complete, with ports X1-W0 and Y0-Z0 indirectly connected. Each thread independently performs this reduction, without impacting surrounding nodes, by converting the auxiliary ports of their owned nodes to redirectors and then swapping opposing ports (e.g., A1 goes to B1, B2 goes to A2, etc.). This approach entirely avoids locks. The link() procedure in the appendix is then only needed to clear the memory occupied by redirectors and to identify new active pairs. As this clean-up process may cross ownership regions, caution is required to deploy atomics when necessary.
+Note that in Image 2, the reduction is semantically complete, with ports X1-W0 and Y0-Z0 indirectly connected. Each thread independently performs this reduction, without impacting surrounding nodes, by converting the auxiliary ports of their owned nodes to redirectors and then swapping opposing ports (e.g., A1 goes to B1, B2 goes to A2, etc.). This approach entirely avoids locks. The link() procedure in the appendix is then only needed to clear the memory occupied by redirectors and to identify new active pairs. As this clean-up process may cross ownership regions, caution is required to deploy atomics.
 
 \section{Optimization: 1/4 rewrites}\label{s:lockfree}
 
