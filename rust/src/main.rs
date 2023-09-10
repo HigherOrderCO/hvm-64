@@ -184,14 +184,14 @@ fn main() {
   // ex0 = ((n S) Z)
   define(book, "ex0", "
     $ root
-    & @c2 ~ (0 @S (0 @Z root))
+    & @c2 ~ (0 @k2 root)
   ");
 
   // Allocates a big tree
   // ex1 = ((n g_s) g_z)
   define(book, "ex1", "
     $ root
-    & @c2 ~ (0 @g_s (0 @g_z root))
+    & @c23 ~ (0 @g_s (0 @g_z root))
   ");
 
   // This example decreases a binary counter until it reaches 0. It uses recursion, based on
@@ -204,47 +204,44 @@ fn main() {
   define(book, "ex2", "
     $ main
     & @run ~ (0 nie main)
-    & @c6  ~ (0 @I (0 @E nie))
+    & @c7  ~ (0 @I (0 @E nie))
   "); 
 
   // Decreases many binary counters until they reach 0
   define(book, "ex3", "
     $ res
     & @brn ~ (0 dep res)
-    & @c14 ~ (0 @S (0 @Z dep))
+    & @c4  ~ (0 @S (0 @Z dep))
   "); 
 
   // Initializes the net
   let net = &mut Net::new(1 << 26);
-  net.boot(name_to_u64("ex3"));
+  net.boot(book, name_to_u32("ex2"));
 
   // Computes its normal form
   net.normal(book);
 
   // Shows results and stats
-  //println!("[net]\n{}", show_net(&net));
+  println!("[net]\n{}", show_net(&net));
   //println!("{}", net.head.iter().map(|x| format!("{:016x}", x.data)).collect::<Vec<String>>().join(" "));
   println!("size: {}", net.node.len());
   println!("used: {}", net.used);
   println!("rwts: {}", net.rwts);
-
-  println!("{}", u64_to_name(0x36E72));
-  //Prints book to use on CUDA
-  //print_book_to_cuda(&book);
+  //populate_cuda(&book); // prints CUDA book
 }
 
-fn print_book_to_cuda(book: &Book) {
+fn populate_cuda(book: &Book) {
   println!("Term* term;");
-  let mut sorted_defs: Vec<(&u64, &Net)> = book.defs.iter().collect();
+  let mut sorted_defs: Vec<(&u32, &Net)> = book.defs.iter().collect();
   sorted_defs.sort_by_key(|&(key, _)| key);
   for (key, def) in sorted_defs {
-    println!("  // {}", u64_to_name(*key));
+    println!("  // {}", u32_to_name(*key));
     println!("  book->defs[0x{:08x}]           = (Term*) malloc(sizeof(Term));", key);
     println!("  book->defs[0x{:08x}]->root     = 0x{:08x};", key, def.root.data);
     println!("  book->defs[0x{:08x}]->alen     = {};", key, def.acts.len());
     println!("  book->defs[0x{:08x}]->acts     = (Wire*) malloc({} * sizeof(Wire));", key, def.acts.len());
     for i in 0..def.acts.len() {
-        println!("  book->defs[0x{:08x}]->acts[{:2}] = (Wire) {{0x{:08x},0x{:08x}}};", key, i, def.acts[i].0.data, def.acts[i].1.data);
+        println!("  book->defs[0x{:08x}]->acts[{:2}] = mkwire(0x{:08x},0x{:08x});", key, i, def.acts[i].0.data, def.acts[i].1.data);
     }
     println!("  book->defs[0x{:08x}]->nlen     = {};", key, def.node.len());
     println!("  book->defs[0x{:08x}]->node     = (Node*) malloc({} * sizeof(Node));", key, def.node.len());
