@@ -76,7 +76,7 @@ pub struct Book {
 impl Ptr {
   #[inline(always)]
   pub fn new(tag: Tag, val: Val) -> Self {
-    Ptr { data: (((tag as u32) << 28) | (val & 0xFFF_FFF)) }
+    Ptr { data: (((tag as u32) << 28) | (val & 0xFFF_FFFF)) }
   }
 
   #[inline(always)]

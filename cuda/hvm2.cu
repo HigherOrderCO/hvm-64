@@ -115,13 +115,13 @@ typedef struct {
   u32   aloc; // where to alloc next node
   u32   rwts; // local rewrites performed
   u32*  locs; // local alloc locs
-  u64*  self_rlen; // local redex bag length
-  Wire* self_rbag; // local redex bag
-  Wire* self_rpop; // popped redex
-  u64*  near_rlen; // local neighbor redex bag len
-  Wire* near_rbag; // local neighbor redex bag
-  u64*  afar_rlen; // global neighbor redex bag len
-  Wire* afar_rbag; // global neighbor redex bag
+  u64*  rlen; // local redex bag length
+  Wire* rbag; // local redex bag
+  Wire* rpop; // popped redex
+  //u64*  near_rlen; // local neighbor redex bag len
+  //Wire* near_rbag; // local neighbor redex bag
+  //u64*  afar_rlen; // global neighbor redex bag len
+  //Wire* afar_rbag; // global neighbor redex bag
 
 } Worker;
 
@@ -248,12 +248,12 @@ __host__ __device__ inline Wire mkwire(Ptr p1, Ptr p2) {
 }
 
 // Gets the left element of a wire
-__host__ __device__ inline Wire wire_lft(Wire wire) {
+__host__ __device__ inline Ptr wire_lft(Wire wire) {
   return wire >> 32;
 }
 
 // Gets the right element of a wire
-__host__ __device__ inline Wire wire_rgt(Wire wire) {
+__host__ __device__ inline Ptr wire_rgt(Wire wire) {
   return wire & 0xFFFFFFFF;
 }
 
@@ -294,29 +294,49 @@ __device__ inline u32 alloc(Worker *worker, Net *net) {
   }
 }
 
-// TODO: use the 4 quad threads
-__device__ inline void split_redex(u64* self_rlen, Wire* self_rbag, u64* targ_rlen, Wire* targ_rbag) {
-  if (*self_rlen > 1 && *self_rlen > *targ_rlen) {
-    u64 init_idx = *targ_rlen;
-    u64 last_idx = *self_rlen;
-    *self_rlen = init_idx;
-    for (u64 i = init_idx; i < last_idx; ++i) {
-      Wire wire = self_rbag[i];
-      self_rbag[i] = mkwire(0,0);
-      if ((i - init_idx) % 2 == 0) {
-        self_rbag[(*self_rlen)++] = wire;
+__device__ inline void split(u32 gid, u32 tid, u64* a_len, u64* a_arr, u64* b_len, u64* b_arr, u64 max_len, u32 tick) {
+  __syncthreads();
+  u64* A_len = *a_len < *b_len ? a_len : b_len;
+  u64* B_len = *a_len < *b_len ? b_len : a_len;
+  u64* A_arr = *a_len < *b_len ? a_arr : b_arr;
+  u64* B_arr = *a_len < *b_len ? b_arr : a_arr;
+  bool move  = *A_len + 1 < *B_len;
+  u64  min   = *A_len;
+  u64  max   = *B_len;
+  __syncthreads();
+  for (u64 t = 0; t < max_len / 8; ++t) {
+    u64 i = min + t * 8 + tid;
+    u64 value;
+    if (move && i < max) {
+      value = B_arr[i];
+      B_arr[i] = 0;
+    }
+    __syncthreads();
+    if (move && i < max) {
+      if ((i - min) % 2 == 0) {
+        A_arr[min + (t * 8 + tid) / 2] = value;
       } else {
-        targ_rbag[(*targ_rlen)++] = wire;
+        B_arr[min + (t * 8 + tid) / 2] = value;
       }
     }
   }
+  __syncthreads();
+  u64 old_A_len = *A_len;
+  u64 old_B_len = *B_len;
+  if (move && tid == 0) {
+    u64 new_A_len = (*A_len + *B_len) / 2 + (*A_len + *B_len) % 2;
+    u64 new_B_len = (*A_len + *B_len) / 2;
+    *A_len = new_A_len;
+    *B_len = new_B_len;
+  }
+  __syncthreads();
 }
 
 // Creates a new redex
 __device__ inline void put_redex(Worker* worker, Ptr a_ptr, Ptr b_ptr) {
-  u32 index = atomicAdd(worker->self_rlen, 1);
+  u32 index = atomicAdd(worker->rlen, 1);
   if (index < RBAG_SIZE - 1) {
-    worker->self_rbag[index] = mkwire(a_ptr, b_ptr);
+    worker->rbag[index] = mkwire(a_ptr, b_ptr);
   } else {
     printf("[%04X] ERROR PUTTING REDEX %u\n", worker->gid, index);
   }
@@ -326,18 +346,20 @@ __device__ inline void put_redex(Worker* worker, Ptr a_ptr, Ptr b_ptr) {
 __device__ inline Wire pop_redex(Worker* worker) {
   if (worker->quad == A1) {
     Wire redex = mkwire(0,0);
-    if (*worker->self_rlen > 0) {
-      u32 index = --(*worker->self_rlen);
-      redex = worker->self_rbag[index];
-      worker->self_rbag[index] = mkwire(0,0);
+    if (*worker->rlen > 0) {
+      u64 index = *worker->rlen - 1;
+      *worker->rlen -= 1;
+      redex = worker->rbag[index];
+      worker->rbag[index] = mkwire(0,0);
       //if (worker->gid < 16) {
-        //printf("[%04x] popped at %d | %08X %08X\n", worker->gid, index, wire_lft(redex), wire_rgt(redex));
+        //printf("[%04x] popped at %llu %llu | %08X %08X\n", worker->gid, index, *worker->rlen, wire_lft(redex), wire_rgt(redex));
+        //printf("??? %llu\n", *worker->rlen);
       //}
     }
-    *worker->self_rpop = redex;
+    *worker->rpop = redex;
   }
   __syncwarp();
-  return *worker->self_rpop;
+  return *worker->rpop;
 }
 
 // Gets the value of a ref; waits if taken.
@@ -525,26 +547,19 @@ __device__ Worker init_worker(Net* net) {
   worker.quad = worker.tid % 4;
   worker.port = worker.tid % 2;
   worker.locs = LOCS + worker.tid / UNIT_SIZE * MAX_TERM_SIZE;
-  worker.self_rpop = &RPOP[worker.tid / UNIT_SIZE];
-  worker.self_rlen = net->bags + worker.gid / UNIT_SIZE * RBAG_SIZE;
-  worker.self_rbag = worker.self_rlen + 1;
-  worker.near_rlen = net->bags + (worker.bid * blockDim.x + (worker.tid + 4) % blockDim.x) / UNIT_SIZE * RBAG_SIZE;
-  worker.near_rbag = worker.near_rlen + 1;
-  worker.afar_rlen = net->bags + ((worker.gid + BLOCK_SIZE) / UNIT_SIZE * RBAG_SIZE) % BAGS_SIZE;
-  worker.afar_rbag = worker.afar_rlen + 1;
-
-  //worker.Rlen = &RLEN[worker.Rtid / UNIT_SIZE];
-  //worker.Rbag = net->bags + (worker.bid * blockDim.x + worker.Rtid) / UNIT_SIZE * RBAG_SIZE;
-  if (worker.quad == A1) {
-    u32 K = 0;
-    while (worker.self_rbag[*worker.self_rlen] != 0 && *worker.self_rlen < RBAG_SIZE - 1) {
-      //dbug(&K, "rlen");
-      *worker.self_rlen += 1;
-    }
-    //if (worker.gid < 256) {
-      //printf("[%04X] rlen=%x\n", worker.gid, *worker.rlen);
+  worker.rpop = &RPOP[worker.tid / UNIT_SIZE];
+  worker.rlen = net->bags + worker.gid / UNIT_SIZE * RBAG_SIZE;
+  worker.rbag = worker.rlen + 1;
+  //if (worker.quad == A1) {
+    //u32 K = 0;
+    //while (worker.rbag[*worker.rlen] != 0 && *worker.rlen < RBAG_SIZE - 1) {
+      ////dbug(&K, "rlen");
+      //*worker.rlen += 1;
     //}
-  }
+    ////if (worker.gid < 256) {
+      ////printf("[%04X] rlen=%x\n", worker.gid, *worker.rlen);
+    ////}
+  //}
   return worker;
 }
 
@@ -558,19 +573,14 @@ __device__ Worker init_worker(Net* net) {
 // This is organized so that local threads can perform the same instructions
 // whenever possible. So, for example, in a commutation rule, all the 4 clones
 // would be allocated at the same time.
-__global__ void global_rewrite(Net* net, Book* book) {
-
+__global__ void global_rewrite(Net* net, Book* book, u32 tick) {
   // Initializes local vars
   Worker worker = init_worker(net);
 
-  // Shares extra redexes with neighbor
-  if (worker.quad == A1) {
-    split_redex(worker.self_rlen, worker.self_rbag, worker.near_rlen, worker.near_rbag);
-  }
-  __syncthreads();
+  //printf("[%04X] rewrite %llu\n", worker.gid);
 
   // Checks if we're full
-  bool is_full = *worker.self_rlen > RBAG_SIZE - MAX_NEW_REDEX;
+  bool is_full = *worker.rlen > RBAG_SIZE - MAX_NEW_REDEX;
 
   // Pops a redex from local bag
   Wire redex;
@@ -590,7 +600,6 @@ __global__ void global_rewrite(Net* net, Book* book) {
   if (!is_full && is_ref(b_ptr) && is_ctr(a_ptr)) {
     dptr = &b_ptr;
   }
-
   deref(&worker, net, book, dptr, mkptr(NIL,0));
 
   // Defines type of interaction
@@ -693,14 +702,23 @@ __global__ void global_rewrite(Net* net, Book* book) {
   }
   __syncwarp();
 
+  // Shares extra redexes with neighbor
+  u32  side  = (worker.tid >> (BLOCK_LOG2 - 1 - (tick % BLOCK_LOG2))) & 1;
+  u32  pad   = (1 << (BLOCK_LOG2 - 1)) >> (tick % BLOCK_LOG2);
+  u32  a_gid = worker.gid;
+  u32  b_gid = side ? worker.gid - pad : worker.gid + pad;
+  u64* a_len = net->bags + a_gid / UNIT_SIZE * RBAG_SIZE;
+  u64* b_len = net->bags + b_gid / UNIT_SIZE * RBAG_SIZE;
+  split(worker.gid, worker.quad + side * 4, a_len, a_len+1, b_len, b_len+1, RBAG_SIZE, tick);
+
   // When the work ends, sum stats
   if (worker.rwts > 0 && worker.quad == A1) {
     atomicAdd((u32*)&net->rwts, worker.rwts);
   }
 }
 
-void do_global_rewrite(Net* net, Book* book, u32 blocks) {
-  global_rewrite<<<blocks, BLOCK_SIZE>>>(net, book);
+void do_global_rewrite(Net* net, Book* book, u32 blocks, u32 tick) {
+  global_rewrite<<<blocks, BLOCK_SIZE>>>(net, book, tick);
 }
 
 __global__ void global_split(Net* net, Book* book) {
@@ -708,9 +726,9 @@ __global__ void global_split(Net* net, Book* book) {
   Worker worker = init_worker(net);
 
   // Shares extra redexes with neighbor
-  if (worker.quad == A1) {
-    split_redex(worker.self_rlen, worker.self_rbag, worker.afar_rlen, worker.afar_rbag);
-  }
+  //if (worker.quad == A1) {
+    //split_redex(worker.gid, worker.rlen, worker.rbag, worker.afar_rlen, worker.afar_rbag);
+  //}
 }
 
 void do_global_split(Net* net, Book* book, u32 blocks) {
@@ -1060,13 +1078,13 @@ void print_net(Net* net) {
     }
   }
   printf("Node:\n");
-  for (u32 i = 0; i < NODE_SIZE; ++i) {
-    Ptr a = net->node[i].ports[P1];
-    Ptr b = net->node[i].ports[P2];
-    if (a != 0 || b != 0) {
-      printf("- [%07X] %s %s\n", i, show_ptr(a,0), show_ptr(b,1));
-    }
-  }
+  //for (u32 i = 0; i < NODE_SIZE; ++i) {
+    //Ptr a = net->node[i].ports[P1];
+    //Ptr b = net->node[i].ports[P2];
+    //if (a != 0 || b != 0) {
+      //printf("- [%07X] %s %s\n", i, show_ptr(a,0), show_ptr(b,1));
+    //}
+  //}
   printf("HLen: %u\n", net->hlen);
   printf("BLen: %u\n", net->blen);
   printf("Rwts: %u\n", net->rwts);
@@ -2252,7 +2270,7 @@ __host__ void populate(Book* book) {
   book->defs[0x00029f02]->root     = 0x50000001;
   book->defs[0x00029f02]->alen     = 1;
   book->defs[0x00029f02]->acts     = (Wire*) malloc(1 * sizeof(Wire));
-  book->defs[0x00029f02]->acts[ 0] = mkwire(0x100009c6,0xa0000000);
+  book->defs[0x00029f02]->acts[ 0] = mkwire(0x100270c1,0xa0000000);
   book->defs[0x00029f02]->nlen     = 2;
   book->defs[0x00029f02]->node     = (Node*) malloc(2 * sizeof(Node));
   book->defs[0x00029f02]->node[ 0] = (Node) {0x1002bff7,0xa0000001};
@@ -2275,7 +2293,7 @@ __host__ void populate(Book* book) {
   book->defs[0x00029f04]->alen     = 2;
   book->defs[0x00029f04]->acts     = (Wire*) malloc(2 * sizeof(Wire));
   book->defs[0x00029f04]->acts[ 0] = mkwire(0x10026db2,0xa0000000);
-  book->defs[0x00029f04]->acts[ 1] = mkwire(0x10027085,0xa0000001);
+  book->defs[0x00029f04]->acts[ 1] = mkwire(0x10027087,0xa0000001);
   book->defs[0x00029f04]->nlen     = 3;
   book->defs[0x00029f04]->node     = (Node*) malloc(3 * sizeof(Node));
   book->defs[0x00029f04]->node[ 0] = (Node) {0x50000002,0x30000000};
@@ -3110,7 +3128,7 @@ int main() {
   Net* cpu_net = mknet();
   Book* cpu_book = mkbook();
   populate(cpu_book);
-  boot(cpu_net, 0x00029f03); // initial term
+  boot(cpu_net, 0x00029f02); // initial term
 
   // Prints the input net
   printf("\nINPUT\n=====\n\n");
@@ -3126,35 +3144,10 @@ int main() {
 
   // Normalizes
   do_global_expand(gpu_net, gpu_book);
-  for (u32 i = 0; i < 20000; ++i) {
-    do_global_rewrite(gpu_net, gpu_book, 1);
+  for (u32 tick = 0; tick < 100000; ++tick) {
+    do_global_rewrite(gpu_net, gpu_book, 1, tick);
   }
-  //do_global_rewrite(gpu_net, gpu_book, 1);
-  //do_global_rewrite(gpu_net, gpu_book, 1);
-  //do_global_rewrite(gpu_net, gpu_book, 1);
-  //do_global_rewrite(gpu_net, gpu_book, 1);
-  //do_global_rewrite(gpu_net, gpu_book, 1);
-  //do_global_rewrite(gpu_net, gpu_book, 1);
-  //do_global_rewrite(gpu_net, gpu_book, 1);
-  //do_global_rewrite(gpu_net, gpu_book, 1);
-  //do_global_rewrite(gpu_net, gpu_book, 1);
-  //do_global_split(gpu_net, gpu_book, 1);
-
-  //do_global_rewrite(gpu_net, gpu_book, 1);
-  //do_global_rewrite(gpu_net, gpu_book, 1);
-  //do_global_rewrite(gpu_net, gpu_book, 1);
-  //do_global_rewrite(gpu_net, gpu_book, 1);
-  //do_global_rewrite(gpu_net, gpu_book, 1);
-  //do_global_rewrite(gpu_net, gpu_book, 1);
-  //do_global_rewrite(gpu_net, gpu_book, 1);
-  //do_global_rewrite(gpu_net, gpu_book, 1);
-  //do_global_rewrite(gpu_net, gpu_book, 1);
-  //do_global_rewrite(gpu_net, gpu_book, 1);
-  //do_global_rewrite(gpu_net, gpu_book, 1);
-  //do_global_rewrite(gpu_net, gpu_book, 1);
-  //do_global_rewrite(gpu_net, gpu_book, 1);
-  //do_global_rewrite(gpu_net, gpu_book, 1);
-  //do_normal(gpu_net, gpu_book);
+  
   cudaDeviceSynchronize();
 
   // Gets end time

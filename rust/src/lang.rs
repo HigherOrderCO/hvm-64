@@ -391,7 +391,7 @@ pub fn do_alloc_ltree(net: &mut Net, tree: &LTree) -> Ptr {
 pub fn readback_ltree(net: &Net, ptr: Ptr, parent: Parent, vars: &mut HashMap<Parent,String>, fresh: &mut usize) -> LTree {
   match ptr.tag() {
     NIL => {
-      LTree::Era
+      LTree::Var { nam: "?".to_string() }
     },
     ERA => {
       LTree::Era
