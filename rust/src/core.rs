@@ -52,7 +52,6 @@ pub struct Node {
 // - root: a single free wire, used as the entrancy point.
 // - acts: a vector of redexes, updated automatically.
 // - node: a vector of nodes, with main ports omitted.
-// - head: a vector of unomralized heads
 // - used: total nodes currently allocated on the graph.
 // - rwts: total graph rewrites performed inside this net.
 // - next: next pointer to allocate memory (internal).
@@ -61,7 +60,6 @@ pub struct Net {
   pub root: Ptr,
   pub acts: Vec<(Ptr, Ptr)>,
   pub node: Vec<Node>,
-  pub isnf: Vec<bool>,
   pub used: usize,
   pub rwts: usize,
       next: usize,
@@ -145,11 +143,6 @@ impl Ptr {
   }
 
   #[inline(always)]
-  pub fn is_target_normal<'a>(&'a self, net: &'a Net) -> bool {
-    return self.is_var() && self.tag() == VRR || net.isnf[self.val() as usize];
-  }
-
-  #[inline(always)]
   pub fn adjust(&self, locs: &[u32]) -> Ptr {
     unsafe {
       return Ptr::new(self.tag(), if self.has_loc() { *locs.get_unchecked(self.val() as usize) } else { self.val() });
@@ -200,7 +193,6 @@ impl Net {
       root: Ptr::new(NIL, 0),
       acts: vec![],
       node: vec![Node::nil(); size],
-      isnf: vec![false; size],
       next: 0,
       used: 0,
       rwts: 0,
@@ -209,8 +201,8 @@ impl Net {
   }
 
   // Creates a net and boots from a REF.
-  pub fn boot(&mut self, book: &Book, root_id: u32) {
-    self.link(book, Ptr::new(VRR, 0), Ptr::new(REF, root_id));
+  pub fn boot(&mut self, root_id: u32) {
+    self.root = Ptr::new(REF, root_id);
   }
 
   // Allocates a consecutive chunk of 'size' nodes. Returns the index.
@@ -272,28 +264,20 @@ impl Net {
     let mut a = a;
     let mut b = b;
     // Dereferences A
-    if a.is_ref() && (b.is_ctr() || b.is_target_normal(self)) {
-      a = self.deref(book, a, &mut 0);
+    if a.is_ref() && b.is_ctr() {
+      a = self.deref(book, a, Ptr::new(NIL,0), &mut 0);
     }
     // Dereferences B
-    if b.is_ref() && (a.is_ctr() || a.is_target_normal(self)) {
-      b = self.deref(book, b, &mut 0);
+    if b.is_ref() && a.is_ctr() {
+      b = self.deref(book, b, Ptr::new(NIL,0), &mut 0);
     }
     // Substitutes A
     if a.is_var() {
       *a.target(self).unwrap() = b;
-      // Flags normalized B
-      if b.is_pri() && a.is_target_normal(self) {
-        self.isnf[b.val() as usize] = true;
-      }
     }
     // Substitutes B
     if b.is_var() {
       *b.target(self).unwrap() = a;
-      // Flags normalized A
-      if a.is_pri() && b.is_target_normal(self) {
-        self.isnf[a.val() as usize] = true;
-      }
     }
     // New redex A-B
     if a.is_pri() && b.is_pri() {
@@ -304,9 +288,6 @@ impl Net {
   // Performs an interaction over a redex.
   #[inline(always)]
   pub fn interact(&mut self, book: &Book, a: &mut Ptr, b: &mut Ptr) {
-    // Dereference
-    //if a.tag() == REF && b.tag() != ERA { *a = self.deref(book, *a, Ptr::new(NIL,0)); }
-    //if a.tag() != ERA && b.tag() == REF { *b = self.deref(book, *b, Ptr::new(NIL,0)); }
     self.rwts += 1;
     // CON-CON
     if a.is_ctr() && b.is_ctr() && a.tag() == b.tag() {
@@ -361,7 +342,7 @@ impl Net {
 
   // Expands a REF into its definition (a closed net).
   #[inline(always)]
-  pub fn deref(&mut self, book: &Book, ptr: Ptr, loc: &mut usize) -> Ptr {
+  pub fn deref(&mut self, book: &Book, ptr: Ptr, parent: Ptr, loc: &mut usize) -> Ptr {
     let mut ptr = ptr;
     // White ptr is still a REF...
     while ptr.is_ref() {
@@ -379,20 +360,25 @@ impl Net {
         for i in 0 .. got.node.len() {
           unsafe {
             let got = got.node.get_unchecked(i).clone();
-            let neo = Node::new(got.port(P1).adjust(&self.locs[ini..]), got.port(P2).adjust(&self.locs[ini..]));
-            *self.at_mut(*self.locs.get_unchecked(ini + i)) = neo;
+            let p1  = got.port(P1).adjust(&self.locs[ini..]);
+            let p2  = got.port(P2).adjust(&self.locs[ini..]);
+            *self.at_mut(*self.locs.get_unchecked(ini + i)) = Node::new(p1, p2);
           }
         }
         // Loads redexes, adjusting locations...
         for got in &got.acts {
-          let a = got.0.adjust(&self.locs[ini..]);
-          let b = got.1.adjust(&self.locs[ini..]);
-          let a = self.deref(book, a, loc);
-          let b = self.deref(book, b, loc);
-          self.acts.push((a, b));
+          let p1 = self.deref(book, got.0.adjust(&self.locs[ini..]), Ptr::new(NIL,0), loc);
+          let p2 = self.deref(book, got.1.adjust(&self.locs[ini..]), Ptr::new(NIL,0), loc);
+          self.acts.push((p1, p2));
         }
         // Overwrites 'ptr' with the loaded root pointer, adjusting locations...
         ptr = got.root.adjust(&self.locs[ini..]);
+        // Links root
+        if ptr.is_var() {
+          if let Some(trg) = ptr.target(self) {
+            *trg = parent;
+          }
+        }
       }
     }
     return ptr;
@@ -411,9 +397,25 @@ impl Net {
 
   // Reduces all redexes until there is none.
   pub fn normal(&mut self, book: &Book) {
+    self.expand(book, Ptr::new(VRR, 0));
     while self.acts.len() > 0 {
-      println!("reduce {}", self.acts.len());
-      self.reduce(book);
+      while self.acts.len() > 0 {
+        println!("reduce {}", self.acts.len());
+        self.reduce(book);
+        //self.expand(book, Ptr::new(VRR, 0));
+      }
+      self.expand(book, Ptr::new(VRR, 0));
+    }
+  }
+
+  // Expands heads.
+  pub fn expand(&mut self, book: &Book, dir: Ptr) {
+    let ptr = *dir.target(self).unwrap();
+    if ptr.is_ctr() {
+      self.expand(book, Ptr::new(VR1, ptr.val()));
+      self.expand(book, Ptr::new(VR2, ptr.val()));
+    } else if ptr.is_ref() {
+      *dir.target(self).unwrap() = self.deref(book, ptr, dir, &mut 0);
     }
   }
 

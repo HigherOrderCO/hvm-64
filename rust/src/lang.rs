@@ -215,7 +215,7 @@ pub fn num_to_str(num: usize) -> String {
   let mut num = num + 1;
   let mut str = String::new();
   while num > 0 {
-    let c = ((num % 26) as u8 + b'a' - 1) as char;
+    let c = ((num % 26) as u8 + b'a') as char;
     str.push(c);
     num /= 26;
   }

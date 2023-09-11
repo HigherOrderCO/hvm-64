@@ -191,7 +191,7 @@ fn main() {
   // ex1 = ((n g_s) g_z)
   define(book, "ex1", "
     $ root
-    & @c20 ~ (0 @g_s (0 @g_z root))
+    & @c22 ~ (0 @g_s (0 @g_z root))
   ");
 
   // This example decreases a binary counter until it reaches 0. It uses recursion, based on
@@ -211,15 +211,19 @@ fn main() {
   define(book, "ex3", "
     $ res
     & @brn ~ (0 dep res)
-    & @c4  ~ (0 @S (0 @Z dep))
+    & @c12 ~ (0 @S (0 @Z dep))
   "); 
 
   // Initializes the net
   let net = &mut Net::new(1 << 28);
-  net.boot(book, name_to_u32("ex1"));
+  net.boot(name_to_u32("ex1"));
 
   // Computes its normal form
+  //net.expand(book, Ptr::new(VRR,0));
   net.normal(book);
+  //net.expand(book, Ptr::new(VRR,0));
+  //net.normal(book);
+  //net.expand(book, Ptr::new(VRR,0));
 
   //Shows results and stats
   //println!("[net]\n{}", show_net(&net));
