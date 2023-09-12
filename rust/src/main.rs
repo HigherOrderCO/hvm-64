@@ -47,6 +47,10 @@ fn main() {
     define(book, "c22", "$ (0 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (0 v u) (0 u t)) (0 t s)) (0 s r)) (0 r q)) (0 q p)) (0 p o)) (0 o n)) (0 n m)) (0 m l)) (0 l k)) (0 k j)) (0 j i)) (0 i h)) (0 h g)) (0 g f)) (0 f e)) (0 e d)) (0 d c)) (0 c b)) (0 b a)) (0 a R)) (0 v R))");
     define(book, "c23", "$ (0 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (0 w v) (0 v u)) (0 u t)) (0 t s)) (0 s r)) (0 r q)) (0 q p)) (0 p o)) (0 o n)) (0 n m)) (0 m l)) (0 l k)) (0 k j)) (0 j i)) (0 i h)) (0 h g)) (0 g f)) (0 f e)) (0 e d)) (0 d c)) (0 c b)) (0 b a)) (0 a R)) (0 w R))");
     define(book, "c24", "$ (0 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (0 x w) (0 w v)) (0 v u)) (0 u t)) (0 t s)) (0 s r)) (0 r q)) (0 q p)) (0 p o)) (0 o n)) (0 n m)) (0 m l)) (0 l k)) (0 k j)) (0 j i)) (0 i h)) (0 h g)) (0 g f)) (0 f e)) (0 e d)) (0 d c)) (0 c b)) (0 b a)) (0 a R)) (0 x R))");
+    define(book, "c25", "$ (0 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (0 y x) (0 x w)) (0 w v)) (0 v u)) (0 u t)) (0 t s)) (0 s r)) (0 r q)) (0 q p)) (0 p o)) (0 o n)) (0 n m)) (0 m l)) (0 l k)) (0 k j)) (0 j i)) (0 i h)) (0 h g)) (0 g f)) (0 f e)) (0 e d)) (0 d c)) (0 c b)) (0 b a)) (0 a R)) (0 x R))");
+    define(book, "c26", "$ (0 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (0 z y) (0 y x)) (0 x w)) (0 w v)) (0 v u)) (0 u t)) (0 t s)) (0 s r)) (0 r q)) (0 q p)) (0 p o)) (0 o n)) (0 n m)) (0 m l)) (0 l k)) (0 k j)) (0 j i)) (0 i h)) (0 h g)) (0 g f)) (0 f e)) (0 e d)) (0 d c)) (0 c b)) (0 b a)) (0 a R)) (0 x R))");
+    //define(book, "c26", "$ (0 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (0 z y) (0 y x)) (0 x w)) (0 w v)) (0 v u)) (0 u t)) (0 t s)) (0 s r)) (0 r q)) (0 q p)) (0 p o)) (0 o n)) (0 n m)) (0 m l)) (0 l k)) (0 k j)) (0 j i)) (0 i h)) (0 h g)) (0 g f)) (0 f e)) (0 e d)) (0 d c)) (0 c b)) (0 b a)) (0 a R)) (0 x R))");
+
     define(book, "k0" , "$ (0 * (0 a a))");
     define(book, "k1" , "$ (0 (0 a R) (0 a R))");
     define(book, "k2" , "$ (0 (2 (0 b a) (0 a R)) (0 b R))");
@@ -169,7 +173,7 @@ fn main() {
   define(book, "brnZ", "
     $ ret
     & @run ~ (0 val ret)
-    & @c10 ~ (0 @I (0 @E val))
+    & @c11 ~ (0 @I (0 @E val))
   ");
   define(book, "brnS", "
     $ (0 (1 p0 p1) (0 r0 r1))
@@ -191,7 +195,7 @@ fn main() {
   // ex1 = ((n g_s) g_z)
   define(book, "ex1", "
     $ root
-    & @c22 ~ (0 @g_s (0 @g_z root))
+    & @c26 ~ (0 @g_s (0 @g_z root))
   ");
 
   // This example decreases a binary counter until it reaches 0. It uses recursion, based on
@@ -204,26 +208,26 @@ fn main() {
   define(book, "ex2", "
     $ main
     & @run ~ (0 nie main)
-    & @c22 ~ (0 @I (0 @E nie))
+    & @c14 ~ (0 @I (0 @E nie))
   "); 
 
   // Decreases many binary counters until they reach 0
   define(book, "ex3", "
     $ res
     & @brn ~ (0 dep res)
-    & @c12 ~ (0 @S (0 @Z dep))
+    & @c14 ~ (0 @S (0 @Z dep))
   "); 
 
   // Initializes the net
-  let net = &mut Net::new(1 << 26);
-  net.boot(name_to_u32("ex1"));
+  let net = &mut Net::new(1 << 24);
+  net.boot(name_to_u32("ex3"));
 
   // Computes its normal form
   net.expand(book, Ptr::new(VRR,0));
   net.normal(book);
 
   //Shows results and stats
-  //println!("[net]\n{}", show_net(&net));
+  println!("[net]\n{}", show_net(&net));
   println!("size: {}", net.node.len());
   println!("used: {}", net.used);
   println!("rwts: {}", net.rwts);

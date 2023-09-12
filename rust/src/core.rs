@@ -121,7 +121,8 @@ impl Ptr {
   pub fn is_pri(&self) -> bool {
     return self.is_era()
         || self.is_ctr()
-        || self.is_num();
+        || self.is_num()
+        || self.is_ref();
   }
 
   #[inline(always)]
@@ -141,24 +142,24 @@ impl Ptr {
     }
   }
 
-  pub fn tmp_target<'a>(&'a self, net: &'a Net) -> Option<&Ptr> {
-    match self.tag() {
-      VRR => { Some(&net.root) }
-      VR1 => { Some(net.at(self.val()).port(P1)) }
-      VR2 => { Some(net.at(self.val()).port(P2)) }
-      _   => { None }
-    }
-  }
+  //pub fn tmp_target<'a>(&'a self, net: &'a Net) -> Option<&Ptr> {
+    //match self.tag() {
+      //VRR => { Some(&net.root) }
+      //VR1 => { Some(net.at(self.val()).port(P1)) }
+      //VR2 => { Some(net.at(self.val()).port(P2)) }
+      //_   => { None }
+    //}
+  //}
 
-  pub fn tmp_redir<'a>(&'a self, net: &'a Net) -> Ptr {
-    if let Some(trg) = self.tmp_target(net) {
-      if trg.is_red() {
-        println!("redir {:08x} ~> {:08x} ~ {:08x}", self.data, trg.data, Ptr::new(trg.tag() - 3, trg.val()).data);
-        return Ptr::new(trg.tag() - 3, trg.val()).tmp_redir(net);
-      }
-    }
-    return self.clone();
-  }
+  //pub fn tmp_redir<'a>(&'a self, net: &'a Net) -> Ptr {
+    //if let Some(trg) = self.tmp_target(net) {
+      //if trg.is_red() {
+        //println!("redir {:08x} ~> {:08x} ~ {:08x}", self.data, trg.data, Ptr::new(trg.tag() - 3, trg.val()).data);
+        //return Ptr::new(trg.tag() - 3, trg.val()).tmp_redir(net);
+      //}
+    //}
+    //return self.clone();
+  //}
 
   #[inline(always)]
   pub fn adjust(&self, locs: &[u32]) -> Ptr {
@@ -218,17 +219,17 @@ impl Net {
     }
   }
 
-  pub fn tmp_redir(&mut self) {
-    self.root = self.root.tmp_redir(self);
-    for i in 0 .. self.node.len() {
-      self.node[i].ports[0] = self.node[i].ports[0].tmp_redir(self);
-      self.node[i].ports[1] = self.node[i].ports[1].tmp_redir(self);
-    }
-    for i in 0 .. self.acts.len() {
-      self.acts[i].0 = self.acts[i].0.tmp_redir(self);
-      self.acts[i].1 = self.acts[i].1.tmp_redir(self);
-    }
-  }
+  //pub fn tmp_redir(&mut self) {
+    //self.root = self.root.tmp_redir(self);
+    //for i in 0 .. self.node.len() {
+      //self.node[i].ports[0] = self.node[i].ports[0].tmp_redir(self);
+      //self.node[i].ports[1] = self.node[i].ports[1].tmp_redir(self);
+    //}
+    //for i in 0 .. self.acts.len() {
+      //self.acts[i].0 = self.acts[i].0.tmp_redir(self);
+      //self.acts[i].1 = self.acts[i].1.tmp_redir(self);
+    //}
+  //}
 
   // Creates a net and boots from a REF.
   pub fn boot(&mut self, root_id: u32) {
@@ -290,17 +291,7 @@ impl Net {
   // - If one of the pointers is a variable, it will move the other value.
   // - Otherwise, this is an redexes, so we add it to 'acts'.
   #[inline(always)]
-  pub fn link(&mut self, book: &Book, a: Ptr, b: Ptr) {
-    //let mut a = a;
-    //let mut b = b;
-    // Dereferences A
-    //if a.is_ref() && b.is_ctr() {
-      //a = self.deref(book, a, Ptr::new(NIL,0), &mut 0);
-    //}
-    // Dereferences B
-    //if b.is_ref() && a.is_ctr() {
-      //b = self.deref(book, b, Ptr::new(NIL,0), &mut 0);
-    //}
+  pub fn link(&mut self, a: Ptr, b: Ptr) {
     // Substitutes A
     if a.is_var() {
       *a.target(self).unwrap() = b;
@@ -309,24 +300,7 @@ impl Net {
     if b.is_var() {
       *b.target(self).unwrap() = a;
     }
-    // New redex A-B
-    self.redux(book, a, b, &mut 0);
-  }
-
-  #[inline(always)]
-  pub fn redux(&mut self, book: &Book, a: Ptr, b: Ptr, loc: &mut usize) {
-    let mut a = a;
-    let mut b = b;
-    //println!("redux {:08x} {:08x}", a.data, b.data);
-    if a.is_ref() && b.is_ctr() {
-      //println!("deref a");
-      a = self.deref(book, a, b, loc);
-    }
-    if b.is_ref() && a.is_ctr() {
-      //println!("deref b");
-      b = self.deref(book, b, a, loc);
-    }
-    //println!("redex {:08x} {:08x}", a.data, b.data);
+    // Creates redex A-B
     if a.is_pri() && b.is_pri() {
       self.acts.push((a, b));
     }
@@ -336,14 +310,24 @@ impl Net {
   #[inline(always)]
   pub fn interact(&mut self, book: &Book, a: &mut Ptr, b: &mut Ptr) {
     self.rwts += 1;
+    // Dereference
+    if a.tag() == REF && b.tag() != ERA {
+      *a = self.deref(book, *a, Ptr::new(NIL,0), &mut 0);
+    }
+    if a.tag() != ERA && b.tag() == REF {
+      *b = self.deref(book, *b, Ptr::new(NIL,0), &mut 0);
+    }
+    // VAR
+    if a.is_var() || b.is_var() {
+      self.link(*a, *b);
     // CON-CON
-    if a.is_ctr() && b.is_ctr() && a.tag() == b.tag() {
+    } else if a.is_ctr() && b.is_ctr() && a.tag() == b.tag() {
       let a1 = self.get(a.val(), P1);
       let b1 = self.get(b.val(), P1);
-      self.link(book, a1, b1);
+      self.link(a1, b1);
       let a2 = self.get(a.val(), P2);
       let b2 = self.get(b.val(), P2);
-      self.link(book, a2, b2);
+      self.link(a2, b2);
       self.free(a.val());
       self.free(b.val());
     // CON-DUP
@@ -360,29 +344,29 @@ impl Net {
       self.set(y1, P2, Ptr::new(VR1, x2));
       self.set(y2, P1, Ptr::new(VR2, x1));
       self.set(y2, P2, Ptr::new(VR2, x2));
-      self.link(book, self.get(a.val(), P1), Ptr::new(b.tag(), x1));
-      self.link(book, self.get(a.val(), P2), Ptr::new(b.tag(), x2));
-      self.link(book, self.get(b.val(), P1), Ptr::new(a.tag(), y1));
-      self.link(book, self.get(b.val(), P2), Ptr::new(a.tag(), y2));
+      self.link(self.get(a.val(), P1), Ptr::new(b.tag(), x1));
+      self.link(self.get(a.val(), P2), Ptr::new(b.tag(), x2));
+      self.link(self.get(b.val(), P1), Ptr::new(a.tag(), y1));
+      self.link(self.get(b.val(), P2), Ptr::new(a.tag(), y2));
       self.free(a.val());
       self.free(b.val());
     // CTR-NUM
     } else if a.is_ctr() && b.is_num() { // TODO: test
-      self.link(book, self.get(a.val(), P1), Ptr::new(NUM, b.val()));
-      self.link(book, self.get(a.val(), P2), Ptr::new(NUM, b.val()));
+      self.link(self.get(a.val(), P1), Ptr::new(NUM, b.val()));
+      self.link(self.get(a.val(), P2), Ptr::new(NUM, b.val()));
       self.free(a.val());
     // NUM-CTR
     } else if a.is_num() && b.is_ctr() { // TODO: test
       self.interact(book, b, a);
     // CON-ERA
     } else if a.is_ctr() && b.is_era() {
-      self.link(book, self.get(a.val(), P1), Ptr::new(ERA, 0));
-      self.link(book, self.get(a.val(), P2), Ptr::new(ERA, 0));
+      self.link(self.get(a.val(), P1), Ptr::new(ERA, 0));
+      self.link(self.get(a.val(), P2), Ptr::new(ERA, 0));
       self.free(a.val());
     // ERA-CON
     } else if a.is_era() && b.is_ctr() {
-      self.link(book, self.get(b.val(), P1), Ptr::new(ERA, 0));
-      self.link(book, self.get(b.val(), P2), Ptr::new(ERA, 0));
+      self.link(self.get(b.val(), P1), Ptr::new(ERA, 0));
+      self.link(self.get(b.val(), P2), Ptr::new(ERA, 0));
       self.free(b.val());
     }
   }
@@ -416,7 +400,7 @@ impl Net {
         for got in &got.acts {
           let p1 = got.0.adjust(&self.locs[ini..]);
           let p2 = got.1.adjust(&self.locs[ini..]);
-          self.redux(book, p1, p2, loc);
+          self.acts.push((p1, p2));
         }
         // Overwrites 'ptr' with the loaded root pointer, adjusting locations...
         ptr = got.root.adjust(&self.locs[ini..]);
@@ -447,7 +431,7 @@ impl Net {
     self.expand(book, Ptr::new(VRR, 0));
     while self.acts.len() > 0 {
       while self.acts.len() > 0 {
-        println!("reduce {}", self.acts.len());
+        println!(">> reduce {}", self.acts.len());
         self.reduce(book);
         //self.expand(book, Ptr::new(VRR, 0));
       }
