@@ -55,7 +55,7 @@ pub struct Node {
 // - used: total nodes currently allocated on the graph.
 // - rwts: total graph rewrites performed inside this net.
 // - next: next pointer to allocate memory (internal).
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Net {
   pub root: Ptr,
   pub acts: Vec<(Ptr, Ptr)>,

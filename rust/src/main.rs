@@ -5,6 +5,8 @@
 
 mod core;
 mod lang;
+mod compat;
+mod test;
 
 use crate::core::*;
 use crate::lang::*;
