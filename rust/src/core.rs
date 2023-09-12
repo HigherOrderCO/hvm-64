@@ -121,7 +121,6 @@ impl Ptr {
   pub fn is_pri(&self) -> bool {
     return self.is_era()
         || self.is_ctr()
-        || self.is_ref()
         || self.is_num();
   }
 
@@ -140,6 +139,25 @@ impl Ptr {
       VR2 => { Some(net.at_mut(self.val()).port_mut(P2)) }
       _   => { None }
     }
+  }
+
+  pub fn tmp_target<'a>(&'a self, net: &'a Net) -> Option<&Ptr> {
+    match self.tag() {
+      VRR => { Some(&net.root) }
+      VR1 => { Some(net.at(self.val()).port(P1)) }
+      VR2 => { Some(net.at(self.val()).port(P2)) }
+      _   => { None }
+    }
+  }
+
+  pub fn tmp_redir<'a>(&'a self, net: &'a Net) -> Ptr {
+    if let Some(trg) = self.tmp_target(net) {
+      if trg.is_red() {
+        println!("redir {:08x} ~> {:08x} ~ {:08x}", self.data, trg.data, Ptr::new(trg.tag() - 3, trg.val()).data);
+        return Ptr::new(trg.tag() - 3, trg.val()).tmp_redir(net);
+      }
+    }
+    return self.clone();
   }
 
   #[inline(always)]
@@ -197,6 +215,18 @@ impl Net {
       used: 0,
       rwts: 0,
       locs: vec![0; 1 << 16], // FIXME: should be field of Worker, not Net
+    }
+  }
+
+  pub fn tmp_redir(&mut self) {
+    self.root = self.root.tmp_redir(self);
+    for i in 0 .. self.node.len() {
+      self.node[i].ports[0] = self.node[i].ports[0].tmp_redir(self);
+      self.node[i].ports[1] = self.node[i].ports[1].tmp_redir(self);
+    }
+    for i in 0 .. self.acts.len() {
+      self.acts[i].0 = self.acts[i].0.tmp_redir(self);
+      self.acts[i].1 = self.acts[i].1.tmp_redir(self);
     }
   }
 
@@ -261,16 +291,16 @@ impl Net {
   // - Otherwise, this is an redexes, so we add it to 'acts'.
   #[inline(always)]
   pub fn link(&mut self, book: &Book, a: Ptr, b: Ptr) {
-    let mut a = a;
-    let mut b = b;
+    //let mut a = a;
+    //let mut b = b;
     // Dereferences A
-    if a.is_ref() && b.is_ctr() {
-      a = self.deref(book, a, Ptr::new(NIL,0), &mut 0);
-    }
+    //if a.is_ref() && b.is_ctr() {
+      //a = self.deref(book, a, Ptr::new(NIL,0), &mut 0);
+    //}
     // Dereferences B
-    if b.is_ref() && a.is_ctr() {
-      b = self.deref(book, b, Ptr::new(NIL,0), &mut 0);
-    }
+    //if b.is_ref() && a.is_ctr() {
+      //b = self.deref(book, b, Ptr::new(NIL,0), &mut 0);
+    //}
     // Substitutes A
     if a.is_var() {
       *a.target(self).unwrap() = b;
@@ -280,6 +310,23 @@ impl Net {
       *b.target(self).unwrap() = a;
     }
     // New redex A-B
+    self.redux(book, a, b, &mut 0);
+  }
+
+  #[inline(always)]
+  pub fn redux(&mut self, book: &Book, a: Ptr, b: Ptr, loc: &mut usize) {
+    let mut a = a;
+    let mut b = b;
+    //println!("redux {:08x} {:08x}", a.data, b.data);
+    if a.is_ref() && b.is_ctr() {
+      //println!("deref a");
+      a = self.deref(book, a, b, loc);
+    }
+    if b.is_ref() && a.is_ctr() {
+      //println!("deref b");
+      b = self.deref(book, b, a, loc);
+    }
+    //println!("redex {:08x} {:08x}", a.data, b.data);
     if a.is_pri() && b.is_pri() {
       self.acts.push((a, b));
     }
@@ -367,9 +414,9 @@ impl Net {
         }
         // Loads redexes, adjusting locations...
         for got in &got.acts {
-          let p1 = self.deref(book, got.0.adjust(&self.locs[ini..]), Ptr::new(NIL,0), loc);
-          let p2 = self.deref(book, got.1.adjust(&self.locs[ini..]), Ptr::new(NIL,0), loc);
-          self.acts.push((p1, p2));
+          let p1 = got.0.adjust(&self.locs[ini..]);
+          let p2 = got.1.adjust(&self.locs[ini..]);
+          self.redux(book, p1, p2, loc);
         }
         // Overwrites 'ptr' with the loaded root pointer, adjusting locations...
         ptr = got.root.adjust(&self.locs[ini..]);

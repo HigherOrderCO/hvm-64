@@ -204,7 +204,7 @@ fn main() {
   define(book, "ex2", "
     $ main
     & @run ~ (0 nie main)
-    & @c7  ~ (0 @I (0 @E nie))
+    & @c22 ~ (0 @I (0 @E nie))
   "); 
 
   // Decreases many binary counters until they reach 0
@@ -215,22 +215,29 @@ fn main() {
   "); 
 
   // Initializes the net
-  let net = &mut Net::new(1 << 28);
+  let net = &mut Net::new(1 << 26);
   net.boot(name_to_u32("ex1"));
 
   // Computes its normal form
-  //net.expand(book, Ptr::new(VRR,0));
+  net.expand(book, Ptr::new(VRR,0));
   net.normal(book);
-  //net.expand(book, Ptr::new(VRR,0));
-  //net.normal(book);
-  //net.expand(book, Ptr::new(VRR,0));
 
   //Shows results and stats
   //println!("[net]\n{}", show_net(&net));
-  //println!("{}", net.head.iter().map(|x| format!("{:016x}", x.data)).collect::<Vec<String>>().join(" "));
   println!("size: {}", net.node.len());
   println!("used: {}", net.used);
   println!("rwts: {}", net.rwts);
+
+  //println!("net.root = {:08x}", net.root.data);
+  //for i in 0 .. net.acts.len() {
+    //println!("net.acts[{:04x}] = {:08x} {:08x}", i, net.acts[i].0.data, net.acts[i].1.data);
+  //}
+  //for i in 0 .. net.node.len() {
+    //if net.node[i].ports[0].data != 0 || net.node[i].ports[1].data != 0 {
+      //println!("net.node[{:04x}] = {:08x} {:08x}", i, net.node[i].ports[0].data, net.node[i].ports[1].data);
+    //}
+  //}
+
   //populate_cuda(&book); // prints CUDA book
 }
 
