@@ -14,37 +14,23 @@ typedef unsigned long long int u64;
 // -------------
 
 // This code is initially optimized for RTX 4090
-const u32 BLOCK_MEMORY = 48 * 1024;               // shared memory size
-const u32 BLOCK_LOG2   = 9;                       // log2 of block size
-const u32 BLOCK_SIZE   = 1 << BLOCK_LOG2;         // threads per block
-const u32 UNIT_LOG2    = 2;                       // log2 of unit size
-const u32 UNIT_SIZE    = 1 << UNIT_LOG2;          // threads per unit
-const u32 GROUP_LOG2   = BLOCK_LOG2 - UNIT_LOG2;  // log2 of group size
-const u32 GROUP_SIZE   = 1 << GROUP_LOG2;         // units per group
-const u32 NODE_LOG2    = 28;                      // log2 of node size
-const u32 NODE_SIZE    = 1 << NODE_LOG2;          // max total nodes (2GB addressable)
-const u32 HEAD_LOG2    = GROUP_LOG2 * 2;          // log2 of head size
-const u32 HEAD_SIZE    = 1 << HEAD_LOG2;          // max head pointers
-const u32 MAX_THREADS  = BLOCK_SIZE * BLOCK_SIZE; // total number of active threads
-const u32 MAX_UNITS    = GROUP_SIZE * GROUP_SIZE; // total number of active units
-
-// max new redexes per rewrite
-const u32 MAX_NEW_REDEX = 4;
-
-// max number of nodes in a term = 32
-const u32 TERM_SIZE = BLOCK_MEMORY / 3 / sizeof(u32) / GROUP_SIZE;
-
-// redexes per unit = 32
-const u32 RBAG_SIZE = BLOCK_MEMORY * 2 / 3 / sizeof(u64) / GROUP_SIZE;
-
-// redexes per GPU
-const u32 BAGS_SIZE = MAX_UNITS * RBAG_SIZE;
-
-// max local heads
-const u32 LHDS_SIZE = RBAG_SIZE / MAX_NEW_REDEX;
-
-// local rewrites per kernel launch
-const u32 REPEAT_RATE = 64;
+const u32 BLOCK_LOG2    = 9;                         // log2 of block size
+const u32 BLOCK_SIZE    = 1 << BLOCK_LOG2;           // threads per block
+const u32 UNIT_LOG2     = 2;                         // log2 of unit size
+const u32 UNIT_SIZE     = 1 << UNIT_LOG2;            // threads per unit
+const u32 GROUP_LOG2    = BLOCK_LOG2 - UNIT_LOG2;    // log2 of group size
+const u32 GROUP_SIZE    = 1 << GROUP_LOG2;           // units per group
+const u32 NODE_LOG2     = 28;                        // log2 of node size
+const u32 NODE_SIZE     = 1 << NODE_LOG2;            // max total nodes (2GB addressable)
+const u32 HEAD_LOG2     = GROUP_LOG2 * 2;            // log2 of head size
+const u32 HEAD_SIZE     = 1 << HEAD_LOG2;            // max head pointers
+const u32 MAX_THREADS   = BLOCK_SIZE * BLOCK_SIZE;   // total number of active threads
+const u32 MAX_UNITS     = GROUP_SIZE * GROUP_SIZE;   // total number of active units
+const u32 MAX_NEW_REDEX = 4;                         // max new redexes per rewrite
+const u32 TERM_SIZE     = 32;                        // max number of nodes in a term = 32
+const u32 RBAG_SIZE     = 32;                        // redexes per unit = 32
+const u32 LHDS_SIZE     = RBAG_SIZE / MAX_NEW_REDEX; // max local heads
+const u32 BAGS_SIZE     = MAX_UNITS * RBAG_SIZE;     // redexes per GPU
 
 // Types
 // -----
@@ -131,8 +117,7 @@ typedef struct {
   u32   aloc; // where to alloc next node
   u32   rwts; // local rewrites performed
   u32*  locs; // local alloc locs / expand ptrs
-  u8*   smem; // shared memory buffer
-  u32*  head; // local heads
+  //u8*   smem; // shared memory buffer
   u64*  rlen; // local redex bag length
   Wire* rbag; // local redex bag
   Wire* rpop; // popped redex
@@ -321,9 +306,6 @@ __device__ bool replace(Ptr* ref, Ptr exp, Ptr neo) {
   Ptr got = atomicCAS((u32*)ref, exp, neo);
   u32 K = 0;
   while (got != exp) {
-    if (++K > 100000) {
-      return false;
-    }
     //dbug(&K, "replace");
     got = atomicCAS((u32*)ref, exp, neo);
   }
@@ -416,7 +398,7 @@ __device__ inline void put_redex(Worker* worker, Ptr a_ptr, Ptr b_ptr) {
   if (index < RBAG_SIZE - 1) {
     worker->rbag[index] = mkwire(a_ptr, b_ptr);
   } else {
-    printf("[%04X:%u] ERROR PUTTING REDEX %u\n", worker->uid, worker->quad, index);
+    //printf("[%04X:%u] ERROR PUTTING REDEX %u\n", worker->uid, worker->quad, index);
   }
 }
 
@@ -578,15 +560,12 @@ __device__ void link(Worker* worker, Net* net, Book* book, Ptr* src_ref, Ptr dir
 // -------
 
 __device__ Worker init_worker(Net* net, bool flip) {
-  // 128x128 units (128 units/block * 128 blocks)
-  // The shared memory of a block is split as:
-  // - 64 KB: redex bag (64 redexes per unit)
-  // - 16 KB: alloc arr (32 indices per unit)
-  
-  extern __shared__ u8 SMEM[];
-  Wire* RBAG = (Wire*)SMEM;
-  u32*  HEAD = (u32*)SMEM;
-  u32*  LOCS = (u32*)(SMEM + GROUP_SIZE * RBAG_SIZE * sizeof(Wire));
+  __shared__ u32 LOCS[GROUP_SIZE * TERM_SIZE];
+
+  for (u32 i = 0; i < GROUP_SIZE * TERM_SIZE / BLOCK_SIZE; ++i) {
+    LOCS[i * BLOCK_SIZE + threadIdx.x] = 0;
+  }
+  __syncthreads();
 
   u32 tid = threadIdx.x;
   u32 gid = blockIdx.x * blockDim.x + tid;
@@ -601,8 +580,7 @@ __device__ Worker init_worker(Net* net, bool flip) {
   worker.rwts = 0;
   worker.quad = worker.tid % 4;
   worker.port = worker.tid % 2;
-  worker.smem = SMEM;
-  worker.head = HEAD + worker.tid / UNIT_SIZE * LHDS_SIZE;
+  //worker.smem = SMEM;
   worker.locs = LOCS + worker.tid / UNIT_SIZE * TERM_SIZE;
   worker.rpop = (Wire*)worker.locs; // reuses locs memory
   worker.rlen = net->bags + worker.uid * RBAG_SIZE;
@@ -622,6 +600,7 @@ __device__ Worker init_worker(Net* net, bool flip) {
 // whenever possible. So, for example, in a commutation rule, all the 4 clones
 // would be allocated at the same time.
 __global__ void global_rewrite(Net* net, Book* book, u32 repeat, u32 tick, bool flip) {
+
   // Initializes local vars
   Worker worker = init_worker(net, flip);
 
@@ -770,23 +749,28 @@ __global__ void global_rewrite(Net* net, Book* book, u32 repeat, u32 tick, bool 
   }
 }
 
-void do_global_rewrite(Net* net, Book* book, u32 blocks, u32 repeat, u32 tick, bool flip) {
-  global_rewrite<<<blocks, BLOCK_SIZE, BLOCK_MEMORY>>>(net, book, repeat, tick, flip);
+void do_global_rewrite(Net* net, Book* book, u32 repeat, u32 tick, bool flip) {
+  global_rewrite<<<GROUP_SIZE, BLOCK_SIZE>>>(net, book, repeat, tick, flip);
+  // print any error launching this kernel:
+  cudaError_t err = cudaGetLastError();
+  if (err != cudaSuccess) {
+    printf("CUDA error: %s\n", cudaGetErrorString(err));
+  }
 }
 
 // Expand
 // ------
 
 // Collects local expansion heads recursively
-__device__ void expand(Worker* worker, Net* net, Book* book, Ptr dir, u32* len) {
+__device__ void expand(Worker* worker, Net* net, Book* book, Ptr dir, u32* len, u32* lhds) {
   Ptr ptr = *target(net, dir);
   if (is_ctr(ptr)) {
-    expand(worker, net, book, mkptr(VR1, val(ptr)), len);
-    expand(worker, net, book, mkptr(VR2, val(ptr)), len);
+    expand(worker, net, book, mkptr(VR1, val(ptr)), len, lhds);
+    expand(worker, net, book, mkptr(VR2, val(ptr)), len, lhds);
   } else if (is_red(ptr)) {
-    expand(worker, net, book, ptr, len);
+    expand(worker, net, book, ptr, len, lhds);
   } else if (is_ref(ptr) && *len < LHDS_SIZE) {
-    worker->head[(*len)++] = dir;
+    lhds[(*len)++] = dir;
   }
 }
 
@@ -828,7 +812,16 @@ __global__ void global_expand_prepare(Net* net) {
 
 // Performs global expansion of heads
 __global__ void global_expand(Net* net, Book* book) {
+  __shared__ u32 HEAD[GROUP_SIZE * LHDS_SIZE];
+
+  for (u32 i = 0; i < GROUP_SIZE * LHDS_SIZE / BLOCK_SIZE; ++i) {
+    HEAD[i * BLOCK_SIZE + threadIdx.x] = 0;
+  }
+  __syncthreads();
+
   Worker worker = init_worker(net, 0);
+
+  u32* head = HEAD + worker.tid / UNIT_SIZE * LHDS_SIZE;
 
   Wire got = net->head[worker.uid];
   Ptr  dir = wire_lft(got);
@@ -842,14 +835,14 @@ __global__ void global_expand(Net* net, Book* book) {
 
   u32 len = 0;
   if (worker.quad == A1 && ptr != mkptr(NIL,0)) {
-    expand(&worker, net, book, dir, &len);
+    expand(&worker, net, book, dir, &len, head);
   }
   __syncthreads();
 
   for (u32 i = 0; i < LHDS_SIZE; ++i) {
-    Ptr  dir = worker.head[i];
+    Ptr  dir = head[i];
     Ptr* ref = target(net, dir);
-    if (!is_ref(*ref)) {
+    if (ref != NULL && !is_ref(*ref)) {
       ref = NULL;
     }
     deref(&worker, net, book, ref, dir);
@@ -860,7 +853,7 @@ __global__ void global_expand(Net* net, Book* book) {
 // Performs a global head expansion
 void do_global_expand(Net* net, Book* book) {
   global_expand_prepare<<<GROUP_SIZE, GROUP_SIZE>>>(net);
-  global_expand<<<GROUP_SIZE, BLOCK_SIZE, BLOCK_MEMORY>>>(net, book);
+  global_expand<<<GROUP_SIZE, BLOCK_SIZE>>>(net, book);
 }
 
 // Host<->Device
@@ -2370,7 +2363,7 @@ __host__ void populate(Book* book) {
   book->defs[0x00029f04]->alen     = 2;
   book->defs[0x00029f04]->acts     = (Wire*) malloc(2 * sizeof(Wire));
   book->defs[0x00029f04]->acts[ 0] = mkwire(0x10026db2,0xa0000000);
-  book->defs[0x00029f04]->acts[ 1] = mkwire(0x10027085,0xa0000001);
+  book->defs[0x00029f04]->acts[ 1] = mkwire(0x10027086,0xa0000001);
   book->defs[0x00029f04]->nlen     = 3;
   book->defs[0x00029f04]->node     = (Node*) malloc(3 * sizeof(Node));
   book->defs[0x00029f04]->node[ 0] = (Node) {0x50000002,0x30000000};
@@ -3090,7 +3083,7 @@ __host__ void populate(Book* book) {
   book->defs[0x009b6ca4]->alen     = 2;
   book->defs[0x009b6ca4]->acts     = (Wire*) malloc(2 * sizeof(Wire));
   book->defs[0x009b6ca4]->acts[ 0] = mkwire(0x10036e72,0xa0000000);
-  book->defs[0x009b6ca4]->acts[ 1] = mkwire(0x10027082,0xa0000001);
+  book->defs[0x009b6ca4]->acts[ 1] = mkwire(0x10027081,0xa0000001);
   book->defs[0x009b6ca4]->nlen     = 3;
   book->defs[0x009b6ca4]->node     = (Node*) malloc(3 * sizeof(Node));
   book->defs[0x009b6ca4]->node[ 0] = (Node) {0x50000002,0x30000000};
@@ -3199,10 +3192,6 @@ int main() {
   cudaGetDeviceProperties(&prop, device);
   printf("CUDA Device: %s, Compute Capability: %d.%d\n\n", prop.name, prop.major, prop.minor);
 
-  // Configs
-  cudaFuncSetAttribute(global_expand, cudaFuncAttributeMaxDynamicSharedMemorySize, BLOCK_MEMORY);
-  cudaFuncSetAttribute(global_rewrite, cudaFuncAttributeMaxDynamicSharedMemorySize, BLOCK_MEMORY);
-
   // Allocates net and book on CPU
   Net* cpu_net = mknet();
   Book* cpu_book = mkbook();
@@ -3223,11 +3212,12 @@ int main() {
 
   // Normalizes
   do_global_expand(gpu_net, gpu_book);
+  do_global_rewrite(gpu_net, gpu_book, 1, 0, 0);
   for (u32 tick = 0; tick < 128; ++tick) {
-    do_global_rewrite(gpu_net, gpu_book, GROUP_SIZE, 16, tick, (tick / GROUP_LOG2) % 2);
+    do_global_rewrite(gpu_net, gpu_book, 16, tick, (tick / GROUP_LOG2) % 2);
   }
   do_global_expand(gpu_net, gpu_book);
-  do_global_rewrite(gpu_net, gpu_book, GROUP_SIZE, 50000, 0, 0);
+  do_global_rewrite(gpu_net, gpu_book, 50000, 0, 0);
   cudaDeviceSynchronize();
 
   // Gets end time

@@ -173,7 +173,7 @@ fn main() {
   define(book, "brnZ", "
     $ ret
     & @run ~ (0 val ret)
-    & @c11 ~ (0 @I (0 @E val))
+    & @c10 ~ (0 @I (0 @E val))
   ");
   define(book, "brnS", "
     $ (0 (1 p0 p1) (0 r0 r1))
@@ -215,7 +215,7 @@ fn main() {
   define(book, "ex3", "
     $ res
     & @brn ~ (0 dep res)
-    & @c14 ~ (0 @S (0 @Z dep))
+    & @c15 ~ (0 @S (0 @Z dep))
   "); 
 
   // Initializes the net
@@ -227,7 +227,7 @@ fn main() {
   net.normal(book);
 
   //Shows results and stats
-  println!("[net]\n{}", show_net(&net));
+  //println!("[net]\n{}", show_net(&net));
   println!("size: {}", net.node.len());
   println!("used: {}", net.used);
   println!("rwts: {}", net.rwts);
