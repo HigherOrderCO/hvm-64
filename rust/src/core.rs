@@ -416,7 +416,7 @@ impl Net {
   }
 
   // Performs a global parallel rewrite.
-  pub fn reduce(&mut self, book: &Book) -> usize {
+  pub fn rewrite(&mut self, book: &Book) -> usize {
     let rwts = self.acts.len();
     let acts = std::mem::replace(&mut self.acts, vec![]);
     // This loop can be parallelized!
@@ -427,14 +427,18 @@ impl Net {
   }
 
   // Reduces all redexes until there is none.
+  pub fn reduce(&mut self, book: &Book) {
+    while self.acts.len() > 0 {
+      println!(">> reduce {}", self.acts.len());
+      self.rewrite(book);
+    }
+  }
+
+  // Reduce a net to normal form.
   pub fn normal(&mut self, book: &Book) {
     self.expand(book, Ptr::new(VRR, 0));
     while self.acts.len() > 0 {
-      while self.acts.len() > 0 {
-        println!(">> reduce {}", self.acts.len());
-        self.reduce(book);
-        //self.expand(book, Ptr::new(VRR, 0));
-      }
+      self.reduce(book);
       self.expand(book, Ptr::new(VRR, 0));
     }
   }
