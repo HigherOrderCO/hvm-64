@@ -4,6 +4,7 @@ mod tests {
         compat::CompatError,
         core::Net,
         lang::{lnet_to_net, LNet},
+        Book,
     };
     use quickcheck::Arbitrary;
     use quickcheck_macros::quickcheck;
@@ -59,7 +60,6 @@ mod tests {
                 *chosen.unwrap()
             }
             let mut nodes: Vec<NodeTag> = Arbitrary::arbitrary(g);
-            nodes = nodes.into_iter().collect();
             fn number_of_ports(tags: &[NodeTag]) -> usize {
                 tags.iter().map(|x| x.arity()).sum()
             }
@@ -98,7 +98,6 @@ mod tests {
                 (curr_idx, curr_port): (usize, usize),
             ) -> (usize, usize) {
                 loop {
-                    // TODO: this doesn't allow for links to the same node
                     let node_id = choose_from_range(g, curr_idx..(nodes.len()));
                     let other_tag = nodes[node_id];
                     let other_port = choose_from_range(g, 0..other_tag.arity());
@@ -118,14 +117,7 @@ mod tests {
 
             for (curr_idx, this_tag) in nodes.clone().into_iter().enumerate().skip(1) {
                 if this_tag.arity() == 1 {
-                    addresses[curr_idx][1] = Some(Address {
-                        node_id: curr_idx,
-                        port_id: 2,
-                    });
-                    addresses[curr_idx][2] = Some(Address {
-                        node_id: curr_idx,
-                        port_id: 1,
-                    });
+                    link(&mut addresses, (curr_idx, 1), (curr_idx, 2));
                 }
 
                 for this_port in 0..this_tag.arity() {
@@ -170,7 +162,7 @@ mod tests {
             let mut nodes = Vec::with_capacity(net.len() * 4);
             for (tag, [main, aux1, aux2]) in net {
                 fn convert_address(address: Address) -> Port {
-                    port(address.node_id as u64, address.port_id as u64)
+                    port(address.node_id as u32, address.port_id as u32)
                 }
                 fn convert_tag(tag: NodeTag) -> NodeKind {
                     match tag {
@@ -194,15 +186,41 @@ mod tests {
             loop {
                 let simple_net = SimpleNet::arbitrary(g);
                 match LNet::try_from(simple_net.clone()) {
-                    Ok(lnet) => return lnet_to_net(&lnet),
+                    Ok(lnet) => return lnet_to_net(&lnet, 4),
                     Err(_) => continue,
                 }
             }
         }
     }
 
+    const MAX_STEPS: usize = 1000;
+
     #[quickcheck]
-    fn prop(_net: Net) -> bool {
+    fn prop_reduces_or_stops(net: Net) -> bool {
+        let mut net = net;
+        net.normal(&Book::new(), Some(MAX_STEPS));
+        net.rwts >= MAX_STEPS || net.acts.is_empty()
+    }
+
+    #[ignore]
+    #[quickcheck]
+    fn prop_confluence(unchanged: Net) -> bool {
+        use rand::seq::SliceRandom;
+        use rand::thread_rng;
+
+        let mut reduced = unchanged.clone();
+        reduced.normal(&Book::new(), Some(MAX_STEPS));
+
+        for _ in 0..20 {
+            let mut net = unchanged.clone();
+            net.acts.shuffle(&mut thread_rng());
+            net.normal(&Book::new(), Some(MAX_STEPS));
+            if net.rwts != reduced.rwts {
+                println!("rwts: {} != {}", net.rwts, reduced.rwts);
+                return false;
+            }
+            // TODO: check that the result is the same
+        }
         true
     }
 }

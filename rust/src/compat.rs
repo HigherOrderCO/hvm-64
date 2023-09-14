@@ -8,7 +8,7 @@ pub struct INet {
     pub nodes: Vec<NodeVal>,
 }
 
-pub type NodeVal = u64;
+pub type NodeVal = u32;
 pub type NodeKind = NodeVal;
 pub type Port = NodeVal;
 pub type NodeId = NodeVal;
@@ -16,8 +16,8 @@ pub type SlotId = NodeVal;
 
 /// The ROOT port is on the deadlocked root node at address 0.
 pub const ROOT: Port = 1;
-pub const TAG_WIDTH: u32 = Tag::BITS;
-pub const TAG: u32 = 64 - TAG_WIDTH;
+pub const TAG_WIDTH: u32 = 4;
+pub const TAG: u32 = NodeVal::BITS - TAG_WIDTH;
 pub const ERA: NodeKind = 0 << TAG;
 pub const CON: NodeKind = 1 << TAG;
 pub const DUP: NodeKind = 2 << TAG;
