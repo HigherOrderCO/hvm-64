@@ -82,6 +82,7 @@ fn main() {
   define(book, "T", "$ (0 t (0 * t))");
   define(book, "F", "$ (0 * (0 f f))");
   define(book, "not", "$ (0 (0 f (0 t r)) (0 t (0 f r)))");
+  define(book, "and", "$ (0 (0 (0 (0 @T (0 @F a)) a) (0 (0 (0 @F (0 @F b)) b) c)) c)");
 
   // Scott Nats
   define(book, "S", "$ (0 a (0 (0 a b) (0 * b)))");
@@ -184,6 +185,25 @@ fn main() {
     $ (0 (0 @brnS (0 @brnZ r)) r)
   ");
 
+  // af  = λx (x afS afZ)
+  // afS = λp (and (af p) (af p))
+  // afZ = T
+  define(book, "af", "
+    $ (0 (0 @afS (0 @afZ a)) a)
+  ");
+  define(book, "afS", "
+    $ (0 (1 a b) c)
+    & (0 b d)
+    ~ @af
+    & (0 e (0 d c))
+    ~ @and
+    & (0 a e)
+    ~ @af
+  ");
+  define(book, "afZ", "
+    $ @T
+  ");
+
   // Creates a nat, for testing
   // ex0 = ((n S) Z)
   define(book, "ex0", "
@@ -218,16 +238,27 @@ fn main() {
     & @c15 ~ (0 @S (0 @Z dep))
   "); 
 
+  // Parallel ands
+  // ex4 = (af (n S Z))
+  define(book, "ex4", "
+    $ a
+    & (0 b a)
+    ~ @af
+    & (0 @S (0 @Z b))
+    ~ @c1
+  ");
+
   // Initializes the net
   let net = &mut Net::new(1 << 24);
-  net.boot(name_to_u32("ex3"));
+  net.boot(name_to_u32("ex4"));
 
   // Computes its normal form
   net.expand(book, Ptr::new(VRR,0));
-  net.normal(book);
+  net.reduce(book);
+  //net.normal(book);
 
   //Shows results and stats
-  //println!("[net]\n{}", show_net(&net));
+  println!("[net]\n{}", show_net(&net));
   println!("size: {}", net.node.len());
   println!("used: {}", net.used);
   println!("rwts: {}", net.rwts);
