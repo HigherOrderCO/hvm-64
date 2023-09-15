@@ -1,6 +1,5 @@
+use hvm_core::{LNet, LTree, Tag};
 use std::collections::HashMap;
-
-use crate::{LNet, LTree, Tag};
 
 #[derive(Clone, Debug)]
 /// Net representation used only as an intermediate for converting to hvm-core format
@@ -27,21 +26,6 @@ pub const NUMOP: NodeKind = 5 << TAG;
 pub const LABEL_MASK: NodeKind = (1 << TAG) - 1;
 pub const TAG_MASK: NodeKind = !LABEL_MASK;
 
-/// Create a new net, with a deadlocked root node.
-pub fn new_inet() -> INet {
-    INet {
-        nodes: vec![2, 1, 0, ERA], // p2 points to p0, p1 points to net
-    }
-}
-
-/// Allocates a new node, reclaiming a freed space if possible.
-pub fn new_node(inet: &mut INet, kind: NodeKind) -> NodeId {
-    let node = addr(inet.nodes.len() as Port);
-    inet.nodes
-        .extend([port(node, 0), port(node, 1), port(node, 2), kind]);
-    node
-}
-
 /// Builds a port (an address / slot pair).
 pub fn port(node: NodeId, slot: SlotId) -> Port {
     (node << 2) | slot
@@ -67,23 +51,10 @@ pub fn kind(inet: &INet, node: NodeId) -> NodeKind {
     inet.nodes[port(node, 3) as usize]
 }
 
-/// Links two ports.
-pub fn link(inet: &mut INet, ptr_a: Port, ptr_b: Port) {
-    inet.nodes[ptr_a as usize] = ptr_b;
-    inet.nodes[ptr_b as usize] = ptr_a;
-}
-
-#[derive(Debug)]
-pub struct INode {
-    pub kind: NodeKind,
-    pub ports: [String; 3],
-}
-
 pub enum CompatError {
     CycleDetected,
 }
 
-pub type INodes = Vec<INode>;
 pub fn compat_net_to_core(inet: &INet) -> Result<LNet, CompatError> {
     let (root_root, acts_roots) = get_tree_roots(inet)?;
     let mut port_to_var_id: HashMap<Port, VarId> = HashMap::new();
@@ -200,12 +171,12 @@ fn compat_tree_to_hvm_tree(
     match tag {
         ERA => LTree::Era,
         CON => LTree::Nod {
-            tag: crate::CON,
+            tag: hvm_core::CON,
             lft: Box::new(var_or_subtree(inet, port(root, 1), port_to_var_id)),
             rgt: Box::new(var_or_subtree(inet, port(root, 2), port_to_var_id)),
         },
         DUP => LTree::Nod {
-            tag: crate::DUP + label as Tag,
+            tag: hvm_core::DUP + label as Tag,
             lft: Box::new(var_or_subtree(inet, port(root, 1), port_to_var_id)),
             rgt: Box::new(var_or_subtree(inet, port(root, 2), port_to_var_id)),
         },
