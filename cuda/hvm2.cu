@@ -278,13 +278,11 @@ __device__ inline Ptr* at(Net* net, Val idx, Port port) {
 __device__ inline u32 alloc(Worker *worker, Net *net) {
   u32 K = 0;
   while (true) {
-    //dbug(&K, "alloc");
     u32  idx = worker->aloc % NODE_SIZE;
     u64* ref = (u64*)&net->node[idx];
     u64  got = atomicCAS((u64*)ref, 0, ((u64)NEO << 32) | (u64)NEO);
     if (got == 0) {
       return idx;
-      //atomicExch(ref, 0);
     }
     worker->aloc = (worker->aloc + 1) % NODE_SIZE;
   }
@@ -475,85 +473,117 @@ __device__ void deref(Worker* worker, Net* net, Book* book, Ptr* deref_ptr, Ptr 
   }
 }
 
-
 // Atomically links the node in 'src_ref' towards 'trg_ptr'.
 __device__ void link(Worker* worker, Net* net, Book* book, Ptr* src_ref, Ptr dir_ptr) {
-  Wire new_redex = mkwire(0,0);
-  u32 K = 0;
-  while (true) {
-    //dbug(&K, "link");
 
-    // Peek the target, which may not be owned by us.
-    Ptr* trg_ref = target(net, dir_ptr);
-    Ptr  trg_ptr = atomicAdd((u32*)trg_ref, 0);
+  Ptr src_ptr = *src_ref;
 
-    // If target is a redirection, clear and move forward.
-    if (is_red(trg_ptr)) {
-      // We own the redirection, so we can mutate it.
-      *trg_ref = 0;
-      dir_ptr = trg_ptr;
-      continue;
-    }
+  // Create a new redex
+  if (is_pri(src_ptr) && is_pri(dir_ptr)) {
+    atomicCAS(src_ref, TKN, 0);
+    put_redex(worker, *src_ref, dir_ptr);
+    return;
+  }
 
-    // If target is a variable, try replacing it by the node.
-    else if (is_var(trg_ptr)) {
-      // Peeks the source node.
-      Ptr src_ptr = *src_ref;
+  // Move src towards either a VAR or another PRI
+  if (is_pri(src_ptr) && is_red(dir_ptr)) {
+    while (true) {
+      //dbug(&K, "link");
 
-      // We don't own the var, so we must try replacing with a CAS.
-      if (atomicCAS((u32*)trg_ref, trg_ptr, src_ptr) == trg_ptr) {
-        // Collect the orphaned backward path.
-        trg_ref = target(net, trg_ptr);
-        trg_ptr = *trg_ref;
-        u32 K2 = 0;
-        while (is_red(trg_ptr)) {
-          *trg_ref = 0;
+      // Peek the target, which may not be owned by us.
+      Ptr* trg_ref = target(net, dir_ptr);
+      Ptr  trg_ptr = atomicAdd(trg_ref, 0);
+
+      // If target is a redirection, clear and move forward.
+      if (is_red(trg_ptr)) {
+        // We own the redirection, so we can mutate it.
+        *trg_ref = 0;
+        dir_ptr = trg_ptr;
+        continue;
+      }
+
+      // If target is a variable, try replacing it by the node.
+      else if (is_var(trg_ptr)) {
+        // Peeks the source node.
+        Ptr src_ptr = *src_ref;
+
+        // We don't own the var, so we must try replacing with a CAS.
+        if (atomicCAS((u32*)trg_ref, trg_ptr, src_ptr) == trg_ptr) {
+          // Collect the orphaned backward path.
           trg_ref = target(net, trg_ptr);
           trg_ptr = *trg_ref;
+          while (is_red(trg_ptr)) {
+            *trg_ref = 0;
+            trg_ref = target(net, trg_ptr);
+            trg_ptr = *trg_ref;
+          }
+          // Clear source location.
+          *src_ref = 0;
+          return;
         }
-        // Clear source location.
-        *src_ref = 0;
-        return;
+
+        // If the CAS failed, the var changed, so we try again.
+        continue;
       }
 
-      // If the CAS failed, the var changed, so we try again.
-      continue;
-    }
+      // If it is a node, two threads will reach this branch.
+      else if (is_pri(trg_ptr) || is_ref(trg_ptr) || trg_ptr == TMP) {
 
-    // If it is a node, two threads will reach this branch.
-    else if (is_pri(trg_ptr) || is_ref(trg_ptr) || trg_ptr == TMP) {
+        // Sort references, to avoid deadlocks.
+        Ptr *fst_ref = src_ref < trg_ref ? src_ref : trg_ref;
+        Ptr *snd_ref = src_ref < trg_ref ? trg_ref : src_ref;
 
-      // Sort references, to avoid deadlocks.
-      Ptr *fst_ref = src_ref < trg_ref ? src_ref : trg_ref;
-      Ptr *snd_ref = src_ref < trg_ref ? trg_ref : src_ref;
+        // Swap first reference by TMP placeholder.
+        Ptr fst_ptr = atomicExch((u32*)fst_ref, TMP);
 
-      // Swap first reference by TMP placeholder.
-      Ptr fst_ptr = atomicExch((u32*)fst_ref, TMP);
+        // First to arrive creates a redex.
+        if (fst_ptr != TMP) {
+          Ptr snd_ptr = atomicExch((u32*)snd_ref, TMP);
+          put_redex(worker, fst_ptr, snd_ptr);
+          return;
 
-      // First to arrive creates a redex.
-      if (fst_ptr != TMP) {
-        Ptr snd_ptr = atomicExch((u32*)snd_ref, TMP);
-        put_redex(worker, fst_ptr, snd_ptr);
-        return;
+        // Second to arrive clears up the memory.
+        } else {
+          *fst_ref = 0;
+          replace((u32*)snd_ref, TMP, 0);
+          return;
+        }
+      }
 
-      // Second to arrive clears up the memory.
-      } else {
-        *fst_ref = 0;
-        replace((u32*)snd_ref, TMP, 0);
+      // If it is taken, we wait.
+      else if (trg_ptr == TKN) {
+        continue;
+      }
+
+      // Shouldn't be reached.
+      else {
         return;
       }
-    }
-
-    // If it is taken, we wait.
-    else if (trg_ptr == TKN) {
-      continue;
-    }
-
-    // Shouldn't be reached.
-    else {
-      return;
     }
   }
+
+  // Optimization: safely shorten redirections
+  if (is_red(src_ptr) && is_red(dir_ptr)) {
+    while (true) {
+      Ptr* ste_ref = target(net, src_ptr);
+      Ptr  ste_ptr = *ste_ref;
+      if (is_var(ste_ptr)) {
+        Ptr* trg_ref = target(net, ste_ptr);
+        Ptr  trg_ptr = atomicAdd(trg_ref, 0);
+        if (is_red(trg_ptr)) {
+          Ptr neo_ptr = mkptr(tag(trg_ptr) - 3, val(trg_ptr));
+          Ptr updated = atomicCAS(ste_ref, ste_ptr, neo_ptr);
+          if (updated == ste_ptr) {
+            *trg_ref = 0;
+            continue;
+          }
+        }
+      }
+      break;
+    }
+    return;
+  }
+
 }
 
 // Rewrite
@@ -580,7 +610,6 @@ __device__ Worker init_worker(Net* net, bool flip) {
   worker.rwts = 0;
   worker.quad = worker.tid % 4;
   worker.port = worker.tid % 2;
-  //worker.smem = SMEM;
   worker.locs = LOCS + worker.tid / UNIT_SIZE * TERM_SIZE;
   worker.rpop = (Wire*)worker.locs; // reuses locs memory
   worker.rlen = net->bags + worker.uid * RBAG_SIZE;
@@ -639,6 +668,8 @@ __global__ void global_rewrite(Net* net, Book* book, u32 repeat, u32 tick, bool 
     bool con_dup = rewrite && is_ctr(a_ptr) && is_ctr(b_ptr) && tag(a_ptr) != tag(b_ptr);
 
     // Local rewrite variables
+    Ptr  ak_dir; // dir to our aux port
+    Ptr  bk_dir; // dir to other aux port
     Ptr *ak_ref; // ref to our aux port
     Ptr *bk_ref; // ref to other aux port
     Ptr  ak_ptr; // val of our aux port
@@ -654,13 +685,15 @@ __global__ void global_rewrite(Net* net, Book* book, u32 repeat, u32 tick, bool 
 
     // Gets port here
     if (rewrite && (ctr_era || con_con || con_dup)) {
-      ak_ref = at(net, val(a_ptr), worker.port);
+      ak_dir = mkptr(RD1 + worker.port, val(a_ptr));
+      ak_ref = target(net, ak_dir);
       ak_ptr = take(ak_ref);
     }
 
     // Gets port there
     if (rewrite && (era_ctr || con_con || con_dup)) {
-      bk_ref = at(net, val(b_ptr), worker.port);
+      bk_dir = mkptr(RD1 + worker.port, val(b_ptr));
+      bk_ref = target(net, bk_dir);
     }
 
     // If era_ctr, send an erasure
@@ -693,40 +726,25 @@ __global__ void global_rewrite(Net* net, Book* book, u32 repeat, u32 tick, bool 
 
     // Send ptr to other side
     if (rewrite && (era_ctr || con_con || con_dup)) {
-      replace(bk_ref, TKN, mv_ptr);
+      worker.locs[worker.quad + (worker.quad <= A2 ? 2 : -2)] = mv_ptr;
     }
+    __syncwarp();
+
+    if (rewrite && (con_con || ctr_era || con_dup)) {
+      *ak_ref = worker.locs[worker.quad];
+    }
+    __syncwarp();
 
     // If var_pri, the var must be a deref root, so we just subst
     if (rewrite && var_pri && worker.port == P1) {
       atomicExch((u32*)target(net, a_ptr), b_ptr);
     }
 
-    // If con_con and we sent a PRI, link the PRI there, towards our port
-    // If ctr_era and we have a VAR, link the ERA  here, towards that var
-    // If con_dup and we have a VAR, link the CPY  here, towards that var
-    if (rewrite &&
-      (  con_con && is_pri(ak_ptr)
-      || ctr_era && is_var(ak_ptr)
-      || con_dup && is_var(ak_ptr))) {
-      Ptr targ, *node;
-      if (con_con) {
-        node = bk_ref;
-        targ = mkptr(worker.port == P1 ? RD1 : RD2, val(a_ptr));
-      } else {
-        node = ak_ref;
-        targ = redir(ak_ptr);
-      }
+    // Links the rewritten port
+    if (rewrite && (con_con || ctr_era || con_dup)) {
+      Ptr* node = con_con ? ak_ref : ak_ref;
+      Ptr  targ = con_con ? redir(bk_dir) : redir(ak_ptr);
       link(&worker, net, book, node, targ);
-    }
-
-    // If we have a PRI...
-    // - if ctr_era, form an active pair with the eraser we got
-    // - if con_dup, form an active pair with the clone we got
-    if (rewrite &&
-      (  ctr_era && is_pri(ak_ptr)
-      || con_dup && is_pri(ak_ptr))) {
-      put_redex(&worker, ak_ptr, take(ak_ref));
-      atomicCAS((u32*)ak_ref, TKN, 0);
     }
     __syncwarp();
   }
@@ -1111,21 +1129,21 @@ void print_net(Net* net) {
     if (i % RBAG_SIZE == 0 && net->bags[i] > 0) {
       printf("- [%07X] LEN=%llu\n", i, net->bags[i]);
     } else {
-      //Ptr a = wire_lft(net->bags[i]);
-      //Ptr b = wire_rgt(net->bags[i]);
-      //if (a != 0 || b != 0) {
-        //printf("- [%07X] %s %s\n", i, show_ptr(a,0), show_ptr(b,1));
-      //}
+      Ptr a = wire_lft(net->bags[i]);
+      Ptr b = wire_rgt(net->bags[i]);
+      if (a != 0 || b != 0) {
+        printf("- [%07X] %s %s\n", i, show_ptr(a,0), show_ptr(b,1));
+      }
     }
   }
-  //printf("Node:\n");
-  //for (u32 i = 0; i < NODE_SIZE; ++i) {
-    //Ptr a = net->node[i].ports[P1];
-    //Ptr b = net->node[i].ports[P2];
-    //if (a != 0 || b != 0) {
-      //printf("- [%07X] %s %s\n", i, show_ptr(a,0), show_ptr(b,1));
-    //}
-  //}
+  printf("Node:\n");
+  for (u32 i = 0; i < NODE_SIZE; ++i) {
+    Ptr a = net->node[i].ports[P1];
+    Ptr b = net->node[i].ports[P2];
+    if (a != 0 || b != 0) {
+      printf("- [%07X] %s %s\n", i, show_ptr(a,0), show_ptr(b,1));
+    }
+  }
   printf("BLen: %u\n", net->blen);
   printf("Rwts: %u\n", net->rwts);
   printf("\n");
@@ -3197,6 +3215,7 @@ int main() {
   Book* cpu_book = mkbook();
   populate(cpu_book);
   boot(cpu_net, 0x00029f04); // initial term
+  //boot(cpu_net, 0x009b6ca4); // initial term
 
   // Prints the input net
   printf("\nINPUT\n=====\n\n");
@@ -3230,7 +3249,7 @@ int main() {
   // Prints the output
   //print_tree(norm, norm->root);
   printf("\nNORMAL ~ rewrites=%d redexes=%d\n======\n\n", norm->rwts, norm->blen);
-  print_net(norm);
+  //print_net(norm);
   printf("Time: %llu ms\n", delta_time);
 
   // Clears CPU memory
