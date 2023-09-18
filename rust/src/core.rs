@@ -142,25 +142,6 @@ impl Ptr {
     }
   }
 
-  //pub fn tmp_target<'a>(&'a self, net: &'a Net) -> Option<&Ptr> {
-    //match self.tag() {
-      //VRR => { Some(&net.root) }
-      //VR1 => { Some(net.at(self.val()).port(P1)) }
-      //VR2 => { Some(net.at(self.val()).port(P2)) }
-      //_   => { None }
-    //}
-  //}
-
-  //pub fn tmp_redir<'a>(&'a self, net: &'a Net) -> Ptr {
-    //if let Some(trg) = self.tmp_target(net) {
-      //if trg.is_red() {
-        //println!("redir {:08x} ~> {:08x} ~ {:08x}", self.data, trg.data, Ptr::new(trg.tag() - 3, trg.val()).data);
-        //return Ptr::new(trg.tag() - 3, trg.val()).tmp_redir(net);
-      //}
-    //}
-    //return self.clone();
-  //}
-
   #[inline(always)]
   pub fn adjust(&self, locs: &[u32]) -> Ptr {
     unsafe {
@@ -219,18 +200,6 @@ impl Net {
     }
   }
 
-  //pub fn tmp_redir(&mut self) {
-    //self.root = self.root.tmp_redir(self);
-    //for i in 0 .. self.node.len() {
-      //self.node[i].ports[0] = self.node[i].ports[0].tmp_redir(self);
-      //self.node[i].ports[1] = self.node[i].ports[1].tmp_redir(self);
-    //}
-    //for i in 0 .. self.acts.len() {
-      //self.acts[i].0 = self.acts[i].0.tmp_redir(self);
-      //self.acts[i].1 = self.acts[i].1.tmp_redir(self);
-    //}
-  //}
-
   // Creates a net and boots from a REF.
   pub fn boot(&mut self, root_id: u32) {
     self.root = Ptr::new(REF, root_id);
@@ -239,11 +208,20 @@ impl Net {
   // Allocates a consecutive chunk of 'size' nodes. Returns the index.
   #[inline(always)]
   pub fn alloc(&mut self) -> Val {
+    const PAGE_SIZE : usize = 512;
+    let mut go_back = true;
     loop {
       if self.next >= self.node.len() {
         self.next = 0;
       }
-      if self.get(self.next as Val, P1).tag() == NIL {
+      if go_back && self.next > 0 && self.next % PAGE_SIZE == 0 {
+        self.next -= PAGE_SIZE;
+        go_back = false;
+      }
+      if self.get(self.next as Val, P1).data == 0
+      && self.get(self.next as Val, P2).data == 0 {
+        self.set(self.next as Val, P1, Ptr::new(NIL,1));
+        self.set(self.next as Val, P2, Ptr::new(NIL,1));
         self.next += 1;
         self.used += 1;
         return (self.next - 1) as Val;
@@ -429,7 +407,7 @@ impl Net {
   // Reduces all redexes until there is none.
   pub fn reduce(&mut self, book: &Book) {
     while self.acts.len() > 0 {
-      println!(">> reduce {}", self.acts.len());
+      //println!(">> reduce {}", self.acts.len());
       self.rewrite(book);
     }
   }

@@ -38,7 +38,7 @@ fn main() {
     define(book, "c13", "$ (0 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (0 m l) (0 l k)) (0 k j)) (0 j i)) (0 i h)) (0 h g)) (0 g f)) (0 f e)) (0 e d)) (0 d c)) (0 c b)) (0 b a)) (0 a R)) (0 m R))");
     define(book, "c14", "$ (0 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (0 n m) (0 m l)) (0 l k)) (0 k j)) (0 j i)) (0 i h)) (0 h g)) (0 g f)) (0 f e)) (0 e d)) (0 d c)) (0 c b)) (0 b a)) (0 a R)) (0 n R))");
     define(book, "c15", "$ (0 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (0 o n) (0 n m)) (0 m l)) (0 l k)) (0 k j)) (0 j i)) (0 i h)) (0 h g)) (0 g f)) (0 f e)) (0 e d)) (0 d c)) (0 c b)) (0 b a)) (0 a R)) (0 o R))");
-    define(book, "c16", "$ (0 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (0 p o) (0 o n)) (0 n m)) (0 m l)) (0 l k)) (0 k j)) (0 j i)) (0 i h)) (0 h g)) (0 g f)) (0 f e)) (0 e d)) (0 d c)) (0 c b)) (0 b a)) (0 a R)) (0 p R))");
+    define(book, "c16", "$ (0 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (0 p o) (0 o n)) (0 n m)) (0 m l)) (0 l k)) (0 k j)) (0 j i)) (0 i h)) (0 h g)) (0 g f)) (0 f e)) (0 e d)) (0 d c)) (0 c b)) (0 b a)) (0 a R)) (0 q R))");
     define(book, "c17", "$ (0 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (0 q p) (0 p o)) (0 o n)) (0 n m)) (0 m l)) (0 l k)) (0 k j)) (0 j i)) (0 i h)) (0 h g)) (0 g f)) (0 f e)) (0 e d)) (0 d c)) (0 c b)) (0 b a)) (0 a R)) (0 q R))");
     define(book, "c18", "$ (0 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (0 r q) (0 q p)) (0 p o)) (0 o n)) (0 n m)) (0 m l)) (0 l k)) (0 k j)) (0 j i)) (0 i h)) (0 h g)) (0 g f)) (0 f e)) (0 e d)) (0 d c)) (0 c b)) (0 b a)) (0 a R)) (0 r R))");
     define(book, "c19", "$ (0 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (1 (0 s r) (0 r q)) (0 q p)) (0 p o)) (0 o n)) (0 n m)) (0 m l)) (0 l k)) (0 k j)) (0 j i)) (0 i h)) (0 h g)) (0 g f)) (0 f e)) (0 e d)) (0 d c)) (0 c b)) (0 b a)) (0 a R)) (0 s R))");
@@ -77,6 +77,9 @@ fn main() {
     define(book, "k23", "$ (0 (2 (2 (2 (2 (2 (2 (2 (2 (2 (2 (2 (2 (2 (2 (2 (2 (2 (2 (2 (2 (2 (2 (0 w v) (0 v u)) (0 u t)) (0 t s)) (0 s r)) (0 r q)) (0 q p)) (0 p o)) (0 o n)) (0 n m)) (0 m l)) (0 l k)) (0 k j)) (0 j i)) (0 i h)) (0 h g)) (0 g f)) (0 f e)) (0 e d)) (0 d c)) (0 c b)) (0 b a)) (0 a R)) (0 w R))");
     define(book, "k24", "$ (0 (2 (2 (2 (2 (2 (2 (2 (2 (2 (2 (2 (2 (2 (2 (2 (2 (2 (2 (2 (2 (2 (2 (2 (0 x w) (0 w v)) (0 v u)) (0 u t)) (0 t s)) (0 s r)) (0 r q)) (0 q p)) (0 p o)) (0 o n)) (0 n m)) (0 m l)) (0 l k)) (0 k j)) (0 j i)) (0 i h)) (0 h g)) (0 g f)) (0 f e)) (0 e d)) (0 d c)) (0 c b)) (0 b a)) (0 a R)) (0 x R))");
   }
+
+  // Church Nats
+  define(book, "mul", "$ (0 (0 a b) (0 (0 c a) (0 c b)))");
 
   // Bools
   define(book, "T", "$ (0 t (0 * t))");
@@ -174,7 +177,7 @@ fn main() {
   define(book, "brnZ", "
     $ ret
     & @run ~ (0 val ret)
-    & @c10 ~ (0 @I (0 @E val))
+    & @mul ~ (0 @c2 (0 @c5 (0 @I (0 @E val))))
   ");
   define(book, "brnS", "
     $ (0 (1 p0 p1) (0 r0 r1))
@@ -193,75 +196,68 @@ fn main() {
   ");
   define(book, "afS", "
     $ (0 (1 a b) c)
-    & (0 b d)
-    ~ @af
-    & (0 e (0 d c))
-    ~ @and
-    & (0 a e)
-    ~ @af
+    & (0 b d) ~ @af
+    & (0 e (0 d c)) ~ @and
+    & (0 a e) ~ @af
   ");
   define(book, "afZ", "
     $ @T
   ");
 
-  // Creates a nat, for testing
-  // ex0 = ((n S) Z)
+  // Church multiplication.
   define(book, "ex0", "
     $ root
     & @c2 ~ (0 @k2 root)
   ");
 
-  // Allocates a big tree
-  // ex1 = ((n g_s) g_z)
+  // Allocates a big tree.
   define(book, "ex1", "
     $ root
-    & @c26 ~ (0 @g_s (0 @g_z root))
+    & @c24 ~ (0 @g_s (0 @g_z root))
   ");
 
-  // This example decreases a binary counter until it reaches 0. It uses recursion, based on
-  // supercombinators. This, coupled with the REF-ERA rule, allows recursive calls to be collected
-  // before they get the chance of expanding forever. This is key for efficient memory usage. Here,
-  // `run` is the looping decrementer, `((n I) E)` is a BitString with `n` bits 1. If this test is
-  // a success, our program will never need more than ~256 nodes of space; which is the case, as
-  // we allocated only 256 nodes for `net` above.
-  // main = (run ((n I) E))
+  // Decrease a binary counter.
   define(book, "ex2", "
     $ main
+    & @c20 ~ (0 @I (0 @E nie))
     & @run ~ (0 nie main)
-    & @c14 ~ (0 @I (0 @E nie))
   "); 
 
-  // Decreases many binary counters until they reach 0
+  // Decreases many binary counters.
   define(book, "ex3", "
     $ res
+    & @mul ~ (0 @c5 (0 @c3 (0 @S (0 @Z dep))))
     & @brn ~ (0 dep res)
-    & @c15 ~ (0 @S (0 @Z dep))
   "); 
 
   // Parallel ands
-  // ex4 = (af (n S Z))
   define(book, "ex4", "
     $ a
-    & (0 b a)
-    ~ @af
-    & (0 @S (0 @Z b))
-    ~ @c1
+    & (0 b a) ~ @af
+    & (0 @S (0 @Z b)) ~ @c1
   ");
 
   // Initializes the net
-  let net = &mut Net::new(1 << 24);
-  net.boot(name_to_u32("ex4"));
+  let net = &mut Net::new(1 << 28);
+  net.boot(name_to_u32("ex3"));
+
+  // Marks initial time
+  let start = std::time::Instant::now();
 
   // Computes its normal form
+  net.expand(book, Ptr::new(VRR,0));
+  net.reduce(book);
   net.expand(book, Ptr::new(VRR,0));
   net.reduce(book);
   //net.normal(book);
 
   //Shows results and stats
-  println!("[net]\n{}", show_net(&net));
+  //println!("[net]\n{}", show_net(&net));
   println!("size: {}", net.node.len());
   println!("used: {}", net.used);
   println!("rwts: {}", net.rwts);
+  println!("time: {}ms", start.elapsed().as_millis());
+  println!("RPS : {}", (net.rwts as f64) / (start.elapsed().as_millis() as f64) / 1000.0);
 
   //println!("net.root = {:08x}", net.root.data);
   //for i in 0 .. net.acts.len() {

@@ -29,7 +29,7 @@ const u32 MAX_UNITS     = GROUP_SIZE * GROUP_SIZE;   // total number of active u
 const u32 MAX_NEW_REDEX = 4;                         // max new redexes per rewrite
 const u32 TERM_SIZE     = 32;                        // max number of nodes in a term = 32
 const u32 RBAG_SIZE     = 32;                        // redexes per unit = 32
-const u32 LHDS_SIZE     = RBAG_SIZE / MAX_NEW_REDEX; // max local heads
+const u32 LHDS_SIZE     = 32;                        // max local heads
 const u32 BAGS_SIZE     = MAX_UNITS * RBAG_SIZE;     // redexes per GPU
 
 // Types
@@ -100,7 +100,6 @@ typedef struct {
 // An interaction net 
 typedef struct {
   Ptr   root; // root wire
-  u32   blen; // total bag length (redex count)
   Wire* bags; // redex bags (active pairs)
   Node* node; // memory buffer with all nodes
   Wire* head; // head expansion buffer
@@ -115,12 +114,12 @@ typedef struct {
   u32   quad; // worker quad (A1|A2|B1|B2)
   u32   port; // worker port (P1|P2)
   u32   aloc; // where to alloc next node
-  u32   rwts; // local rewrites performed
+  u64   rwts; // local rewrites performed
   u32*  locs; // local alloc locs / expand ptrs
-  //u8*   smem; // shared memory buffer
+  u32*  sm32; // shared 32-bit buffer
+  u64*  sm64; // shared 64-bit buffer
   u64*  rlen; // local redex bag length
   Wire* rbag; // local redex bag
-  Wire* rpop; // popped redex
 } Worker;
 
 // Debug
@@ -277,6 +276,7 @@ __device__ inline Ptr* at(Net* net, Val idx, Port port) {
 // Allocates a new node in memory
 __device__ inline u32 alloc(Worker *worker, Net *net) {
   u32 K = 0;
+  bool back = true;
   while (true) {
     u32  idx = worker->aloc % NODE_SIZE;
     u64* ref = (u64*)&net->node[idx];
@@ -285,6 +285,10 @@ __device__ inline u32 alloc(Worker *worker, Net *net) {
       return idx;
     }
     worker->aloc = (worker->aloc + 1) % NODE_SIZE;
+    //if (worker->aloc > 0 && worker->aloc % 256 == 0 && back) {
+      //back = false;
+      //worker->aloc -= 256;
+    //}
   }
 }
 
@@ -321,8 +325,8 @@ __device__ inline void split(u32 tid, u64* a_len, u64* a_arr, u64* b_len, u64* b
   u64  min   = *A_len;
   u64  max   = *B_len;
   __syncthreads();
-  for (u64 t = 0; t < max_len / 8; ++t) {
-    u64 i = min + t * 8 + tid;
+  for (u64 t = 0; t < max_len / (UNIT_SIZE * 2); ++t) {
+    u64 i = min + t * (UNIT_SIZE * 2) + tid;
     u64 value;
     if (move && i < max) {
       value = B_arr[i];
@@ -331,9 +335,9 @@ __device__ inline void split(u32 tid, u64* a_len, u64* a_arr, u64* b_len, u64* b
     __syncthreads();
     if (move && i < max) {
       if ((i - min) % 2 == 0) {
-        A_arr[min + (t * 8 + tid) / 2] = value;
+        A_arr[min + (t * (UNIT_SIZE * 2) + tid) / 2] = value;
       } else {
-        B_arr[min + (t * 8 + tid) / 2] = value;
+        B_arr[min + (t * (UNIT_SIZE * 2) + tid) / 2] = value;
       }
     }
   }
@@ -358,17 +362,13 @@ __device__ inline Wire pop_redex(Worker* worker) {
       *worker->rlen -= 1;
       redex = worker->rbag[index];
       worker->rbag[index] = mkwire(0,0);
-      //if (worker->gid < 16) {
-        //printf("[%04x] popped at %llu %llu | %08X %08X\n", worker->gid, index, *worker->rlen, wire_lft(redex), wire_rgt(redex));
-        //printf("??? %llu\n", *worker->rlen);
-      //}
     }
-    *worker->rpop = redex;
+    *worker->sm64 = redex;
   }
   __syncwarp();
-  Wire got = *worker->rpop;
+  Wire got = *worker->sm64;
   __syncwarp();
-  *worker->rpop = 0;
+  *worker->sm64 = 0;
   if (worker->quad <= A2) {
     return mkwire(wire_lft(got), wire_rgt(got));
   } else {
@@ -395,8 +395,6 @@ __device__ inline void put_redex(Worker* worker, Ptr a_ptr, Ptr b_ptr) {
   u32 index = atomicAdd(worker->rlen, 1);
   if (index < RBAG_SIZE - 1) {
     worker->rbag[index] = mkwire(a_ptr, b_ptr);
-  } else {
-    //printf("[%04X:%u] ERROR PUTTING REDEX %u\n", worker->uid, worker->quad, index);
   }
 }
 
@@ -418,7 +416,7 @@ __device__ void deref(Worker* worker, Net* net, Book* book, Ptr* deref_ptr, Ptr 
   // Allocates needed space
   if (term != NULL) {
     //printf("[%04X] deref: %x\n", worker->gid, val(*dref));
-    for (u32 i = 0; i < div(term->nlen, (u32)UNIT_SIZE); ++i) {
+    for (u32 i = 0; i < div(term->nlen, UNIT_SIZE); ++i) {
       u32 loc = i * UNIT_SIZE + worker->quad;
       if (loc < term->nlen) {
         worker->locs[loc] = alloc(worker, net);
@@ -430,7 +428,7 @@ __device__ void deref(Worker* worker, Net* net, Book* book, Ptr* deref_ptr, Ptr 
   // Loads dereferenced nodes, adjusted
   if (term != NULL) {
     //printf("[%04X] deref B\n", worker->gid);
-    for (u32 i = 0; i < div(term->nlen, (u32)UNIT_SIZE); ++i) {
+    for (u32 i = 0; i < div(term->nlen, UNIT_SIZE); ++i) {
       u32 loc = i * UNIT_SIZE + worker->quad;
       if (loc < term->nlen) {
         //printf("... node %u\n", loc);
@@ -447,7 +445,7 @@ __device__ void deref(Worker* worker, Net* net, Book* book, Ptr* deref_ptr, Ptr 
 
   // Loads dereferenced redexes, adjusted
   if (term != NULL) {
-    for (u32 i = 0; i < div(term->alen, (u32)UNIT_SIZE); ++i) {
+    for (u32 i = 0; i < div(term->alen, UNIT_SIZE); ++i) {
       u32 loc = i * UNIT_SIZE + worker->quad;
       if (loc < term->alen) {
         Wire got = term->acts[loc];
@@ -474,9 +472,7 @@ __device__ void deref(Worker* worker, Net* net, Book* book, Ptr* deref_ptr, Ptr 
 }
 
 // Atomically links the node in 'src_ref' towards 'trg_ptr'.
-__device__ void link(Worker* worker, Net* net, Book* book, Ptr* src_ref, Ptr dir_ptr) {
-
-  Ptr src_ptr = *src_ref;
+__device__ void link(Worker* worker, Net* net, Book* book, Ptr* src_ref, Ptr src_ptr, Ptr dir_ptr) {
 
   // Create a new redex
   if (is_pri(src_ptr) && is_pri(dir_ptr)) {
@@ -611,7 +607,8 @@ __device__ Worker init_worker(Net* net, bool flip) {
   worker.quad = worker.tid % 4;
   worker.port = worker.tid % 2;
   worker.locs = LOCS + worker.tid / UNIT_SIZE * TERM_SIZE;
-  worker.rpop = (Wire*)worker.locs; // reuses locs memory
+  worker.sm32 = (u32*)worker.locs;
+  worker.sm64 = (u64*)worker.locs;
   worker.rlen = net->bags + worker.uid * RBAG_SIZE;
   worker.rbag = worker.rlen + 1;
 
@@ -711,14 +708,14 @@ __global__ void global_rewrite(Net* net, Book* book, u32 repeat, u32 tick, bool 
       mv_tag = tag(a_ptr);
       mv_loc = alloc(&worker, net); // alloc a clone
       mv_ptr = mkptr(mv_tag, mv_loc); // cloned ptr to send
-      worker.locs[worker.quad] = mv_loc; // pass cloned index to other threads
+      worker.sm32[worker.quad] = mv_loc; // pass cloned index to other threads
     }
     __syncwarp();
 
     // If con_dup, create inner wires between clones
     if (rewrite && con_dup) {
-      u32 c1_loc = worker.locs[(worker.quad <= A2 ? 2 : 0) + 0];
-      u32 c2_loc = worker.locs[(worker.quad <= A2 ? 2 : 0) + 1];
+      u32 c1_loc = worker.sm32[(worker.quad <= A2 ? 2 : 0) + 0];
+      u32 c2_loc = worker.sm32[(worker.quad <= A2 ? 2 : 0) + 1];
       replace(at(net, mv_loc, P1), NEO, mkptr(worker.port == P1 ? VR1 : VR2, c1_loc));
       replace(at(net, mv_loc, P2), NEO, mkptr(worker.port == P1 ? VR1 : VR2, c2_loc));
     }
@@ -726,12 +723,13 @@ __global__ void global_rewrite(Net* net, Book* book, u32 repeat, u32 tick, bool 
 
     // Send ptr to other side
     if (rewrite && (era_ctr || con_con || con_dup)) {
-      worker.locs[worker.quad + (worker.quad <= A2 ? 2 : -2)] = mv_ptr;
+      worker.sm32[worker.quad + (worker.quad <= A2 ? 2 : -2)] = mv_ptr;
     }
     __syncwarp();
 
+    // Receive ptr from other side
     if (rewrite && (con_con || ctr_era || con_dup)) {
-      *ak_ref = worker.locs[worker.quad];
+      *ak_ref = worker.sm32[worker.quad];
     }
     __syncwarp();
 
@@ -741,10 +739,15 @@ __global__ void global_rewrite(Net* net, Book* book, u32 repeat, u32 tick, bool 
     }
 
     // Links the rewritten port
+    Ptr* src_ref, src_ptr, dir_ptr;
     if (rewrite && (con_con || ctr_era || con_dup)) {
-      Ptr* node = con_con ? ak_ref : ak_ref;
-      Ptr  targ = con_con ? redir(bk_dir) : redir(ak_ptr);
-      link(&worker, net, book, node, targ);
+      src_ref = con_con ? ak_ref : ak_ref;
+      src_ptr = *src_ref;
+      dir_ptr = con_con ? redir(bk_dir) : redir(ak_ptr);
+    }
+    __syncwarp();
+    if (rewrite && (con_con || ctr_era || con_dup)) {
+      link(&worker, net, book, src_ref, src_ptr, dir_ptr);
     }
     __syncwarp();
   }
@@ -758,12 +761,12 @@ __global__ void global_rewrite(Net* net, Book* book, u32 repeat, u32 tick, bool 
   u64* a_len = net->bags + a_uid * RBAG_SIZE;
   u64* b_len = net->bags + b_uid * RBAG_SIZE;
   //printf("[%04x:%x] tid=%x split! %04x ~ %04x | flip=%u tick=%u side=%u lpad=%u gpad=%u\n", worker.uid, worker.quad, worker.tid, a_uid, b_uid, flip, tick, side, lpad, gpad);
-  split(worker.quad + side * 4, a_len, a_len+1, b_len, b_len+1, RBAG_SIZE);
+  split(worker.quad + side * UNIT_SIZE, a_len, a_len+1, b_len, b_len+1, RBAG_SIZE);
   __syncthreads();
 
   // When the work ends, sum stats
   if (worker.rwts > 0) {
-    atomicAdd((u32*)&net->rwts, worker.rwts);
+    atomicAdd(&net->rwts, worker.rwts);
   }
 }
 
@@ -882,7 +885,6 @@ __host__ Net* mknet() {
   net->root = mkptr(NIL, 0);
   net->rwts = 0;
   net->done = 0;
-  net->blen = 0;
   net->bags = (Wire*)malloc(BAGS_SIZE * sizeof(Wire));
   net->node = (Node*)malloc(NODE_SIZE * sizeof(Node));
   net->head = (Wire*)malloc(HEAD_SIZE * sizeof(Wire));
@@ -1129,24 +1131,22 @@ void print_net(Net* net) {
     if (i % RBAG_SIZE == 0 && net->bags[i] > 0) {
       printf("- [%07X] LEN=%llu\n", i, net->bags[i]);
     } else {
-      Ptr a = wire_lft(net->bags[i]);
-      Ptr b = wire_rgt(net->bags[i]);
-      if (a != 0 || b != 0) {
-        printf("- [%07X] %s %s\n", i, show_ptr(a,0), show_ptr(b,1));
-      }
+      //Ptr a = wire_lft(net->bags[i]);
+      //Ptr b = wire_rgt(net->bags[i]);
+      //if (a != 0 || b != 0) {
+        //printf("- [%07X] %s %s\n", i, show_ptr(a,0), show_ptr(b,1));
+      //}
     }
   }
-  printf("Node:\n");
-  for (u32 i = 0; i < NODE_SIZE; ++i) {
-    Ptr a = net->node[i].ports[P1];
-    Ptr b = net->node[i].ports[P2];
-    if (a != 0 || b != 0) {
-      printf("- [%07X] %s %s\n", i, show_ptr(a,0), show_ptr(b,1));
-    }
-  }
-  printf("BLen: %u\n", net->blen);
-  printf("Rwts: %u\n", net->rwts);
-  printf("\n");
+  //printf("Node:\n");
+  //for (u32 i = 0; i < NODE_SIZE; ++i) {
+    //Ptr a = net->node[i].ports[P1];
+    //Ptr b = net->node[i].ports[P2];
+    //if (a != 0 || b != 0) {
+      //printf("- [%07X] %s %s\n", i, show_ptr(a,0), show_ptr(b,1));
+    //}
+  //}
+  printf("Rwts: %llu\n", net->rwts);
 }
 //void print_net(Net* net) {
   ////printf("Root:\n");
@@ -1174,7 +1174,6 @@ void print_net(Net* net) {
       //printf("net.node[0x%07X] = Node::new(Ptr { data: 0x%08x }, Ptr { data: 0x%08x });\n", i, a, b);
     //}
   //}
-  //printf("BLen: %u\n", net->blen);
   //printf("Rwts: %u\n", net->rwts);
   //printf("\n");
 //}
@@ -3101,7 +3100,7 @@ __host__ void populate(Book* book) {
   book->defs[0x009b6ca4]->alen     = 2;
   book->defs[0x009b6ca4]->acts     = (Wire*) malloc(2 * sizeof(Wire));
   book->defs[0x009b6ca4]->acts[ 0] = mkwire(0x10036e72,0xa0000000);
-  book->defs[0x009b6ca4]->acts[ 1] = mkwire(0x10027081,0xa0000001);
+  book->defs[0x009b6ca4]->acts[ 1] = mkwire(0x10027082,0xa0000001);
   book->defs[0x009b6ca4]->nlen     = 3;
   book->defs[0x009b6ca4]->node     = (Node*) malloc(3 * sizeof(Node));
   book->defs[0x009b6ca4]->node[ 0] = (Node) {0x50000002,0x30000000};
@@ -3236,7 +3235,7 @@ int main() {
     do_global_rewrite(gpu_net, gpu_book, 16, tick, (tick / GROUP_LOG2) % 2);
   }
   do_global_expand(gpu_net, gpu_book);
-  do_global_rewrite(gpu_net, gpu_book, 50000, 0, 0);
+  do_global_rewrite(gpu_net, gpu_book, 200000, 0, 0);
   cudaDeviceSynchronize();
 
   // Gets end time
@@ -3248,9 +3247,10 @@ int main() {
 
   // Prints the output
   //print_tree(norm, norm->root);
-  printf("\nNORMAL ~ rewrites=%d redexes=%d\n======\n\n", norm->rwts, norm->blen);
-  //print_net(norm);
-  printf("Time: %llu ms\n", delta_time);
+  printf("\nNORMAL ~ rewrites=%llu\n======\n\n", norm->rwts);
+  print_net(norm);
+  printf("Time: %.3f s\n", ((double)delta_time) / 1000.0);
+  printf("RPS : %.3f million\n", ((double)norm->rwts) / ((double)delta_time) / 1000.0);
 
   // Clears CPU memory
   net_free_on_gpu(gpu_net);
