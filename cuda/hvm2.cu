@@ -16,21 +16,21 @@ typedef unsigned long long int u64;
 // This code is initially optimized for RTX 4090
 const u32 BLOCK_LOG2    = 9;                         // log2 of block size
 const u32 BLOCK_SIZE    = 1 << BLOCK_LOG2;           // threads per block
-const u32 UNIT_LOG2     = 2;                         // log2 of unit size
-const u32 UNIT_SIZE     = 1 << UNIT_LOG2;            // threads per unit
-const u32 GROUP_LOG2    = BLOCK_LOG2 - UNIT_LOG2;    // log2 of group size
-const u32 GROUP_SIZE    = 1 << GROUP_LOG2;           // units per group
+const u32 SQUAD_LOG2    = 2;                         // log2 of squad size
+const u32 SQUAD_SIZE    = 1 << SQUAD_LOG2;           // threads per squad
+const u32 GROUP_LOG2    = BLOCK_LOG2 - SQUAD_LOG2;   // log2 of group size
+const u32 GROUP_SIZE    = 1 << GROUP_LOG2;           // squad per group
 const u32 NODE_LOG2     = 28;                        // log2 of node size
 const u32 NODE_SIZE     = 1 << NODE_LOG2;            // max total nodes (2GB addressable)
 const u32 HEAD_LOG2     = GROUP_LOG2 * 2;            // log2 of head size
 const u32 HEAD_SIZE     = 1 << HEAD_LOG2;            // max head pointers
 const u32 MAX_THREADS   = BLOCK_SIZE * BLOCK_SIZE;   // total number of active threads
-const u32 MAX_UNITS     = GROUP_SIZE * GROUP_SIZE;   // total number of active units
-const u32 MAX_NEW_REDEX = 4;                         // max new redexes per rewrite
-const u32 SMEM_SIZE     = 4;                         // u32's shared by unit
-const u32 RBAG_SIZE     = 32;                        // redexes per unit = 32
+const u32 MAX_SQUADS    = GROUP_SIZE * GROUP_SIZE;   // total number of active squads
+const u32 MAX_NEW_REDEX = 16;                        // max new redexes per rewrite
+const u32 SMEM_SIZE     = 4;                         // u32's shared by squad
+const u32 RBAG_SIZE     = 256;                       // max redexes per squad
 const u32 LHDS_SIZE     = 32;                        // max local heads
-const u32 BAGS_SIZE     = MAX_UNITS * RBAG_SIZE;     // redexes per GPU
+const u32 BAGS_SIZE     = MAX_SQUADS * RBAG_SIZE;     // redexes per GPU
 
 // Types
 // -----
@@ -59,7 +59,7 @@ const u32 NEO = 0xFFFFFFFD; // recently allocated value
 const u32 TMP = 0xFFFFFFFE; // node has been moved to redex bag
 const u32 TKN = 0xFFFFFFFF; // value taken by another thread, will be replaced soon
 
-// Worker types
+// Unit types
 const u32 A1 = 0; // focuses on the A node, P1 port
 const u32 A2 = 1; // focuses on the A node, P2 port
 const u32 B1 = 2; // focuses on the B node, P1 port
@@ -81,22 +81,6 @@ typedef struct {
 // Wires are pairs of pointers
 typedef u64 Wire;
 
-// Maximum number of defs in a book
-const u32 MAX_DEFS = 1 << 24; // FIXME: make a proper HashMap
-
-typedef struct {
-  Ptr   root;
-  u32   alen;
-  Wire* acts;
-  u32   nlen;
-  Node* node;
-} Term;
-
-// A book
-typedef struct {
-  Term** defs;
-} Book;
-
 // An interaction net 
 typedef struct {
   Ptr   root; // root wire
@@ -107,35 +91,38 @@ typedef struct {
   u64   rwts; // number of rewrites performed
 } Net;
 
-// A worker local data
+// A unit local data
 typedef struct {
   u32   tid;  // thread id (local)
-  u32   uid;  // unit id (global)
-  u32   quad; // worker quad (A1|A2|B1|B2)
-  u32   port; // worker port (P1|P2)
+  u32   uid;  // squad id (global)
+  u32   qid;  // squad id (local: A1|A2|B1|B2)
+  u32   port; // unit port (P1|P2)
   u32   aloc; // where to alloc next node
   u64   rwts; // local rewrites performed
   u32*  sm32; // shared 32-bit buffer
   u64*  sm64; // shared 64-bit buffer
   u64*  rlen; // local redex bag length
   Wire* rbag; // local redex bag
-} Worker;
+} Unit;
 
-// Debug
-// -----
 
-__device__ __host__ void stop(const char* tag) {
-  printf(tag);
-  printf("\n");
+// TermBook
+// --------
+
+__constant__ u32* BOOK;
+
+typedef u32 Book; // stored in a flat buffer
+
+Book* init_book_on_gpu(u32* data, u32 size) {
+  u32* gpu_book;
+  cudaMalloc(&gpu_book, size * sizeof(u32));
+  cudaMemcpy(gpu_book, data, size * sizeof(u32), cudaMemcpyHostToDevice);
+  cudaMemcpyToSymbol(BOOK, &gpu_book, sizeof(u32*));
+  return gpu_book;
 }
 
-__device__ __host__ bool dbug(u32* K, const char* tag) {
-  *K += 1;
-  if (*K > 5000000) {
-    stop(tag);
-    return false;
-  }
-  return true;
+void book_free_on_gpu(Book* gpu_book) {
+  cudaFree(gpu_book);
 }
 
 // Runtime
@@ -273,31 +260,31 @@ __device__ inline Ptr* at(Net* net, Val idx, Port port) {
 }
 
 // Allocates one node in memory
-__device__ inline u32 alloc(Worker *worker, Net *net) {
+__device__ inline u32 alloc(Unit *unit, Net *net) {
   while (true) {
-    u64* ref = (u64*)&net->node[worker->aloc];
+    u64* ref = (u64*)&net->node[unit->aloc];
     u64  got = atomicCAS((u64*)ref, 0, ((u64)NEO << 32) | (u64)NEO);
-    worker->aloc = (worker->aloc + 1) % NODE_SIZE;
+    unit->aloc = (unit->aloc + 1) % NODE_SIZE;
     if (got == 0) {
-      return (worker->aloc - 1) % NODE_SIZE;
+      return (unit->aloc - 1) % NODE_SIZE;
     }
   }
 }
 
 // Allocates many nodes in memory
 // TODO: use the entire squad to perform this
-__device__ inline u32 alloc_many(Worker *worker, Net *net, u32 size) {
+__device__ inline u32 alloc_many(Unit *unit, Net *net, u32 size) {
   u64 MKNEO = ((u64)NEO << 32) | (u64)NEO;
   u32 space = 0;
   while (true) {
-    if (worker->aloc + size - space > NODE_SIZE) {
-      worker->aloc = 0;
+    if (unit->aloc + size - space > NODE_SIZE) {
+      unit->aloc = 0;
     }
-    u64* ref = (u64*)&net->node[worker->aloc];
+    u64* ref = (u64*)&net->node[unit->aloc];
     u64  got = atomicCAS(ref, 0, MKNEO);
     if (got != 0) {
       for (u32 i = 0; i < space; ++i) {
-        u32  index = (worker->aloc - space + i) % NODE_SIZE;
+        u32  index = (unit->aloc - space + i) % NODE_SIZE;
         Node clear = mknode(mkptr(NIL,0), mkptr(NIL,0));
         u64* ref = (u64*)&net->node[index];
         u64  got = atomicCAS(ref, MKNEO, 0);
@@ -306,9 +293,9 @@ __device__ inline u32 alloc_many(Worker *worker, Net *net, u32 size) {
     } else {
       space += 1;
     }
-    worker->aloc = (worker->aloc + 1) % NODE_SIZE;
+    unit->aloc = (unit->aloc + 1) % NODE_SIZE;
     if (space == size) {
-      return (worker->aloc - space) % NODE_SIZE;
+      return (unit->aloc - space) % NODE_SIZE;
     }
   }
 }
@@ -316,9 +303,7 @@ __device__ inline u32 alloc_many(Worker *worker, Net *net, u32 size) {
 // Gets the value of a ref; waits if taken.
 __device__ Ptr take(Ptr* ref) {
   Ptr got = atomicExch((u32*)ref, TKN);
-  u32 K = 0;
   while (got == TKN) {
-    //dbug(&K, "take");
     got = atomicExch((u32*)ref, TKN);
   }
   return got;
@@ -327,9 +312,7 @@ __device__ Ptr take(Ptr* ref) {
 // Attempts to replace 'exp' by 'neo', until it succeeds
 __device__ bool replace(Ptr* ref, Ptr exp, Ptr neo) {
   Ptr got = atomicCAS((u32*)ref, exp, neo);
-  u32 K = 0;
   while (got != exp) {
-    //dbug(&K, "replace");
     got = atomicCAS((u32*)ref, exp, neo);
   }
   return true;
@@ -346,8 +329,8 @@ __device__ inline void split(u32 tid, u64* a_len, u64* a_arr, u64* b_len, u64* b
   u64  min   = *A_len;
   u64  max   = *B_len;
   __syncthreads();
-  for (u64 t = 0; t < max_len / (UNIT_SIZE * 2); ++t) {
-    u64 i = min + t * (UNIT_SIZE * 2) + tid;
+  for (u64 t = 0; t < max_len / (SQUAD_SIZE * 2); ++t) {
+    u64 i = min + t * (SQUAD_SIZE * 2) + tid;
     u64 value;
     if (move && i < max) {
       value = B_arr[i];
@@ -356,9 +339,9 @@ __device__ inline void split(u32 tid, u64* a_len, u64* a_arr, u64* b_len, u64* b
     __syncthreads();
     if (move && i < max) {
       if ((i - min) % 2 == 0) {
-        A_arr[min + (t * (UNIT_SIZE * 2) + tid) / 2] = value;
+        A_arr[min + (t * (SQUAD_SIZE * 2) + tid) / 2] = value;
       } else {
-        B_arr[min + (t * (UNIT_SIZE * 2) + tid) / 2] = value;
+        B_arr[min + (t * (SQUAD_SIZE * 2) + tid) / 2] = value;
       }
     }
   }
@@ -375,22 +358,22 @@ __device__ inline void split(u32 tid, u64* a_len, u64* a_arr, u64* b_len, u64* b
 }
 
 // Pops a redex
-__device__ inline Wire pop_redex(Worker* worker) {
-  if (worker->quad == A1) {
+__device__ inline Wire pop_redex(Unit* unit) {
+  if (unit->qid == A1) {
     Wire redex = mkwire(0,0);
-    if (*worker->rlen > 0) {
-      u64 index = *worker->rlen - 1;
-      *worker->rlen -= 1;
-      redex = worker->rbag[index];
-      worker->rbag[index] = mkwire(0,0);
+    if (*unit->rlen > 0) {
+      u64 index = *unit->rlen - 1;
+      *unit->rlen -= 1;
+      redex = unit->rbag[index];
+      unit->rbag[index] = mkwire(0,0);
     }
-    *worker->sm64 = redex;
+    *unit->sm64 = redex;
   }
   __syncwarp();
-  Wire got = *worker->sm64;
+  Wire got = *unit->sm64;
   __syncwarp();
-  *worker->sm64 = 0;
-  if (worker->quad <= A2) {
+  *unit->sm64 = 0;
+  if (unit->qid <= A2) {
     return mkwire(wire_lft(got), wire_rgt(got));
   } else {
     return mkwire(wire_rgt(got), wire_lft(got));
@@ -398,108 +381,97 @@ __device__ inline Wire pop_redex(Worker* worker) {
 }
 
 // Puts a redex
-__device__ inline void put_redex(Worker* worker, Ptr a_ptr, Ptr b_ptr) {
-  //printf("[%04x:%x] put_redex %08x %08x\n", worker->uid, worker->quad, a_ptr, b_ptr);
-
+__device__ inline void put_redex(Unit* unit, Ptr a_ptr, Ptr b_ptr) {
   // optimization: avoids pushing non-reactive redexes
-  bool exclude
-    =  is_era(a_ptr) && is_era(b_ptr)
-    || is_ref(a_ptr) && is_era(b_ptr)
-    || is_era(a_ptr) && is_ref(b_ptr)
-    || is_ref(a_ptr) && is_ref(b_ptr);
-  if (exclude) {
-    worker->rwts += 1;
+  bool a_era = is_era(a_ptr);
+  bool b_era = is_era(b_ptr);
+  bool a_ref = is_ref(a_ptr);
+  bool b_ref = is_ref(b_ptr);
+  if (a_era && b_era || a_ref && b_era || a_era && b_ref || a_ref && b_ref) {
+    unit->rwts += 1;
     return;
   }
 
   // pushes redex to end of bag
-  u32 index = atomicAdd(worker->rlen, 1);
+  u32 index = atomicAdd(unit->rlen, 1);
   if (index < RBAG_SIZE - 1) {
-    worker->rbag[index] = mkwire(a_ptr, b_ptr);
+    unit->rbag[index] = mkwire(a_ptr, b_ptr);
   }
 }
 
 // Adjusts a dereferenced pointer
-__device__ Ptr adjust(Worker* worker, Ptr ptr, u32 delta) {
+__device__ Ptr adjust(Unit* unit, Ptr ptr, u32 delta) {
   return mkptr(tag(ptr), has_loc(ptr) ? val(ptr) + delta : val(ptr));
 }
 
-// Dereferences a global definition
-__device__ void deref(Worker* worker, Net* net, Book* book, Ptr* deref_ptr, Ptr parent) {
+// Expands a reference
+__device__ void deref(Unit* unit, Net* net, Book* book, Ptr* ref, Ptr up) {
   // Loads definition
-  Term* term = NULL;
-  if (deref_ptr != NULL) {
-    term = book->defs[val(*deref_ptr)];
-  }
+  const u32  term = ref != NULL ? book[val(*ref)] : 0;
+  const u32  nlen = book[term + 0];
+  const u32  alen = book[term + 1];
+  const u32  root = book[term + 2];
+  const u32* node = &book[term + 3];
+  const u32* acts = &book[term + 3 + nlen*2];
 
   // Allocates needed space
-  if (term != NULL && worker->quad == A1) {
-    worker->sm32[0] = alloc_many(worker, net, term->nlen);
-  }
-  __syncwarp();
-  u32 delta = 0;
-  if (term != NULL) {
-    delta = worker->sm32[0];
-  }
-
-  // Loads dereferenced nodes, adjusted
-  if (term != NULL) {
-    for (u32 i = 0; i < div(term->nlen, UNIT_SIZE); ++i) {
-      u32 loc = i * UNIT_SIZE + worker->quad;
-      if (loc < term->nlen) {
-        //printf("... node %u\n", loc);
-        Node got = term->node[loc];
-        Ptr  p1  = adjust(worker, got.ports[P1], delta);
-        Ptr  p2  = adjust(worker, got.ports[P2], delta);
-        replace(at(net, delta + loc, P1), NEO, p1);
-        replace(at(net, delta + loc, P2), NEO, p2);
-      }
-    }
-  }
-
-  // Loads dereferenced redexes, adjusted
-  if (term != NULL) {
-    for (u32 i = 0; i < div(term->alen, UNIT_SIZE); ++i) {
-      u32 loc = i * UNIT_SIZE + worker->quad;
-      if (loc < term->alen) {
-        Wire got = term->acts[loc];
-        Ptr  p1  = adjust(worker, wire_lft(got), delta);
-        Ptr  p2  = adjust(worker, wire_rgt(got), delta);
-        put_redex(worker, p1, p2);
-      }
-    }
-  }
-
-  // Loads dereferenced root, adjusted
-  if (term != NULL) {
-    *deref_ptr = adjust(worker, term->root, delta);
+  if (term && unit->qid == A1) {
+    unit->sm32[0] = alloc_many(unit, net, nlen);
   }
   __syncwarp();
 
-  // Links root
-  if (term != NULL && worker->quad == A1) {
-    Ptr* trg = target(net, *deref_ptr);
-    if (trg != NULL) {
-      *trg = parent;
+  if (term) {
+    // Gets allocated index
+    u32 loc = unit->sm32[0];
+
+    // Loads dereferenced nodes, adjusted
+    for (u32 i = 0; i < div(nlen, SQUAD_SIZE); ++i) {
+      u32 idx = i * SQUAD_SIZE + unit->qid;
+      if (idx < nlen) {
+        Ptr p1 = adjust(unit, node[idx*2+0], loc);
+        Ptr p2 = adjust(unit, node[idx*2+1], loc);
+        *at(net, loc + idx, P1) = p1;
+        *at(net, loc + idx, P2) = p2;
+      }
+    }
+
+    // Loads dereferenced redexes, adjusted
+    for (u32 i = 0; i < div(alen, SQUAD_SIZE); ++i) {
+      u32 idx = i * SQUAD_SIZE + unit->qid;
+      if (idx < alen) {
+        Ptr p1 = adjust(unit, acts[idx*2+0], loc);
+        Ptr p2 = adjust(unit, acts[idx*2+1], loc);
+        put_redex(unit, p1, p2);
+      }
+    }
+
+    // Loads dereferenced root, adjusted
+    *ref = adjust(unit, root, loc);
+
+    // Links root
+    if (unit->qid == A1) {
+      Ptr* trg = target(net, *ref);
+      if (trg != NULL) {
+        *trg = up;
+      }
     }
   }
+  __syncwarp();
 }
 
 // Atomically links the node in 'src_ref' towards 'trg_ptr'.
-__device__ void link(Worker* worker, Net* net, Book* book, Ptr* src_ref, Ptr src_ptr, Ptr dir_ptr) {
+__device__ void link(Unit* unit, Net* net, Book* book, Ptr* src_ref, Ptr src_ptr, Ptr dir_ptr) {
 
   // Create a new redex
   if (is_pri(src_ptr) && is_pri(dir_ptr)) {
     atomicCAS(src_ref, TKN, 0);
-    put_redex(worker, *src_ref, dir_ptr);
+    put_redex(unit, *src_ref, dir_ptr);
     return;
   }
 
   // Move src towards either a VAR or another PRI
   if (is_pri(src_ptr) && is_red(dir_ptr)) {
     while (true) {
-      //dbug(&K, "link");
-
       // Peek the target, which may not be owned by us.
       Ptr* trg_ref = target(net, dir_ptr);
       Ptr  trg_ptr = atomicAdd(trg_ref, 0);
@@ -549,7 +521,7 @@ __device__ void link(Worker* worker, Net* net, Book* book, Ptr* src_ref, Ptr src
         // First to arrive creates a redex.
         if (fst_ptr != TMP) {
           Ptr snd_ptr = atomicExch((u32*)snd_ref, TMP);
-          put_redex(worker, fst_ptr, snd_ptr);
+          put_redex(unit, fst_ptr, snd_ptr);
           return;
 
         // Second to arrive clears up the memory.
@@ -599,7 +571,7 @@ __device__ void link(Worker* worker, Net* net, Book* book, Ptr* src_ref, Ptr src
 // Rewrite
 // -------
 
-__device__ Worker init_worker(Net* net, bool flip) {
+__device__ Unit init_unit(Net* net, bool flip) {
   __shared__ u32 SMEM[GROUP_SIZE * SMEM_SIZE];
 
   for (u32 i = 0; i < GROUP_SIZE * SMEM_SIZE / BLOCK_SIZE; ++i) {
@@ -609,23 +581,23 @@ __device__ Worker init_worker(Net* net, bool flip) {
 
   u32 tid = threadIdx.x;
   u32 gid = blockIdx.x * blockDim.x + tid;
-  u32 uid = gid / UNIT_SIZE;
+  u32 uid = gid / SQUAD_SIZE;
   u32 row = uid / GROUP_SIZE;
   u32 col = uid % GROUP_SIZE;
 
-  Worker worker;
-  worker.uid  = flip ? col * GROUP_SIZE + row : row * GROUP_SIZE + col;
-  worker.tid  = threadIdx.x;
-  worker.aloc = rng(clock() * (gid + 1)) % NODE_SIZE;
-  worker.rwts = 0;
-  worker.quad = worker.tid % 4;
-  worker.port = worker.tid % 2;
-  worker.sm32 = (u32*)(SMEM + worker.tid / UNIT_SIZE * SMEM_SIZE);
-  worker.sm64 = (u64*)(SMEM + worker.tid / UNIT_SIZE * SMEM_SIZE);
-  worker.rlen = net->bags + worker.uid * RBAG_SIZE;
-  worker.rbag = worker.rlen + 1;
+  Unit unit;
+  unit.uid  = flip ? col * GROUP_SIZE + row : row * GROUP_SIZE + col;
+  unit.tid  = threadIdx.x;
+  unit.qid  = unit.tid % 4;
+  unit.aloc = rng(clock() * (gid + 1)) % NODE_SIZE;
+  unit.rwts = 0;
+  unit.port = unit.tid % 2;
+  unit.sm32 = (u32*)(SMEM + unit.tid / SQUAD_SIZE * SMEM_SIZE);
+  unit.sm64 = (u64*)(SMEM + unit.tid / SQUAD_SIZE * SMEM_SIZE);
+  unit.rlen = net->bags + unit.uid * RBAG_SIZE;
+  unit.rbag = unit.rlen + 1;
 
-  return worker;
+  return unit;
 }
 
 // An active wire is reduced by 4 parallel threads, each one performing "1/4" of
@@ -641,21 +613,19 @@ __device__ Worker init_worker(Net* net, bool flip) {
 __global__ void global_rewrite(Net* net, Book* book, u32 repeat, u32 tick, bool flip) {
 
   // Initializes local vars
-  Worker worker = init_worker(net, flip);
+  Unit unit = init_unit(net, flip);
 
   for (u32 turn = 0; turn < repeat; ++turn) {
     // Checks if we're full
-    bool is_full = *worker.rlen > RBAG_SIZE - MAX_NEW_REDEX;
+    bool is_full = *unit.rlen > RBAG_SIZE - MAX_NEW_REDEX;
 
     // Pops a redex from local bag
     Wire redex;
     Ptr a_ptr, b_ptr;
     if (!is_full) {
-      redex = pop_redex(&worker);
+      redex = pop_redex(&unit);
       a_ptr = wire_lft(redex);
       b_ptr = wire_rgt(redex);
-    } else {
-      //printf("[%04x:%x] full\n", worker.uid, worker.quad);
     }
     __syncwarp();
 
@@ -667,11 +637,11 @@ __global__ void global_rewrite(Net* net, Book* book, u32 repeat, u32 tick, bool 
     if (is_ref(b_ptr) && is_ctr(a_ptr)) {
       deref_ptr = &b_ptr;
     }
-    deref(&worker, net, book, deref_ptr, mkptr(NIL,0));
+    deref(&unit, net, book, deref_ptr, mkptr(NIL,0));
 
     // Defines type of interaction
     bool rewrite = !is_full && a_ptr != 0 && b_ptr != 0;
-    bool var_pri = rewrite && is_var(a_ptr) && is_pri(b_ptr) && worker.port == P1;
+    bool var_pri = rewrite && is_var(a_ptr) && is_pri(b_ptr) && unit.port == P1;
     bool era_ctr = rewrite && is_era(a_ptr) && is_ctr(b_ptr);
     bool ctr_era = rewrite && is_ctr(a_ptr) && is_era(b_ptr);
     bool con_con = rewrite && is_ctr(a_ptr) && is_ctr(b_ptr) && tag(a_ptr) == tag(b_ptr);
@@ -687,20 +657,20 @@ __global__ void global_rewrite(Net* net, Book* book, u32 repeat, u32 tick, bool 
     u32  y0_idx; // idx of other clone idx
 
     // Inc rewrite count
-    if (rewrite && worker.quad == A1) {
-      worker.rwts += 1;
+    if (rewrite && unit.qid == A1) {
+      unit.rwts += 1;
     }
 
     // Gets port here
     if (rewrite && (ctr_era || con_con || con_dup)) {
-      ak_dir = mkptr(RD1 + worker.port, val(a_ptr));
+      ak_dir = mkptr(RD1 + unit.port, val(a_ptr));
       ak_ref = target(net, ak_dir);
       ak_ptr = take(ak_ref);
     }
 
     // Gets port there
     if (rewrite && (era_ctr || con_con || con_dup)) {
-      bk_dir = mkptr(RD1 + worker.port, val(b_ptr));
+      bk_dir = mkptr(RD1 + unit.port, val(b_ptr));
       bk_ref = target(net, bk_dir);
     }
 
@@ -715,37 +685,37 @@ __global__ void global_rewrite(Net* net, Book* book, u32 repeat, u32 tick, bool 
     }
 
     // If con_dup, alloc clones base index
-    if (rewrite && con_dup && worker.quad == A1) {
-      worker.sm32[0] = alloc_many(&worker, net, 4);
+    if (rewrite && con_dup && unit.qid == A1) {
+      unit.sm32[0] = alloc_many(&unit, net, 4);
     }
     __syncwarp();
 
     // If con_dup, create inner wires between clones
     if (rewrite && con_dup) {
-      u32 al_loc = worker.sm32[0];
-      u32 cx_loc = al_loc + worker.quad;
-      u32 c1_loc = al_loc + (worker.quad <= A2 ? 2 : 0);
-      u32 c2_loc = al_loc + (worker.quad <= A2 ? 3 : 1);
-      replace(at(net, cx_loc, P1), NEO, mkptr(worker.port == P1 ? VR1 : VR2, c1_loc));
-      replace(at(net, cx_loc, P2), NEO, mkptr(worker.port == P1 ? VR1 : VR2, c2_loc));
+      u32 al_loc = unit.sm32[0];
+      u32 cx_loc = al_loc + unit.qid;
+      u32 c1_loc = al_loc + (unit.qid <= A2 ? 2 : 0);
+      u32 c2_loc = al_loc + (unit.qid <= A2 ? 3 : 1);
+      replace(at(net, cx_loc, P1), NEO, mkptr(unit.port == P1 ? VR1 : VR2, c1_loc));
+      replace(at(net, cx_loc, P2), NEO, mkptr(unit.port == P1 ? VR1 : VR2, c2_loc));
       mv_ptr = mkptr(tag(a_ptr), cx_loc);
     }
     __syncwarp();
 
     // Send ptr to other side
     if (rewrite && (era_ctr || con_con || con_dup)) {
-      worker.sm32[worker.quad + (worker.quad <= A2 ? 2 : -2)] = mv_ptr;
+      unit.sm32[unit.qid + (unit.qid <= A2 ? 2 : -2)] = mv_ptr;
     }
     __syncwarp();
 
     // Receive ptr from other side
     if (rewrite && (con_con || ctr_era || con_dup)) {
-      *ak_ref = worker.sm32[worker.quad];
+      *ak_ref = unit.sm32[unit.qid];
     }
     __syncwarp();
 
     // If var_pri, the var must be a deref root, so we just subst
-    if (rewrite && var_pri && worker.port == P1) {
+    if (rewrite && var_pri && unit.port == P1) {
       atomicExch((u32*)target(net, a_ptr), b_ptr);
     }
 
@@ -758,26 +728,25 @@ __global__ void global_rewrite(Net* net, Book* book, u32 repeat, u32 tick, bool 
     }
     __syncwarp();
     if (rewrite && (con_con || ctr_era || con_dup)) {
-      link(&worker, net, book, src_ref, src_ptr, dir_ptr);
+      link(&unit, net, book, src_ref, src_ptr, dir_ptr);
     }
     __syncwarp();
   }
 
   // Splits redexes with neighbor
-  u32  side  = ((worker.tid / UNIT_SIZE) >> (GROUP_LOG2 - 1 - (tick % GROUP_LOG2))) & 1;
+  u32  side  = ((unit.tid / SQUAD_SIZE) >> (GROUP_LOG2 - 1 - (tick % GROUP_LOG2))) & 1;
   u32  lpad  = (1 << (GROUP_LOG2 - 1)) >> (tick % GROUP_LOG2);
   u32  gpad  = flip ? lpad * GROUP_SIZE : lpad;
-  u32  a_uid = worker.uid;
-  u32  b_uid = side ? worker.uid - gpad : worker.uid + gpad;
+  u32  a_uid = unit.uid;
+  u32  b_uid = side ? unit.uid - gpad : unit.uid + gpad;
   u64* a_len = net->bags + a_uid * RBAG_SIZE;
   u64* b_len = net->bags + b_uid * RBAG_SIZE;
-  //printf("[%04x:%x] tid=%x split! %04x ~ %04x | flip=%u tick=%u side=%u lpad=%u gpad=%u\n", worker.uid, worker.quad, worker.tid, a_uid, b_uid, flip, tick, side, lpad, gpad);
-  split(worker.quad + side * UNIT_SIZE, a_len, a_len+1, b_len, b_len+1, RBAG_SIZE);
+  split(unit.qid + side * SQUAD_SIZE, a_len, a_len+1, b_len, b_len+1, RBAG_SIZE);
   __syncthreads();
 
   // When the work ends, sum stats
-  if (worker.rwts > 0) {
-    atomicAdd(&net->rwts, worker.rwts);
+  if (unit.rwts > 0) {
+    atomicAdd(&net->rwts, unit.rwts);
   }
 }
 
@@ -794,19 +763,19 @@ void do_global_rewrite(Net* net, Book* book, u32 repeat, u32 tick, bool flip) {
 // ------
 
 // Collects local expansion heads recursively
-__device__ void expand(Worker* worker, Net* net, Book* book, Ptr dir, u32* len, u32* lhds) {
+__device__ void expand(Unit* unit, Net* net, Book* book, Ptr dir, u32* len, u32* lhds) {
   Ptr ptr = *target(net, dir);
   if (is_ctr(ptr)) {
-    expand(worker, net, book, mkptr(VR1, val(ptr)), len, lhds);
-    expand(worker, net, book, mkptr(VR2, val(ptr)), len, lhds);
+    expand(unit, net, book, mkptr(VR1, val(ptr)), len, lhds);
+    expand(unit, net, book, mkptr(VR2, val(ptr)), len, lhds);
   } else if (is_red(ptr)) {
-    expand(worker, net, book, ptr, len, lhds);
+    expand(unit, net, book, ptr, len, lhds);
   } else if (is_ref(ptr) && *len < LHDS_SIZE) {
     lhds[(*len)++] = dir;
   }
 }
 
-// Takes an initial head location for each unit
+// Takes an initial head location for each squad
 __global__ void global_expand_prepare(Net* net) {
   u32 uid = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -851,23 +820,23 @@ __global__ void global_expand(Net* net, Book* book) {
   }
   __syncthreads();
 
-  Worker worker = init_worker(net, 0);
+  Unit unit = init_unit(net, 0);
 
-  u32* head = HEAD + worker.tid / UNIT_SIZE * LHDS_SIZE;
+  u32* head = HEAD + unit.tid / SQUAD_SIZE * LHDS_SIZE;
 
-  Wire got = net->head[worker.uid];
+  Wire got = net->head[unit.uid];
   Ptr  dir = wire_lft(got);
   Ptr* ref = target(net, dir);
   Ptr  ptr = wire_rgt(got);
 
-  if (worker.quad == A1 && ptr != mkptr(NIL,0)) {
+  if (unit.qid == A1 && ptr != mkptr(NIL,0)) {
     *ref = ptr;
   }
   __syncthreads();
 
   u32 len = 0;
-  if (worker.quad == A1 && ptr != mkptr(NIL,0)) {
-    expand(&worker, net, book, dir, &len, head);
+  if (unit.qid == A1 && ptr != mkptr(NIL,0)) {
+    expand(&unit, net, book, dir, &len, head);
   }
   __syncthreads();
 
@@ -877,7 +846,7 @@ __global__ void global_expand(Net* net, Book* book) {
     if (ref != NULL && !is_ref(*ref)) {
       ref = NULL;
     }
-    deref(&worker, net, book, ref, dir);
+    deref(&unit, net, book, ref, dir);
   }
   __syncthreads();
 }
@@ -891,9 +860,9 @@ void do_global_expand(Net* net, Book* book) {
 // Host<->Device
 // -------------
 
-__host__ Net* mknet() {
+__host__ Net* mknet(u32 root_fn) {
   Net* net  = (Net*)malloc(sizeof(Net));
-  net->root = mkptr(NIL, 0);
+  net->root = mkptr(REF, root_fn);
   net->rwts = 0;
   net->done = 0;
   net->bags = (Wire*)malloc(BAGS_SIZE * sizeof(Wire));
@@ -985,120 +954,6 @@ __host__ void net_free_on_cpu(Net* host_net) {
   free(host_net);
 }
 
-// Creates a new book
-__host__ __device__ inline Book* mkbook() {
-  Book* book = (Book*)malloc(sizeof(Book));
-  book->defs = (Term**)malloc(MAX_DEFS * sizeof(Term*));
-  memset(book->defs, 0, sizeof(book->defs));
-  return book;
-}
-
-__host__ Term* term_to_gpu(Term* host_term) {
-  // Allocate memory on the device for the Term object, and its data
-  Term* device_term;
-  Wire* device_acts;
-  Node* device_node;
-
-  cudaMalloc((void**)&device_term, sizeof(Term));
-  cudaMalloc((void**)&device_acts, host_term->alen * sizeof(Wire));
-  cudaMalloc((void**)&device_node, host_term->nlen * sizeof(Node));
-
-  // Copy the host data to the device memory
-  cudaMemcpy(device_acts, host_term->acts, host_term->alen * sizeof(Wire), cudaMemcpyHostToDevice);
-  cudaMemcpy(device_node, host_term->node, host_term->nlen * sizeof(Node), cudaMemcpyHostToDevice);
-
-  // Create a temporary host Term object with device pointers
-  Term temp_term = *host_term;
-  temp_term.acts = device_acts;
-  temp_term.node = device_node;
-
-  // Copy the temporary host Term object to the device memory
-  cudaMemcpy(device_term, &temp_term, sizeof(Term), cudaMemcpyHostToDevice);
-
-  // Return the device pointer to the created Term object
-  return device_term;
-}
-
-__host__ Term* term_to_cpu(Term* device_term) {
-  // Create a new host Term object
-  Term* host_term = (Term*)malloc(sizeof(Term));
-
-  // Copy the device Term object to the host memory
-  cudaMemcpy(host_term, device_term, sizeof(Term), cudaMemcpyDeviceToHost);
-
-  // Allocate host memory for data
-  host_term->acts = (Wire*)malloc(host_term->alen * sizeof(Wire));
-  host_term->node = (Node*)malloc(host_term->nlen * sizeof(Node));
-
-  // Retrieve the device pointers for data
-  Wire* device_acts;
-  Node* device_node;
-  cudaMemcpy(&device_acts, &(device_term->acts), sizeof(Wire*), cudaMemcpyDeviceToHost);
-  cudaMemcpy(&device_node, &(device_term->node), sizeof(Node*), cudaMemcpyDeviceToHost);
-
-  // Copy the device data to the host memory
-  cudaMemcpy(host_term->acts, device_acts, host_term->alen * sizeof(Wire), cudaMemcpyDeviceToHost);
-  cudaMemcpy(host_term->node, device_node, host_term->nlen * sizeof(Node), cudaMemcpyDeviceToHost);
-
-  return host_term;
-}
-
-__host__ Book* book_to_gpu(Book* host_book) {
-  Book* device_book;
-  Term** device_defs;
-
-  cudaMalloc((void**)&device_book, sizeof(Book));
-  cudaMalloc((void**)&device_defs, MAX_DEFS * sizeof(Term*));
-  cudaMemset(device_defs, 0, MAX_DEFS * sizeof(Term*));
-
-  for (u32 i = 0; i < MAX_DEFS; ++i) {
-    if (host_book->defs[i] != NULL) {
-      Term* device_term = term_to_gpu(host_book->defs[i]);
-      cudaMemcpy(device_defs + i, &device_term, sizeof(Term*), cudaMemcpyHostToDevice);
-    }
-  }
-
-  cudaMemcpy(&(device_book->defs), &device_defs, sizeof(Term*), cudaMemcpyHostToDevice);
-
-  return device_book;
-}
-
-// opposite of book_to_gpu; same style as net_to_cpu and term_to_cpu
-__host__ Book* book_to_cpu(Book* device_book) {
-  // Create a new host Book object
-  Book* host_book = (Book*)malloc(sizeof(Book));
-
-  // Copy the device Book object to the host memory
-  cudaMemcpy(host_book, device_book, sizeof(Book), cudaMemcpyDeviceToHost);
-
-  // Allocate host memory for data
-  host_book->defs = (Term**)malloc(MAX_DEFS * sizeof(Term*));
-
-  // Retrieve the device pointer for data
-  Term** device_defs;
-  cudaMemcpy(&device_defs, &(device_book->defs), sizeof(Term**), cudaMemcpyDeviceToHost);
-
-  // Copies device_defs into host_book->defs
-  cudaMemcpy(host_book->defs, device_defs, MAX_DEFS * sizeof(Term*), cudaMemcpyDeviceToHost);
-
-  // Copy the device data to the host memory
-  for (u32 i = 0; i < MAX_DEFS; ++i) {
-    if (host_book->defs[i] != NULL) {
-      host_book->defs[i] = term_to_cpu(host_book->defs[i]);
-    }
-  }
-
-  return host_book;
-}
-
-__host__ void book_free_on_gpu(Book* device_book) {
-  // TODO
-}
-
-__host__ void book_free_on_cpu(Book* host_book) {
-  // TODO
-}
-
 // Debugging
 // ---------
 
@@ -1142,52 +997,23 @@ void print_net(Net* net) {
     if (i % RBAG_SIZE == 0 && net->bags[i] > 0) {
       printf("- [%07X] LEN=%llu\n", i, net->bags[i]);
     } else {
-      //Ptr a = wire_lft(net->bags[i]);
-      //Ptr b = wire_rgt(net->bags[i]);
-      //if (a != 0 || b != 0) {
-        //printf("- [%07X] %s %s\n", i, show_ptr(a,0), show_ptr(b,1));
-      //}
+      Ptr a = wire_lft(net->bags[i]);
+      Ptr b = wire_rgt(net->bags[i]);
+      if (a != 0 || b != 0) {
+        printf("- [%07X] %s %s\n", i, show_ptr(a,0), show_ptr(b,1));
+      }
     }
   }
-  //printf("Node:\n");
-  //for (u32 i = 0; i < NODE_SIZE; ++i) {
-    //Ptr a = net->node[i].ports[P1];
-    //Ptr b = net->node[i].ports[P2];
-    //if (a != 0 || b != 0) {
-      //printf("- [%07X] %s %s\n", i, show_ptr(a,0), show_ptr(b,1));
-    //}
-  //}
+  printf("Node:\n");
+  for (u32 i = 0; i < NODE_SIZE; ++i) {
+    Ptr a = net->node[i].ports[P1];
+    Ptr b = net->node[i].ports[P2];
+    if (a != 0 || b != 0) {
+      printf("- [%07X] %s %s\n", i, show_ptr(a,0), show_ptr(b,1));
+    }
+  }
   printf("Rwts: %llu\n", net->rwts);
 }
-//void print_net(Net* net) {
-  ////printf("Root:\n");
-  ////printf("- %s\n", show_ptr(net->root,0));
-  //printf("net.root = Ptr { data: 0x%08x };\n", net->root);
-  ////printf("Bags:\n");
-  //for (u32 i = 0; i < BAGS_SIZE; ++i) {
-    //if (i % RBAG_SIZE == 0 && net->bags[i] > 0) {
-      ////printf("- [%07X] LEN=%llu\n", i, net->bags[i]);
-    //} else {
-      //Ptr a = wire_lft(net->bags[i]);
-      //Ptr b = wire_rgt(net->bags[i]);
-      //if (a != 0 || b != 0) {
-        ////printf("- [%07X] %s %s\n", i, show_ptr(a,0), show_ptr(b,1));
-        //printf("net.acts.push((Ptr { data: 0x%08x }, Ptr { data: 0x%08x }));\n", a, b);
-      //}
-    //}
-  //}
-  ////printf("Node:\n");
-  //for (u32 i = 0; i < NODE_SIZE; ++i) {
-    //Ptr a = net->node[i].ports[P1];
-    //Ptr b = net->node[i].ports[P2];
-    //if (a != 0 || b != 0) {
-      ////printf("- [%07X] %s %s\n", i, show_ptr(a,0), show_ptr(b,1));
-      //printf("net.node[0x%07X] = Node::new(Ptr { data: 0x%08x }, Ptr { data: 0x%08x });\n", i, a, b);
-    //}
-  //}
-  //printf("Rwts: %u\n", net->rwts);
-  //printf("\n");
-//}
 
 // Struct to represent a Map of entries using a simple array of (key,id) pairs
 typedef struct {
@@ -1250,2157 +1076,1153 @@ __host__ void print_tree(Net* net, Ptr ptr) {
   printf("\n");
 }
 
-// ~
-// ~
-// ~
+// Book
+// ----
 
-// Tests
-// -----
+const u32 F_E = 0x0000;
+const u32 F_F = 0x0001;
+const u32 F_I = 0x0002;
+const u32 F_O = 0x0003;
+const u32 F_S = 0x0004;
+const u32 F_T = 0x0005;
+const u32 F_Z = 0x0006;
+const u32 F_af = 0x0007;
+const u32 F_c0 = 0x0008;
+const u32 F_c1 = 0x0009;
+const u32 F_c2 = 0x000a;
+const u32 F_c3 = 0x000b;
+const u32 F_c4 = 0x000c;
+const u32 F_c5 = 0x000d;
+const u32 F_c6 = 0x000e;
+const u32 F_c7 = 0x000f;
+const u32 F_c8 = 0x0010;
+const u32 F_c9 = 0x0011;
+const u32 F_id = 0x0012;
+const u32 F_k0 = 0x0013;
+const u32 F_k1 = 0x0014;
+const u32 F_k2 = 0x0015;
+const u32 F_k3 = 0x0016;
+const u32 F_k4 = 0x0017;
+const u32 F_k5 = 0x0018;
+const u32 F_k6 = 0x0019;
+const u32 F_k7 = 0x001a;
+const u32 F_k8 = 0x001b;
+const u32 F_k9 = 0x001c;
+const u32 F_afS = 0x001d;
+const u32 F_afZ = 0x001e;
+const u32 F_and = 0x001f;
+const u32 F_brn = 0x0020;
+const u32 F_c10 = 0x0021;
+const u32 F_c11 = 0x0022;
+const u32 F_c12 = 0x0023;
+const u32 F_c13 = 0x0024;
+const u32 F_c14 = 0x0025;
+const u32 F_c15 = 0x0026;
+const u32 F_c16 = 0x0027;
+const u32 F_c17 = 0x0028;
+const u32 F_c18 = 0x0029;
+const u32 F_c19 = 0x002a;
+const u32 F_c20 = 0x002b;
+const u32 F_c21 = 0x002c;
+const u32 F_c22 = 0x002d;
+const u32 F_c23 = 0x002e;
+const u32 F_c24 = 0x002f;
+const u32 F_c25 = 0x0030;
+const u32 F_c26 = 0x0031;
+const u32 F_c_s = 0x0032;
+const u32 F_c_z = 0x0033;
+const u32 F_dec = 0x0034;
+const u32 F_ex0 = 0x0035;
+const u32 F_ex1 = 0x0036;
+const u32 F_ex2 = 0x0037;
+const u32 F_ex3 = 0x0038;
+const u32 F_ex4 = 0x0039;
+const u32 F_g_s = 0x003a;
+const u32 F_g_z = 0x003b;
+const u32 F_k10 = 0x003c;
+const u32 F_k11 = 0x003d;
+const u32 F_k12 = 0x003e;
+const u32 F_k13 = 0x003f;
+const u32 F_k14 = 0x0040;
+const u32 F_k15 = 0x0041;
+const u32 F_k16 = 0x0042;
+const u32 F_k17 = 0x0043;
+const u32 F_k18 = 0x0044;
+const u32 F_k19 = 0x0045;
+const u32 F_k20 = 0x0046;
+const u32 F_k21 = 0x0047;
+const u32 F_k22 = 0x0048;
+const u32 F_k23 = 0x0049;
+const u32 F_k24 = 0x004a;
+const u32 F_low = 0x004b;
+const u32 F_mul = 0x004c;
+const u32 F_nid = 0x004d;
+const u32 F_not = 0x004e;
+const u32 F_run = 0x004f;
+const u32 F_brnS = 0x0050;
+const u32 F_brnZ = 0x0051;
+const u32 F_decI = 0x0052;
+const u32 F_decO = 0x0053;
+const u32 F_lowI = 0x0054;
+const u32 F_lowO = 0x0055;
+const u32 F_nidS = 0x0056;
+const u32 F_runI = 0x0057;
+const u32 F_runO = 0x0058;
 
-__host__ void populate(Book* book) {
+u32 BOOK_DATA[] = {
+  0x00000059, // E
+  0x00000062, // F
+  0x00000069, // I
+  0x00000076, // O
+  0x00000083, // S
+  0x0000008E, // T
+  0x00000095, // Z
+  0x0000009C, // af
+  0x000000A5, // c0
+  0x000000AC, // c1
+  0x000000B5, // c2
+  0x000000C2, // c3
+  0x000000D3, // c4
+  0x000000E8, // c5
+  0x00000101, // c6
+  0x0000011E, // c7
+  0x0000013F, // c8
+  0x00000164, // c9
+  0x0000018D, // id
+  0x00000192, // k0
+  0x00000199, // k1
+  0x000001A2, // k2
+  0x000001AF, // k3
+  0x000001C0, // k4
+  0x000001D5, // k5
+  0x000001EE, // k6
+  0x0000020B, // k7
+  0x0000022C, // k8
+  0x00000251, // k9
+  0x0000027A, // afS
+  0x0000028F, // afZ
+  0x00000292, // and
+  0x000002A7, // brn
+  0x000002B0, // c10
+  0x000002DD, // c11
+  0x0000030E, // c12
+  0x00000343, // c13
+  0x0000037C, // c14
+  0x000003B9, // c15
+  0x000003FA, // c16
+  0x0000043F, // c17
+  0x00000488, // c18
+  0x000004D5, // c19
+  0x00000526, // c20
+  0x0000057B, // c21
+  0x000005D4, // c22
+  0x00000631, // c23
+  0x00000692, // c24
+  0x000006F7, // c25
+  0x00000760, // c26
+  0x000007CD, // c_s
+  0x000007DE, // c_z
+  0x000007E5, // dec
+  0x000007F0, // ex0
+  0x000007F7, // ex1
+  0x00000800, // ex2
+  0x0000080D, // ex3
+  0x0000081A, // ex4
+  0x00000827, // g_s
+  0x00000834, // g_z
+  0x00000839, // k10
+  0x00000866, // k11
+  0x00000897, // k12
+  0x000008CC, // k13
+  0x00000905, // k14
+  0x00000942, // k15
+  0x00000983, // k16
+  0x000009C8, // k17
+  0x00000A11, // k18
+  0x00000A5E, // k19
+  0x00000AAF, // k20
+  0x00000B04, // k21
+  0x00000B5D, // k22
+  0x00000BBA, // k23
+  0x00000C1B, // k24
+  0x00000C80, // low
+  0x00000C8B, // mul
+  0x00000C98, // nid
+  0x00000CA1, // not
+  0x00000CAE, // run
+  0x00000CB9, // brnS
+  0x00000CCA, // brnZ
+  0x00000CDB, // decI
+  0x00000CE4, // decO
+  0x00000CF1, // lowI
+  0x00000CFE, // lowO
+  0x00000D0B, // nidS
+  0x00000D18, // runI
+  0x00000D29, // runO
   // E
-  book->defs[0x0000000f]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x0000000f]->root     = 0xa0000000;
-  book->defs[0x0000000f]->alen     = 0;
-  book->defs[0x0000000f]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x0000000f]->nlen     = 3;
-  book->defs[0x0000000f]->node     = (Node*) malloc(3 * sizeof(Node));
-  book->defs[0x0000000f]->node[ 0] = (Node) {0x20000000,0xa0000001};
-  book->defs[0x0000000f]->node[ 1] = (Node) {0x20000000,0xa0000002};
-  book->defs[0x0000000f]->node[ 2] = (Node) {0x50000002,0x40000002};
+  0x00000003, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0x20000000, 0xA0000001,  0x20000000, 0xA0000002,  0x50000002, 0x40000002,
+  // .acts
   // F
-  book->defs[0x00000010]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x00000010]->root     = 0xa0000000;
-  book->defs[0x00000010]->alen     = 0;
-  book->defs[0x00000010]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x00000010]->nlen     = 2;
-  book->defs[0x00000010]->node     = (Node*) malloc(2 * sizeof(Node));
-  book->defs[0x00000010]->node[ 0] = (Node) {0x20000000,0xa0000001};
-  book->defs[0x00000010]->node[ 1] = (Node) {0x50000001,0x40000001};
+  0x00000002, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0x20000000, 0xA0000001,  0x50000001, 0x40000001,
+  // .acts
   // I
-  book->defs[0x00000013]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x00000013]->root     = 0xa0000000;
-  book->defs[0x00000013]->alen     = 0;
-  book->defs[0x00000013]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x00000013]->nlen     = 5;
-  book->defs[0x00000013]->node     = (Node*) malloc(5 * sizeof(Node));
-  book->defs[0x00000013]->node[ 0] = (Node) {0x40000003,0xa0000001};
-  book->defs[0x00000013]->node[ 1] = (Node) {0x20000000,0xa0000002};
-  book->defs[0x00000013]->node[ 2] = (Node) {0xa0000003,0xa0000004};
-  book->defs[0x00000013]->node[ 3] = (Node) {0x40000000,0x50000004};
-  book->defs[0x00000013]->node[ 4] = (Node) {0x20000000,0x50000003};
+  0x00000005, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0x40000003, 0xA0000001,  0x20000000, 0xA0000002,  0xA0000003, 0xA0000004,  0x40000000, 0x50000004,
+  0x20000000, 0x50000003,
+  // .acts
   // O
-  book->defs[0x00000019]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x00000019]->root     = 0xa0000000;
-  book->defs[0x00000019]->alen     = 0;
-  book->defs[0x00000019]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x00000019]->nlen     = 5;
-  book->defs[0x00000019]->node     = (Node*) malloc(5 * sizeof(Node));
-  book->defs[0x00000019]->node[ 0] = (Node) {0x40000002,0xa0000001};
-  book->defs[0x00000019]->node[ 1] = (Node) {0xa0000002,0xa0000003};
-  book->defs[0x00000019]->node[ 2] = (Node) {0x40000000,0x50000004};
-  book->defs[0x00000019]->node[ 3] = (Node) {0x20000000,0xa0000004};
-  book->defs[0x00000019]->node[ 4] = (Node) {0x20000000,0x50000002};
+  0x00000005, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0x40000002, 0xA0000001,  0xA0000002, 0xA0000003,  0x40000000, 0x50000004,  0x20000000, 0xA0000004,
+  0x20000000, 0x50000002,
+  // .acts
   // S
-  book->defs[0x0000001d]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x0000001d]->root     = 0xa0000000;
-  book->defs[0x0000001d]->alen     = 0;
-  book->defs[0x0000001d]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x0000001d]->nlen     = 4;
-  book->defs[0x0000001d]->node     = (Node*) malloc(4 * sizeof(Node));
-  book->defs[0x0000001d]->node[ 0] = (Node) {0x40000002,0xa0000001};
-  book->defs[0x0000001d]->node[ 1] = (Node) {0xa0000002,0xa0000003};
-  book->defs[0x0000001d]->node[ 2] = (Node) {0x40000000,0x50000003};
-  book->defs[0x0000001d]->node[ 3] = (Node) {0x20000000,0x50000002};
+  0x00000004, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0x40000002, 0xA0000001,  0xA0000002, 0xA0000003,  0x40000000, 0x50000003,  0x20000000, 0x50000002,
+  // .acts
   // T
-  book->defs[0x0000001e]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x0000001e]->root     = 0xa0000000;
-  book->defs[0x0000001e]->alen     = 0;
-  book->defs[0x0000001e]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x0000001e]->nlen     = 2;
-  book->defs[0x0000001e]->node     = (Node*) malloc(2 * sizeof(Node));
-  book->defs[0x0000001e]->node[ 0] = (Node) {0x50000001,0xa0000001};
-  book->defs[0x0000001e]->node[ 1] = (Node) {0x20000000,0x40000000};
+  0x00000002, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0x50000001, 0xA0000001,  0x20000000, 0x40000000,
+  // .acts
   // Z
-  book->defs[0x00000024]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x00000024]->root     = 0xa0000000;
-  book->defs[0x00000024]->alen     = 0;
-  book->defs[0x00000024]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x00000024]->nlen     = 2;
-  book->defs[0x00000024]->node     = (Node*) malloc(2 * sizeof(Node));
-  book->defs[0x00000024]->node[ 0] = (Node) {0x20000000,0xa0000001};
-  book->defs[0x00000024]->node[ 1] = (Node) {0x50000001,0x40000001};
+  0x00000002, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0x20000000, 0xA0000001,  0x50000001, 0x40000001,
+  // .acts
   // af
-  book->defs[0x0000096a]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x0000096a]->root     = 0xa0000000;
-  book->defs[0x0000096a]->alen     = 0;
-  book->defs[0x0000096a]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x0000096a]->nlen     = 3;
-  book->defs[0x0000096a]->node     = (Node*) malloc(3 * sizeof(Node));
-  book->defs[0x0000096a]->node[ 0] = (Node) {0xa0000001,0x50000002};
-  book->defs[0x0000096a]->node[ 1] = (Node) {0x10025a9d,0xa0000002};
-  book->defs[0x0000096a]->node[ 2] = (Node) {0x10025aa4,0x50000000};
+  0x00000003, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0xA0000001, 0x50000002,  0x1000001D, 0xA0000002,  0x1000001E, 0x50000000,
+  // .acts
   // c0
-  book->defs[0x000009c1]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x000009c1]->root     = 0xa0000000;
-  book->defs[0x000009c1]->alen     = 0;
-  book->defs[0x000009c1]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x000009c1]->nlen     = 2;
-  book->defs[0x000009c1]->node     = (Node*) malloc(2 * sizeof(Node));
-  book->defs[0x000009c1]->node[ 0] = (Node) {0x20000000,0xa0000001};
-  book->defs[0x000009c1]->node[ 1] = (Node) {0x50000001,0x40000001};
+  0x00000002, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0x20000000, 0xA0000001,  0x50000001, 0x40000001,
+  // .acts
   // c1
-  book->defs[0x000009c2]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x000009c2]->root     = 0xa0000000;
-  book->defs[0x000009c2]->alen     = 0;
-  book->defs[0x000009c2]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x000009c2]->nlen     = 3;
-  book->defs[0x000009c2]->node     = (Node*) malloc(3 * sizeof(Node));
-  book->defs[0x000009c2]->node[ 0] = (Node) {0xa0000001,0xa0000002};
-  book->defs[0x000009c2]->node[ 1] = (Node) {0x40000002,0x50000002};
-  book->defs[0x000009c2]->node[ 2] = (Node) {0x40000001,0x50000001};
+  0x00000003, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0xA0000001, 0xA0000002,  0x40000002, 0x50000002,  0x40000001, 0x50000001,
+  // .acts
   // c2
-  book->defs[0x000009c3]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x000009c3]->root     = 0xa0000000;
-  book->defs[0x000009c3]->alen     = 0;
-  book->defs[0x000009c3]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x000009c3]->nlen     = 5;
-  book->defs[0x000009c3]->node     = (Node*) malloc(5 * sizeof(Node));
-  book->defs[0x000009c3]->node[ 0] = (Node) {0xb0000001,0xa0000004};
-  book->defs[0x000009c3]->node[ 1] = (Node) {0xa0000002,0xa0000003};
-  book->defs[0x000009c3]->node[ 2] = (Node) {0x40000004,0x40000003};
-  book->defs[0x000009c3]->node[ 3] = (Node) {0x50000002,0x50000004};
-  book->defs[0x000009c3]->node[ 4] = (Node) {0x40000002,0x50000003};
+  0x00000005, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0xB0000001, 0xA0000004,  0xA0000002, 0xA0000003,  0x40000004, 0x40000003,  0x50000002, 0x50000004,
+  0x40000002, 0x50000003,
+  // .acts
   // c3
-  book->defs[0x000009c4]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x000009c4]->root     = 0xa0000000;
-  book->defs[0x000009c4]->alen     = 0;
-  book->defs[0x000009c4]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x000009c4]->nlen     = 7;
-  book->defs[0x000009c4]->node     = (Node*) malloc(7 * sizeof(Node));
-  book->defs[0x000009c4]->node[ 0] = (Node) {0xb0000001,0xa0000006};
-  book->defs[0x000009c4]->node[ 1] = (Node) {0xb0000002,0xa0000005};
-  book->defs[0x000009c4]->node[ 2] = (Node) {0xa0000003,0xa0000004};
-  book->defs[0x000009c4]->node[ 3] = (Node) {0x40000006,0x40000004};
-  book->defs[0x000009c4]->node[ 4] = (Node) {0x50000003,0x40000005};
-  book->defs[0x000009c4]->node[ 5] = (Node) {0x50000004,0x50000006};
-  book->defs[0x000009c4]->node[ 6] = (Node) {0x40000003,0x50000005};
+  0x00000007, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0xB0000001, 0xA0000006,  0xB0000002, 0xA0000005,  0xA0000003, 0xA0000004,  0x40000006, 0x40000004,
+  0x50000003, 0x40000005,  0x50000004, 0x50000006,  0x40000003, 0x50000005,
+  // .acts
   // c4
-  book->defs[0x000009c5]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x000009c5]->root     = 0xa0000000;
-  book->defs[0x000009c5]->alen     = 0;
-  book->defs[0x000009c5]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x000009c5]->nlen     = 9;
-  book->defs[0x000009c5]->node     = (Node*) malloc(9 * sizeof(Node));
-  book->defs[0x000009c5]->node[ 0] = (Node) {0xb0000001,0xa0000008};
-  book->defs[0x000009c5]->node[ 1] = (Node) {0xb0000002,0xa0000007};
-  book->defs[0x000009c5]->node[ 2] = (Node) {0xb0000003,0xa0000006};
-  book->defs[0x000009c5]->node[ 3] = (Node) {0xa0000004,0xa0000005};
-  book->defs[0x000009c5]->node[ 4] = (Node) {0x40000008,0x40000005};
-  book->defs[0x000009c5]->node[ 5] = (Node) {0x50000004,0x40000006};
-  book->defs[0x000009c5]->node[ 6] = (Node) {0x50000005,0x40000007};
-  book->defs[0x000009c5]->node[ 7] = (Node) {0x50000006,0x50000008};
-  book->defs[0x000009c5]->node[ 8] = (Node) {0x40000004,0x50000007};
+  0x00000009, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0xB0000001, 0xA0000008,  0xB0000002, 0xA0000007,  0xB0000003, 0xA0000006,  0xA0000004, 0xA0000005,
+  0x40000008, 0x40000005,  0x50000004, 0x40000006,  0x50000005, 0x40000007,  0x50000006, 0x50000008,
+  0x40000004, 0x50000007,
+  // .acts
   // c5
-  book->defs[0x000009c6]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x000009c6]->root     = 0xa0000000;
-  book->defs[0x000009c6]->alen     = 0;
-  book->defs[0x000009c6]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x000009c6]->nlen     = 11;
-  book->defs[0x000009c6]->node     = (Node*) malloc(11 * sizeof(Node));
-  book->defs[0x000009c6]->node[ 0] = (Node) {0xb0000001,0xa000000a};
-  book->defs[0x000009c6]->node[ 1] = (Node) {0xb0000002,0xa0000009};
-  book->defs[0x000009c6]->node[ 2] = (Node) {0xb0000003,0xa0000008};
-  book->defs[0x000009c6]->node[ 3] = (Node) {0xb0000004,0xa0000007};
-  book->defs[0x000009c6]->node[ 4] = (Node) {0xa0000005,0xa0000006};
-  book->defs[0x000009c6]->node[ 5] = (Node) {0x4000000a,0x40000006};
-  book->defs[0x000009c6]->node[ 6] = (Node) {0x50000005,0x40000007};
-  book->defs[0x000009c6]->node[ 7] = (Node) {0x50000006,0x40000008};
-  book->defs[0x000009c6]->node[ 8] = (Node) {0x50000007,0x40000009};
-  book->defs[0x000009c6]->node[ 9] = (Node) {0x50000008,0x5000000a};
-  book->defs[0x000009c6]->node[10] = (Node) {0x40000005,0x50000009};
+  0x0000000B, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0xB0000001, 0xA000000A,  0xB0000002, 0xA0000009,  0xB0000003, 0xA0000008,  0xB0000004, 0xA0000007,
+  0xA0000005, 0xA0000006,  0x4000000A, 0x40000006,  0x50000005, 0x40000007,  0x50000006, 0x40000008,
+  0x50000007, 0x40000009,  0x50000008, 0x5000000A,  0x40000005, 0x50000009,
+  // .acts
   // c6
-  book->defs[0x000009c7]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x000009c7]->root     = 0xa0000000;
-  book->defs[0x000009c7]->alen     = 0;
-  book->defs[0x000009c7]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x000009c7]->nlen     = 13;
-  book->defs[0x000009c7]->node     = (Node*) malloc(13 * sizeof(Node));
-  book->defs[0x000009c7]->node[ 0] = (Node) {0xb0000001,0xa000000c};
-  book->defs[0x000009c7]->node[ 1] = (Node) {0xb0000002,0xa000000b};
-  book->defs[0x000009c7]->node[ 2] = (Node) {0xb0000003,0xa000000a};
-  book->defs[0x000009c7]->node[ 3] = (Node) {0xb0000004,0xa0000009};
-  book->defs[0x000009c7]->node[ 4] = (Node) {0xb0000005,0xa0000008};
-  book->defs[0x000009c7]->node[ 5] = (Node) {0xa0000006,0xa0000007};
-  book->defs[0x000009c7]->node[ 6] = (Node) {0x4000000c,0x40000007};
-  book->defs[0x000009c7]->node[ 7] = (Node) {0x50000006,0x40000008};
-  book->defs[0x000009c7]->node[ 8] = (Node) {0x50000007,0x40000009};
-  book->defs[0x000009c7]->node[ 9] = (Node) {0x50000008,0x4000000a};
-  book->defs[0x000009c7]->node[10] = (Node) {0x50000009,0x4000000b};
-  book->defs[0x000009c7]->node[11] = (Node) {0x5000000a,0x5000000c};
-  book->defs[0x000009c7]->node[12] = (Node) {0x40000006,0x5000000b};
+  0x0000000D, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0xB0000001, 0xA000000C,  0xB0000002, 0xA000000B,  0xB0000003, 0xA000000A,  0xB0000004, 0xA0000009,
+  0xB0000005, 0xA0000008,  0xA0000006, 0xA0000007,  0x4000000C, 0x40000007,  0x50000006, 0x40000008,
+  0x50000007, 0x40000009,  0x50000008, 0x4000000A,  0x50000009, 0x4000000B,  0x5000000A, 0x5000000C,
+  0x40000006, 0x5000000B,
+  // .acts
   // c7
-  book->defs[0x000009c8]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x000009c8]->root     = 0xa0000000;
-  book->defs[0x000009c8]->alen     = 0;
-  book->defs[0x000009c8]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x000009c8]->nlen     = 15;
-  book->defs[0x000009c8]->node     = (Node*) malloc(15 * sizeof(Node));
-  book->defs[0x000009c8]->node[ 0] = (Node) {0xb0000001,0xa000000e};
-  book->defs[0x000009c8]->node[ 1] = (Node) {0xb0000002,0xa000000d};
-  book->defs[0x000009c8]->node[ 2] = (Node) {0xb0000003,0xa000000c};
-  book->defs[0x000009c8]->node[ 3] = (Node) {0xb0000004,0xa000000b};
-  book->defs[0x000009c8]->node[ 4] = (Node) {0xb0000005,0xa000000a};
-  book->defs[0x000009c8]->node[ 5] = (Node) {0xb0000006,0xa0000009};
-  book->defs[0x000009c8]->node[ 6] = (Node) {0xa0000007,0xa0000008};
-  book->defs[0x000009c8]->node[ 7] = (Node) {0x4000000e,0x40000008};
-  book->defs[0x000009c8]->node[ 8] = (Node) {0x50000007,0x40000009};
-  book->defs[0x000009c8]->node[ 9] = (Node) {0x50000008,0x4000000a};
-  book->defs[0x000009c8]->node[10] = (Node) {0x50000009,0x4000000b};
-  book->defs[0x000009c8]->node[11] = (Node) {0x5000000a,0x4000000c};
-  book->defs[0x000009c8]->node[12] = (Node) {0x5000000b,0x4000000d};
-  book->defs[0x000009c8]->node[13] = (Node) {0x5000000c,0x5000000e};
-  book->defs[0x000009c8]->node[14] = (Node) {0x40000007,0x5000000d};
+  0x0000000F, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0xB0000001, 0xA000000E,  0xB0000002, 0xA000000D,  0xB0000003, 0xA000000C,  0xB0000004, 0xA000000B,
+  0xB0000005, 0xA000000A,  0xB0000006, 0xA0000009,  0xA0000007, 0xA0000008,  0x4000000E, 0x40000008,
+  0x50000007, 0x40000009,  0x50000008, 0x4000000A,  0x50000009, 0x4000000B,  0x5000000A, 0x4000000C,
+  0x5000000B, 0x4000000D,  0x5000000C, 0x5000000E,  0x40000007, 0x5000000D,
+  // .acts
   // c8
-  book->defs[0x000009c9]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x000009c9]->root     = 0xa0000000;
-  book->defs[0x000009c9]->alen     = 0;
-  book->defs[0x000009c9]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x000009c9]->nlen     = 17;
-  book->defs[0x000009c9]->node     = (Node*) malloc(17 * sizeof(Node));
-  book->defs[0x000009c9]->node[ 0] = (Node) {0xb0000001,0xa0000010};
-  book->defs[0x000009c9]->node[ 1] = (Node) {0xb0000002,0xa000000f};
-  book->defs[0x000009c9]->node[ 2] = (Node) {0xb0000003,0xa000000e};
-  book->defs[0x000009c9]->node[ 3] = (Node) {0xb0000004,0xa000000d};
-  book->defs[0x000009c9]->node[ 4] = (Node) {0xb0000005,0xa000000c};
-  book->defs[0x000009c9]->node[ 5] = (Node) {0xb0000006,0xa000000b};
-  book->defs[0x000009c9]->node[ 6] = (Node) {0xb0000007,0xa000000a};
-  book->defs[0x000009c9]->node[ 7] = (Node) {0xa0000008,0xa0000009};
-  book->defs[0x000009c9]->node[ 8] = (Node) {0x40000010,0x40000009};
-  book->defs[0x000009c9]->node[ 9] = (Node) {0x50000008,0x4000000a};
-  book->defs[0x000009c9]->node[10] = (Node) {0x50000009,0x4000000b};
-  book->defs[0x000009c9]->node[11] = (Node) {0x5000000a,0x4000000c};
-  book->defs[0x000009c9]->node[12] = (Node) {0x5000000b,0x4000000d};
-  book->defs[0x000009c9]->node[13] = (Node) {0x5000000c,0x4000000e};
-  book->defs[0x000009c9]->node[14] = (Node) {0x5000000d,0x4000000f};
-  book->defs[0x000009c9]->node[15] = (Node) {0x5000000e,0x50000010};
-  book->defs[0x000009c9]->node[16] = (Node) {0x40000008,0x5000000f};
+  0x00000011, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0xB0000001, 0xA0000010,  0xB0000002, 0xA000000F,  0xB0000003, 0xA000000E,  0xB0000004, 0xA000000D,
+  0xB0000005, 0xA000000C,  0xB0000006, 0xA000000B,  0xB0000007, 0xA000000A,  0xA0000008, 0xA0000009,
+  0x40000010, 0x40000009,  0x50000008, 0x4000000A,  0x50000009, 0x4000000B,  0x5000000A, 0x4000000C,
+  0x5000000B, 0x4000000D,  0x5000000C, 0x4000000E,  0x5000000D, 0x4000000F,  0x5000000E, 0x50000010,
+  0x40000008, 0x5000000F,
+  // .acts
   // c9
-  book->defs[0x000009ca]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x000009ca]->root     = 0xa0000000;
-  book->defs[0x000009ca]->alen     = 0;
-  book->defs[0x000009ca]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x000009ca]->nlen     = 19;
-  book->defs[0x000009ca]->node     = (Node*) malloc(19 * sizeof(Node));
-  book->defs[0x000009ca]->node[ 0] = (Node) {0xb0000001,0xa0000012};
-  book->defs[0x000009ca]->node[ 1] = (Node) {0xb0000002,0xa0000011};
-  book->defs[0x000009ca]->node[ 2] = (Node) {0xb0000003,0xa0000010};
-  book->defs[0x000009ca]->node[ 3] = (Node) {0xb0000004,0xa000000f};
-  book->defs[0x000009ca]->node[ 4] = (Node) {0xb0000005,0xa000000e};
-  book->defs[0x000009ca]->node[ 5] = (Node) {0xb0000006,0xa000000d};
-  book->defs[0x000009ca]->node[ 6] = (Node) {0xb0000007,0xa000000c};
-  book->defs[0x000009ca]->node[ 7] = (Node) {0xb0000008,0xa000000b};
-  book->defs[0x000009ca]->node[ 8] = (Node) {0xa0000009,0xa000000a};
-  book->defs[0x000009ca]->node[ 9] = (Node) {0x40000012,0x4000000a};
-  book->defs[0x000009ca]->node[10] = (Node) {0x50000009,0x4000000b};
-  book->defs[0x000009ca]->node[11] = (Node) {0x5000000a,0x4000000c};
-  book->defs[0x000009ca]->node[12] = (Node) {0x5000000b,0x4000000d};
-  book->defs[0x000009ca]->node[13] = (Node) {0x5000000c,0x4000000e};
-  book->defs[0x000009ca]->node[14] = (Node) {0x5000000d,0x4000000f};
-  book->defs[0x000009ca]->node[15] = (Node) {0x5000000e,0x40000010};
-  book->defs[0x000009ca]->node[16] = (Node) {0x5000000f,0x40000011};
-  book->defs[0x000009ca]->node[17] = (Node) {0x50000010,0x50000012};
-  book->defs[0x000009ca]->node[18] = (Node) {0x40000009,0x50000011};
+  0x00000013, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0xB0000001, 0xA0000012,  0xB0000002, 0xA0000011,  0xB0000003, 0xA0000010,  0xB0000004, 0xA000000F,
+  0xB0000005, 0xA000000E,  0xB0000006, 0xA000000D,  0xB0000007, 0xA000000C,  0xB0000008, 0xA000000B,
+  0xA0000009, 0xA000000A,  0x40000012, 0x4000000A,  0x50000009, 0x4000000B,  0x5000000A, 0x4000000C,
+  0x5000000B, 0x4000000D,  0x5000000C, 0x4000000E,  0x5000000D, 0x4000000F,  0x5000000E, 0x40000010,
+  0x5000000F, 0x40000011,  0x50000010, 0x50000012,  0x40000009, 0x50000011,
+  // .acts
   // id
-  book->defs[0x00000b68]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x00000b68]->root     = 0xa0000000;
-  book->defs[0x00000b68]->alen     = 0;
-  book->defs[0x00000b68]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x00000b68]->nlen     = 1;
-  book->defs[0x00000b68]->node     = (Node*) malloc(1 * sizeof(Node));
-  book->defs[0x00000b68]->node[ 0] = (Node) {0x50000000,0x40000000};
+  0x00000001, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0x50000000, 0x40000000,
+  // .acts
   // k0
-  book->defs[0x00000bc1]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x00000bc1]->root     = 0xa0000000;
-  book->defs[0x00000bc1]->alen     = 0;
-  book->defs[0x00000bc1]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x00000bc1]->nlen     = 2;
-  book->defs[0x00000bc1]->node     = (Node*) malloc(2 * sizeof(Node));
-  book->defs[0x00000bc1]->node[ 0] = (Node) {0x20000000,0xa0000001};
-  book->defs[0x00000bc1]->node[ 1] = (Node) {0x50000001,0x40000001};
+  0x00000002, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0x20000000, 0xA0000001,  0x50000001, 0x40000001,
+  // .acts
   // k1
-  book->defs[0x00000bc2]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x00000bc2]->root     = 0xa0000000;
-  book->defs[0x00000bc2]->alen     = 0;
-  book->defs[0x00000bc2]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x00000bc2]->nlen     = 3;
-  book->defs[0x00000bc2]->node     = (Node*) malloc(3 * sizeof(Node));
-  book->defs[0x00000bc2]->node[ 0] = (Node) {0xa0000001,0xa0000002};
-  book->defs[0x00000bc2]->node[ 1] = (Node) {0x40000002,0x50000002};
-  book->defs[0x00000bc2]->node[ 2] = (Node) {0x40000001,0x50000001};
+  0x00000003, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0xA0000001, 0xA0000002,  0x40000002, 0x50000002,  0x40000001, 0x50000001,
+  // .acts
   // k2
-  book->defs[0x00000bc3]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x00000bc3]->root     = 0xa0000000;
-  book->defs[0x00000bc3]->alen     = 0;
-  book->defs[0x00000bc3]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x00000bc3]->nlen     = 5;
-  book->defs[0x00000bc3]->node     = (Node*) malloc(5 * sizeof(Node));
-  book->defs[0x00000bc3]->node[ 0] = (Node) {0xc0000001,0xa0000004};
-  book->defs[0x00000bc3]->node[ 1] = (Node) {0xa0000002,0xa0000003};
-  book->defs[0x00000bc3]->node[ 2] = (Node) {0x40000004,0x40000003};
-  book->defs[0x00000bc3]->node[ 3] = (Node) {0x50000002,0x50000004};
-  book->defs[0x00000bc3]->node[ 4] = (Node) {0x40000002,0x50000003};
+  0x00000005, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0xC0000001, 0xA0000004,  0xA0000002, 0xA0000003,  0x40000004, 0x40000003,  0x50000002, 0x50000004,
+  0x40000002, 0x50000003,
+  // .acts
   // k3
-  book->defs[0x00000bc4]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x00000bc4]->root     = 0xa0000000;
-  book->defs[0x00000bc4]->alen     = 0;
-  book->defs[0x00000bc4]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x00000bc4]->nlen     = 7;
-  book->defs[0x00000bc4]->node     = (Node*) malloc(7 * sizeof(Node));
-  book->defs[0x00000bc4]->node[ 0] = (Node) {0xc0000001,0xa0000006};
-  book->defs[0x00000bc4]->node[ 1] = (Node) {0xc0000002,0xa0000005};
-  book->defs[0x00000bc4]->node[ 2] = (Node) {0xa0000003,0xa0000004};
-  book->defs[0x00000bc4]->node[ 3] = (Node) {0x40000006,0x40000004};
-  book->defs[0x00000bc4]->node[ 4] = (Node) {0x50000003,0x40000005};
-  book->defs[0x00000bc4]->node[ 5] = (Node) {0x50000004,0x50000006};
-  book->defs[0x00000bc4]->node[ 6] = (Node) {0x40000003,0x50000005};
+  0x00000007, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0xC0000001, 0xA0000006,  0xC0000002, 0xA0000005,  0xA0000003, 0xA0000004,  0x40000006, 0x40000004,
+  0x50000003, 0x40000005,  0x50000004, 0x50000006,  0x40000003, 0x50000005,
+  // .acts
   // k4
-  book->defs[0x00000bc5]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x00000bc5]->root     = 0xa0000000;
-  book->defs[0x00000bc5]->alen     = 0;
-  book->defs[0x00000bc5]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x00000bc5]->nlen     = 9;
-  book->defs[0x00000bc5]->node     = (Node*) malloc(9 * sizeof(Node));
-  book->defs[0x00000bc5]->node[ 0] = (Node) {0xc0000001,0xa0000008};
-  book->defs[0x00000bc5]->node[ 1] = (Node) {0xc0000002,0xa0000007};
-  book->defs[0x00000bc5]->node[ 2] = (Node) {0xc0000003,0xa0000006};
-  book->defs[0x00000bc5]->node[ 3] = (Node) {0xa0000004,0xa0000005};
-  book->defs[0x00000bc5]->node[ 4] = (Node) {0x40000008,0x40000005};
-  book->defs[0x00000bc5]->node[ 5] = (Node) {0x50000004,0x40000006};
-  book->defs[0x00000bc5]->node[ 6] = (Node) {0x50000005,0x40000007};
-  book->defs[0x00000bc5]->node[ 7] = (Node) {0x50000006,0x50000008};
-  book->defs[0x00000bc5]->node[ 8] = (Node) {0x40000004,0x50000007};
+  0x00000009, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0xC0000001, 0xA0000008,  0xC0000002, 0xA0000007,  0xC0000003, 0xA0000006,  0xA0000004, 0xA0000005,
+  0x40000008, 0x40000005,  0x50000004, 0x40000006,  0x50000005, 0x40000007,  0x50000006, 0x50000008,
+  0x40000004, 0x50000007,
+  // .acts
   // k5
-  book->defs[0x00000bc6]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x00000bc6]->root     = 0xa0000000;
-  book->defs[0x00000bc6]->alen     = 0;
-  book->defs[0x00000bc6]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x00000bc6]->nlen     = 11;
-  book->defs[0x00000bc6]->node     = (Node*) malloc(11 * sizeof(Node));
-  book->defs[0x00000bc6]->node[ 0] = (Node) {0xc0000001,0xa000000a};
-  book->defs[0x00000bc6]->node[ 1] = (Node) {0xc0000002,0xa0000009};
-  book->defs[0x00000bc6]->node[ 2] = (Node) {0xc0000003,0xa0000008};
-  book->defs[0x00000bc6]->node[ 3] = (Node) {0xc0000004,0xa0000007};
-  book->defs[0x00000bc6]->node[ 4] = (Node) {0xa0000005,0xa0000006};
-  book->defs[0x00000bc6]->node[ 5] = (Node) {0x4000000a,0x40000006};
-  book->defs[0x00000bc6]->node[ 6] = (Node) {0x50000005,0x40000007};
-  book->defs[0x00000bc6]->node[ 7] = (Node) {0x50000006,0x40000008};
-  book->defs[0x00000bc6]->node[ 8] = (Node) {0x50000007,0x40000009};
-  book->defs[0x00000bc6]->node[ 9] = (Node) {0x50000008,0x5000000a};
-  book->defs[0x00000bc6]->node[10] = (Node) {0x40000005,0x50000009};
+  0x0000000B, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0xC0000001, 0xA000000A,  0xC0000002, 0xA0000009,  0xC0000003, 0xA0000008,  0xC0000004, 0xA0000007,
+  0xA0000005, 0xA0000006,  0x4000000A, 0x40000006,  0x50000005, 0x40000007,  0x50000006, 0x40000008,
+  0x50000007, 0x40000009,  0x50000008, 0x5000000A,  0x40000005, 0x50000009,
+  // .acts
   // k6
-  book->defs[0x00000bc7]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x00000bc7]->root     = 0xa0000000;
-  book->defs[0x00000bc7]->alen     = 0;
-  book->defs[0x00000bc7]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x00000bc7]->nlen     = 13;
-  book->defs[0x00000bc7]->node     = (Node*) malloc(13 * sizeof(Node));
-  book->defs[0x00000bc7]->node[ 0] = (Node) {0xc0000001,0xa000000c};
-  book->defs[0x00000bc7]->node[ 1] = (Node) {0xc0000002,0xa000000b};
-  book->defs[0x00000bc7]->node[ 2] = (Node) {0xc0000003,0xa000000a};
-  book->defs[0x00000bc7]->node[ 3] = (Node) {0xc0000004,0xa0000009};
-  book->defs[0x00000bc7]->node[ 4] = (Node) {0xc0000005,0xa0000008};
-  book->defs[0x00000bc7]->node[ 5] = (Node) {0xa0000006,0xa0000007};
-  book->defs[0x00000bc7]->node[ 6] = (Node) {0x4000000c,0x40000007};
-  book->defs[0x00000bc7]->node[ 7] = (Node) {0x50000006,0x40000008};
-  book->defs[0x00000bc7]->node[ 8] = (Node) {0x50000007,0x40000009};
-  book->defs[0x00000bc7]->node[ 9] = (Node) {0x50000008,0x4000000a};
-  book->defs[0x00000bc7]->node[10] = (Node) {0x50000009,0x4000000b};
-  book->defs[0x00000bc7]->node[11] = (Node) {0x5000000a,0x5000000c};
-  book->defs[0x00000bc7]->node[12] = (Node) {0x40000006,0x5000000b};
+  0x0000000D, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0xC0000001, 0xA000000C,  0xC0000002, 0xA000000B,  0xC0000003, 0xA000000A,  0xC0000004, 0xA0000009,
+  0xC0000005, 0xA0000008,  0xA0000006, 0xA0000007,  0x4000000C, 0x40000007,  0x50000006, 0x40000008,
+  0x50000007, 0x40000009,  0x50000008, 0x4000000A,  0x50000009, 0x4000000B,  0x5000000A, 0x5000000C,
+  0x40000006, 0x5000000B,
+  // .acts
   // k7
-  book->defs[0x00000bc8]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x00000bc8]->root     = 0xa0000000;
-  book->defs[0x00000bc8]->alen     = 0;
-  book->defs[0x00000bc8]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x00000bc8]->nlen     = 15;
-  book->defs[0x00000bc8]->node     = (Node*) malloc(15 * sizeof(Node));
-  book->defs[0x00000bc8]->node[ 0] = (Node) {0xc0000001,0xa000000e};
-  book->defs[0x00000bc8]->node[ 1] = (Node) {0xc0000002,0xa000000d};
-  book->defs[0x00000bc8]->node[ 2] = (Node) {0xc0000003,0xa000000c};
-  book->defs[0x00000bc8]->node[ 3] = (Node) {0xc0000004,0xa000000b};
-  book->defs[0x00000bc8]->node[ 4] = (Node) {0xc0000005,0xa000000a};
-  book->defs[0x00000bc8]->node[ 5] = (Node) {0xc0000006,0xa0000009};
-  book->defs[0x00000bc8]->node[ 6] = (Node) {0xa0000007,0xa0000008};
-  book->defs[0x00000bc8]->node[ 7] = (Node) {0x4000000e,0x40000008};
-  book->defs[0x00000bc8]->node[ 8] = (Node) {0x50000007,0x40000009};
-  book->defs[0x00000bc8]->node[ 9] = (Node) {0x50000008,0x4000000a};
-  book->defs[0x00000bc8]->node[10] = (Node) {0x50000009,0x4000000b};
-  book->defs[0x00000bc8]->node[11] = (Node) {0x5000000a,0x4000000c};
-  book->defs[0x00000bc8]->node[12] = (Node) {0x5000000b,0x4000000d};
-  book->defs[0x00000bc8]->node[13] = (Node) {0x5000000c,0x5000000e};
-  book->defs[0x00000bc8]->node[14] = (Node) {0x40000007,0x5000000d};
+  0x0000000F, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0xC0000001, 0xA000000E,  0xC0000002, 0xA000000D,  0xC0000003, 0xA000000C,  0xC0000004, 0xA000000B,
+  0xC0000005, 0xA000000A,  0xC0000006, 0xA0000009,  0xA0000007, 0xA0000008,  0x4000000E, 0x40000008,
+  0x50000007, 0x40000009,  0x50000008, 0x4000000A,  0x50000009, 0x4000000B,  0x5000000A, 0x4000000C,
+  0x5000000B, 0x4000000D,  0x5000000C, 0x5000000E,  0x40000007, 0x5000000D,
+  // .acts
   // k8
-  book->defs[0x00000bc9]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x00000bc9]->root     = 0xa0000000;
-  book->defs[0x00000bc9]->alen     = 0;
-  book->defs[0x00000bc9]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x00000bc9]->nlen     = 17;
-  book->defs[0x00000bc9]->node     = (Node*) malloc(17 * sizeof(Node));
-  book->defs[0x00000bc9]->node[ 0] = (Node) {0xc0000001,0xa0000010};
-  book->defs[0x00000bc9]->node[ 1] = (Node) {0xc0000002,0xa000000f};
-  book->defs[0x00000bc9]->node[ 2] = (Node) {0xc0000003,0xa000000e};
-  book->defs[0x00000bc9]->node[ 3] = (Node) {0xc0000004,0xa000000d};
-  book->defs[0x00000bc9]->node[ 4] = (Node) {0xc0000005,0xa000000c};
-  book->defs[0x00000bc9]->node[ 5] = (Node) {0xc0000006,0xa000000b};
-  book->defs[0x00000bc9]->node[ 6] = (Node) {0xc0000007,0xa000000a};
-  book->defs[0x00000bc9]->node[ 7] = (Node) {0xa0000008,0xa0000009};
-  book->defs[0x00000bc9]->node[ 8] = (Node) {0x40000010,0x40000009};
-  book->defs[0x00000bc9]->node[ 9] = (Node) {0x50000008,0x4000000a};
-  book->defs[0x00000bc9]->node[10] = (Node) {0x50000009,0x4000000b};
-  book->defs[0x00000bc9]->node[11] = (Node) {0x5000000a,0x4000000c};
-  book->defs[0x00000bc9]->node[12] = (Node) {0x5000000b,0x4000000d};
-  book->defs[0x00000bc9]->node[13] = (Node) {0x5000000c,0x4000000e};
-  book->defs[0x00000bc9]->node[14] = (Node) {0x5000000d,0x4000000f};
-  book->defs[0x00000bc9]->node[15] = (Node) {0x5000000e,0x50000010};
-  book->defs[0x00000bc9]->node[16] = (Node) {0x40000008,0x5000000f};
+  0x00000011, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0xC0000001, 0xA0000010,  0xC0000002, 0xA000000F,  0xC0000003, 0xA000000E,  0xC0000004, 0xA000000D,
+  0xC0000005, 0xA000000C,  0xC0000006, 0xA000000B,  0xC0000007, 0xA000000A,  0xA0000008, 0xA0000009,
+  0x40000010, 0x40000009,  0x50000008, 0x4000000A,  0x50000009, 0x4000000B,  0x5000000A, 0x4000000C,
+  0x5000000B, 0x4000000D,  0x5000000C, 0x4000000E,  0x5000000D, 0x4000000F,  0x5000000E, 0x50000010,
+  0x40000008, 0x5000000F,
+  // .acts
   // k9
-  book->defs[0x00000bca]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x00000bca]->root     = 0xa0000000;
-  book->defs[0x00000bca]->alen     = 0;
-  book->defs[0x00000bca]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x00000bca]->nlen     = 19;
-  book->defs[0x00000bca]->node     = (Node*) malloc(19 * sizeof(Node));
-  book->defs[0x00000bca]->node[ 0] = (Node) {0xc0000001,0xa0000012};
-  book->defs[0x00000bca]->node[ 1] = (Node) {0xc0000002,0xa0000011};
-  book->defs[0x00000bca]->node[ 2] = (Node) {0xc0000003,0xa0000010};
-  book->defs[0x00000bca]->node[ 3] = (Node) {0xc0000004,0xa000000f};
-  book->defs[0x00000bca]->node[ 4] = (Node) {0xc0000005,0xa000000e};
-  book->defs[0x00000bca]->node[ 5] = (Node) {0xc0000006,0xa000000d};
-  book->defs[0x00000bca]->node[ 6] = (Node) {0xc0000007,0xa000000c};
-  book->defs[0x00000bca]->node[ 7] = (Node) {0xc0000008,0xa000000b};
-  book->defs[0x00000bca]->node[ 8] = (Node) {0xa0000009,0xa000000a};
-  book->defs[0x00000bca]->node[ 9] = (Node) {0x40000012,0x4000000a};
-  book->defs[0x00000bca]->node[10] = (Node) {0x50000009,0x4000000b};
-  book->defs[0x00000bca]->node[11] = (Node) {0x5000000a,0x4000000c};
-  book->defs[0x00000bca]->node[12] = (Node) {0x5000000b,0x4000000d};
-  book->defs[0x00000bca]->node[13] = (Node) {0x5000000c,0x4000000e};
-  book->defs[0x00000bca]->node[14] = (Node) {0x5000000d,0x4000000f};
-  book->defs[0x00000bca]->node[15] = (Node) {0x5000000e,0x40000010};
-  book->defs[0x00000bca]->node[16] = (Node) {0x5000000f,0x40000011};
-  book->defs[0x00000bca]->node[17] = (Node) {0x50000010,0x50000012};
-  book->defs[0x00000bca]->node[18] = (Node) {0x40000009,0x50000011};
+  0x00000013, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0xC0000001, 0xA0000012,  0xC0000002, 0xA0000011,  0xC0000003, 0xA0000010,  0xC0000004, 0xA000000F,
+  0xC0000005, 0xA000000E,  0xC0000006, 0xA000000D,  0xC0000007, 0xA000000C,  0xC0000008, 0xA000000B,
+  0xA0000009, 0xA000000A,  0x40000012, 0x4000000A,  0x50000009, 0x4000000B,  0x5000000A, 0x4000000C,
+  0x5000000B, 0x4000000D,  0x5000000C, 0x4000000E,  0x5000000D, 0x4000000F,  0x5000000E, 0x40000010,
+  0x5000000F, 0x40000011,  0x50000010, 0x50000012,  0x40000009, 0x50000011,
+  // .acts
   // afS
-  book->defs[0x00025a9d]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x00025a9d]->root     = 0xa0000000;
-  book->defs[0x00025a9d]->alen     = 3;
-  book->defs[0x00025a9d]->acts     = (Wire*) malloc(3 * sizeof(Wire));
-  book->defs[0x00025a9d]->acts[ 0] = mkwire(0xa0000002,0x1000096a);
-  book->defs[0x00025a9d]->acts[ 1] = mkwire(0xa0000003,0x10025ca8);
-  book->defs[0x00025a9d]->acts[ 2] = mkwire(0xa0000005,0x1000096a);
-  book->defs[0x00025a9d]->nlen     = 6;
-  book->defs[0x00025a9d]->node     = (Node*) malloc(6 * sizeof(Node));
-  book->defs[0x00025a9d]->node[ 0] = (Node) {0xb0000001,0x50000004};
-  book->defs[0x00025a9d]->node[ 1] = (Node) {0x40000005,0x40000002};
-  book->defs[0x00025a9d]->node[ 2] = (Node) {0x50000001,0x40000004};
-  book->defs[0x00025a9d]->node[ 3] = (Node) {0x50000005,0xa0000004};
-  book->defs[0x00025a9d]->node[ 4] = (Node) {0x50000002,0x50000000};
-  book->defs[0x00025a9d]->node[ 5] = (Node) {0x40000001,0x40000003};
+  0x00000006, // .nlen
+  0x00000003, // .alen
+  0xA0000000, // .root
+  // .node
+  0xB0000001, 0x50000004,  0x40000005, 0x40000002,  0x50000001, 0x40000004,  0x50000005, 0xA0000004,
+  0x50000002, 0x50000000,  0x40000001, 0x40000003,
+  // .acts
+  0xA0000002, 0x10000007,  0xA0000003, 0x1000001F,  0xA0000005, 0x10000007,
   // afZ
-  book->defs[0x00025aa4]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x00025aa4]->root     = 0x1000001e;
-  book->defs[0x00025aa4]->alen     = 0;
-  book->defs[0x00025aa4]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x00025aa4]->nlen     = 0;
-  book->defs[0x00025aa4]->node     = (Node*) malloc(0 * sizeof(Node));
+  0x00000000, // .nlen
+  0x00000000, // .alen
+  0x10000005, // .root
+  // .node
+  // .acts
   // and
-  book->defs[0x00025ca8]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x00025ca8]->root     = 0xa0000000;
-  book->defs[0x00025ca8]->alen     = 0;
-  book->defs[0x00025ca8]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x00025ca8]->nlen     = 9;
-  book->defs[0x00025ca8]->node     = (Node*) malloc(9 * sizeof(Node));
-  book->defs[0x00025ca8]->node[ 0] = (Node) {0xa0000001,0x50000005};
-  book->defs[0x00025ca8]->node[ 1] = (Node) {0xa0000002,0xa0000005};
-  book->defs[0x00025ca8]->node[ 2] = (Node) {0xa0000003,0x50000004};
-  book->defs[0x00025ca8]->node[ 3] = (Node) {0x1000001e,0xa0000004};
-  book->defs[0x00025ca8]->node[ 4] = (Node) {0x10000010,0x50000002};
-  book->defs[0x00025ca8]->node[ 5] = (Node) {0xa0000006,0x50000000};
-  book->defs[0x00025ca8]->node[ 6] = (Node) {0xa0000007,0x50000008};
-  book->defs[0x00025ca8]->node[ 7] = (Node) {0x10000010,0xa0000008};
-  book->defs[0x00025ca8]->node[ 8] = (Node) {0x10000010,0x50000006};
+  0x00000009, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0xA0000001, 0x50000005,  0xA0000002, 0xA0000005,  0xA0000003, 0x50000004,  0x10000005, 0xA0000004,
+  0x10000001, 0x50000002,  0xA0000006, 0x50000000,  0xA0000007, 0x50000008,  0x10000001, 0xA0000008,
+  0x10000001, 0x50000006,
+  // .acts
   // brn
-  book->defs[0x00026db2]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x00026db2]->root     = 0xa0000000;
-  book->defs[0x00026db2]->alen     = 0;
-  book->defs[0x00026db2]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x00026db2]->nlen     = 3;
-  book->defs[0x00026db2]->node     = (Node*) malloc(3 * sizeof(Node));
-  book->defs[0x00026db2]->node[ 0] = (Node) {0xa0000001,0x50000002};
-  book->defs[0x00026db2]->node[ 1] = (Node) {0x109b6c9d,0xa0000002};
-  book->defs[0x00026db2]->node[ 2] = (Node) {0x109b6ca4,0x50000000};
+  0x00000003, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0xA0000001, 0x50000002,  0x10000050, 0xA0000002,  0x10000051, 0x50000000,
+  // .acts
   // c10
-  book->defs[0x00027081]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x00027081]->root     = 0xa0000000;
-  book->defs[0x00027081]->alen     = 0;
-  book->defs[0x00027081]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x00027081]->nlen     = 21;
-  book->defs[0x00027081]->node     = (Node*) malloc(21 * sizeof(Node));
-  book->defs[0x00027081]->node[ 0] = (Node) {0xb0000001,0xa0000014};
-  book->defs[0x00027081]->node[ 1] = (Node) {0xb0000002,0xa0000013};
-  book->defs[0x00027081]->node[ 2] = (Node) {0xb0000003,0xa0000012};
-  book->defs[0x00027081]->node[ 3] = (Node) {0xb0000004,0xa0000011};
-  book->defs[0x00027081]->node[ 4] = (Node) {0xb0000005,0xa0000010};
-  book->defs[0x00027081]->node[ 5] = (Node) {0xb0000006,0xa000000f};
-  book->defs[0x00027081]->node[ 6] = (Node) {0xb0000007,0xa000000e};
-  book->defs[0x00027081]->node[ 7] = (Node) {0xb0000008,0xa000000d};
-  book->defs[0x00027081]->node[ 8] = (Node) {0xb0000009,0xa000000c};
-  book->defs[0x00027081]->node[ 9] = (Node) {0xa000000a,0xa000000b};
-  book->defs[0x00027081]->node[10] = (Node) {0x40000014,0x4000000b};
-  book->defs[0x00027081]->node[11] = (Node) {0x5000000a,0x4000000c};
-  book->defs[0x00027081]->node[12] = (Node) {0x5000000b,0x4000000d};
-  book->defs[0x00027081]->node[13] = (Node) {0x5000000c,0x4000000e};
-  book->defs[0x00027081]->node[14] = (Node) {0x5000000d,0x4000000f};
-  book->defs[0x00027081]->node[15] = (Node) {0x5000000e,0x40000010};
-  book->defs[0x00027081]->node[16] = (Node) {0x5000000f,0x40000011};
-  book->defs[0x00027081]->node[17] = (Node) {0x50000010,0x40000012};
-  book->defs[0x00027081]->node[18] = (Node) {0x50000011,0x40000013};
-  book->defs[0x00027081]->node[19] = (Node) {0x50000012,0x50000014};
-  book->defs[0x00027081]->node[20] = (Node) {0x4000000a,0x50000013};
+  0x00000015, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0xB0000001, 0xA0000014,  0xB0000002, 0xA0000013,  0xB0000003, 0xA0000012,  0xB0000004, 0xA0000011,
+  0xB0000005, 0xA0000010,  0xB0000006, 0xA000000F,  0xB0000007, 0xA000000E,  0xB0000008, 0xA000000D,
+  0xB0000009, 0xA000000C,  0xA000000A, 0xA000000B,  0x40000014, 0x4000000B,  0x5000000A, 0x4000000C,
+  0x5000000B, 0x4000000D,  0x5000000C, 0x4000000E,  0x5000000D, 0x4000000F,  0x5000000E, 0x40000010,
+  0x5000000F, 0x40000011,  0x50000010, 0x40000012,  0x50000011, 0x40000013,  0x50000012, 0x50000014,
+  0x4000000A, 0x50000013,
+  // .acts
   // c11
-  book->defs[0x00027082]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x00027082]->root     = 0xa0000000;
-  book->defs[0x00027082]->alen     = 0;
-  book->defs[0x00027082]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x00027082]->nlen     = 23;
-  book->defs[0x00027082]->node     = (Node*) malloc(23 * sizeof(Node));
-  book->defs[0x00027082]->node[ 0] = (Node) {0xb0000001,0xa0000016};
-  book->defs[0x00027082]->node[ 1] = (Node) {0xb0000002,0xa0000015};
-  book->defs[0x00027082]->node[ 2] = (Node) {0xb0000003,0xa0000014};
-  book->defs[0x00027082]->node[ 3] = (Node) {0xb0000004,0xa0000013};
-  book->defs[0x00027082]->node[ 4] = (Node) {0xb0000005,0xa0000012};
-  book->defs[0x00027082]->node[ 5] = (Node) {0xb0000006,0xa0000011};
-  book->defs[0x00027082]->node[ 6] = (Node) {0xb0000007,0xa0000010};
-  book->defs[0x00027082]->node[ 7] = (Node) {0xb0000008,0xa000000f};
-  book->defs[0x00027082]->node[ 8] = (Node) {0xb0000009,0xa000000e};
-  book->defs[0x00027082]->node[ 9] = (Node) {0xb000000a,0xa000000d};
-  book->defs[0x00027082]->node[10] = (Node) {0xa000000b,0xa000000c};
-  book->defs[0x00027082]->node[11] = (Node) {0x40000016,0x4000000c};
-  book->defs[0x00027082]->node[12] = (Node) {0x5000000b,0x4000000d};
-  book->defs[0x00027082]->node[13] = (Node) {0x5000000c,0x4000000e};
-  book->defs[0x00027082]->node[14] = (Node) {0x5000000d,0x4000000f};
-  book->defs[0x00027082]->node[15] = (Node) {0x5000000e,0x40000010};
-  book->defs[0x00027082]->node[16] = (Node) {0x5000000f,0x40000011};
-  book->defs[0x00027082]->node[17] = (Node) {0x50000010,0x40000012};
-  book->defs[0x00027082]->node[18] = (Node) {0x50000011,0x40000013};
-  book->defs[0x00027082]->node[19] = (Node) {0x50000012,0x40000014};
-  book->defs[0x00027082]->node[20] = (Node) {0x50000013,0x40000015};
-  book->defs[0x00027082]->node[21] = (Node) {0x50000014,0x50000016};
-  book->defs[0x00027082]->node[22] = (Node) {0x4000000b,0x50000015};
+  0x00000017, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0xB0000001, 0xA0000016,  0xB0000002, 0xA0000015,  0xB0000003, 0xA0000014,  0xB0000004, 0xA0000013,
+  0xB0000005, 0xA0000012,  0xB0000006, 0xA0000011,  0xB0000007, 0xA0000010,  0xB0000008, 0xA000000F,
+  0xB0000009, 0xA000000E,  0xB000000A, 0xA000000D,  0xA000000B, 0xA000000C,  0x40000016, 0x4000000C,
+  0x5000000B, 0x4000000D,  0x5000000C, 0x4000000E,  0x5000000D, 0x4000000F,  0x5000000E, 0x40000010,
+  0x5000000F, 0x40000011,  0x50000010, 0x40000012,  0x50000011, 0x40000013,  0x50000012, 0x40000014,
+  0x50000013, 0x40000015,  0x50000014, 0x50000016,  0x4000000B, 0x50000015,
+  // .acts
   // c12
-  book->defs[0x00027083]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x00027083]->root     = 0xa0000000;
-  book->defs[0x00027083]->alen     = 0;
-  book->defs[0x00027083]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x00027083]->nlen     = 25;
-  book->defs[0x00027083]->node     = (Node*) malloc(25 * sizeof(Node));
-  book->defs[0x00027083]->node[ 0] = (Node) {0xb0000001,0xa0000018};
-  book->defs[0x00027083]->node[ 1] = (Node) {0xb0000002,0xa0000017};
-  book->defs[0x00027083]->node[ 2] = (Node) {0xb0000003,0xa0000016};
-  book->defs[0x00027083]->node[ 3] = (Node) {0xb0000004,0xa0000015};
-  book->defs[0x00027083]->node[ 4] = (Node) {0xb0000005,0xa0000014};
-  book->defs[0x00027083]->node[ 5] = (Node) {0xb0000006,0xa0000013};
-  book->defs[0x00027083]->node[ 6] = (Node) {0xb0000007,0xa0000012};
-  book->defs[0x00027083]->node[ 7] = (Node) {0xb0000008,0xa0000011};
-  book->defs[0x00027083]->node[ 8] = (Node) {0xb0000009,0xa0000010};
-  book->defs[0x00027083]->node[ 9] = (Node) {0xb000000a,0xa000000f};
-  book->defs[0x00027083]->node[10] = (Node) {0xb000000b,0xa000000e};
-  book->defs[0x00027083]->node[11] = (Node) {0xa000000c,0xa000000d};
-  book->defs[0x00027083]->node[12] = (Node) {0x40000018,0x4000000d};
-  book->defs[0x00027083]->node[13] = (Node) {0x5000000c,0x4000000e};
-  book->defs[0x00027083]->node[14] = (Node) {0x5000000d,0x4000000f};
-  book->defs[0x00027083]->node[15] = (Node) {0x5000000e,0x40000010};
-  book->defs[0x00027083]->node[16] = (Node) {0x5000000f,0x40000011};
-  book->defs[0x00027083]->node[17] = (Node) {0x50000010,0x40000012};
-  book->defs[0x00027083]->node[18] = (Node) {0x50000011,0x40000013};
-  book->defs[0x00027083]->node[19] = (Node) {0x50000012,0x40000014};
-  book->defs[0x00027083]->node[20] = (Node) {0x50000013,0x40000015};
-  book->defs[0x00027083]->node[21] = (Node) {0x50000014,0x40000016};
-  book->defs[0x00027083]->node[22] = (Node) {0x50000015,0x40000017};
-  book->defs[0x00027083]->node[23] = (Node) {0x50000016,0x50000018};
-  book->defs[0x00027083]->node[24] = (Node) {0x4000000c,0x50000017};
+  0x00000019, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0xB0000001, 0xA0000018,  0xB0000002, 0xA0000017,  0xB0000003, 0xA0000016,  0xB0000004, 0xA0000015,
+  0xB0000005, 0xA0000014,  0xB0000006, 0xA0000013,  0xB0000007, 0xA0000012,  0xB0000008, 0xA0000011,
+  0xB0000009, 0xA0000010,  0xB000000A, 0xA000000F,  0xB000000B, 0xA000000E,  0xA000000C, 0xA000000D,
+  0x40000018, 0x4000000D,  0x5000000C, 0x4000000E,  0x5000000D, 0x4000000F,  0x5000000E, 0x40000010,
+  0x5000000F, 0x40000011,  0x50000010, 0x40000012,  0x50000011, 0x40000013,  0x50000012, 0x40000014,
+  0x50000013, 0x40000015,  0x50000014, 0x40000016,  0x50000015, 0x40000017,  0x50000016, 0x50000018,
+  0x4000000C, 0x50000017,
+  // .acts
   // c13
-  book->defs[0x00027084]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x00027084]->root     = 0xa0000000;
-  book->defs[0x00027084]->alen     = 0;
-  book->defs[0x00027084]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x00027084]->nlen     = 27;
-  book->defs[0x00027084]->node     = (Node*) malloc(27 * sizeof(Node));
-  book->defs[0x00027084]->node[ 0] = (Node) {0xb0000001,0xa000001a};
-  book->defs[0x00027084]->node[ 1] = (Node) {0xb0000002,0xa0000019};
-  book->defs[0x00027084]->node[ 2] = (Node) {0xb0000003,0xa0000018};
-  book->defs[0x00027084]->node[ 3] = (Node) {0xb0000004,0xa0000017};
-  book->defs[0x00027084]->node[ 4] = (Node) {0xb0000005,0xa0000016};
-  book->defs[0x00027084]->node[ 5] = (Node) {0xb0000006,0xa0000015};
-  book->defs[0x00027084]->node[ 6] = (Node) {0xb0000007,0xa0000014};
-  book->defs[0x00027084]->node[ 7] = (Node) {0xb0000008,0xa0000013};
-  book->defs[0x00027084]->node[ 8] = (Node) {0xb0000009,0xa0000012};
-  book->defs[0x00027084]->node[ 9] = (Node) {0xb000000a,0xa0000011};
-  book->defs[0x00027084]->node[10] = (Node) {0xb000000b,0xa0000010};
-  book->defs[0x00027084]->node[11] = (Node) {0xb000000c,0xa000000f};
-  book->defs[0x00027084]->node[12] = (Node) {0xa000000d,0xa000000e};
-  book->defs[0x00027084]->node[13] = (Node) {0x4000001a,0x4000000e};
-  book->defs[0x00027084]->node[14] = (Node) {0x5000000d,0x4000000f};
-  book->defs[0x00027084]->node[15] = (Node) {0x5000000e,0x40000010};
-  book->defs[0x00027084]->node[16] = (Node) {0x5000000f,0x40000011};
-  book->defs[0x00027084]->node[17] = (Node) {0x50000010,0x40000012};
-  book->defs[0x00027084]->node[18] = (Node) {0x50000011,0x40000013};
-  book->defs[0x00027084]->node[19] = (Node) {0x50000012,0x40000014};
-  book->defs[0x00027084]->node[20] = (Node) {0x50000013,0x40000015};
-  book->defs[0x00027084]->node[21] = (Node) {0x50000014,0x40000016};
-  book->defs[0x00027084]->node[22] = (Node) {0x50000015,0x40000017};
-  book->defs[0x00027084]->node[23] = (Node) {0x50000016,0x40000018};
-  book->defs[0x00027084]->node[24] = (Node) {0x50000017,0x40000019};
-  book->defs[0x00027084]->node[25] = (Node) {0x50000018,0x5000001a};
-  book->defs[0x00027084]->node[26] = (Node) {0x4000000d,0x50000019};
+  0x0000001B, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0xB0000001, 0xA000001A,  0xB0000002, 0xA0000019,  0xB0000003, 0xA0000018,  0xB0000004, 0xA0000017,
+  0xB0000005, 0xA0000016,  0xB0000006, 0xA0000015,  0xB0000007, 0xA0000014,  0xB0000008, 0xA0000013,
+  0xB0000009, 0xA0000012,  0xB000000A, 0xA0000011,  0xB000000B, 0xA0000010,  0xB000000C, 0xA000000F,
+  0xA000000D, 0xA000000E,  0x4000001A, 0x4000000E,  0x5000000D, 0x4000000F,  0x5000000E, 0x40000010,
+  0x5000000F, 0x40000011,  0x50000010, 0x40000012,  0x50000011, 0x40000013,  0x50000012, 0x40000014,
+  0x50000013, 0x40000015,  0x50000014, 0x40000016,  0x50000015, 0x40000017,  0x50000016, 0x40000018,
+  0x50000017, 0x40000019,  0x50000018, 0x5000001A,  0x4000000D, 0x50000019,
+  // .acts
   // c14
-  book->defs[0x00027085]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x00027085]->root     = 0xa0000000;
-  book->defs[0x00027085]->alen     = 0;
-  book->defs[0x00027085]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x00027085]->nlen     = 29;
-  book->defs[0x00027085]->node     = (Node*) malloc(29 * sizeof(Node));
-  book->defs[0x00027085]->node[ 0] = (Node) {0xb0000001,0xa000001c};
-  book->defs[0x00027085]->node[ 1] = (Node) {0xb0000002,0xa000001b};
-  book->defs[0x00027085]->node[ 2] = (Node) {0xb0000003,0xa000001a};
-  book->defs[0x00027085]->node[ 3] = (Node) {0xb0000004,0xa0000019};
-  book->defs[0x00027085]->node[ 4] = (Node) {0xb0000005,0xa0000018};
-  book->defs[0x00027085]->node[ 5] = (Node) {0xb0000006,0xa0000017};
-  book->defs[0x00027085]->node[ 6] = (Node) {0xb0000007,0xa0000016};
-  book->defs[0x00027085]->node[ 7] = (Node) {0xb0000008,0xa0000015};
-  book->defs[0x00027085]->node[ 8] = (Node) {0xb0000009,0xa0000014};
-  book->defs[0x00027085]->node[ 9] = (Node) {0xb000000a,0xa0000013};
-  book->defs[0x00027085]->node[10] = (Node) {0xb000000b,0xa0000012};
-  book->defs[0x00027085]->node[11] = (Node) {0xb000000c,0xa0000011};
-  book->defs[0x00027085]->node[12] = (Node) {0xb000000d,0xa0000010};
-  book->defs[0x00027085]->node[13] = (Node) {0xa000000e,0xa000000f};
-  book->defs[0x00027085]->node[14] = (Node) {0x4000001c,0x4000000f};
-  book->defs[0x00027085]->node[15] = (Node) {0x5000000e,0x40000010};
-  book->defs[0x00027085]->node[16] = (Node) {0x5000000f,0x40000011};
-  book->defs[0x00027085]->node[17] = (Node) {0x50000010,0x40000012};
-  book->defs[0x00027085]->node[18] = (Node) {0x50000011,0x40000013};
-  book->defs[0x00027085]->node[19] = (Node) {0x50000012,0x40000014};
-  book->defs[0x00027085]->node[20] = (Node) {0x50000013,0x40000015};
-  book->defs[0x00027085]->node[21] = (Node) {0x50000014,0x40000016};
-  book->defs[0x00027085]->node[22] = (Node) {0x50000015,0x40000017};
-  book->defs[0x00027085]->node[23] = (Node) {0x50000016,0x40000018};
-  book->defs[0x00027085]->node[24] = (Node) {0x50000017,0x40000019};
-  book->defs[0x00027085]->node[25] = (Node) {0x50000018,0x4000001a};
-  book->defs[0x00027085]->node[26] = (Node) {0x50000019,0x4000001b};
-  book->defs[0x00027085]->node[27] = (Node) {0x5000001a,0x5000001c};
-  book->defs[0x00027085]->node[28] = (Node) {0x4000000e,0x5000001b};
+  0x0000001D, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0xB0000001, 0xA000001C,  0xB0000002, 0xA000001B,  0xB0000003, 0xA000001A,  0xB0000004, 0xA0000019,
+  0xB0000005, 0xA0000018,  0xB0000006, 0xA0000017,  0xB0000007, 0xA0000016,  0xB0000008, 0xA0000015,
+  0xB0000009, 0xA0000014,  0xB000000A, 0xA0000013,  0xB000000B, 0xA0000012,  0xB000000C, 0xA0000011,
+  0xB000000D, 0xA0000010,  0xA000000E, 0xA000000F,  0x4000001C, 0x4000000F,  0x5000000E, 0x40000010,
+  0x5000000F, 0x40000011,  0x50000010, 0x40000012,  0x50000011, 0x40000013,  0x50000012, 0x40000014,
+  0x50000013, 0x40000015,  0x50000014, 0x40000016,  0x50000015, 0x40000017,  0x50000016, 0x40000018,
+  0x50000017, 0x40000019,  0x50000018, 0x4000001A,  0x50000019, 0x4000001B,  0x5000001A, 0x5000001C,
+  0x4000000E, 0x5000001B,
+  // .acts
   // c15
-  book->defs[0x00027086]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x00027086]->root     = 0xa0000000;
-  book->defs[0x00027086]->alen     = 0;
-  book->defs[0x00027086]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x00027086]->nlen     = 31;
-  book->defs[0x00027086]->node     = (Node*) malloc(31 * sizeof(Node));
-  book->defs[0x00027086]->node[ 0] = (Node) {0xb0000001,0xa000001e};
-  book->defs[0x00027086]->node[ 1] = (Node) {0xb0000002,0xa000001d};
-  book->defs[0x00027086]->node[ 2] = (Node) {0xb0000003,0xa000001c};
-  book->defs[0x00027086]->node[ 3] = (Node) {0xb0000004,0xa000001b};
-  book->defs[0x00027086]->node[ 4] = (Node) {0xb0000005,0xa000001a};
-  book->defs[0x00027086]->node[ 5] = (Node) {0xb0000006,0xa0000019};
-  book->defs[0x00027086]->node[ 6] = (Node) {0xb0000007,0xa0000018};
-  book->defs[0x00027086]->node[ 7] = (Node) {0xb0000008,0xa0000017};
-  book->defs[0x00027086]->node[ 8] = (Node) {0xb0000009,0xa0000016};
-  book->defs[0x00027086]->node[ 9] = (Node) {0xb000000a,0xa0000015};
-  book->defs[0x00027086]->node[10] = (Node) {0xb000000b,0xa0000014};
-  book->defs[0x00027086]->node[11] = (Node) {0xb000000c,0xa0000013};
-  book->defs[0x00027086]->node[12] = (Node) {0xb000000d,0xa0000012};
-  book->defs[0x00027086]->node[13] = (Node) {0xb000000e,0xa0000011};
-  book->defs[0x00027086]->node[14] = (Node) {0xa000000f,0xa0000010};
-  book->defs[0x00027086]->node[15] = (Node) {0x4000001e,0x40000010};
-  book->defs[0x00027086]->node[16] = (Node) {0x5000000f,0x40000011};
-  book->defs[0x00027086]->node[17] = (Node) {0x50000010,0x40000012};
-  book->defs[0x00027086]->node[18] = (Node) {0x50000011,0x40000013};
-  book->defs[0x00027086]->node[19] = (Node) {0x50000012,0x40000014};
-  book->defs[0x00027086]->node[20] = (Node) {0x50000013,0x40000015};
-  book->defs[0x00027086]->node[21] = (Node) {0x50000014,0x40000016};
-  book->defs[0x00027086]->node[22] = (Node) {0x50000015,0x40000017};
-  book->defs[0x00027086]->node[23] = (Node) {0x50000016,0x40000018};
-  book->defs[0x00027086]->node[24] = (Node) {0x50000017,0x40000019};
-  book->defs[0x00027086]->node[25] = (Node) {0x50000018,0x4000001a};
-  book->defs[0x00027086]->node[26] = (Node) {0x50000019,0x4000001b};
-  book->defs[0x00027086]->node[27] = (Node) {0x5000001a,0x4000001c};
-  book->defs[0x00027086]->node[28] = (Node) {0x5000001b,0x4000001d};
-  book->defs[0x00027086]->node[29] = (Node) {0x5000001c,0x5000001e};
-  book->defs[0x00027086]->node[30] = (Node) {0x4000000f,0x5000001d};
+  0x0000001F, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0xB0000001, 0xA000001E,  0xB0000002, 0xA000001D,  0xB0000003, 0xA000001C,  0xB0000004, 0xA000001B,
+  0xB0000005, 0xA000001A,  0xB0000006, 0xA0000019,  0xB0000007, 0xA0000018,  0xB0000008, 0xA0000017,
+  0xB0000009, 0xA0000016,  0xB000000A, 0xA0000015,  0xB000000B, 0xA0000014,  0xB000000C, 0xA0000013,
+  0xB000000D, 0xA0000012,  0xB000000E, 0xA0000011,  0xA000000F, 0xA0000010,  0x4000001E, 0x40000010,
+  0x5000000F, 0x40000011,  0x50000010, 0x40000012,  0x50000011, 0x40000013,  0x50000012, 0x40000014,
+  0x50000013, 0x40000015,  0x50000014, 0x40000016,  0x50000015, 0x40000017,  0x50000016, 0x40000018,
+  0x50000017, 0x40000019,  0x50000018, 0x4000001A,  0x50000019, 0x4000001B,  0x5000001A, 0x4000001C,
+  0x5000001B, 0x4000001D,  0x5000001C, 0x5000001E,  0x4000000F, 0x5000001D,
+  // .acts
   // c16
-  book->defs[0x00027087]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x00027087]->root     = 0xa0000000;
-  book->defs[0x00027087]->alen     = 0;
-  book->defs[0x00027087]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x00027087]->nlen     = 33;
-  book->defs[0x00027087]->node     = (Node*) malloc(33 * sizeof(Node));
-  book->defs[0x00027087]->node[ 0] = (Node) {0xb0000001,0xa0000020};
-  book->defs[0x00027087]->node[ 1] = (Node) {0xb0000002,0xa000001f};
-  book->defs[0x00027087]->node[ 2] = (Node) {0xb0000003,0xa000001e};
-  book->defs[0x00027087]->node[ 3] = (Node) {0xb0000004,0xa000001d};
-  book->defs[0x00027087]->node[ 4] = (Node) {0xb0000005,0xa000001c};
-  book->defs[0x00027087]->node[ 5] = (Node) {0xb0000006,0xa000001b};
-  book->defs[0x00027087]->node[ 6] = (Node) {0xb0000007,0xa000001a};
-  book->defs[0x00027087]->node[ 7] = (Node) {0xb0000008,0xa0000019};
-  book->defs[0x00027087]->node[ 8] = (Node) {0xb0000009,0xa0000018};
-  book->defs[0x00027087]->node[ 9] = (Node) {0xb000000a,0xa0000017};
-  book->defs[0x00027087]->node[10] = (Node) {0xb000000b,0xa0000016};
-  book->defs[0x00027087]->node[11] = (Node) {0xb000000c,0xa0000015};
-  book->defs[0x00027087]->node[12] = (Node) {0xb000000d,0xa0000014};
-  book->defs[0x00027087]->node[13] = (Node) {0xb000000e,0xa0000013};
-  book->defs[0x00027087]->node[14] = (Node) {0xb000000f,0xa0000012};
-  book->defs[0x00027087]->node[15] = (Node) {0xa0000010,0xa0000011};
-  book->defs[0x00027087]->node[16] = (Node) {0x00000000,0x40000011};
-  book->defs[0x00027087]->node[17] = (Node) {0x50000010,0x40000012};
-  book->defs[0x00027087]->node[18] = (Node) {0x50000011,0x40000013};
-  book->defs[0x00027087]->node[19] = (Node) {0x50000012,0x40000014};
-  book->defs[0x00027087]->node[20] = (Node) {0x50000013,0x40000015};
-  book->defs[0x00027087]->node[21] = (Node) {0x50000014,0x40000016};
-  book->defs[0x00027087]->node[22] = (Node) {0x50000015,0x40000017};
-  book->defs[0x00027087]->node[23] = (Node) {0x50000016,0x40000018};
-  book->defs[0x00027087]->node[24] = (Node) {0x50000017,0x40000019};
-  book->defs[0x00027087]->node[25] = (Node) {0x50000018,0x4000001a};
-  book->defs[0x00027087]->node[26] = (Node) {0x50000019,0x4000001b};
-  book->defs[0x00027087]->node[27] = (Node) {0x5000001a,0x4000001c};
-  book->defs[0x00027087]->node[28] = (Node) {0x5000001b,0x4000001d};
-  book->defs[0x00027087]->node[29] = (Node) {0x5000001c,0x4000001e};
-  book->defs[0x00027087]->node[30] = (Node) {0x5000001d,0x4000001f};
-  book->defs[0x00027087]->node[31] = (Node) {0x5000001e,0x50000020};
-  book->defs[0x00027087]->node[32] = (Node) {0x00000000,0x5000001f};
+  0x00000021, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0xB0000001, 0xA0000020,  0xB0000002, 0xA000001F,  0xB0000003, 0xA000001E,  0xB0000004, 0xA000001D,
+  0xB0000005, 0xA000001C,  0xB0000006, 0xA000001B,  0xB0000007, 0xA000001A,  0xB0000008, 0xA0000019,
+  0xB0000009, 0xA0000018,  0xB000000A, 0xA0000017,  0xB000000B, 0xA0000016,  0xB000000C, 0xA0000015,
+  0xB000000D, 0xA0000014,  0xB000000E, 0xA0000013,  0xB000000F, 0xA0000012,  0xA0000010, 0xA0000011,
+  0x00000000, 0x40000011,  0x50000010, 0x40000012,  0x50000011, 0x40000013,  0x50000012, 0x40000014,
+  0x50000013, 0x40000015,  0x50000014, 0x40000016,  0x50000015, 0x40000017,  0x50000016, 0x40000018,
+  0x50000017, 0x40000019,  0x50000018, 0x4000001A,  0x50000019, 0x4000001B,  0x5000001A, 0x4000001C,
+  0x5000001B, 0x4000001D,  0x5000001C, 0x4000001E,  0x5000001D, 0x4000001F,  0x5000001E, 0x50000020,
+  0x00000000, 0x5000001F,
+  // .acts
   // c17
-  book->defs[0x00027088]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x00027088]->root     = 0xa0000000;
-  book->defs[0x00027088]->alen     = 0;
-  book->defs[0x00027088]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x00027088]->nlen     = 35;
-  book->defs[0x00027088]->node     = (Node*) malloc(35 * sizeof(Node));
-  book->defs[0x00027088]->node[ 0] = (Node) {0xb0000001,0xa0000022};
-  book->defs[0x00027088]->node[ 1] = (Node) {0xb0000002,0xa0000021};
-  book->defs[0x00027088]->node[ 2] = (Node) {0xb0000003,0xa0000020};
-  book->defs[0x00027088]->node[ 3] = (Node) {0xb0000004,0xa000001f};
-  book->defs[0x00027088]->node[ 4] = (Node) {0xb0000005,0xa000001e};
-  book->defs[0x00027088]->node[ 5] = (Node) {0xb0000006,0xa000001d};
-  book->defs[0x00027088]->node[ 6] = (Node) {0xb0000007,0xa000001c};
-  book->defs[0x00027088]->node[ 7] = (Node) {0xb0000008,0xa000001b};
-  book->defs[0x00027088]->node[ 8] = (Node) {0xb0000009,0xa000001a};
-  book->defs[0x00027088]->node[ 9] = (Node) {0xb000000a,0xa0000019};
-  book->defs[0x00027088]->node[10] = (Node) {0xb000000b,0xa0000018};
-  book->defs[0x00027088]->node[11] = (Node) {0xb000000c,0xa0000017};
-  book->defs[0x00027088]->node[12] = (Node) {0xb000000d,0xa0000016};
-  book->defs[0x00027088]->node[13] = (Node) {0xb000000e,0xa0000015};
-  book->defs[0x00027088]->node[14] = (Node) {0xb000000f,0xa0000014};
-  book->defs[0x00027088]->node[15] = (Node) {0xb0000010,0xa0000013};
-  book->defs[0x00027088]->node[16] = (Node) {0xa0000011,0xa0000012};
-  book->defs[0x00027088]->node[17] = (Node) {0x40000022,0x40000012};
-  book->defs[0x00027088]->node[18] = (Node) {0x50000011,0x40000013};
-  book->defs[0x00027088]->node[19] = (Node) {0x50000012,0x40000014};
-  book->defs[0x00027088]->node[20] = (Node) {0x50000013,0x40000015};
-  book->defs[0x00027088]->node[21] = (Node) {0x50000014,0x40000016};
-  book->defs[0x00027088]->node[22] = (Node) {0x50000015,0x40000017};
-  book->defs[0x00027088]->node[23] = (Node) {0x50000016,0x40000018};
-  book->defs[0x00027088]->node[24] = (Node) {0x50000017,0x40000019};
-  book->defs[0x00027088]->node[25] = (Node) {0x50000018,0x4000001a};
-  book->defs[0x00027088]->node[26] = (Node) {0x50000019,0x4000001b};
-  book->defs[0x00027088]->node[27] = (Node) {0x5000001a,0x4000001c};
-  book->defs[0x00027088]->node[28] = (Node) {0x5000001b,0x4000001d};
-  book->defs[0x00027088]->node[29] = (Node) {0x5000001c,0x4000001e};
-  book->defs[0x00027088]->node[30] = (Node) {0x5000001d,0x4000001f};
-  book->defs[0x00027088]->node[31] = (Node) {0x5000001e,0x40000020};
-  book->defs[0x00027088]->node[32] = (Node) {0x5000001f,0x40000021};
-  book->defs[0x00027088]->node[33] = (Node) {0x50000020,0x50000022};
-  book->defs[0x00027088]->node[34] = (Node) {0x40000011,0x50000021};
+  0x00000023, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0xB0000001, 0xA0000022,  0xB0000002, 0xA0000021,  0xB0000003, 0xA0000020,  0xB0000004, 0xA000001F,
+  0xB0000005, 0xA000001E,  0xB0000006, 0xA000001D,  0xB0000007, 0xA000001C,  0xB0000008, 0xA000001B,
+  0xB0000009, 0xA000001A,  0xB000000A, 0xA0000019,  0xB000000B, 0xA0000018,  0xB000000C, 0xA0000017,
+  0xB000000D, 0xA0000016,  0xB000000E, 0xA0000015,  0xB000000F, 0xA0000014,  0xB0000010, 0xA0000013,
+  0xA0000011, 0xA0000012,  0x40000022, 0x40000012,  0x50000011, 0x40000013,  0x50000012, 0x40000014,
+  0x50000013, 0x40000015,  0x50000014, 0x40000016,  0x50000015, 0x40000017,  0x50000016, 0x40000018,
+  0x50000017, 0x40000019,  0x50000018, 0x4000001A,  0x50000019, 0x4000001B,  0x5000001A, 0x4000001C,
+  0x5000001B, 0x4000001D,  0x5000001C, 0x4000001E,  0x5000001D, 0x4000001F,  0x5000001E, 0x40000020,
+  0x5000001F, 0x40000021,  0x50000020, 0x50000022,  0x40000011, 0x50000021,
+  // .acts
   // c18
-  book->defs[0x00027089]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x00027089]->root     = 0xa0000000;
-  book->defs[0x00027089]->alen     = 0;
-  book->defs[0x00027089]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x00027089]->nlen     = 37;
-  book->defs[0x00027089]->node     = (Node*) malloc(37 * sizeof(Node));
-  book->defs[0x00027089]->node[ 0] = (Node) {0xb0000001,0xa0000024};
-  book->defs[0x00027089]->node[ 1] = (Node) {0xb0000002,0xa0000023};
-  book->defs[0x00027089]->node[ 2] = (Node) {0xb0000003,0xa0000022};
-  book->defs[0x00027089]->node[ 3] = (Node) {0xb0000004,0xa0000021};
-  book->defs[0x00027089]->node[ 4] = (Node) {0xb0000005,0xa0000020};
-  book->defs[0x00027089]->node[ 5] = (Node) {0xb0000006,0xa000001f};
-  book->defs[0x00027089]->node[ 6] = (Node) {0xb0000007,0xa000001e};
-  book->defs[0x00027089]->node[ 7] = (Node) {0xb0000008,0xa000001d};
-  book->defs[0x00027089]->node[ 8] = (Node) {0xb0000009,0xa000001c};
-  book->defs[0x00027089]->node[ 9] = (Node) {0xb000000a,0xa000001b};
-  book->defs[0x00027089]->node[10] = (Node) {0xb000000b,0xa000001a};
-  book->defs[0x00027089]->node[11] = (Node) {0xb000000c,0xa0000019};
-  book->defs[0x00027089]->node[12] = (Node) {0xb000000d,0xa0000018};
-  book->defs[0x00027089]->node[13] = (Node) {0xb000000e,0xa0000017};
-  book->defs[0x00027089]->node[14] = (Node) {0xb000000f,0xa0000016};
-  book->defs[0x00027089]->node[15] = (Node) {0xb0000010,0xa0000015};
-  book->defs[0x00027089]->node[16] = (Node) {0xb0000011,0xa0000014};
-  book->defs[0x00027089]->node[17] = (Node) {0xa0000012,0xa0000013};
-  book->defs[0x00027089]->node[18] = (Node) {0x40000024,0x40000013};
-  book->defs[0x00027089]->node[19] = (Node) {0x50000012,0x40000014};
-  book->defs[0x00027089]->node[20] = (Node) {0x50000013,0x40000015};
-  book->defs[0x00027089]->node[21] = (Node) {0x50000014,0x40000016};
-  book->defs[0x00027089]->node[22] = (Node) {0x50000015,0x40000017};
-  book->defs[0x00027089]->node[23] = (Node) {0x50000016,0x40000018};
-  book->defs[0x00027089]->node[24] = (Node) {0x50000017,0x40000019};
-  book->defs[0x00027089]->node[25] = (Node) {0x50000018,0x4000001a};
-  book->defs[0x00027089]->node[26] = (Node) {0x50000019,0x4000001b};
-  book->defs[0x00027089]->node[27] = (Node) {0x5000001a,0x4000001c};
-  book->defs[0x00027089]->node[28] = (Node) {0x5000001b,0x4000001d};
-  book->defs[0x00027089]->node[29] = (Node) {0x5000001c,0x4000001e};
-  book->defs[0x00027089]->node[30] = (Node) {0x5000001d,0x4000001f};
-  book->defs[0x00027089]->node[31] = (Node) {0x5000001e,0x40000020};
-  book->defs[0x00027089]->node[32] = (Node) {0x5000001f,0x40000021};
-  book->defs[0x00027089]->node[33] = (Node) {0x50000020,0x40000022};
-  book->defs[0x00027089]->node[34] = (Node) {0x50000021,0x40000023};
-  book->defs[0x00027089]->node[35] = (Node) {0x50000022,0x50000024};
-  book->defs[0x00027089]->node[36] = (Node) {0x40000012,0x50000023};
+  0x00000025, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0xB0000001, 0xA0000024,  0xB0000002, 0xA0000023,  0xB0000003, 0xA0000022,  0xB0000004, 0xA0000021,
+  0xB0000005, 0xA0000020,  0xB0000006, 0xA000001F,  0xB0000007, 0xA000001E,  0xB0000008, 0xA000001D,
+  0xB0000009, 0xA000001C,  0xB000000A, 0xA000001B,  0xB000000B, 0xA000001A,  0xB000000C, 0xA0000019,
+  0xB000000D, 0xA0000018,  0xB000000E, 0xA0000017,  0xB000000F, 0xA0000016,  0xB0000010, 0xA0000015,
+  0xB0000011, 0xA0000014,  0xA0000012, 0xA0000013,  0x40000024, 0x40000013,  0x50000012, 0x40000014,
+  0x50000013, 0x40000015,  0x50000014, 0x40000016,  0x50000015, 0x40000017,  0x50000016, 0x40000018,
+  0x50000017, 0x40000019,  0x50000018, 0x4000001A,  0x50000019, 0x4000001B,  0x5000001A, 0x4000001C,
+  0x5000001B, 0x4000001D,  0x5000001C, 0x4000001E,  0x5000001D, 0x4000001F,  0x5000001E, 0x40000020,
+  0x5000001F, 0x40000021,  0x50000020, 0x40000022,  0x50000021, 0x40000023,  0x50000022, 0x50000024,
+  0x40000012, 0x50000023,
+  // .acts
   // c19
-  book->defs[0x0002708a]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x0002708a]->root     = 0xa0000000;
-  book->defs[0x0002708a]->alen     = 0;
-  book->defs[0x0002708a]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x0002708a]->nlen     = 39;
-  book->defs[0x0002708a]->node     = (Node*) malloc(39 * sizeof(Node));
-  book->defs[0x0002708a]->node[ 0] = (Node) {0xb0000001,0xa0000026};
-  book->defs[0x0002708a]->node[ 1] = (Node) {0xb0000002,0xa0000025};
-  book->defs[0x0002708a]->node[ 2] = (Node) {0xb0000003,0xa0000024};
-  book->defs[0x0002708a]->node[ 3] = (Node) {0xb0000004,0xa0000023};
-  book->defs[0x0002708a]->node[ 4] = (Node) {0xb0000005,0xa0000022};
-  book->defs[0x0002708a]->node[ 5] = (Node) {0xb0000006,0xa0000021};
-  book->defs[0x0002708a]->node[ 6] = (Node) {0xb0000007,0xa0000020};
-  book->defs[0x0002708a]->node[ 7] = (Node) {0xb0000008,0xa000001f};
-  book->defs[0x0002708a]->node[ 8] = (Node) {0xb0000009,0xa000001e};
-  book->defs[0x0002708a]->node[ 9] = (Node) {0xb000000a,0xa000001d};
-  book->defs[0x0002708a]->node[10] = (Node) {0xb000000b,0xa000001c};
-  book->defs[0x0002708a]->node[11] = (Node) {0xb000000c,0xa000001b};
-  book->defs[0x0002708a]->node[12] = (Node) {0xb000000d,0xa000001a};
-  book->defs[0x0002708a]->node[13] = (Node) {0xb000000e,0xa0000019};
-  book->defs[0x0002708a]->node[14] = (Node) {0xb000000f,0xa0000018};
-  book->defs[0x0002708a]->node[15] = (Node) {0xb0000010,0xa0000017};
-  book->defs[0x0002708a]->node[16] = (Node) {0xb0000011,0xa0000016};
-  book->defs[0x0002708a]->node[17] = (Node) {0xb0000012,0xa0000015};
-  book->defs[0x0002708a]->node[18] = (Node) {0xa0000013,0xa0000014};
-  book->defs[0x0002708a]->node[19] = (Node) {0x40000026,0x40000014};
-  book->defs[0x0002708a]->node[20] = (Node) {0x50000013,0x40000015};
-  book->defs[0x0002708a]->node[21] = (Node) {0x50000014,0x40000016};
-  book->defs[0x0002708a]->node[22] = (Node) {0x50000015,0x40000017};
-  book->defs[0x0002708a]->node[23] = (Node) {0x50000016,0x40000018};
-  book->defs[0x0002708a]->node[24] = (Node) {0x50000017,0x40000019};
-  book->defs[0x0002708a]->node[25] = (Node) {0x50000018,0x4000001a};
-  book->defs[0x0002708a]->node[26] = (Node) {0x50000019,0x4000001b};
-  book->defs[0x0002708a]->node[27] = (Node) {0x5000001a,0x4000001c};
-  book->defs[0x0002708a]->node[28] = (Node) {0x5000001b,0x4000001d};
-  book->defs[0x0002708a]->node[29] = (Node) {0x5000001c,0x4000001e};
-  book->defs[0x0002708a]->node[30] = (Node) {0x5000001d,0x4000001f};
-  book->defs[0x0002708a]->node[31] = (Node) {0x5000001e,0x40000020};
-  book->defs[0x0002708a]->node[32] = (Node) {0x5000001f,0x40000021};
-  book->defs[0x0002708a]->node[33] = (Node) {0x50000020,0x40000022};
-  book->defs[0x0002708a]->node[34] = (Node) {0x50000021,0x40000023};
-  book->defs[0x0002708a]->node[35] = (Node) {0x50000022,0x40000024};
-  book->defs[0x0002708a]->node[36] = (Node) {0x50000023,0x40000025};
-  book->defs[0x0002708a]->node[37] = (Node) {0x50000024,0x50000026};
-  book->defs[0x0002708a]->node[38] = (Node) {0x40000013,0x50000025};
+  0x00000027, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0xB0000001, 0xA0000026,  0xB0000002, 0xA0000025,  0xB0000003, 0xA0000024,  0xB0000004, 0xA0000023,
+  0xB0000005, 0xA0000022,  0xB0000006, 0xA0000021,  0xB0000007, 0xA0000020,  0xB0000008, 0xA000001F,
+  0xB0000009, 0xA000001E,  0xB000000A, 0xA000001D,  0xB000000B, 0xA000001C,  0xB000000C, 0xA000001B,
+  0xB000000D, 0xA000001A,  0xB000000E, 0xA0000019,  0xB000000F, 0xA0000018,  0xB0000010, 0xA0000017,
+  0xB0000011, 0xA0000016,  0xB0000012, 0xA0000015,  0xA0000013, 0xA0000014,  0x40000026, 0x40000014,
+  0x50000013, 0x40000015,  0x50000014, 0x40000016,  0x50000015, 0x40000017,  0x50000016, 0x40000018,
+  0x50000017, 0x40000019,  0x50000018, 0x4000001A,  0x50000019, 0x4000001B,  0x5000001A, 0x4000001C,
+  0x5000001B, 0x4000001D,  0x5000001C, 0x4000001E,  0x5000001D, 0x4000001F,  0x5000001E, 0x40000020,
+  0x5000001F, 0x40000021,  0x50000020, 0x40000022,  0x50000021, 0x40000023,  0x50000022, 0x40000024,
+  0x50000023, 0x40000025,  0x50000024, 0x50000026,  0x40000013, 0x50000025,
+  // .acts
   // c20
-  book->defs[0x000270c1]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x000270c1]->root     = 0xa0000000;
-  book->defs[0x000270c1]->alen     = 0;
-  book->defs[0x000270c1]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x000270c1]->nlen     = 41;
-  book->defs[0x000270c1]->node     = (Node*) malloc(41 * sizeof(Node));
-  book->defs[0x000270c1]->node[ 0] = (Node) {0xb0000001,0xa0000028};
-  book->defs[0x000270c1]->node[ 1] = (Node) {0xb0000002,0xa0000027};
-  book->defs[0x000270c1]->node[ 2] = (Node) {0xb0000003,0xa0000026};
-  book->defs[0x000270c1]->node[ 3] = (Node) {0xb0000004,0xa0000025};
-  book->defs[0x000270c1]->node[ 4] = (Node) {0xb0000005,0xa0000024};
-  book->defs[0x000270c1]->node[ 5] = (Node) {0xb0000006,0xa0000023};
-  book->defs[0x000270c1]->node[ 6] = (Node) {0xb0000007,0xa0000022};
-  book->defs[0x000270c1]->node[ 7] = (Node) {0xb0000008,0xa0000021};
-  book->defs[0x000270c1]->node[ 8] = (Node) {0xb0000009,0xa0000020};
-  book->defs[0x000270c1]->node[ 9] = (Node) {0xb000000a,0xa000001f};
-  book->defs[0x000270c1]->node[10] = (Node) {0xb000000b,0xa000001e};
-  book->defs[0x000270c1]->node[11] = (Node) {0xb000000c,0xa000001d};
-  book->defs[0x000270c1]->node[12] = (Node) {0xb000000d,0xa000001c};
-  book->defs[0x000270c1]->node[13] = (Node) {0xb000000e,0xa000001b};
-  book->defs[0x000270c1]->node[14] = (Node) {0xb000000f,0xa000001a};
-  book->defs[0x000270c1]->node[15] = (Node) {0xb0000010,0xa0000019};
-  book->defs[0x000270c1]->node[16] = (Node) {0xb0000011,0xa0000018};
-  book->defs[0x000270c1]->node[17] = (Node) {0xb0000012,0xa0000017};
-  book->defs[0x000270c1]->node[18] = (Node) {0xb0000013,0xa0000016};
-  book->defs[0x000270c1]->node[19] = (Node) {0xa0000014,0xa0000015};
-  book->defs[0x000270c1]->node[20] = (Node) {0x40000028,0x40000015};
-  book->defs[0x000270c1]->node[21] = (Node) {0x50000014,0x40000016};
-  book->defs[0x000270c1]->node[22] = (Node) {0x50000015,0x40000017};
-  book->defs[0x000270c1]->node[23] = (Node) {0x50000016,0x40000018};
-  book->defs[0x000270c1]->node[24] = (Node) {0x50000017,0x40000019};
-  book->defs[0x000270c1]->node[25] = (Node) {0x50000018,0x4000001a};
-  book->defs[0x000270c1]->node[26] = (Node) {0x50000019,0x4000001b};
-  book->defs[0x000270c1]->node[27] = (Node) {0x5000001a,0x4000001c};
-  book->defs[0x000270c1]->node[28] = (Node) {0x5000001b,0x4000001d};
-  book->defs[0x000270c1]->node[29] = (Node) {0x5000001c,0x4000001e};
-  book->defs[0x000270c1]->node[30] = (Node) {0x5000001d,0x4000001f};
-  book->defs[0x000270c1]->node[31] = (Node) {0x5000001e,0x40000020};
-  book->defs[0x000270c1]->node[32] = (Node) {0x5000001f,0x40000021};
-  book->defs[0x000270c1]->node[33] = (Node) {0x50000020,0x40000022};
-  book->defs[0x000270c1]->node[34] = (Node) {0x50000021,0x40000023};
-  book->defs[0x000270c1]->node[35] = (Node) {0x50000022,0x40000024};
-  book->defs[0x000270c1]->node[36] = (Node) {0x50000023,0x40000025};
-  book->defs[0x000270c1]->node[37] = (Node) {0x50000024,0x40000026};
-  book->defs[0x000270c1]->node[38] = (Node) {0x50000025,0x40000027};
-  book->defs[0x000270c1]->node[39] = (Node) {0x50000026,0x50000028};
-  book->defs[0x000270c1]->node[40] = (Node) {0x40000014,0x50000027};
+  0x00000029, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0xB0000001, 0xA0000028,  0xB0000002, 0xA0000027,  0xB0000003, 0xA0000026,  0xB0000004, 0xA0000025,
+  0xB0000005, 0xA0000024,  0xB0000006, 0xA0000023,  0xB0000007, 0xA0000022,  0xB0000008, 0xA0000021,
+  0xB0000009, 0xA0000020,  0xB000000A, 0xA000001F,  0xB000000B, 0xA000001E,  0xB000000C, 0xA000001D,
+  0xB000000D, 0xA000001C,  0xB000000E, 0xA000001B,  0xB000000F, 0xA000001A,  0xB0000010, 0xA0000019,
+  0xB0000011, 0xA0000018,  0xB0000012, 0xA0000017,  0xB0000013, 0xA0000016,  0xA0000014, 0xA0000015,
+  0x40000028, 0x40000015,  0x50000014, 0x40000016,  0x50000015, 0x40000017,  0x50000016, 0x40000018,
+  0x50000017, 0x40000019,  0x50000018, 0x4000001A,  0x50000019, 0x4000001B,  0x5000001A, 0x4000001C,
+  0x5000001B, 0x4000001D,  0x5000001C, 0x4000001E,  0x5000001D, 0x4000001F,  0x5000001E, 0x40000020,
+  0x5000001F, 0x40000021,  0x50000020, 0x40000022,  0x50000021, 0x40000023,  0x50000022, 0x40000024,
+  0x50000023, 0x40000025,  0x50000024, 0x40000026,  0x50000025, 0x40000027,  0x50000026, 0x50000028,
+  0x40000014, 0x50000027,
+  // .acts
   // c21
-  book->defs[0x000270c2]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x000270c2]->root     = 0xa0000000;
-  book->defs[0x000270c2]->alen     = 0;
-  book->defs[0x000270c2]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x000270c2]->nlen     = 43;
-  book->defs[0x000270c2]->node     = (Node*) malloc(43 * sizeof(Node));
-  book->defs[0x000270c2]->node[ 0] = (Node) {0xb0000001,0xa000002a};
-  book->defs[0x000270c2]->node[ 1] = (Node) {0xb0000002,0xa0000029};
-  book->defs[0x000270c2]->node[ 2] = (Node) {0xb0000003,0xa0000028};
-  book->defs[0x000270c2]->node[ 3] = (Node) {0xb0000004,0xa0000027};
-  book->defs[0x000270c2]->node[ 4] = (Node) {0xb0000005,0xa0000026};
-  book->defs[0x000270c2]->node[ 5] = (Node) {0xb0000006,0xa0000025};
-  book->defs[0x000270c2]->node[ 6] = (Node) {0xb0000007,0xa0000024};
-  book->defs[0x000270c2]->node[ 7] = (Node) {0xb0000008,0xa0000023};
-  book->defs[0x000270c2]->node[ 8] = (Node) {0xb0000009,0xa0000022};
-  book->defs[0x000270c2]->node[ 9] = (Node) {0xb000000a,0xa0000021};
-  book->defs[0x000270c2]->node[10] = (Node) {0xb000000b,0xa0000020};
-  book->defs[0x000270c2]->node[11] = (Node) {0xb000000c,0xa000001f};
-  book->defs[0x000270c2]->node[12] = (Node) {0xb000000d,0xa000001e};
-  book->defs[0x000270c2]->node[13] = (Node) {0xb000000e,0xa000001d};
-  book->defs[0x000270c2]->node[14] = (Node) {0xb000000f,0xa000001c};
-  book->defs[0x000270c2]->node[15] = (Node) {0xb0000010,0xa000001b};
-  book->defs[0x000270c2]->node[16] = (Node) {0xb0000011,0xa000001a};
-  book->defs[0x000270c2]->node[17] = (Node) {0xb0000012,0xa0000019};
-  book->defs[0x000270c2]->node[18] = (Node) {0xb0000013,0xa0000018};
-  book->defs[0x000270c2]->node[19] = (Node) {0xb0000014,0xa0000017};
-  book->defs[0x000270c2]->node[20] = (Node) {0xa0000015,0xa0000016};
-  book->defs[0x000270c2]->node[21] = (Node) {0x4000002a,0x40000016};
-  book->defs[0x000270c2]->node[22] = (Node) {0x50000015,0x40000017};
-  book->defs[0x000270c2]->node[23] = (Node) {0x50000016,0x40000018};
-  book->defs[0x000270c2]->node[24] = (Node) {0x50000017,0x40000019};
-  book->defs[0x000270c2]->node[25] = (Node) {0x50000018,0x4000001a};
-  book->defs[0x000270c2]->node[26] = (Node) {0x50000019,0x4000001b};
-  book->defs[0x000270c2]->node[27] = (Node) {0x5000001a,0x4000001c};
-  book->defs[0x000270c2]->node[28] = (Node) {0x5000001b,0x4000001d};
-  book->defs[0x000270c2]->node[29] = (Node) {0x5000001c,0x4000001e};
-  book->defs[0x000270c2]->node[30] = (Node) {0x5000001d,0x4000001f};
-  book->defs[0x000270c2]->node[31] = (Node) {0x5000001e,0x40000020};
-  book->defs[0x000270c2]->node[32] = (Node) {0x5000001f,0x40000021};
-  book->defs[0x000270c2]->node[33] = (Node) {0x50000020,0x40000022};
-  book->defs[0x000270c2]->node[34] = (Node) {0x50000021,0x40000023};
-  book->defs[0x000270c2]->node[35] = (Node) {0x50000022,0x40000024};
-  book->defs[0x000270c2]->node[36] = (Node) {0x50000023,0x40000025};
-  book->defs[0x000270c2]->node[37] = (Node) {0x50000024,0x40000026};
-  book->defs[0x000270c2]->node[38] = (Node) {0x50000025,0x40000027};
-  book->defs[0x000270c2]->node[39] = (Node) {0x50000026,0x40000028};
-  book->defs[0x000270c2]->node[40] = (Node) {0x50000027,0x40000029};
-  book->defs[0x000270c2]->node[41] = (Node) {0x50000028,0x5000002a};
-  book->defs[0x000270c2]->node[42] = (Node) {0x40000015,0x50000029};
+  0x0000002B, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0xB0000001, 0xA000002A,  0xB0000002, 0xA0000029,  0xB0000003, 0xA0000028,  0xB0000004, 0xA0000027,
+  0xB0000005, 0xA0000026,  0xB0000006, 0xA0000025,  0xB0000007, 0xA0000024,  0xB0000008, 0xA0000023,
+  0xB0000009, 0xA0000022,  0xB000000A, 0xA0000021,  0xB000000B, 0xA0000020,  0xB000000C, 0xA000001F,
+  0xB000000D, 0xA000001E,  0xB000000E, 0xA000001D,  0xB000000F, 0xA000001C,  0xB0000010, 0xA000001B,
+  0xB0000011, 0xA000001A,  0xB0000012, 0xA0000019,  0xB0000013, 0xA0000018,  0xB0000014, 0xA0000017,
+  0xA0000015, 0xA0000016,  0x4000002A, 0x40000016,  0x50000015, 0x40000017,  0x50000016, 0x40000018,
+  0x50000017, 0x40000019,  0x50000018, 0x4000001A,  0x50000019, 0x4000001B,  0x5000001A, 0x4000001C,
+  0x5000001B, 0x4000001D,  0x5000001C, 0x4000001E,  0x5000001D, 0x4000001F,  0x5000001E, 0x40000020,
+  0x5000001F, 0x40000021,  0x50000020, 0x40000022,  0x50000021, 0x40000023,  0x50000022, 0x40000024,
+  0x50000023, 0x40000025,  0x50000024, 0x40000026,  0x50000025, 0x40000027,  0x50000026, 0x40000028,
+  0x50000027, 0x40000029,  0x50000028, 0x5000002A,  0x40000015, 0x50000029,
+  // .acts
   // c22
-  book->defs[0x000270c3]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x000270c3]->root     = 0xa0000000;
-  book->defs[0x000270c3]->alen     = 0;
-  book->defs[0x000270c3]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x000270c3]->nlen     = 45;
-  book->defs[0x000270c3]->node     = (Node*) malloc(45 * sizeof(Node));
-  book->defs[0x000270c3]->node[ 0] = (Node) {0xb0000001,0xa000002c};
-  book->defs[0x000270c3]->node[ 1] = (Node) {0xb0000002,0xa000002b};
-  book->defs[0x000270c3]->node[ 2] = (Node) {0xb0000003,0xa000002a};
-  book->defs[0x000270c3]->node[ 3] = (Node) {0xb0000004,0xa0000029};
-  book->defs[0x000270c3]->node[ 4] = (Node) {0xb0000005,0xa0000028};
-  book->defs[0x000270c3]->node[ 5] = (Node) {0xb0000006,0xa0000027};
-  book->defs[0x000270c3]->node[ 6] = (Node) {0xb0000007,0xa0000026};
-  book->defs[0x000270c3]->node[ 7] = (Node) {0xb0000008,0xa0000025};
-  book->defs[0x000270c3]->node[ 8] = (Node) {0xb0000009,0xa0000024};
-  book->defs[0x000270c3]->node[ 9] = (Node) {0xb000000a,0xa0000023};
-  book->defs[0x000270c3]->node[10] = (Node) {0xb000000b,0xa0000022};
-  book->defs[0x000270c3]->node[11] = (Node) {0xb000000c,0xa0000021};
-  book->defs[0x000270c3]->node[12] = (Node) {0xb000000d,0xa0000020};
-  book->defs[0x000270c3]->node[13] = (Node) {0xb000000e,0xa000001f};
-  book->defs[0x000270c3]->node[14] = (Node) {0xb000000f,0xa000001e};
-  book->defs[0x000270c3]->node[15] = (Node) {0xb0000010,0xa000001d};
-  book->defs[0x000270c3]->node[16] = (Node) {0xb0000011,0xa000001c};
-  book->defs[0x000270c3]->node[17] = (Node) {0xb0000012,0xa000001b};
-  book->defs[0x000270c3]->node[18] = (Node) {0xb0000013,0xa000001a};
-  book->defs[0x000270c3]->node[19] = (Node) {0xb0000014,0xa0000019};
-  book->defs[0x000270c3]->node[20] = (Node) {0xb0000015,0xa0000018};
-  book->defs[0x000270c3]->node[21] = (Node) {0xa0000016,0xa0000017};
-  book->defs[0x000270c3]->node[22] = (Node) {0x4000002c,0x40000017};
-  book->defs[0x000270c3]->node[23] = (Node) {0x50000016,0x40000018};
-  book->defs[0x000270c3]->node[24] = (Node) {0x50000017,0x40000019};
-  book->defs[0x000270c3]->node[25] = (Node) {0x50000018,0x4000001a};
-  book->defs[0x000270c3]->node[26] = (Node) {0x50000019,0x4000001b};
-  book->defs[0x000270c3]->node[27] = (Node) {0x5000001a,0x4000001c};
-  book->defs[0x000270c3]->node[28] = (Node) {0x5000001b,0x4000001d};
-  book->defs[0x000270c3]->node[29] = (Node) {0x5000001c,0x4000001e};
-  book->defs[0x000270c3]->node[30] = (Node) {0x5000001d,0x4000001f};
-  book->defs[0x000270c3]->node[31] = (Node) {0x5000001e,0x40000020};
-  book->defs[0x000270c3]->node[32] = (Node) {0x5000001f,0x40000021};
-  book->defs[0x000270c3]->node[33] = (Node) {0x50000020,0x40000022};
-  book->defs[0x000270c3]->node[34] = (Node) {0x50000021,0x40000023};
-  book->defs[0x000270c3]->node[35] = (Node) {0x50000022,0x40000024};
-  book->defs[0x000270c3]->node[36] = (Node) {0x50000023,0x40000025};
-  book->defs[0x000270c3]->node[37] = (Node) {0x50000024,0x40000026};
-  book->defs[0x000270c3]->node[38] = (Node) {0x50000025,0x40000027};
-  book->defs[0x000270c3]->node[39] = (Node) {0x50000026,0x40000028};
-  book->defs[0x000270c3]->node[40] = (Node) {0x50000027,0x40000029};
-  book->defs[0x000270c3]->node[41] = (Node) {0x50000028,0x4000002a};
-  book->defs[0x000270c3]->node[42] = (Node) {0x50000029,0x4000002b};
-  book->defs[0x000270c3]->node[43] = (Node) {0x5000002a,0x5000002c};
-  book->defs[0x000270c3]->node[44] = (Node) {0x40000016,0x5000002b};
+  0x0000002D, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0xB0000001, 0xA000002C,  0xB0000002, 0xA000002B,  0xB0000003, 0xA000002A,  0xB0000004, 0xA0000029,
+  0xB0000005, 0xA0000028,  0xB0000006, 0xA0000027,  0xB0000007, 0xA0000026,  0xB0000008, 0xA0000025,
+  0xB0000009, 0xA0000024,  0xB000000A, 0xA0000023,  0xB000000B, 0xA0000022,  0xB000000C, 0xA0000021,
+  0xB000000D, 0xA0000020,  0xB000000E, 0xA000001F,  0xB000000F, 0xA000001E,  0xB0000010, 0xA000001D,
+  0xB0000011, 0xA000001C,  0xB0000012, 0xA000001B,  0xB0000013, 0xA000001A,  0xB0000014, 0xA0000019,
+  0xB0000015, 0xA0000018,  0xA0000016, 0xA0000017,  0x4000002C, 0x40000017,  0x50000016, 0x40000018,
+  0x50000017, 0x40000019,  0x50000018, 0x4000001A,  0x50000019, 0x4000001B,  0x5000001A, 0x4000001C,
+  0x5000001B, 0x4000001D,  0x5000001C, 0x4000001E,  0x5000001D, 0x4000001F,  0x5000001E, 0x40000020,
+  0x5000001F, 0x40000021,  0x50000020, 0x40000022,  0x50000021, 0x40000023,  0x50000022, 0x40000024,
+  0x50000023, 0x40000025,  0x50000024, 0x40000026,  0x50000025, 0x40000027,  0x50000026, 0x40000028,
+  0x50000027, 0x40000029,  0x50000028, 0x4000002A,  0x50000029, 0x4000002B,  0x5000002A, 0x5000002C,
+  0x40000016, 0x5000002B,
+  // .acts
   // c23
-  book->defs[0x000270c4]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x000270c4]->root     = 0xa0000000;
-  book->defs[0x000270c4]->alen     = 0;
-  book->defs[0x000270c4]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x000270c4]->nlen     = 47;
-  book->defs[0x000270c4]->node     = (Node*) malloc(47 * sizeof(Node));
-  book->defs[0x000270c4]->node[ 0] = (Node) {0xb0000001,0xa000002e};
-  book->defs[0x000270c4]->node[ 1] = (Node) {0xb0000002,0xa000002d};
-  book->defs[0x000270c4]->node[ 2] = (Node) {0xb0000003,0xa000002c};
-  book->defs[0x000270c4]->node[ 3] = (Node) {0xb0000004,0xa000002b};
-  book->defs[0x000270c4]->node[ 4] = (Node) {0xb0000005,0xa000002a};
-  book->defs[0x000270c4]->node[ 5] = (Node) {0xb0000006,0xa0000029};
-  book->defs[0x000270c4]->node[ 6] = (Node) {0xb0000007,0xa0000028};
-  book->defs[0x000270c4]->node[ 7] = (Node) {0xb0000008,0xa0000027};
-  book->defs[0x000270c4]->node[ 8] = (Node) {0xb0000009,0xa0000026};
-  book->defs[0x000270c4]->node[ 9] = (Node) {0xb000000a,0xa0000025};
-  book->defs[0x000270c4]->node[10] = (Node) {0xb000000b,0xa0000024};
-  book->defs[0x000270c4]->node[11] = (Node) {0xb000000c,0xa0000023};
-  book->defs[0x000270c4]->node[12] = (Node) {0xb000000d,0xa0000022};
-  book->defs[0x000270c4]->node[13] = (Node) {0xb000000e,0xa0000021};
-  book->defs[0x000270c4]->node[14] = (Node) {0xb000000f,0xa0000020};
-  book->defs[0x000270c4]->node[15] = (Node) {0xb0000010,0xa000001f};
-  book->defs[0x000270c4]->node[16] = (Node) {0xb0000011,0xa000001e};
-  book->defs[0x000270c4]->node[17] = (Node) {0xb0000012,0xa000001d};
-  book->defs[0x000270c4]->node[18] = (Node) {0xb0000013,0xa000001c};
-  book->defs[0x000270c4]->node[19] = (Node) {0xb0000014,0xa000001b};
-  book->defs[0x000270c4]->node[20] = (Node) {0xb0000015,0xa000001a};
-  book->defs[0x000270c4]->node[21] = (Node) {0xb0000016,0xa0000019};
-  book->defs[0x000270c4]->node[22] = (Node) {0xa0000017,0xa0000018};
-  book->defs[0x000270c4]->node[23] = (Node) {0x4000002e,0x40000018};
-  book->defs[0x000270c4]->node[24] = (Node) {0x50000017,0x40000019};
-  book->defs[0x000270c4]->node[25] = (Node) {0x50000018,0x4000001a};
-  book->defs[0x000270c4]->node[26] = (Node) {0x50000019,0x4000001b};
-  book->defs[0x000270c4]->node[27] = (Node) {0x5000001a,0x4000001c};
-  book->defs[0x000270c4]->node[28] = (Node) {0x5000001b,0x4000001d};
-  book->defs[0x000270c4]->node[29] = (Node) {0x5000001c,0x4000001e};
-  book->defs[0x000270c4]->node[30] = (Node) {0x5000001d,0x4000001f};
-  book->defs[0x000270c4]->node[31] = (Node) {0x5000001e,0x40000020};
-  book->defs[0x000270c4]->node[32] = (Node) {0x5000001f,0x40000021};
-  book->defs[0x000270c4]->node[33] = (Node) {0x50000020,0x40000022};
-  book->defs[0x000270c4]->node[34] = (Node) {0x50000021,0x40000023};
-  book->defs[0x000270c4]->node[35] = (Node) {0x50000022,0x40000024};
-  book->defs[0x000270c4]->node[36] = (Node) {0x50000023,0x40000025};
-  book->defs[0x000270c4]->node[37] = (Node) {0x50000024,0x40000026};
-  book->defs[0x000270c4]->node[38] = (Node) {0x50000025,0x40000027};
-  book->defs[0x000270c4]->node[39] = (Node) {0x50000026,0x40000028};
-  book->defs[0x000270c4]->node[40] = (Node) {0x50000027,0x40000029};
-  book->defs[0x000270c4]->node[41] = (Node) {0x50000028,0x4000002a};
-  book->defs[0x000270c4]->node[42] = (Node) {0x50000029,0x4000002b};
-  book->defs[0x000270c4]->node[43] = (Node) {0x5000002a,0x4000002c};
-  book->defs[0x000270c4]->node[44] = (Node) {0x5000002b,0x4000002d};
-  book->defs[0x000270c4]->node[45] = (Node) {0x5000002c,0x5000002e};
-  book->defs[0x000270c4]->node[46] = (Node) {0x40000017,0x5000002d};
+  0x0000002F, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0xB0000001, 0xA000002E,  0xB0000002, 0xA000002D,  0xB0000003, 0xA000002C,  0xB0000004, 0xA000002B,
+  0xB0000005, 0xA000002A,  0xB0000006, 0xA0000029,  0xB0000007, 0xA0000028,  0xB0000008, 0xA0000027,
+  0xB0000009, 0xA0000026,  0xB000000A, 0xA0000025,  0xB000000B, 0xA0000024,  0xB000000C, 0xA0000023,
+  0xB000000D, 0xA0000022,  0xB000000E, 0xA0000021,  0xB000000F, 0xA0000020,  0xB0000010, 0xA000001F,
+  0xB0000011, 0xA000001E,  0xB0000012, 0xA000001D,  0xB0000013, 0xA000001C,  0xB0000014, 0xA000001B,
+  0xB0000015, 0xA000001A,  0xB0000016, 0xA0000019,  0xA0000017, 0xA0000018,  0x4000002E, 0x40000018,
+  0x50000017, 0x40000019,  0x50000018, 0x4000001A,  0x50000019, 0x4000001B,  0x5000001A, 0x4000001C,
+  0x5000001B, 0x4000001D,  0x5000001C, 0x4000001E,  0x5000001D, 0x4000001F,  0x5000001E, 0x40000020,
+  0x5000001F, 0x40000021,  0x50000020, 0x40000022,  0x50000021, 0x40000023,  0x50000022, 0x40000024,
+  0x50000023, 0x40000025,  0x50000024, 0x40000026,  0x50000025, 0x40000027,  0x50000026, 0x40000028,
+  0x50000027, 0x40000029,  0x50000028, 0x4000002A,  0x50000029, 0x4000002B,  0x5000002A, 0x4000002C,
+  0x5000002B, 0x4000002D,  0x5000002C, 0x5000002E,  0x40000017, 0x5000002D,
+  // .acts
   // c24
-  book->defs[0x000270c5]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x000270c5]->root     = 0xa0000000;
-  book->defs[0x000270c5]->alen     = 0;
-  book->defs[0x000270c5]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x000270c5]->nlen     = 49;
-  book->defs[0x000270c5]->node     = (Node*) malloc(49 * sizeof(Node));
-  book->defs[0x000270c5]->node[ 0] = (Node) {0xb0000001,0xa0000030};
-  book->defs[0x000270c5]->node[ 1] = (Node) {0xb0000002,0xa000002f};
-  book->defs[0x000270c5]->node[ 2] = (Node) {0xb0000003,0xa000002e};
-  book->defs[0x000270c5]->node[ 3] = (Node) {0xb0000004,0xa000002d};
-  book->defs[0x000270c5]->node[ 4] = (Node) {0xb0000005,0xa000002c};
-  book->defs[0x000270c5]->node[ 5] = (Node) {0xb0000006,0xa000002b};
-  book->defs[0x000270c5]->node[ 6] = (Node) {0xb0000007,0xa000002a};
-  book->defs[0x000270c5]->node[ 7] = (Node) {0xb0000008,0xa0000029};
-  book->defs[0x000270c5]->node[ 8] = (Node) {0xb0000009,0xa0000028};
-  book->defs[0x000270c5]->node[ 9] = (Node) {0xb000000a,0xa0000027};
-  book->defs[0x000270c5]->node[10] = (Node) {0xb000000b,0xa0000026};
-  book->defs[0x000270c5]->node[11] = (Node) {0xb000000c,0xa0000025};
-  book->defs[0x000270c5]->node[12] = (Node) {0xb000000d,0xa0000024};
-  book->defs[0x000270c5]->node[13] = (Node) {0xb000000e,0xa0000023};
-  book->defs[0x000270c5]->node[14] = (Node) {0xb000000f,0xa0000022};
-  book->defs[0x000270c5]->node[15] = (Node) {0xb0000010,0xa0000021};
-  book->defs[0x000270c5]->node[16] = (Node) {0xb0000011,0xa0000020};
-  book->defs[0x000270c5]->node[17] = (Node) {0xb0000012,0xa000001f};
-  book->defs[0x000270c5]->node[18] = (Node) {0xb0000013,0xa000001e};
-  book->defs[0x000270c5]->node[19] = (Node) {0xb0000014,0xa000001d};
-  book->defs[0x000270c5]->node[20] = (Node) {0xb0000015,0xa000001c};
-  book->defs[0x000270c5]->node[21] = (Node) {0xb0000016,0xa000001b};
-  book->defs[0x000270c5]->node[22] = (Node) {0xb0000017,0xa000001a};
-  book->defs[0x000270c5]->node[23] = (Node) {0xa0000018,0xa0000019};
-  book->defs[0x000270c5]->node[24] = (Node) {0x40000030,0x40000019};
-  book->defs[0x000270c5]->node[25] = (Node) {0x50000018,0x4000001a};
-  book->defs[0x000270c5]->node[26] = (Node) {0x50000019,0x4000001b};
-  book->defs[0x000270c5]->node[27] = (Node) {0x5000001a,0x4000001c};
-  book->defs[0x000270c5]->node[28] = (Node) {0x5000001b,0x4000001d};
-  book->defs[0x000270c5]->node[29] = (Node) {0x5000001c,0x4000001e};
-  book->defs[0x000270c5]->node[30] = (Node) {0x5000001d,0x4000001f};
-  book->defs[0x000270c5]->node[31] = (Node) {0x5000001e,0x40000020};
-  book->defs[0x000270c5]->node[32] = (Node) {0x5000001f,0x40000021};
-  book->defs[0x000270c5]->node[33] = (Node) {0x50000020,0x40000022};
-  book->defs[0x000270c5]->node[34] = (Node) {0x50000021,0x40000023};
-  book->defs[0x000270c5]->node[35] = (Node) {0x50000022,0x40000024};
-  book->defs[0x000270c5]->node[36] = (Node) {0x50000023,0x40000025};
-  book->defs[0x000270c5]->node[37] = (Node) {0x50000024,0x40000026};
-  book->defs[0x000270c5]->node[38] = (Node) {0x50000025,0x40000027};
-  book->defs[0x000270c5]->node[39] = (Node) {0x50000026,0x40000028};
-  book->defs[0x000270c5]->node[40] = (Node) {0x50000027,0x40000029};
-  book->defs[0x000270c5]->node[41] = (Node) {0x50000028,0x4000002a};
-  book->defs[0x000270c5]->node[42] = (Node) {0x50000029,0x4000002b};
-  book->defs[0x000270c5]->node[43] = (Node) {0x5000002a,0x4000002c};
-  book->defs[0x000270c5]->node[44] = (Node) {0x5000002b,0x4000002d};
-  book->defs[0x000270c5]->node[45] = (Node) {0x5000002c,0x4000002e};
-  book->defs[0x000270c5]->node[46] = (Node) {0x5000002d,0x4000002f};
-  book->defs[0x000270c5]->node[47] = (Node) {0x5000002e,0x50000030};
-  book->defs[0x000270c5]->node[48] = (Node) {0x40000018,0x5000002f};
+  0x00000031, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0xB0000001, 0xA0000030,  0xB0000002, 0xA000002F,  0xB0000003, 0xA000002E,  0xB0000004, 0xA000002D,
+  0xB0000005, 0xA000002C,  0xB0000006, 0xA000002B,  0xB0000007, 0xA000002A,  0xB0000008, 0xA0000029,
+  0xB0000009, 0xA0000028,  0xB000000A, 0xA0000027,  0xB000000B, 0xA0000026,  0xB000000C, 0xA0000025,
+  0xB000000D, 0xA0000024,  0xB000000E, 0xA0000023,  0xB000000F, 0xA0000022,  0xB0000010, 0xA0000021,
+  0xB0000011, 0xA0000020,  0xB0000012, 0xA000001F,  0xB0000013, 0xA000001E,  0xB0000014, 0xA000001D,
+  0xB0000015, 0xA000001C,  0xB0000016, 0xA000001B,  0xB0000017, 0xA000001A,  0xA0000018, 0xA0000019,
+  0x40000030, 0x40000019,  0x50000018, 0x4000001A,  0x50000019, 0x4000001B,  0x5000001A, 0x4000001C,
+  0x5000001B, 0x4000001D,  0x5000001C, 0x4000001E,  0x5000001D, 0x4000001F,  0x5000001E, 0x40000020,
+  0x5000001F, 0x40000021,  0x50000020, 0x40000022,  0x50000021, 0x40000023,  0x50000022, 0x40000024,
+  0x50000023, 0x40000025,  0x50000024, 0x40000026,  0x50000025, 0x40000027,  0x50000026, 0x40000028,
+  0x50000027, 0x40000029,  0x50000028, 0x4000002A,  0x50000029, 0x4000002B,  0x5000002A, 0x4000002C,
+  0x5000002B, 0x4000002D,  0x5000002C, 0x4000002E,  0x5000002D, 0x4000002F,  0x5000002E, 0x50000030,
+  0x40000018, 0x5000002F,
+  // .acts
   // c25
-  book->defs[0x000270c6]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x000270c6]->root     = 0xa0000000;
-  book->defs[0x000270c6]->alen     = 0;
-  book->defs[0x000270c6]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x000270c6]->nlen     = 51;
-  book->defs[0x000270c6]->node     = (Node*) malloc(51 * sizeof(Node));
-  book->defs[0x000270c6]->node[ 0] = (Node) {0xb0000001,0xa0000032};
-  book->defs[0x000270c6]->node[ 1] = (Node) {0xb0000002,0xa0000031};
-  book->defs[0x000270c6]->node[ 2] = (Node) {0xb0000003,0xa0000030};
-  book->defs[0x000270c6]->node[ 3] = (Node) {0xb0000004,0xa000002f};
-  book->defs[0x000270c6]->node[ 4] = (Node) {0xb0000005,0xa000002e};
-  book->defs[0x000270c6]->node[ 5] = (Node) {0xb0000006,0xa000002d};
-  book->defs[0x000270c6]->node[ 6] = (Node) {0xb0000007,0xa000002c};
-  book->defs[0x000270c6]->node[ 7] = (Node) {0xb0000008,0xa000002b};
-  book->defs[0x000270c6]->node[ 8] = (Node) {0xb0000009,0xa000002a};
-  book->defs[0x000270c6]->node[ 9] = (Node) {0xb000000a,0xa0000029};
-  book->defs[0x000270c6]->node[10] = (Node) {0xb000000b,0xa0000028};
-  book->defs[0x000270c6]->node[11] = (Node) {0xb000000c,0xa0000027};
-  book->defs[0x000270c6]->node[12] = (Node) {0xb000000d,0xa0000026};
-  book->defs[0x000270c6]->node[13] = (Node) {0xb000000e,0xa0000025};
-  book->defs[0x000270c6]->node[14] = (Node) {0xb000000f,0xa0000024};
-  book->defs[0x000270c6]->node[15] = (Node) {0xb0000010,0xa0000023};
-  book->defs[0x000270c6]->node[16] = (Node) {0xb0000011,0xa0000022};
-  book->defs[0x000270c6]->node[17] = (Node) {0xb0000012,0xa0000021};
-  book->defs[0x000270c6]->node[18] = (Node) {0xb0000013,0xa0000020};
-  book->defs[0x000270c6]->node[19] = (Node) {0xb0000014,0xa000001f};
-  book->defs[0x000270c6]->node[20] = (Node) {0xb0000015,0xa000001e};
-  book->defs[0x000270c6]->node[21] = (Node) {0xb0000016,0xa000001d};
-  book->defs[0x000270c6]->node[22] = (Node) {0xb0000017,0xa000001c};
-  book->defs[0x000270c6]->node[23] = (Node) {0xb0000018,0xa000001b};
-  book->defs[0x000270c6]->node[24] = (Node) {0xa0000019,0xa000001a};
-  book->defs[0x000270c6]->node[25] = (Node) {0x00000000,0x40000032};
-  book->defs[0x000270c6]->node[26] = (Node) {0x50000019,0x4000001b};
-  book->defs[0x000270c6]->node[27] = (Node) {0x5000001a,0x4000001c};
-  book->defs[0x000270c6]->node[28] = (Node) {0x5000001b,0x4000001d};
-  book->defs[0x000270c6]->node[29] = (Node) {0x5000001c,0x4000001e};
-  book->defs[0x000270c6]->node[30] = (Node) {0x5000001d,0x4000001f};
-  book->defs[0x000270c6]->node[31] = (Node) {0x5000001e,0x40000020};
-  book->defs[0x000270c6]->node[32] = (Node) {0x5000001f,0x40000021};
-  book->defs[0x000270c6]->node[33] = (Node) {0x50000020,0x40000022};
-  book->defs[0x000270c6]->node[34] = (Node) {0x50000021,0x40000023};
-  book->defs[0x000270c6]->node[35] = (Node) {0x50000022,0x40000024};
-  book->defs[0x000270c6]->node[36] = (Node) {0x50000023,0x40000025};
-  book->defs[0x000270c6]->node[37] = (Node) {0x50000024,0x40000026};
-  book->defs[0x000270c6]->node[38] = (Node) {0x50000025,0x40000027};
-  book->defs[0x000270c6]->node[39] = (Node) {0x50000026,0x40000028};
-  book->defs[0x000270c6]->node[40] = (Node) {0x50000027,0x40000029};
-  book->defs[0x000270c6]->node[41] = (Node) {0x50000028,0x4000002a};
-  book->defs[0x000270c6]->node[42] = (Node) {0x50000029,0x4000002b};
-  book->defs[0x000270c6]->node[43] = (Node) {0x5000002a,0x4000002c};
-  book->defs[0x000270c6]->node[44] = (Node) {0x5000002b,0x4000002d};
-  book->defs[0x000270c6]->node[45] = (Node) {0x5000002c,0x4000002e};
-  book->defs[0x000270c6]->node[46] = (Node) {0x5000002d,0x4000002f};
-  book->defs[0x000270c6]->node[47] = (Node) {0x5000002e,0x40000030};
-  book->defs[0x000270c6]->node[48] = (Node) {0x5000002f,0x40000031};
-  book->defs[0x000270c6]->node[49] = (Node) {0x50000030,0x50000032};
-  book->defs[0x000270c6]->node[50] = (Node) {0x50000019,0x50000031};
+  0x00000033, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0xB0000001, 0xA0000032,  0xB0000002, 0xA0000031,  0xB0000003, 0xA0000030,  0xB0000004, 0xA000002F,
+  0xB0000005, 0xA000002E,  0xB0000006, 0xA000002D,  0xB0000007, 0xA000002C,  0xB0000008, 0xA000002B,
+  0xB0000009, 0xA000002A,  0xB000000A, 0xA0000029,  0xB000000B, 0xA0000028,  0xB000000C, 0xA0000027,
+  0xB000000D, 0xA0000026,  0xB000000E, 0xA0000025,  0xB000000F, 0xA0000024,  0xB0000010, 0xA0000023,
+  0xB0000011, 0xA0000022,  0xB0000012, 0xA0000021,  0xB0000013, 0xA0000020,  0xB0000014, 0xA000001F,
+  0xB0000015, 0xA000001E,  0xB0000016, 0xA000001D,  0xB0000017, 0xA000001C,  0xB0000018, 0xA000001B,
+  0xA0000019, 0xA000001A,  0x00000000, 0x40000032,  0x50000019, 0x4000001B,  0x5000001A, 0x4000001C,
+  0x5000001B, 0x4000001D,  0x5000001C, 0x4000001E,  0x5000001D, 0x4000001F,  0x5000001E, 0x40000020,
+  0x5000001F, 0x40000021,  0x50000020, 0x40000022,  0x50000021, 0x40000023,  0x50000022, 0x40000024,
+  0x50000023, 0x40000025,  0x50000024, 0x40000026,  0x50000025, 0x40000027,  0x50000026, 0x40000028,
+  0x50000027, 0x40000029,  0x50000028, 0x4000002A,  0x50000029, 0x4000002B,  0x5000002A, 0x4000002C,
+  0x5000002B, 0x4000002D,  0x5000002C, 0x4000002E,  0x5000002D, 0x4000002F,  0x5000002E, 0x40000030,
+  0x5000002F, 0x40000031,  0x50000030, 0x50000032,  0x50000019, 0x50000031,
+  // .acts
   // c26
-  book->defs[0x000270c7]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x000270c7]->root     = 0xa0000000;
-  book->defs[0x000270c7]->alen     = 0;
-  book->defs[0x000270c7]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x000270c7]->nlen     = 53;
-  book->defs[0x000270c7]->node     = (Node*) malloc(53 * sizeof(Node));
-  book->defs[0x000270c7]->node[ 0] = (Node) {0xb0000001,0xa0000034};
-  book->defs[0x000270c7]->node[ 1] = (Node) {0xb0000002,0xa0000033};
-  book->defs[0x000270c7]->node[ 2] = (Node) {0xb0000003,0xa0000032};
-  book->defs[0x000270c7]->node[ 3] = (Node) {0xb0000004,0xa0000031};
-  book->defs[0x000270c7]->node[ 4] = (Node) {0xb0000005,0xa0000030};
-  book->defs[0x000270c7]->node[ 5] = (Node) {0xb0000006,0xa000002f};
-  book->defs[0x000270c7]->node[ 6] = (Node) {0xb0000007,0xa000002e};
-  book->defs[0x000270c7]->node[ 7] = (Node) {0xb0000008,0xa000002d};
-  book->defs[0x000270c7]->node[ 8] = (Node) {0xb0000009,0xa000002c};
-  book->defs[0x000270c7]->node[ 9] = (Node) {0xb000000a,0xa000002b};
-  book->defs[0x000270c7]->node[10] = (Node) {0xb000000b,0xa000002a};
-  book->defs[0x000270c7]->node[11] = (Node) {0xb000000c,0xa0000029};
-  book->defs[0x000270c7]->node[12] = (Node) {0xb000000d,0xa0000028};
-  book->defs[0x000270c7]->node[13] = (Node) {0xb000000e,0xa0000027};
-  book->defs[0x000270c7]->node[14] = (Node) {0xb000000f,0xa0000026};
-  book->defs[0x000270c7]->node[15] = (Node) {0xb0000010,0xa0000025};
-  book->defs[0x000270c7]->node[16] = (Node) {0xb0000011,0xa0000024};
-  book->defs[0x000270c7]->node[17] = (Node) {0xb0000012,0xa0000023};
-  book->defs[0x000270c7]->node[18] = (Node) {0xb0000013,0xa0000022};
-  book->defs[0x000270c7]->node[19] = (Node) {0xb0000014,0xa0000021};
-  book->defs[0x000270c7]->node[20] = (Node) {0xb0000015,0xa0000020};
-  book->defs[0x000270c7]->node[21] = (Node) {0xb0000016,0xa000001f};
-  book->defs[0x000270c7]->node[22] = (Node) {0xb0000017,0xa000001e};
-  book->defs[0x000270c7]->node[23] = (Node) {0xb0000018,0xa000001d};
-  book->defs[0x000270c7]->node[24] = (Node) {0xb0000019,0xa000001c};
-  book->defs[0x000270c7]->node[25] = (Node) {0xa000001a,0xa000001b};
-  book->defs[0x000270c7]->node[26] = (Node) {0x00000000,0x4000001b};
-  book->defs[0x000270c7]->node[27] = (Node) {0x5000001a,0x40000034};
-  book->defs[0x000270c7]->node[28] = (Node) {0x5000001b,0x4000001d};
-  book->defs[0x000270c7]->node[29] = (Node) {0x5000001c,0x4000001e};
-  book->defs[0x000270c7]->node[30] = (Node) {0x5000001d,0x4000001f};
-  book->defs[0x000270c7]->node[31] = (Node) {0x5000001e,0x40000020};
-  book->defs[0x000270c7]->node[32] = (Node) {0x5000001f,0x40000021};
-  book->defs[0x000270c7]->node[33] = (Node) {0x50000020,0x40000022};
-  book->defs[0x000270c7]->node[34] = (Node) {0x50000021,0x40000023};
-  book->defs[0x000270c7]->node[35] = (Node) {0x50000022,0x40000024};
-  book->defs[0x000270c7]->node[36] = (Node) {0x50000023,0x40000025};
-  book->defs[0x000270c7]->node[37] = (Node) {0x50000024,0x40000026};
-  book->defs[0x000270c7]->node[38] = (Node) {0x50000025,0x40000027};
-  book->defs[0x000270c7]->node[39] = (Node) {0x50000026,0x40000028};
-  book->defs[0x000270c7]->node[40] = (Node) {0x50000027,0x40000029};
-  book->defs[0x000270c7]->node[41] = (Node) {0x50000028,0x4000002a};
-  book->defs[0x000270c7]->node[42] = (Node) {0x50000029,0x4000002b};
-  book->defs[0x000270c7]->node[43] = (Node) {0x5000002a,0x4000002c};
-  book->defs[0x000270c7]->node[44] = (Node) {0x5000002b,0x4000002d};
-  book->defs[0x000270c7]->node[45] = (Node) {0x5000002c,0x4000002e};
-  book->defs[0x000270c7]->node[46] = (Node) {0x5000002d,0x4000002f};
-  book->defs[0x000270c7]->node[47] = (Node) {0x5000002e,0x40000030};
-  book->defs[0x000270c7]->node[48] = (Node) {0x5000002f,0x40000031};
-  book->defs[0x000270c7]->node[49] = (Node) {0x50000030,0x40000032};
-  book->defs[0x000270c7]->node[50] = (Node) {0x50000031,0x40000033};
-  book->defs[0x000270c7]->node[51] = (Node) {0x50000032,0x50000034};
-  book->defs[0x000270c7]->node[52] = (Node) {0x5000001b,0x50000033};
+  0x00000035, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0xB0000001, 0xA0000034,  0xB0000002, 0xA0000033,  0xB0000003, 0xA0000032,  0xB0000004, 0xA0000031,
+  0xB0000005, 0xA0000030,  0xB0000006, 0xA000002F,  0xB0000007, 0xA000002E,  0xB0000008, 0xA000002D,
+  0xB0000009, 0xA000002C,  0xB000000A, 0xA000002B,  0xB000000B, 0xA000002A,  0xB000000C, 0xA0000029,
+  0xB000000D, 0xA0000028,  0xB000000E, 0xA0000027,  0xB000000F, 0xA0000026,  0xB0000010, 0xA0000025,
+  0xB0000011, 0xA0000024,  0xB0000012, 0xA0000023,  0xB0000013, 0xA0000022,  0xB0000014, 0xA0000021,
+  0xB0000015, 0xA0000020,  0xB0000016, 0xA000001F,  0xB0000017, 0xA000001E,  0xB0000018, 0xA000001D,
+  0xB0000019, 0xA000001C,  0xA000001A, 0xA000001B,  0x00000000, 0x4000001B,  0x5000001A, 0x40000034,
+  0x5000001B, 0x4000001D,  0x5000001C, 0x4000001E,  0x5000001D, 0x4000001F,  0x5000001E, 0x40000020,
+  0x5000001F, 0x40000021,  0x50000020, 0x40000022,  0x50000021, 0x40000023,  0x50000022, 0x40000024,
+  0x50000023, 0x40000025,  0x50000024, 0x40000026,  0x50000025, 0x40000027,  0x50000026, 0x40000028,
+  0x50000027, 0x40000029,  0x50000028, 0x4000002A,  0x50000029, 0x4000002B,  0x5000002A, 0x4000002C,
+  0x5000002B, 0x4000002D,  0x5000002C, 0x4000002E,  0x5000002D, 0x4000002F,  0x5000002E, 0x40000030,
+  0x5000002F, 0x40000031,  0x50000030, 0x40000032,  0x50000031, 0x40000033,  0x50000032, 0x50000034,
+  0x5000001B, 0x50000033,
+  // .acts
   // c_s
-  book->defs[0x00027ff7]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x00027ff7]->root     = 0xa0000000;
-  book->defs[0x00027ff7]->alen     = 0;
-  book->defs[0x00027ff7]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x00027ff7]->nlen     = 7;
-  book->defs[0x00027ff7]->node     = (Node*) malloc(7 * sizeof(Node));
-  book->defs[0x00027ff7]->node[ 0] = (Node) {0xa0000001,0xa0000003};
-  book->defs[0x00027ff7]->node[ 1] = (Node) {0x50000004,0xa0000002};
-  book->defs[0x00027ff7]->node[ 2] = (Node) {0x40000006,0x40000005};
-  book->defs[0x00027ff7]->node[ 3] = (Node) {0xb0000004,0xa0000006};
-  book->defs[0x00027ff7]->node[ 4] = (Node) {0xa0000005,0x40000001};
-  book->defs[0x00027ff7]->node[ 5] = (Node) {0x50000002,0x50000006};
-  book->defs[0x00027ff7]->node[ 6] = (Node) {0x40000002,0x50000005};
+  0x00000007, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0xA0000001, 0xA0000003,  0x50000004, 0xA0000002,  0x40000006, 0x40000005,  0xB0000004, 0xA0000006,
+  0xA0000005, 0x40000001,  0x50000002, 0x50000006,  0x40000002, 0x50000005,
+  // .acts
   // c_z
-  book->defs[0x00027ffe]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x00027ffe]->root     = 0xa0000000;
-  book->defs[0x00027ffe]->alen     = 0;
-  book->defs[0x00027ffe]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x00027ffe]->nlen     = 2;
-  book->defs[0x00027ffe]->node     = (Node*) malloc(2 * sizeof(Node));
-  book->defs[0x00027ffe]->node[ 0] = (Node) {0x20000000,0xa0000001};
-  book->defs[0x00027ffe]->node[ 1] = (Node) {0x50000001,0x40000001};
+  0x00000002, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0x20000000, 0xA0000001,  0x50000001, 0x40000001,
+  // .acts
   // dec
-  book->defs[0x00028a67]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x00028a67]->root     = 0xa0000000;
-  book->defs[0x00028a67]->alen     = 0;
-  book->defs[0x00028a67]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x00028a67]->nlen     = 4;
-  book->defs[0x00028a67]->node     = (Node*) malloc(4 * sizeof(Node));
-  book->defs[0x00028a67]->node[ 0] = (Node) {0xa0000001,0x50000003};
-  book->defs[0x00028a67]->node[ 1] = (Node) {0x10a299d9,0xa0000002};
-  book->defs[0x00028a67]->node[ 2] = (Node) {0x10a299d3,0xa0000003};
-  book->defs[0x00028a67]->node[ 3] = (Node) {0x1000000f,0x50000000};
+  0x00000004, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0xA0000001, 0x50000003,  0x10000053, 0xA0000002,  0x10000052, 0xA0000003,  0x10000000, 0x50000000,
+  // .acts
   // ex0
-  book->defs[0x00029f01]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x00029f01]->root     = 0x50000000;
-  book->defs[0x00029f01]->alen     = 1;
-  book->defs[0x00029f01]->acts     = (Wire*) malloc(1 * sizeof(Wire));
-  book->defs[0x00029f01]->acts[ 0] = mkwire(0x100009c3,0xa0000000);
-  book->defs[0x00029f01]->nlen     = 1;
-  book->defs[0x00029f01]->node     = (Node*) malloc(1 * sizeof(Node));
-  book->defs[0x00029f01]->node[ 0] = (Node) {0x10000bc3,0x30000000};
+  0x00000001, // .nlen
+  0x00000001, // .alen
+  0x50000000, // .root
+  // .node
+  0x10000015, 0x30000000,
+  // .acts
+  0x1000000A, 0xA0000000,
   // ex1
-  book->defs[0x00029f02]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x00029f02]->root     = 0x50000001;
-  book->defs[0x00029f02]->alen     = 1;
-  book->defs[0x00029f02]->acts     = (Wire*) malloc(1 * sizeof(Wire));
-  book->defs[0x00029f02]->acts[ 0] = mkwire(0x100270c5,0xa0000000);
-  book->defs[0x00029f02]->nlen     = 2;
-  book->defs[0x00029f02]->node     = (Node*) malloc(2 * sizeof(Node));
-  book->defs[0x00029f02]->node[ 0] = (Node) {0x1002bff7,0xa0000001};
-  book->defs[0x00029f02]->node[ 1] = (Node) {0x1002bffe,0x30000000};
+  0x00000002, // .nlen
+  0x00000001, // .alen
+  0x50000001, // .root
+  // .node
+  0x1000003A, 0xA0000001,  0x1000003B, 0x30000000,
+  // .acts
+  0x1000002F, 0xA0000000,
   // ex2
-  book->defs[0x00029f03]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x00029f03]->root     = 0x50000002;
-  book->defs[0x00029f03]->alen     = 2;
-  book->defs[0x00029f03]->acts     = (Wire*) malloc(2 * sizeof(Wire));
-  book->defs[0x00029f03]->acts[ 0] = mkwire(0x100270c1,0xa0000000);
-  book->defs[0x00029f03]->acts[ 1] = mkwire(0x10036e72,0xa0000002);
-  book->defs[0x00029f03]->nlen     = 3;
-  book->defs[0x00029f03]->node     = (Node*) malloc(3 * sizeof(Node));
-  book->defs[0x00029f03]->node[ 0] = (Node) {0x10000013,0xa0000001};
-  book->defs[0x00029f03]->node[ 1] = (Node) {0x1000000f,0x40000002};
-  book->defs[0x00029f03]->node[ 2] = (Node) {0x50000001,0x30000000};
+  0x00000003, // .nlen
+  0x00000002, // .alen
+  0x50000002, // .root
+  // .node
+  0x10000002, 0xA0000001,  0x10000000, 0x40000002,  0x50000001, 0x30000000,
+  // .acts
+  0x1000002B, 0xA0000000,  0x1000004F, 0xA0000002,
   // ex3
-  book->defs[0x00029f04]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x00029f04]->root     = 0x50000002;
-  book->defs[0x00029f04]->alen     = 2;
-  book->defs[0x00029f04]->acts     = (Wire*) malloc(2 * sizeof(Wire));
-  book->defs[0x00029f04]->acts[ 0] = mkwire(0x10027088,0xa0000000);
-  book->defs[0x00029f04]->acts[ 1] = mkwire(0x10026db2,0xa0000002);
-  book->defs[0x00029f04]->nlen     = 3;
-  book->defs[0x00029f04]->node     = (Node*) malloc(3 * sizeof(Node));
-  book->defs[0x00029f04]->node[ 0] = (Node) {0x1000001d,0xa0000001};
-  book->defs[0x00029f04]->node[ 1] = (Node) {0x10000024,0x40000002};
-  book->defs[0x00029f04]->node[ 2] = (Node) {0x50000001,0x30000000};
+  0x00000003, // .nlen
+  0x00000002, // .alen
+  0x50000002, // .root
+  // .node
+  0x10000004, 0xA0000001,  0x10000006, 0x40000002,  0x50000001, 0x30000000,
+  // .acts
+  0x10000028, 0xA0000000,  0x10000020, 0xA0000002,
   // ex4
-  book->defs[0x00029f05]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x00029f05]->root     = 0x50000000;
-  book->defs[0x00029f05]->alen     = 2;
-  book->defs[0x00029f05]->acts     = (Wire*) malloc(2 * sizeof(Wire));
-  book->defs[0x00029f05]->acts[ 0] = mkwire(0xa0000000,0x1000096a);
-  book->defs[0x00029f05]->acts[ 1] = mkwire(0xa0000001,0x100009c2);
-  book->defs[0x00029f05]->nlen     = 3;
-  book->defs[0x00029f05]->node     = (Node*) malloc(3 * sizeof(Node));
-  book->defs[0x00029f05]->node[ 0] = (Node) {0x50000002,0x30000000};
-  book->defs[0x00029f05]->node[ 1] = (Node) {0x1000001d,0xa0000002};
-  book->defs[0x00029f05]->node[ 2] = (Node) {0x10000024,0x40000000};
+  0x00000003, // .nlen
+  0x00000002, // .alen
+  0x50000000, // .root
+  // .node
+  0x50000002, 0x30000000,  0x10000004, 0xA0000002,  0x10000006, 0x40000000,
+  // .acts
+  0xA0000000, 0x10000007,  0xA0000001, 0x10000009,
   // g_s
-  book->defs[0x0002bff7]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x0002bff7]->root     = 0xa0000000;
-  book->defs[0x0002bff7]->alen     = 0;
-  book->defs[0x0002bff7]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x0002bff7]->nlen     = 5;
-  book->defs[0x0002bff7]->node     = (Node*) malloc(5 * sizeof(Node));
-  book->defs[0x0002bff7]->node[ 0] = (Node) {0xc0000001,0xa0000002};
-  book->defs[0x0002bff7]->node[ 1] = (Node) {0x40000003,0x40000004};
-  book->defs[0x0002bff7]->node[ 2] = (Node) {0xa0000003,0x50000004};
-  book->defs[0x0002bff7]->node[ 3] = (Node) {0x40000001,0xa0000004};
-  book->defs[0x0002bff7]->node[ 4] = (Node) {0x50000001,0x50000002};
+  0x00000005, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0xC0000001, 0xA0000002,  0x40000003, 0x40000004,  0xA0000003, 0x50000004,  0x40000001, 0xA0000004,
+  0x50000001, 0x50000002,
+  // .acts
   // g_z
-  book->defs[0x0002bffe]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x0002bffe]->root     = 0xa0000000;
-  book->defs[0x0002bffe]->alen     = 0;
-  book->defs[0x0002bffe]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x0002bffe]->nlen     = 1;
-  book->defs[0x0002bffe]->node     = (Node*) malloc(1 * sizeof(Node));
-  book->defs[0x0002bffe]->node[ 0] = (Node) {0x50000000,0x40000000};
+  0x00000001, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0x50000000, 0x40000000,
+  // .acts
   // k10
-  book->defs[0x0002f081]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x0002f081]->root     = 0xa0000000;
-  book->defs[0x0002f081]->alen     = 0;
-  book->defs[0x0002f081]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x0002f081]->nlen     = 21;
-  book->defs[0x0002f081]->node     = (Node*) malloc(21 * sizeof(Node));
-  book->defs[0x0002f081]->node[ 0] = (Node) {0xc0000001,0xa0000014};
-  book->defs[0x0002f081]->node[ 1] = (Node) {0xc0000002,0xa0000013};
-  book->defs[0x0002f081]->node[ 2] = (Node) {0xc0000003,0xa0000012};
-  book->defs[0x0002f081]->node[ 3] = (Node) {0xc0000004,0xa0000011};
-  book->defs[0x0002f081]->node[ 4] = (Node) {0xc0000005,0xa0000010};
-  book->defs[0x0002f081]->node[ 5] = (Node) {0xc0000006,0xa000000f};
-  book->defs[0x0002f081]->node[ 6] = (Node) {0xc0000007,0xa000000e};
-  book->defs[0x0002f081]->node[ 7] = (Node) {0xc0000008,0xa000000d};
-  book->defs[0x0002f081]->node[ 8] = (Node) {0xc0000009,0xa000000c};
-  book->defs[0x0002f081]->node[ 9] = (Node) {0xa000000a,0xa000000b};
-  book->defs[0x0002f081]->node[10] = (Node) {0x40000014,0x4000000b};
-  book->defs[0x0002f081]->node[11] = (Node) {0x5000000a,0x4000000c};
-  book->defs[0x0002f081]->node[12] = (Node) {0x5000000b,0x4000000d};
-  book->defs[0x0002f081]->node[13] = (Node) {0x5000000c,0x4000000e};
-  book->defs[0x0002f081]->node[14] = (Node) {0x5000000d,0x4000000f};
-  book->defs[0x0002f081]->node[15] = (Node) {0x5000000e,0x40000010};
-  book->defs[0x0002f081]->node[16] = (Node) {0x5000000f,0x40000011};
-  book->defs[0x0002f081]->node[17] = (Node) {0x50000010,0x40000012};
-  book->defs[0x0002f081]->node[18] = (Node) {0x50000011,0x40000013};
-  book->defs[0x0002f081]->node[19] = (Node) {0x50000012,0x50000014};
-  book->defs[0x0002f081]->node[20] = (Node) {0x4000000a,0x50000013};
+  0x00000015, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0xC0000001, 0xA0000014,  0xC0000002, 0xA0000013,  0xC0000003, 0xA0000012,  0xC0000004, 0xA0000011,
+  0xC0000005, 0xA0000010,  0xC0000006, 0xA000000F,  0xC0000007, 0xA000000E,  0xC0000008, 0xA000000D,
+  0xC0000009, 0xA000000C,  0xA000000A, 0xA000000B,  0x40000014, 0x4000000B,  0x5000000A, 0x4000000C,
+  0x5000000B, 0x4000000D,  0x5000000C, 0x4000000E,  0x5000000D, 0x4000000F,  0x5000000E, 0x40000010,
+  0x5000000F, 0x40000011,  0x50000010, 0x40000012,  0x50000011, 0x40000013,  0x50000012, 0x50000014,
+  0x4000000A, 0x50000013,
+  // .acts
   // k11
-  book->defs[0x0002f082]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x0002f082]->root     = 0xa0000000;
-  book->defs[0x0002f082]->alen     = 0;
-  book->defs[0x0002f082]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x0002f082]->nlen     = 23;
-  book->defs[0x0002f082]->node     = (Node*) malloc(23 * sizeof(Node));
-  book->defs[0x0002f082]->node[ 0] = (Node) {0xc0000001,0xa0000016};
-  book->defs[0x0002f082]->node[ 1] = (Node) {0xc0000002,0xa0000015};
-  book->defs[0x0002f082]->node[ 2] = (Node) {0xc0000003,0xa0000014};
-  book->defs[0x0002f082]->node[ 3] = (Node) {0xc0000004,0xa0000013};
-  book->defs[0x0002f082]->node[ 4] = (Node) {0xc0000005,0xa0000012};
-  book->defs[0x0002f082]->node[ 5] = (Node) {0xc0000006,0xa0000011};
-  book->defs[0x0002f082]->node[ 6] = (Node) {0xc0000007,0xa0000010};
-  book->defs[0x0002f082]->node[ 7] = (Node) {0xc0000008,0xa000000f};
-  book->defs[0x0002f082]->node[ 8] = (Node) {0xc0000009,0xa000000e};
-  book->defs[0x0002f082]->node[ 9] = (Node) {0xc000000a,0xa000000d};
-  book->defs[0x0002f082]->node[10] = (Node) {0xa000000b,0xa000000c};
-  book->defs[0x0002f082]->node[11] = (Node) {0x40000016,0x4000000c};
-  book->defs[0x0002f082]->node[12] = (Node) {0x5000000b,0x4000000d};
-  book->defs[0x0002f082]->node[13] = (Node) {0x5000000c,0x4000000e};
-  book->defs[0x0002f082]->node[14] = (Node) {0x5000000d,0x4000000f};
-  book->defs[0x0002f082]->node[15] = (Node) {0x5000000e,0x40000010};
-  book->defs[0x0002f082]->node[16] = (Node) {0x5000000f,0x40000011};
-  book->defs[0x0002f082]->node[17] = (Node) {0x50000010,0x40000012};
-  book->defs[0x0002f082]->node[18] = (Node) {0x50000011,0x40000013};
-  book->defs[0x0002f082]->node[19] = (Node) {0x50000012,0x40000014};
-  book->defs[0x0002f082]->node[20] = (Node) {0x50000013,0x40000015};
-  book->defs[0x0002f082]->node[21] = (Node) {0x50000014,0x50000016};
-  book->defs[0x0002f082]->node[22] = (Node) {0x4000000b,0x50000015};
+  0x00000017, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0xC0000001, 0xA0000016,  0xC0000002, 0xA0000015,  0xC0000003, 0xA0000014,  0xC0000004, 0xA0000013,
+  0xC0000005, 0xA0000012,  0xC0000006, 0xA0000011,  0xC0000007, 0xA0000010,  0xC0000008, 0xA000000F,
+  0xC0000009, 0xA000000E,  0xC000000A, 0xA000000D,  0xA000000B, 0xA000000C,  0x40000016, 0x4000000C,
+  0x5000000B, 0x4000000D,  0x5000000C, 0x4000000E,  0x5000000D, 0x4000000F,  0x5000000E, 0x40000010,
+  0x5000000F, 0x40000011,  0x50000010, 0x40000012,  0x50000011, 0x40000013,  0x50000012, 0x40000014,
+  0x50000013, 0x40000015,  0x50000014, 0x50000016,  0x4000000B, 0x50000015,
+  // .acts
   // k12
-  book->defs[0x0002f083]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x0002f083]->root     = 0xa0000000;
-  book->defs[0x0002f083]->alen     = 0;
-  book->defs[0x0002f083]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x0002f083]->nlen     = 25;
-  book->defs[0x0002f083]->node     = (Node*) malloc(25 * sizeof(Node));
-  book->defs[0x0002f083]->node[ 0] = (Node) {0xc0000001,0xa0000018};
-  book->defs[0x0002f083]->node[ 1] = (Node) {0xc0000002,0xa0000017};
-  book->defs[0x0002f083]->node[ 2] = (Node) {0xc0000003,0xa0000016};
-  book->defs[0x0002f083]->node[ 3] = (Node) {0xc0000004,0xa0000015};
-  book->defs[0x0002f083]->node[ 4] = (Node) {0xc0000005,0xa0000014};
-  book->defs[0x0002f083]->node[ 5] = (Node) {0xc0000006,0xa0000013};
-  book->defs[0x0002f083]->node[ 6] = (Node) {0xc0000007,0xa0000012};
-  book->defs[0x0002f083]->node[ 7] = (Node) {0xc0000008,0xa0000011};
-  book->defs[0x0002f083]->node[ 8] = (Node) {0xc0000009,0xa0000010};
-  book->defs[0x0002f083]->node[ 9] = (Node) {0xc000000a,0xa000000f};
-  book->defs[0x0002f083]->node[10] = (Node) {0xc000000b,0xa000000e};
-  book->defs[0x0002f083]->node[11] = (Node) {0xa000000c,0xa000000d};
-  book->defs[0x0002f083]->node[12] = (Node) {0x40000018,0x4000000d};
-  book->defs[0x0002f083]->node[13] = (Node) {0x5000000c,0x4000000e};
-  book->defs[0x0002f083]->node[14] = (Node) {0x5000000d,0x4000000f};
-  book->defs[0x0002f083]->node[15] = (Node) {0x5000000e,0x40000010};
-  book->defs[0x0002f083]->node[16] = (Node) {0x5000000f,0x40000011};
-  book->defs[0x0002f083]->node[17] = (Node) {0x50000010,0x40000012};
-  book->defs[0x0002f083]->node[18] = (Node) {0x50000011,0x40000013};
-  book->defs[0x0002f083]->node[19] = (Node) {0x50000012,0x40000014};
-  book->defs[0x0002f083]->node[20] = (Node) {0x50000013,0x40000015};
-  book->defs[0x0002f083]->node[21] = (Node) {0x50000014,0x40000016};
-  book->defs[0x0002f083]->node[22] = (Node) {0x50000015,0x40000017};
-  book->defs[0x0002f083]->node[23] = (Node) {0x50000016,0x50000018};
-  book->defs[0x0002f083]->node[24] = (Node) {0x4000000c,0x50000017};
+  0x00000019, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0xC0000001, 0xA0000018,  0xC0000002, 0xA0000017,  0xC0000003, 0xA0000016,  0xC0000004, 0xA0000015,
+  0xC0000005, 0xA0000014,  0xC0000006, 0xA0000013,  0xC0000007, 0xA0000012,  0xC0000008, 0xA0000011,
+  0xC0000009, 0xA0000010,  0xC000000A, 0xA000000F,  0xC000000B, 0xA000000E,  0xA000000C, 0xA000000D,
+  0x40000018, 0x4000000D,  0x5000000C, 0x4000000E,  0x5000000D, 0x4000000F,  0x5000000E, 0x40000010,
+  0x5000000F, 0x40000011,  0x50000010, 0x40000012,  0x50000011, 0x40000013,  0x50000012, 0x40000014,
+  0x50000013, 0x40000015,  0x50000014, 0x40000016,  0x50000015, 0x40000017,  0x50000016, 0x50000018,
+  0x4000000C, 0x50000017,
+  // .acts
   // k13
-  book->defs[0x0002f084]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x0002f084]->root     = 0xa0000000;
-  book->defs[0x0002f084]->alen     = 0;
-  book->defs[0x0002f084]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x0002f084]->nlen     = 27;
-  book->defs[0x0002f084]->node     = (Node*) malloc(27 * sizeof(Node));
-  book->defs[0x0002f084]->node[ 0] = (Node) {0xc0000001,0xa000001a};
-  book->defs[0x0002f084]->node[ 1] = (Node) {0xc0000002,0xa0000019};
-  book->defs[0x0002f084]->node[ 2] = (Node) {0xc0000003,0xa0000018};
-  book->defs[0x0002f084]->node[ 3] = (Node) {0xc0000004,0xa0000017};
-  book->defs[0x0002f084]->node[ 4] = (Node) {0xc0000005,0xa0000016};
-  book->defs[0x0002f084]->node[ 5] = (Node) {0xc0000006,0xa0000015};
-  book->defs[0x0002f084]->node[ 6] = (Node) {0xc0000007,0xa0000014};
-  book->defs[0x0002f084]->node[ 7] = (Node) {0xc0000008,0xa0000013};
-  book->defs[0x0002f084]->node[ 8] = (Node) {0xc0000009,0xa0000012};
-  book->defs[0x0002f084]->node[ 9] = (Node) {0xc000000a,0xa0000011};
-  book->defs[0x0002f084]->node[10] = (Node) {0xc000000b,0xa0000010};
-  book->defs[0x0002f084]->node[11] = (Node) {0xc000000c,0xa000000f};
-  book->defs[0x0002f084]->node[12] = (Node) {0xa000000d,0xa000000e};
-  book->defs[0x0002f084]->node[13] = (Node) {0x4000001a,0x4000000e};
-  book->defs[0x0002f084]->node[14] = (Node) {0x5000000d,0x4000000f};
-  book->defs[0x0002f084]->node[15] = (Node) {0x5000000e,0x40000010};
-  book->defs[0x0002f084]->node[16] = (Node) {0x5000000f,0x40000011};
-  book->defs[0x0002f084]->node[17] = (Node) {0x50000010,0x40000012};
-  book->defs[0x0002f084]->node[18] = (Node) {0x50000011,0x40000013};
-  book->defs[0x0002f084]->node[19] = (Node) {0x50000012,0x40000014};
-  book->defs[0x0002f084]->node[20] = (Node) {0x50000013,0x40000015};
-  book->defs[0x0002f084]->node[21] = (Node) {0x50000014,0x40000016};
-  book->defs[0x0002f084]->node[22] = (Node) {0x50000015,0x40000017};
-  book->defs[0x0002f084]->node[23] = (Node) {0x50000016,0x40000018};
-  book->defs[0x0002f084]->node[24] = (Node) {0x50000017,0x40000019};
-  book->defs[0x0002f084]->node[25] = (Node) {0x50000018,0x5000001a};
-  book->defs[0x0002f084]->node[26] = (Node) {0x4000000d,0x50000019};
+  0x0000001B, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0xC0000001, 0xA000001A,  0xC0000002, 0xA0000019,  0xC0000003, 0xA0000018,  0xC0000004, 0xA0000017,
+  0xC0000005, 0xA0000016,  0xC0000006, 0xA0000015,  0xC0000007, 0xA0000014,  0xC0000008, 0xA0000013,
+  0xC0000009, 0xA0000012,  0xC000000A, 0xA0000011,  0xC000000B, 0xA0000010,  0xC000000C, 0xA000000F,
+  0xA000000D, 0xA000000E,  0x4000001A, 0x4000000E,  0x5000000D, 0x4000000F,  0x5000000E, 0x40000010,
+  0x5000000F, 0x40000011,  0x50000010, 0x40000012,  0x50000011, 0x40000013,  0x50000012, 0x40000014,
+  0x50000013, 0x40000015,  0x50000014, 0x40000016,  0x50000015, 0x40000017,  0x50000016, 0x40000018,
+  0x50000017, 0x40000019,  0x50000018, 0x5000001A,  0x4000000D, 0x50000019,
+  // .acts
   // k14
-  book->defs[0x0002f085]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x0002f085]->root     = 0xa0000000;
-  book->defs[0x0002f085]->alen     = 0;
-  book->defs[0x0002f085]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x0002f085]->nlen     = 29;
-  book->defs[0x0002f085]->node     = (Node*) malloc(29 * sizeof(Node));
-  book->defs[0x0002f085]->node[ 0] = (Node) {0xc0000001,0xa000001c};
-  book->defs[0x0002f085]->node[ 1] = (Node) {0xc0000002,0xa000001b};
-  book->defs[0x0002f085]->node[ 2] = (Node) {0xc0000003,0xa000001a};
-  book->defs[0x0002f085]->node[ 3] = (Node) {0xc0000004,0xa0000019};
-  book->defs[0x0002f085]->node[ 4] = (Node) {0xc0000005,0xa0000018};
-  book->defs[0x0002f085]->node[ 5] = (Node) {0xc0000006,0xa0000017};
-  book->defs[0x0002f085]->node[ 6] = (Node) {0xc0000007,0xa0000016};
-  book->defs[0x0002f085]->node[ 7] = (Node) {0xc0000008,0xa0000015};
-  book->defs[0x0002f085]->node[ 8] = (Node) {0xc0000009,0xa0000014};
-  book->defs[0x0002f085]->node[ 9] = (Node) {0xc000000a,0xa0000013};
-  book->defs[0x0002f085]->node[10] = (Node) {0xc000000b,0xa0000012};
-  book->defs[0x0002f085]->node[11] = (Node) {0xc000000c,0xa0000011};
-  book->defs[0x0002f085]->node[12] = (Node) {0xc000000d,0xa0000010};
-  book->defs[0x0002f085]->node[13] = (Node) {0xa000000e,0xa000000f};
-  book->defs[0x0002f085]->node[14] = (Node) {0x4000001c,0x4000000f};
-  book->defs[0x0002f085]->node[15] = (Node) {0x5000000e,0x40000010};
-  book->defs[0x0002f085]->node[16] = (Node) {0x5000000f,0x40000011};
-  book->defs[0x0002f085]->node[17] = (Node) {0x50000010,0x40000012};
-  book->defs[0x0002f085]->node[18] = (Node) {0x50000011,0x40000013};
-  book->defs[0x0002f085]->node[19] = (Node) {0x50000012,0x40000014};
-  book->defs[0x0002f085]->node[20] = (Node) {0x50000013,0x40000015};
-  book->defs[0x0002f085]->node[21] = (Node) {0x50000014,0x40000016};
-  book->defs[0x0002f085]->node[22] = (Node) {0x50000015,0x40000017};
-  book->defs[0x0002f085]->node[23] = (Node) {0x50000016,0x40000018};
-  book->defs[0x0002f085]->node[24] = (Node) {0x50000017,0x40000019};
-  book->defs[0x0002f085]->node[25] = (Node) {0x50000018,0x4000001a};
-  book->defs[0x0002f085]->node[26] = (Node) {0x50000019,0x4000001b};
-  book->defs[0x0002f085]->node[27] = (Node) {0x5000001a,0x5000001c};
-  book->defs[0x0002f085]->node[28] = (Node) {0x4000000e,0x5000001b};
+  0x0000001D, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0xC0000001, 0xA000001C,  0xC0000002, 0xA000001B,  0xC0000003, 0xA000001A,  0xC0000004, 0xA0000019,
+  0xC0000005, 0xA0000018,  0xC0000006, 0xA0000017,  0xC0000007, 0xA0000016,  0xC0000008, 0xA0000015,
+  0xC0000009, 0xA0000014,  0xC000000A, 0xA0000013,  0xC000000B, 0xA0000012,  0xC000000C, 0xA0000011,
+  0xC000000D, 0xA0000010,  0xA000000E, 0xA000000F,  0x4000001C, 0x4000000F,  0x5000000E, 0x40000010,
+  0x5000000F, 0x40000011,  0x50000010, 0x40000012,  0x50000011, 0x40000013,  0x50000012, 0x40000014,
+  0x50000013, 0x40000015,  0x50000014, 0x40000016,  0x50000015, 0x40000017,  0x50000016, 0x40000018,
+  0x50000017, 0x40000019,  0x50000018, 0x4000001A,  0x50000019, 0x4000001B,  0x5000001A, 0x5000001C,
+  0x4000000E, 0x5000001B,
+  // .acts
   // k15
-  book->defs[0x0002f086]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x0002f086]->root     = 0xa0000000;
-  book->defs[0x0002f086]->alen     = 0;
-  book->defs[0x0002f086]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x0002f086]->nlen     = 31;
-  book->defs[0x0002f086]->node     = (Node*) malloc(31 * sizeof(Node));
-  book->defs[0x0002f086]->node[ 0] = (Node) {0xc0000001,0xa000001e};
-  book->defs[0x0002f086]->node[ 1] = (Node) {0xc0000002,0xa000001d};
-  book->defs[0x0002f086]->node[ 2] = (Node) {0xc0000003,0xa000001c};
-  book->defs[0x0002f086]->node[ 3] = (Node) {0xc0000004,0xa000001b};
-  book->defs[0x0002f086]->node[ 4] = (Node) {0xc0000005,0xa000001a};
-  book->defs[0x0002f086]->node[ 5] = (Node) {0xc0000006,0xa0000019};
-  book->defs[0x0002f086]->node[ 6] = (Node) {0xc0000007,0xa0000018};
-  book->defs[0x0002f086]->node[ 7] = (Node) {0xc0000008,0xa0000017};
-  book->defs[0x0002f086]->node[ 8] = (Node) {0xc0000009,0xa0000016};
-  book->defs[0x0002f086]->node[ 9] = (Node) {0xc000000a,0xa0000015};
-  book->defs[0x0002f086]->node[10] = (Node) {0xc000000b,0xa0000014};
-  book->defs[0x0002f086]->node[11] = (Node) {0xc000000c,0xa0000013};
-  book->defs[0x0002f086]->node[12] = (Node) {0xc000000d,0xa0000012};
-  book->defs[0x0002f086]->node[13] = (Node) {0xc000000e,0xa0000011};
-  book->defs[0x0002f086]->node[14] = (Node) {0xa000000f,0xa0000010};
-  book->defs[0x0002f086]->node[15] = (Node) {0x4000001e,0x40000010};
-  book->defs[0x0002f086]->node[16] = (Node) {0x5000000f,0x40000011};
-  book->defs[0x0002f086]->node[17] = (Node) {0x50000010,0x40000012};
-  book->defs[0x0002f086]->node[18] = (Node) {0x50000011,0x40000013};
-  book->defs[0x0002f086]->node[19] = (Node) {0x50000012,0x40000014};
-  book->defs[0x0002f086]->node[20] = (Node) {0x50000013,0x40000015};
-  book->defs[0x0002f086]->node[21] = (Node) {0x50000014,0x40000016};
-  book->defs[0x0002f086]->node[22] = (Node) {0x50000015,0x40000017};
-  book->defs[0x0002f086]->node[23] = (Node) {0x50000016,0x40000018};
-  book->defs[0x0002f086]->node[24] = (Node) {0x50000017,0x40000019};
-  book->defs[0x0002f086]->node[25] = (Node) {0x50000018,0x4000001a};
-  book->defs[0x0002f086]->node[26] = (Node) {0x50000019,0x4000001b};
-  book->defs[0x0002f086]->node[27] = (Node) {0x5000001a,0x4000001c};
-  book->defs[0x0002f086]->node[28] = (Node) {0x5000001b,0x4000001d};
-  book->defs[0x0002f086]->node[29] = (Node) {0x5000001c,0x5000001e};
-  book->defs[0x0002f086]->node[30] = (Node) {0x4000000f,0x5000001d};
+  0x0000001F, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0xC0000001, 0xA000001E,  0xC0000002, 0xA000001D,  0xC0000003, 0xA000001C,  0xC0000004, 0xA000001B,
+  0xC0000005, 0xA000001A,  0xC0000006, 0xA0000019,  0xC0000007, 0xA0000018,  0xC0000008, 0xA0000017,
+  0xC0000009, 0xA0000016,  0xC000000A, 0xA0000015,  0xC000000B, 0xA0000014,  0xC000000C, 0xA0000013,
+  0xC000000D, 0xA0000012,  0xC000000E, 0xA0000011,  0xA000000F, 0xA0000010,  0x4000001E, 0x40000010,
+  0x5000000F, 0x40000011,  0x50000010, 0x40000012,  0x50000011, 0x40000013,  0x50000012, 0x40000014,
+  0x50000013, 0x40000015,  0x50000014, 0x40000016,  0x50000015, 0x40000017,  0x50000016, 0x40000018,
+  0x50000017, 0x40000019,  0x50000018, 0x4000001A,  0x50000019, 0x4000001B,  0x5000001A, 0x4000001C,
+  0x5000001B, 0x4000001D,  0x5000001C, 0x5000001E,  0x4000000F, 0x5000001D,
+  // .acts
   // k16
-  book->defs[0x0002f087]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x0002f087]->root     = 0xa0000000;
-  book->defs[0x0002f087]->alen     = 0;
-  book->defs[0x0002f087]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x0002f087]->nlen     = 33;
-  book->defs[0x0002f087]->node     = (Node*) malloc(33 * sizeof(Node));
-  book->defs[0x0002f087]->node[ 0] = (Node) {0xc0000001,0xa0000020};
-  book->defs[0x0002f087]->node[ 1] = (Node) {0xc0000002,0xa000001f};
-  book->defs[0x0002f087]->node[ 2] = (Node) {0xc0000003,0xa000001e};
-  book->defs[0x0002f087]->node[ 3] = (Node) {0xc0000004,0xa000001d};
-  book->defs[0x0002f087]->node[ 4] = (Node) {0xc0000005,0xa000001c};
-  book->defs[0x0002f087]->node[ 5] = (Node) {0xc0000006,0xa000001b};
-  book->defs[0x0002f087]->node[ 6] = (Node) {0xc0000007,0xa000001a};
-  book->defs[0x0002f087]->node[ 7] = (Node) {0xc0000008,0xa0000019};
-  book->defs[0x0002f087]->node[ 8] = (Node) {0xc0000009,0xa0000018};
-  book->defs[0x0002f087]->node[ 9] = (Node) {0xc000000a,0xa0000017};
-  book->defs[0x0002f087]->node[10] = (Node) {0xc000000b,0xa0000016};
-  book->defs[0x0002f087]->node[11] = (Node) {0xc000000c,0xa0000015};
-  book->defs[0x0002f087]->node[12] = (Node) {0xc000000d,0xa0000014};
-  book->defs[0x0002f087]->node[13] = (Node) {0xc000000e,0xa0000013};
-  book->defs[0x0002f087]->node[14] = (Node) {0xc000000f,0xa0000012};
-  book->defs[0x0002f087]->node[15] = (Node) {0xa0000010,0xa0000011};
-  book->defs[0x0002f087]->node[16] = (Node) {0x40000020,0x40000011};
-  book->defs[0x0002f087]->node[17] = (Node) {0x50000010,0x40000012};
-  book->defs[0x0002f087]->node[18] = (Node) {0x50000011,0x40000013};
-  book->defs[0x0002f087]->node[19] = (Node) {0x50000012,0x40000014};
-  book->defs[0x0002f087]->node[20] = (Node) {0x50000013,0x40000015};
-  book->defs[0x0002f087]->node[21] = (Node) {0x50000014,0x40000016};
-  book->defs[0x0002f087]->node[22] = (Node) {0x50000015,0x40000017};
-  book->defs[0x0002f087]->node[23] = (Node) {0x50000016,0x40000018};
-  book->defs[0x0002f087]->node[24] = (Node) {0x50000017,0x40000019};
-  book->defs[0x0002f087]->node[25] = (Node) {0x50000018,0x4000001a};
-  book->defs[0x0002f087]->node[26] = (Node) {0x50000019,0x4000001b};
-  book->defs[0x0002f087]->node[27] = (Node) {0x5000001a,0x4000001c};
-  book->defs[0x0002f087]->node[28] = (Node) {0x5000001b,0x4000001d};
-  book->defs[0x0002f087]->node[29] = (Node) {0x5000001c,0x4000001e};
-  book->defs[0x0002f087]->node[30] = (Node) {0x5000001d,0x4000001f};
-  book->defs[0x0002f087]->node[31] = (Node) {0x5000001e,0x50000020};
-  book->defs[0x0002f087]->node[32] = (Node) {0x40000010,0x5000001f};
+  0x00000021, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0xC0000001, 0xA0000020,  0xC0000002, 0xA000001F,  0xC0000003, 0xA000001E,  0xC0000004, 0xA000001D,
+  0xC0000005, 0xA000001C,  0xC0000006, 0xA000001B,  0xC0000007, 0xA000001A,  0xC0000008, 0xA0000019,
+  0xC0000009, 0xA0000018,  0xC000000A, 0xA0000017,  0xC000000B, 0xA0000016,  0xC000000C, 0xA0000015,
+  0xC000000D, 0xA0000014,  0xC000000E, 0xA0000013,  0xC000000F, 0xA0000012,  0xA0000010, 0xA0000011,
+  0x40000020, 0x40000011,  0x50000010, 0x40000012,  0x50000011, 0x40000013,  0x50000012, 0x40000014,
+  0x50000013, 0x40000015,  0x50000014, 0x40000016,  0x50000015, 0x40000017,  0x50000016, 0x40000018,
+  0x50000017, 0x40000019,  0x50000018, 0x4000001A,  0x50000019, 0x4000001B,  0x5000001A, 0x4000001C,
+  0x5000001B, 0x4000001D,  0x5000001C, 0x4000001E,  0x5000001D, 0x4000001F,  0x5000001E, 0x50000020,
+  0x40000010, 0x5000001F,
+  // .acts
   // k17
-  book->defs[0x0002f088]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x0002f088]->root     = 0xa0000000;
-  book->defs[0x0002f088]->alen     = 0;
-  book->defs[0x0002f088]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x0002f088]->nlen     = 35;
-  book->defs[0x0002f088]->node     = (Node*) malloc(35 * sizeof(Node));
-  book->defs[0x0002f088]->node[ 0] = (Node) {0xc0000001,0xa0000022};
-  book->defs[0x0002f088]->node[ 1] = (Node) {0xc0000002,0xa0000021};
-  book->defs[0x0002f088]->node[ 2] = (Node) {0xc0000003,0xa0000020};
-  book->defs[0x0002f088]->node[ 3] = (Node) {0xc0000004,0xa000001f};
-  book->defs[0x0002f088]->node[ 4] = (Node) {0xc0000005,0xa000001e};
-  book->defs[0x0002f088]->node[ 5] = (Node) {0xc0000006,0xa000001d};
-  book->defs[0x0002f088]->node[ 6] = (Node) {0xc0000007,0xa000001c};
-  book->defs[0x0002f088]->node[ 7] = (Node) {0xc0000008,0xa000001b};
-  book->defs[0x0002f088]->node[ 8] = (Node) {0xc0000009,0xa000001a};
-  book->defs[0x0002f088]->node[ 9] = (Node) {0xc000000a,0xa0000019};
-  book->defs[0x0002f088]->node[10] = (Node) {0xc000000b,0xa0000018};
-  book->defs[0x0002f088]->node[11] = (Node) {0xc000000c,0xa0000017};
-  book->defs[0x0002f088]->node[12] = (Node) {0xc000000d,0xa0000016};
-  book->defs[0x0002f088]->node[13] = (Node) {0xc000000e,0xa0000015};
-  book->defs[0x0002f088]->node[14] = (Node) {0xc000000f,0xa0000014};
-  book->defs[0x0002f088]->node[15] = (Node) {0xc0000010,0xa0000013};
-  book->defs[0x0002f088]->node[16] = (Node) {0xa0000011,0xa0000012};
-  book->defs[0x0002f088]->node[17] = (Node) {0x40000022,0x40000012};
-  book->defs[0x0002f088]->node[18] = (Node) {0x50000011,0x40000013};
-  book->defs[0x0002f088]->node[19] = (Node) {0x50000012,0x40000014};
-  book->defs[0x0002f088]->node[20] = (Node) {0x50000013,0x40000015};
-  book->defs[0x0002f088]->node[21] = (Node) {0x50000014,0x40000016};
-  book->defs[0x0002f088]->node[22] = (Node) {0x50000015,0x40000017};
-  book->defs[0x0002f088]->node[23] = (Node) {0x50000016,0x40000018};
-  book->defs[0x0002f088]->node[24] = (Node) {0x50000017,0x40000019};
-  book->defs[0x0002f088]->node[25] = (Node) {0x50000018,0x4000001a};
-  book->defs[0x0002f088]->node[26] = (Node) {0x50000019,0x4000001b};
-  book->defs[0x0002f088]->node[27] = (Node) {0x5000001a,0x4000001c};
-  book->defs[0x0002f088]->node[28] = (Node) {0x5000001b,0x4000001d};
-  book->defs[0x0002f088]->node[29] = (Node) {0x5000001c,0x4000001e};
-  book->defs[0x0002f088]->node[30] = (Node) {0x5000001d,0x4000001f};
-  book->defs[0x0002f088]->node[31] = (Node) {0x5000001e,0x40000020};
-  book->defs[0x0002f088]->node[32] = (Node) {0x5000001f,0x40000021};
-  book->defs[0x0002f088]->node[33] = (Node) {0x50000020,0x50000022};
-  book->defs[0x0002f088]->node[34] = (Node) {0x40000011,0x50000021};
+  0x00000023, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0xC0000001, 0xA0000022,  0xC0000002, 0xA0000021,  0xC0000003, 0xA0000020,  0xC0000004, 0xA000001F,
+  0xC0000005, 0xA000001E,  0xC0000006, 0xA000001D,  0xC0000007, 0xA000001C,  0xC0000008, 0xA000001B,
+  0xC0000009, 0xA000001A,  0xC000000A, 0xA0000019,  0xC000000B, 0xA0000018,  0xC000000C, 0xA0000017,
+  0xC000000D, 0xA0000016,  0xC000000E, 0xA0000015,  0xC000000F, 0xA0000014,  0xC0000010, 0xA0000013,
+  0xA0000011, 0xA0000012,  0x40000022, 0x40000012,  0x50000011, 0x40000013,  0x50000012, 0x40000014,
+  0x50000013, 0x40000015,  0x50000014, 0x40000016,  0x50000015, 0x40000017,  0x50000016, 0x40000018,
+  0x50000017, 0x40000019,  0x50000018, 0x4000001A,  0x50000019, 0x4000001B,  0x5000001A, 0x4000001C,
+  0x5000001B, 0x4000001D,  0x5000001C, 0x4000001E,  0x5000001D, 0x4000001F,  0x5000001E, 0x40000020,
+  0x5000001F, 0x40000021,  0x50000020, 0x50000022,  0x40000011, 0x50000021,
+  // .acts
   // k18
-  book->defs[0x0002f089]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x0002f089]->root     = 0xa0000000;
-  book->defs[0x0002f089]->alen     = 0;
-  book->defs[0x0002f089]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x0002f089]->nlen     = 37;
-  book->defs[0x0002f089]->node     = (Node*) malloc(37 * sizeof(Node));
-  book->defs[0x0002f089]->node[ 0] = (Node) {0xc0000001,0xa0000024};
-  book->defs[0x0002f089]->node[ 1] = (Node) {0xc0000002,0xa0000023};
-  book->defs[0x0002f089]->node[ 2] = (Node) {0xc0000003,0xa0000022};
-  book->defs[0x0002f089]->node[ 3] = (Node) {0xc0000004,0xa0000021};
-  book->defs[0x0002f089]->node[ 4] = (Node) {0xc0000005,0xa0000020};
-  book->defs[0x0002f089]->node[ 5] = (Node) {0xc0000006,0xa000001f};
-  book->defs[0x0002f089]->node[ 6] = (Node) {0xc0000007,0xa000001e};
-  book->defs[0x0002f089]->node[ 7] = (Node) {0xc0000008,0xa000001d};
-  book->defs[0x0002f089]->node[ 8] = (Node) {0xc0000009,0xa000001c};
-  book->defs[0x0002f089]->node[ 9] = (Node) {0xc000000a,0xa000001b};
-  book->defs[0x0002f089]->node[10] = (Node) {0xc000000b,0xa000001a};
-  book->defs[0x0002f089]->node[11] = (Node) {0xc000000c,0xa0000019};
-  book->defs[0x0002f089]->node[12] = (Node) {0xc000000d,0xa0000018};
-  book->defs[0x0002f089]->node[13] = (Node) {0xc000000e,0xa0000017};
-  book->defs[0x0002f089]->node[14] = (Node) {0xc000000f,0xa0000016};
-  book->defs[0x0002f089]->node[15] = (Node) {0xc0000010,0xa0000015};
-  book->defs[0x0002f089]->node[16] = (Node) {0xc0000011,0xa0000014};
-  book->defs[0x0002f089]->node[17] = (Node) {0xa0000012,0xa0000013};
-  book->defs[0x0002f089]->node[18] = (Node) {0x40000024,0x40000013};
-  book->defs[0x0002f089]->node[19] = (Node) {0x50000012,0x40000014};
-  book->defs[0x0002f089]->node[20] = (Node) {0x50000013,0x40000015};
-  book->defs[0x0002f089]->node[21] = (Node) {0x50000014,0x40000016};
-  book->defs[0x0002f089]->node[22] = (Node) {0x50000015,0x40000017};
-  book->defs[0x0002f089]->node[23] = (Node) {0x50000016,0x40000018};
-  book->defs[0x0002f089]->node[24] = (Node) {0x50000017,0x40000019};
-  book->defs[0x0002f089]->node[25] = (Node) {0x50000018,0x4000001a};
-  book->defs[0x0002f089]->node[26] = (Node) {0x50000019,0x4000001b};
-  book->defs[0x0002f089]->node[27] = (Node) {0x5000001a,0x4000001c};
-  book->defs[0x0002f089]->node[28] = (Node) {0x5000001b,0x4000001d};
-  book->defs[0x0002f089]->node[29] = (Node) {0x5000001c,0x4000001e};
-  book->defs[0x0002f089]->node[30] = (Node) {0x5000001d,0x4000001f};
-  book->defs[0x0002f089]->node[31] = (Node) {0x5000001e,0x40000020};
-  book->defs[0x0002f089]->node[32] = (Node) {0x5000001f,0x40000021};
-  book->defs[0x0002f089]->node[33] = (Node) {0x50000020,0x40000022};
-  book->defs[0x0002f089]->node[34] = (Node) {0x50000021,0x40000023};
-  book->defs[0x0002f089]->node[35] = (Node) {0x50000022,0x50000024};
-  book->defs[0x0002f089]->node[36] = (Node) {0x40000012,0x50000023};
+  0x00000025, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0xC0000001, 0xA0000024,  0xC0000002, 0xA0000023,  0xC0000003, 0xA0000022,  0xC0000004, 0xA0000021,
+  0xC0000005, 0xA0000020,  0xC0000006, 0xA000001F,  0xC0000007, 0xA000001E,  0xC0000008, 0xA000001D,
+  0xC0000009, 0xA000001C,  0xC000000A, 0xA000001B,  0xC000000B, 0xA000001A,  0xC000000C, 0xA0000019,
+  0xC000000D, 0xA0000018,  0xC000000E, 0xA0000017,  0xC000000F, 0xA0000016,  0xC0000010, 0xA0000015,
+  0xC0000011, 0xA0000014,  0xA0000012, 0xA0000013,  0x40000024, 0x40000013,  0x50000012, 0x40000014,
+  0x50000013, 0x40000015,  0x50000014, 0x40000016,  0x50000015, 0x40000017,  0x50000016, 0x40000018,
+  0x50000017, 0x40000019,  0x50000018, 0x4000001A,  0x50000019, 0x4000001B,  0x5000001A, 0x4000001C,
+  0x5000001B, 0x4000001D,  0x5000001C, 0x4000001E,  0x5000001D, 0x4000001F,  0x5000001E, 0x40000020,
+  0x5000001F, 0x40000021,  0x50000020, 0x40000022,  0x50000021, 0x40000023,  0x50000022, 0x50000024,
+  0x40000012, 0x50000023,
+  // .acts
   // k19
-  book->defs[0x0002f08a]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x0002f08a]->root     = 0xa0000000;
-  book->defs[0x0002f08a]->alen     = 0;
-  book->defs[0x0002f08a]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x0002f08a]->nlen     = 39;
-  book->defs[0x0002f08a]->node     = (Node*) malloc(39 * sizeof(Node));
-  book->defs[0x0002f08a]->node[ 0] = (Node) {0xc0000001,0xa0000026};
-  book->defs[0x0002f08a]->node[ 1] = (Node) {0xc0000002,0xa0000025};
-  book->defs[0x0002f08a]->node[ 2] = (Node) {0xc0000003,0xa0000024};
-  book->defs[0x0002f08a]->node[ 3] = (Node) {0xc0000004,0xa0000023};
-  book->defs[0x0002f08a]->node[ 4] = (Node) {0xc0000005,0xa0000022};
-  book->defs[0x0002f08a]->node[ 5] = (Node) {0xc0000006,0xa0000021};
-  book->defs[0x0002f08a]->node[ 6] = (Node) {0xc0000007,0xa0000020};
-  book->defs[0x0002f08a]->node[ 7] = (Node) {0xc0000008,0xa000001f};
-  book->defs[0x0002f08a]->node[ 8] = (Node) {0xc0000009,0xa000001e};
-  book->defs[0x0002f08a]->node[ 9] = (Node) {0xc000000a,0xa000001d};
-  book->defs[0x0002f08a]->node[10] = (Node) {0xc000000b,0xa000001c};
-  book->defs[0x0002f08a]->node[11] = (Node) {0xc000000c,0xa000001b};
-  book->defs[0x0002f08a]->node[12] = (Node) {0xc000000d,0xa000001a};
-  book->defs[0x0002f08a]->node[13] = (Node) {0xc000000e,0xa0000019};
-  book->defs[0x0002f08a]->node[14] = (Node) {0xc000000f,0xa0000018};
-  book->defs[0x0002f08a]->node[15] = (Node) {0xc0000010,0xa0000017};
-  book->defs[0x0002f08a]->node[16] = (Node) {0xc0000011,0xa0000016};
-  book->defs[0x0002f08a]->node[17] = (Node) {0xc0000012,0xa0000015};
-  book->defs[0x0002f08a]->node[18] = (Node) {0xa0000013,0xa0000014};
-  book->defs[0x0002f08a]->node[19] = (Node) {0x40000026,0x40000014};
-  book->defs[0x0002f08a]->node[20] = (Node) {0x50000013,0x40000015};
-  book->defs[0x0002f08a]->node[21] = (Node) {0x50000014,0x40000016};
-  book->defs[0x0002f08a]->node[22] = (Node) {0x50000015,0x40000017};
-  book->defs[0x0002f08a]->node[23] = (Node) {0x50000016,0x40000018};
-  book->defs[0x0002f08a]->node[24] = (Node) {0x50000017,0x40000019};
-  book->defs[0x0002f08a]->node[25] = (Node) {0x50000018,0x4000001a};
-  book->defs[0x0002f08a]->node[26] = (Node) {0x50000019,0x4000001b};
-  book->defs[0x0002f08a]->node[27] = (Node) {0x5000001a,0x4000001c};
-  book->defs[0x0002f08a]->node[28] = (Node) {0x5000001b,0x4000001d};
-  book->defs[0x0002f08a]->node[29] = (Node) {0x5000001c,0x4000001e};
-  book->defs[0x0002f08a]->node[30] = (Node) {0x5000001d,0x4000001f};
-  book->defs[0x0002f08a]->node[31] = (Node) {0x5000001e,0x40000020};
-  book->defs[0x0002f08a]->node[32] = (Node) {0x5000001f,0x40000021};
-  book->defs[0x0002f08a]->node[33] = (Node) {0x50000020,0x40000022};
-  book->defs[0x0002f08a]->node[34] = (Node) {0x50000021,0x40000023};
-  book->defs[0x0002f08a]->node[35] = (Node) {0x50000022,0x40000024};
-  book->defs[0x0002f08a]->node[36] = (Node) {0x50000023,0x40000025};
-  book->defs[0x0002f08a]->node[37] = (Node) {0x50000024,0x50000026};
-  book->defs[0x0002f08a]->node[38] = (Node) {0x40000013,0x50000025};
+  0x00000027, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0xC0000001, 0xA0000026,  0xC0000002, 0xA0000025,  0xC0000003, 0xA0000024,  0xC0000004, 0xA0000023,
+  0xC0000005, 0xA0000022,  0xC0000006, 0xA0000021,  0xC0000007, 0xA0000020,  0xC0000008, 0xA000001F,
+  0xC0000009, 0xA000001E,  0xC000000A, 0xA000001D,  0xC000000B, 0xA000001C,  0xC000000C, 0xA000001B,
+  0xC000000D, 0xA000001A,  0xC000000E, 0xA0000019,  0xC000000F, 0xA0000018,  0xC0000010, 0xA0000017,
+  0xC0000011, 0xA0000016,  0xC0000012, 0xA0000015,  0xA0000013, 0xA0000014,  0x40000026, 0x40000014,
+  0x50000013, 0x40000015,  0x50000014, 0x40000016,  0x50000015, 0x40000017,  0x50000016, 0x40000018,
+  0x50000017, 0x40000019,  0x50000018, 0x4000001A,  0x50000019, 0x4000001B,  0x5000001A, 0x4000001C,
+  0x5000001B, 0x4000001D,  0x5000001C, 0x4000001E,  0x5000001D, 0x4000001F,  0x5000001E, 0x40000020,
+  0x5000001F, 0x40000021,  0x50000020, 0x40000022,  0x50000021, 0x40000023,  0x50000022, 0x40000024,
+  0x50000023, 0x40000025,  0x50000024, 0x50000026,  0x40000013, 0x50000025,
+  // .acts
   // k20
-  book->defs[0x0002f0c1]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x0002f0c1]->root     = 0xa0000000;
-  book->defs[0x0002f0c1]->alen     = 0;
-  book->defs[0x0002f0c1]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x0002f0c1]->nlen     = 41;
-  book->defs[0x0002f0c1]->node     = (Node*) malloc(41 * sizeof(Node));
-  book->defs[0x0002f0c1]->node[ 0] = (Node) {0xc0000001,0xa0000028};
-  book->defs[0x0002f0c1]->node[ 1] = (Node) {0xc0000002,0xa0000027};
-  book->defs[0x0002f0c1]->node[ 2] = (Node) {0xc0000003,0xa0000026};
-  book->defs[0x0002f0c1]->node[ 3] = (Node) {0xc0000004,0xa0000025};
-  book->defs[0x0002f0c1]->node[ 4] = (Node) {0xc0000005,0xa0000024};
-  book->defs[0x0002f0c1]->node[ 5] = (Node) {0xc0000006,0xa0000023};
-  book->defs[0x0002f0c1]->node[ 6] = (Node) {0xc0000007,0xa0000022};
-  book->defs[0x0002f0c1]->node[ 7] = (Node) {0xc0000008,0xa0000021};
-  book->defs[0x0002f0c1]->node[ 8] = (Node) {0xc0000009,0xa0000020};
-  book->defs[0x0002f0c1]->node[ 9] = (Node) {0xc000000a,0xa000001f};
-  book->defs[0x0002f0c1]->node[10] = (Node) {0xc000000b,0xa000001e};
-  book->defs[0x0002f0c1]->node[11] = (Node) {0xc000000c,0xa000001d};
-  book->defs[0x0002f0c1]->node[12] = (Node) {0xc000000d,0xa000001c};
-  book->defs[0x0002f0c1]->node[13] = (Node) {0xc000000e,0xa000001b};
-  book->defs[0x0002f0c1]->node[14] = (Node) {0xc000000f,0xa000001a};
-  book->defs[0x0002f0c1]->node[15] = (Node) {0xc0000010,0xa0000019};
-  book->defs[0x0002f0c1]->node[16] = (Node) {0xc0000011,0xa0000018};
-  book->defs[0x0002f0c1]->node[17] = (Node) {0xc0000012,0xa0000017};
-  book->defs[0x0002f0c1]->node[18] = (Node) {0xc0000013,0xa0000016};
-  book->defs[0x0002f0c1]->node[19] = (Node) {0xa0000014,0xa0000015};
-  book->defs[0x0002f0c1]->node[20] = (Node) {0x40000028,0x40000015};
-  book->defs[0x0002f0c1]->node[21] = (Node) {0x50000014,0x40000016};
-  book->defs[0x0002f0c1]->node[22] = (Node) {0x50000015,0x40000017};
-  book->defs[0x0002f0c1]->node[23] = (Node) {0x50000016,0x40000018};
-  book->defs[0x0002f0c1]->node[24] = (Node) {0x50000017,0x40000019};
-  book->defs[0x0002f0c1]->node[25] = (Node) {0x50000018,0x4000001a};
-  book->defs[0x0002f0c1]->node[26] = (Node) {0x50000019,0x4000001b};
-  book->defs[0x0002f0c1]->node[27] = (Node) {0x5000001a,0x4000001c};
-  book->defs[0x0002f0c1]->node[28] = (Node) {0x5000001b,0x4000001d};
-  book->defs[0x0002f0c1]->node[29] = (Node) {0x5000001c,0x4000001e};
-  book->defs[0x0002f0c1]->node[30] = (Node) {0x5000001d,0x4000001f};
-  book->defs[0x0002f0c1]->node[31] = (Node) {0x5000001e,0x40000020};
-  book->defs[0x0002f0c1]->node[32] = (Node) {0x5000001f,0x40000021};
-  book->defs[0x0002f0c1]->node[33] = (Node) {0x50000020,0x40000022};
-  book->defs[0x0002f0c1]->node[34] = (Node) {0x50000021,0x40000023};
-  book->defs[0x0002f0c1]->node[35] = (Node) {0x50000022,0x40000024};
-  book->defs[0x0002f0c1]->node[36] = (Node) {0x50000023,0x40000025};
-  book->defs[0x0002f0c1]->node[37] = (Node) {0x50000024,0x40000026};
-  book->defs[0x0002f0c1]->node[38] = (Node) {0x50000025,0x40000027};
-  book->defs[0x0002f0c1]->node[39] = (Node) {0x50000026,0x50000028};
-  book->defs[0x0002f0c1]->node[40] = (Node) {0x40000014,0x50000027};
+  0x00000029, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0xC0000001, 0xA0000028,  0xC0000002, 0xA0000027,  0xC0000003, 0xA0000026,  0xC0000004, 0xA0000025,
+  0xC0000005, 0xA0000024,  0xC0000006, 0xA0000023,  0xC0000007, 0xA0000022,  0xC0000008, 0xA0000021,
+  0xC0000009, 0xA0000020,  0xC000000A, 0xA000001F,  0xC000000B, 0xA000001E,  0xC000000C, 0xA000001D,
+  0xC000000D, 0xA000001C,  0xC000000E, 0xA000001B,  0xC000000F, 0xA000001A,  0xC0000010, 0xA0000019,
+  0xC0000011, 0xA0000018,  0xC0000012, 0xA0000017,  0xC0000013, 0xA0000016,  0xA0000014, 0xA0000015,
+  0x40000028, 0x40000015,  0x50000014, 0x40000016,  0x50000015, 0x40000017,  0x50000016, 0x40000018,
+  0x50000017, 0x40000019,  0x50000018, 0x4000001A,  0x50000019, 0x4000001B,  0x5000001A, 0x4000001C,
+  0x5000001B, 0x4000001D,  0x5000001C, 0x4000001E,  0x5000001D, 0x4000001F,  0x5000001E, 0x40000020,
+  0x5000001F, 0x40000021,  0x50000020, 0x40000022,  0x50000021, 0x40000023,  0x50000022, 0x40000024,
+  0x50000023, 0x40000025,  0x50000024, 0x40000026,  0x50000025, 0x40000027,  0x50000026, 0x50000028,
+  0x40000014, 0x50000027,
+  // .acts
   // k21
-  book->defs[0x0002f0c2]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x0002f0c2]->root     = 0xa0000000;
-  book->defs[0x0002f0c2]->alen     = 0;
-  book->defs[0x0002f0c2]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x0002f0c2]->nlen     = 43;
-  book->defs[0x0002f0c2]->node     = (Node*) malloc(43 * sizeof(Node));
-  book->defs[0x0002f0c2]->node[ 0] = (Node) {0xc0000001,0xa000002a};
-  book->defs[0x0002f0c2]->node[ 1] = (Node) {0xc0000002,0xa0000029};
-  book->defs[0x0002f0c2]->node[ 2] = (Node) {0xc0000003,0xa0000028};
-  book->defs[0x0002f0c2]->node[ 3] = (Node) {0xc0000004,0xa0000027};
-  book->defs[0x0002f0c2]->node[ 4] = (Node) {0xc0000005,0xa0000026};
-  book->defs[0x0002f0c2]->node[ 5] = (Node) {0xc0000006,0xa0000025};
-  book->defs[0x0002f0c2]->node[ 6] = (Node) {0xc0000007,0xa0000024};
-  book->defs[0x0002f0c2]->node[ 7] = (Node) {0xc0000008,0xa0000023};
-  book->defs[0x0002f0c2]->node[ 8] = (Node) {0xc0000009,0xa0000022};
-  book->defs[0x0002f0c2]->node[ 9] = (Node) {0xc000000a,0xa0000021};
-  book->defs[0x0002f0c2]->node[10] = (Node) {0xc000000b,0xa0000020};
-  book->defs[0x0002f0c2]->node[11] = (Node) {0xc000000c,0xa000001f};
-  book->defs[0x0002f0c2]->node[12] = (Node) {0xc000000d,0xa000001e};
-  book->defs[0x0002f0c2]->node[13] = (Node) {0xc000000e,0xa000001d};
-  book->defs[0x0002f0c2]->node[14] = (Node) {0xc000000f,0xa000001c};
-  book->defs[0x0002f0c2]->node[15] = (Node) {0xc0000010,0xa000001b};
-  book->defs[0x0002f0c2]->node[16] = (Node) {0xc0000011,0xa000001a};
-  book->defs[0x0002f0c2]->node[17] = (Node) {0xc0000012,0xa0000019};
-  book->defs[0x0002f0c2]->node[18] = (Node) {0xc0000013,0xa0000018};
-  book->defs[0x0002f0c2]->node[19] = (Node) {0xc0000014,0xa0000017};
-  book->defs[0x0002f0c2]->node[20] = (Node) {0xa0000015,0xa0000016};
-  book->defs[0x0002f0c2]->node[21] = (Node) {0x4000002a,0x40000016};
-  book->defs[0x0002f0c2]->node[22] = (Node) {0x50000015,0x40000017};
-  book->defs[0x0002f0c2]->node[23] = (Node) {0x50000016,0x40000018};
-  book->defs[0x0002f0c2]->node[24] = (Node) {0x50000017,0x40000019};
-  book->defs[0x0002f0c2]->node[25] = (Node) {0x50000018,0x4000001a};
-  book->defs[0x0002f0c2]->node[26] = (Node) {0x50000019,0x4000001b};
-  book->defs[0x0002f0c2]->node[27] = (Node) {0x5000001a,0x4000001c};
-  book->defs[0x0002f0c2]->node[28] = (Node) {0x5000001b,0x4000001d};
-  book->defs[0x0002f0c2]->node[29] = (Node) {0x5000001c,0x4000001e};
-  book->defs[0x0002f0c2]->node[30] = (Node) {0x5000001d,0x4000001f};
-  book->defs[0x0002f0c2]->node[31] = (Node) {0x5000001e,0x40000020};
-  book->defs[0x0002f0c2]->node[32] = (Node) {0x5000001f,0x40000021};
-  book->defs[0x0002f0c2]->node[33] = (Node) {0x50000020,0x40000022};
-  book->defs[0x0002f0c2]->node[34] = (Node) {0x50000021,0x40000023};
-  book->defs[0x0002f0c2]->node[35] = (Node) {0x50000022,0x40000024};
-  book->defs[0x0002f0c2]->node[36] = (Node) {0x50000023,0x40000025};
-  book->defs[0x0002f0c2]->node[37] = (Node) {0x50000024,0x40000026};
-  book->defs[0x0002f0c2]->node[38] = (Node) {0x50000025,0x40000027};
-  book->defs[0x0002f0c2]->node[39] = (Node) {0x50000026,0x40000028};
-  book->defs[0x0002f0c2]->node[40] = (Node) {0x50000027,0x40000029};
-  book->defs[0x0002f0c2]->node[41] = (Node) {0x50000028,0x5000002a};
-  book->defs[0x0002f0c2]->node[42] = (Node) {0x40000015,0x50000029};
+  0x0000002B, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0xC0000001, 0xA000002A,  0xC0000002, 0xA0000029,  0xC0000003, 0xA0000028,  0xC0000004, 0xA0000027,
+  0xC0000005, 0xA0000026,  0xC0000006, 0xA0000025,  0xC0000007, 0xA0000024,  0xC0000008, 0xA0000023,
+  0xC0000009, 0xA0000022,  0xC000000A, 0xA0000021,  0xC000000B, 0xA0000020,  0xC000000C, 0xA000001F,
+  0xC000000D, 0xA000001E,  0xC000000E, 0xA000001D,  0xC000000F, 0xA000001C,  0xC0000010, 0xA000001B,
+  0xC0000011, 0xA000001A,  0xC0000012, 0xA0000019,  0xC0000013, 0xA0000018,  0xC0000014, 0xA0000017,
+  0xA0000015, 0xA0000016,  0x4000002A, 0x40000016,  0x50000015, 0x40000017,  0x50000016, 0x40000018,
+  0x50000017, 0x40000019,  0x50000018, 0x4000001A,  0x50000019, 0x4000001B,  0x5000001A, 0x4000001C,
+  0x5000001B, 0x4000001D,  0x5000001C, 0x4000001E,  0x5000001D, 0x4000001F,  0x5000001E, 0x40000020,
+  0x5000001F, 0x40000021,  0x50000020, 0x40000022,  0x50000021, 0x40000023,  0x50000022, 0x40000024,
+  0x50000023, 0x40000025,  0x50000024, 0x40000026,  0x50000025, 0x40000027,  0x50000026, 0x40000028,
+  0x50000027, 0x40000029,  0x50000028, 0x5000002A,  0x40000015, 0x50000029,
+  // .acts
   // k22
-  book->defs[0x0002f0c3]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x0002f0c3]->root     = 0xa0000000;
-  book->defs[0x0002f0c3]->alen     = 0;
-  book->defs[0x0002f0c3]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x0002f0c3]->nlen     = 45;
-  book->defs[0x0002f0c3]->node     = (Node*) malloc(45 * sizeof(Node));
-  book->defs[0x0002f0c3]->node[ 0] = (Node) {0xc0000001,0xa000002c};
-  book->defs[0x0002f0c3]->node[ 1] = (Node) {0xc0000002,0xa000002b};
-  book->defs[0x0002f0c3]->node[ 2] = (Node) {0xc0000003,0xa000002a};
-  book->defs[0x0002f0c3]->node[ 3] = (Node) {0xc0000004,0xa0000029};
-  book->defs[0x0002f0c3]->node[ 4] = (Node) {0xc0000005,0xa0000028};
-  book->defs[0x0002f0c3]->node[ 5] = (Node) {0xc0000006,0xa0000027};
-  book->defs[0x0002f0c3]->node[ 6] = (Node) {0xc0000007,0xa0000026};
-  book->defs[0x0002f0c3]->node[ 7] = (Node) {0xc0000008,0xa0000025};
-  book->defs[0x0002f0c3]->node[ 8] = (Node) {0xc0000009,0xa0000024};
-  book->defs[0x0002f0c3]->node[ 9] = (Node) {0xc000000a,0xa0000023};
-  book->defs[0x0002f0c3]->node[10] = (Node) {0xc000000b,0xa0000022};
-  book->defs[0x0002f0c3]->node[11] = (Node) {0xc000000c,0xa0000021};
-  book->defs[0x0002f0c3]->node[12] = (Node) {0xc000000d,0xa0000020};
-  book->defs[0x0002f0c3]->node[13] = (Node) {0xc000000e,0xa000001f};
-  book->defs[0x0002f0c3]->node[14] = (Node) {0xc000000f,0xa000001e};
-  book->defs[0x0002f0c3]->node[15] = (Node) {0xc0000010,0xa000001d};
-  book->defs[0x0002f0c3]->node[16] = (Node) {0xc0000011,0xa000001c};
-  book->defs[0x0002f0c3]->node[17] = (Node) {0xc0000012,0xa000001b};
-  book->defs[0x0002f0c3]->node[18] = (Node) {0xc0000013,0xa000001a};
-  book->defs[0x0002f0c3]->node[19] = (Node) {0xc0000014,0xa0000019};
-  book->defs[0x0002f0c3]->node[20] = (Node) {0xc0000015,0xa0000018};
-  book->defs[0x0002f0c3]->node[21] = (Node) {0xa0000016,0xa0000017};
-  book->defs[0x0002f0c3]->node[22] = (Node) {0x4000002c,0x40000017};
-  book->defs[0x0002f0c3]->node[23] = (Node) {0x50000016,0x40000018};
-  book->defs[0x0002f0c3]->node[24] = (Node) {0x50000017,0x40000019};
-  book->defs[0x0002f0c3]->node[25] = (Node) {0x50000018,0x4000001a};
-  book->defs[0x0002f0c3]->node[26] = (Node) {0x50000019,0x4000001b};
-  book->defs[0x0002f0c3]->node[27] = (Node) {0x5000001a,0x4000001c};
-  book->defs[0x0002f0c3]->node[28] = (Node) {0x5000001b,0x4000001d};
-  book->defs[0x0002f0c3]->node[29] = (Node) {0x5000001c,0x4000001e};
-  book->defs[0x0002f0c3]->node[30] = (Node) {0x5000001d,0x4000001f};
-  book->defs[0x0002f0c3]->node[31] = (Node) {0x5000001e,0x40000020};
-  book->defs[0x0002f0c3]->node[32] = (Node) {0x5000001f,0x40000021};
-  book->defs[0x0002f0c3]->node[33] = (Node) {0x50000020,0x40000022};
-  book->defs[0x0002f0c3]->node[34] = (Node) {0x50000021,0x40000023};
-  book->defs[0x0002f0c3]->node[35] = (Node) {0x50000022,0x40000024};
-  book->defs[0x0002f0c3]->node[36] = (Node) {0x50000023,0x40000025};
-  book->defs[0x0002f0c3]->node[37] = (Node) {0x50000024,0x40000026};
-  book->defs[0x0002f0c3]->node[38] = (Node) {0x50000025,0x40000027};
-  book->defs[0x0002f0c3]->node[39] = (Node) {0x50000026,0x40000028};
-  book->defs[0x0002f0c3]->node[40] = (Node) {0x50000027,0x40000029};
-  book->defs[0x0002f0c3]->node[41] = (Node) {0x50000028,0x4000002a};
-  book->defs[0x0002f0c3]->node[42] = (Node) {0x50000029,0x4000002b};
-  book->defs[0x0002f0c3]->node[43] = (Node) {0x5000002a,0x5000002c};
-  book->defs[0x0002f0c3]->node[44] = (Node) {0x40000016,0x5000002b};
+  0x0000002D, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0xC0000001, 0xA000002C,  0xC0000002, 0xA000002B,  0xC0000003, 0xA000002A,  0xC0000004, 0xA0000029,
+  0xC0000005, 0xA0000028,  0xC0000006, 0xA0000027,  0xC0000007, 0xA0000026,  0xC0000008, 0xA0000025,
+  0xC0000009, 0xA0000024,  0xC000000A, 0xA0000023,  0xC000000B, 0xA0000022,  0xC000000C, 0xA0000021,
+  0xC000000D, 0xA0000020,  0xC000000E, 0xA000001F,  0xC000000F, 0xA000001E,  0xC0000010, 0xA000001D,
+  0xC0000011, 0xA000001C,  0xC0000012, 0xA000001B,  0xC0000013, 0xA000001A,  0xC0000014, 0xA0000019,
+  0xC0000015, 0xA0000018,  0xA0000016, 0xA0000017,  0x4000002C, 0x40000017,  0x50000016, 0x40000018,
+  0x50000017, 0x40000019,  0x50000018, 0x4000001A,  0x50000019, 0x4000001B,  0x5000001A, 0x4000001C,
+  0x5000001B, 0x4000001D,  0x5000001C, 0x4000001E,  0x5000001D, 0x4000001F,  0x5000001E, 0x40000020,
+  0x5000001F, 0x40000021,  0x50000020, 0x40000022,  0x50000021, 0x40000023,  0x50000022, 0x40000024,
+  0x50000023, 0x40000025,  0x50000024, 0x40000026,  0x50000025, 0x40000027,  0x50000026, 0x40000028,
+  0x50000027, 0x40000029,  0x50000028, 0x4000002A,  0x50000029, 0x4000002B,  0x5000002A, 0x5000002C,
+  0x40000016, 0x5000002B,
+  // .acts
   // k23
-  book->defs[0x0002f0c4]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x0002f0c4]->root     = 0xa0000000;
-  book->defs[0x0002f0c4]->alen     = 0;
-  book->defs[0x0002f0c4]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x0002f0c4]->nlen     = 47;
-  book->defs[0x0002f0c4]->node     = (Node*) malloc(47 * sizeof(Node));
-  book->defs[0x0002f0c4]->node[ 0] = (Node) {0xc0000001,0xa000002e};
-  book->defs[0x0002f0c4]->node[ 1] = (Node) {0xc0000002,0xa000002d};
-  book->defs[0x0002f0c4]->node[ 2] = (Node) {0xc0000003,0xa000002c};
-  book->defs[0x0002f0c4]->node[ 3] = (Node) {0xc0000004,0xa000002b};
-  book->defs[0x0002f0c4]->node[ 4] = (Node) {0xc0000005,0xa000002a};
-  book->defs[0x0002f0c4]->node[ 5] = (Node) {0xc0000006,0xa0000029};
-  book->defs[0x0002f0c4]->node[ 6] = (Node) {0xc0000007,0xa0000028};
-  book->defs[0x0002f0c4]->node[ 7] = (Node) {0xc0000008,0xa0000027};
-  book->defs[0x0002f0c4]->node[ 8] = (Node) {0xc0000009,0xa0000026};
-  book->defs[0x0002f0c4]->node[ 9] = (Node) {0xc000000a,0xa0000025};
-  book->defs[0x0002f0c4]->node[10] = (Node) {0xc000000b,0xa0000024};
-  book->defs[0x0002f0c4]->node[11] = (Node) {0xc000000c,0xa0000023};
-  book->defs[0x0002f0c4]->node[12] = (Node) {0xc000000d,0xa0000022};
-  book->defs[0x0002f0c4]->node[13] = (Node) {0xc000000e,0xa0000021};
-  book->defs[0x0002f0c4]->node[14] = (Node) {0xc000000f,0xa0000020};
-  book->defs[0x0002f0c4]->node[15] = (Node) {0xc0000010,0xa000001f};
-  book->defs[0x0002f0c4]->node[16] = (Node) {0xc0000011,0xa000001e};
-  book->defs[0x0002f0c4]->node[17] = (Node) {0xc0000012,0xa000001d};
-  book->defs[0x0002f0c4]->node[18] = (Node) {0xc0000013,0xa000001c};
-  book->defs[0x0002f0c4]->node[19] = (Node) {0xc0000014,0xa000001b};
-  book->defs[0x0002f0c4]->node[20] = (Node) {0xc0000015,0xa000001a};
-  book->defs[0x0002f0c4]->node[21] = (Node) {0xc0000016,0xa0000019};
-  book->defs[0x0002f0c4]->node[22] = (Node) {0xa0000017,0xa0000018};
-  book->defs[0x0002f0c4]->node[23] = (Node) {0x4000002e,0x40000018};
-  book->defs[0x0002f0c4]->node[24] = (Node) {0x50000017,0x40000019};
-  book->defs[0x0002f0c4]->node[25] = (Node) {0x50000018,0x4000001a};
-  book->defs[0x0002f0c4]->node[26] = (Node) {0x50000019,0x4000001b};
-  book->defs[0x0002f0c4]->node[27] = (Node) {0x5000001a,0x4000001c};
-  book->defs[0x0002f0c4]->node[28] = (Node) {0x5000001b,0x4000001d};
-  book->defs[0x0002f0c4]->node[29] = (Node) {0x5000001c,0x4000001e};
-  book->defs[0x0002f0c4]->node[30] = (Node) {0x5000001d,0x4000001f};
-  book->defs[0x0002f0c4]->node[31] = (Node) {0x5000001e,0x40000020};
-  book->defs[0x0002f0c4]->node[32] = (Node) {0x5000001f,0x40000021};
-  book->defs[0x0002f0c4]->node[33] = (Node) {0x50000020,0x40000022};
-  book->defs[0x0002f0c4]->node[34] = (Node) {0x50000021,0x40000023};
-  book->defs[0x0002f0c4]->node[35] = (Node) {0x50000022,0x40000024};
-  book->defs[0x0002f0c4]->node[36] = (Node) {0x50000023,0x40000025};
-  book->defs[0x0002f0c4]->node[37] = (Node) {0x50000024,0x40000026};
-  book->defs[0x0002f0c4]->node[38] = (Node) {0x50000025,0x40000027};
-  book->defs[0x0002f0c4]->node[39] = (Node) {0x50000026,0x40000028};
-  book->defs[0x0002f0c4]->node[40] = (Node) {0x50000027,0x40000029};
-  book->defs[0x0002f0c4]->node[41] = (Node) {0x50000028,0x4000002a};
-  book->defs[0x0002f0c4]->node[42] = (Node) {0x50000029,0x4000002b};
-  book->defs[0x0002f0c4]->node[43] = (Node) {0x5000002a,0x4000002c};
-  book->defs[0x0002f0c4]->node[44] = (Node) {0x5000002b,0x4000002d};
-  book->defs[0x0002f0c4]->node[45] = (Node) {0x5000002c,0x5000002e};
-  book->defs[0x0002f0c4]->node[46] = (Node) {0x40000017,0x5000002d};
+  0x0000002F, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0xC0000001, 0xA000002E,  0xC0000002, 0xA000002D,  0xC0000003, 0xA000002C,  0xC0000004, 0xA000002B,
+  0xC0000005, 0xA000002A,  0xC0000006, 0xA0000029,  0xC0000007, 0xA0000028,  0xC0000008, 0xA0000027,
+  0xC0000009, 0xA0000026,  0xC000000A, 0xA0000025,  0xC000000B, 0xA0000024,  0xC000000C, 0xA0000023,
+  0xC000000D, 0xA0000022,  0xC000000E, 0xA0000021,  0xC000000F, 0xA0000020,  0xC0000010, 0xA000001F,
+  0xC0000011, 0xA000001E,  0xC0000012, 0xA000001D,  0xC0000013, 0xA000001C,  0xC0000014, 0xA000001B,
+  0xC0000015, 0xA000001A,  0xC0000016, 0xA0000019,  0xA0000017, 0xA0000018,  0x4000002E, 0x40000018,
+  0x50000017, 0x40000019,  0x50000018, 0x4000001A,  0x50000019, 0x4000001B,  0x5000001A, 0x4000001C,
+  0x5000001B, 0x4000001D,  0x5000001C, 0x4000001E,  0x5000001D, 0x4000001F,  0x5000001E, 0x40000020,
+  0x5000001F, 0x40000021,  0x50000020, 0x40000022,  0x50000021, 0x40000023,  0x50000022, 0x40000024,
+  0x50000023, 0x40000025,  0x50000024, 0x40000026,  0x50000025, 0x40000027,  0x50000026, 0x40000028,
+  0x50000027, 0x40000029,  0x50000028, 0x4000002A,  0x50000029, 0x4000002B,  0x5000002A, 0x4000002C,
+  0x5000002B, 0x4000002D,  0x5000002C, 0x5000002E,  0x40000017, 0x5000002D,
+  // .acts
   // k24
-  book->defs[0x0002f0c5]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x0002f0c5]->root     = 0xa0000000;
-  book->defs[0x0002f0c5]->alen     = 0;
-  book->defs[0x0002f0c5]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x0002f0c5]->nlen     = 49;
-  book->defs[0x0002f0c5]->node     = (Node*) malloc(49 * sizeof(Node));
-  book->defs[0x0002f0c5]->node[ 0] = (Node) {0xc0000001,0xa0000030};
-  book->defs[0x0002f0c5]->node[ 1] = (Node) {0xc0000002,0xa000002f};
-  book->defs[0x0002f0c5]->node[ 2] = (Node) {0xc0000003,0xa000002e};
-  book->defs[0x0002f0c5]->node[ 3] = (Node) {0xc0000004,0xa000002d};
-  book->defs[0x0002f0c5]->node[ 4] = (Node) {0xc0000005,0xa000002c};
-  book->defs[0x0002f0c5]->node[ 5] = (Node) {0xc0000006,0xa000002b};
-  book->defs[0x0002f0c5]->node[ 6] = (Node) {0xc0000007,0xa000002a};
-  book->defs[0x0002f0c5]->node[ 7] = (Node) {0xc0000008,0xa0000029};
-  book->defs[0x0002f0c5]->node[ 8] = (Node) {0xc0000009,0xa0000028};
-  book->defs[0x0002f0c5]->node[ 9] = (Node) {0xc000000a,0xa0000027};
-  book->defs[0x0002f0c5]->node[10] = (Node) {0xc000000b,0xa0000026};
-  book->defs[0x0002f0c5]->node[11] = (Node) {0xc000000c,0xa0000025};
-  book->defs[0x0002f0c5]->node[12] = (Node) {0xc000000d,0xa0000024};
-  book->defs[0x0002f0c5]->node[13] = (Node) {0xc000000e,0xa0000023};
-  book->defs[0x0002f0c5]->node[14] = (Node) {0xc000000f,0xa0000022};
-  book->defs[0x0002f0c5]->node[15] = (Node) {0xc0000010,0xa0000021};
-  book->defs[0x0002f0c5]->node[16] = (Node) {0xc0000011,0xa0000020};
-  book->defs[0x0002f0c5]->node[17] = (Node) {0xc0000012,0xa000001f};
-  book->defs[0x0002f0c5]->node[18] = (Node) {0xc0000013,0xa000001e};
-  book->defs[0x0002f0c5]->node[19] = (Node) {0xc0000014,0xa000001d};
-  book->defs[0x0002f0c5]->node[20] = (Node) {0xc0000015,0xa000001c};
-  book->defs[0x0002f0c5]->node[21] = (Node) {0xc0000016,0xa000001b};
-  book->defs[0x0002f0c5]->node[22] = (Node) {0xc0000017,0xa000001a};
-  book->defs[0x0002f0c5]->node[23] = (Node) {0xa0000018,0xa0000019};
-  book->defs[0x0002f0c5]->node[24] = (Node) {0x40000030,0x40000019};
-  book->defs[0x0002f0c5]->node[25] = (Node) {0x50000018,0x4000001a};
-  book->defs[0x0002f0c5]->node[26] = (Node) {0x50000019,0x4000001b};
-  book->defs[0x0002f0c5]->node[27] = (Node) {0x5000001a,0x4000001c};
-  book->defs[0x0002f0c5]->node[28] = (Node) {0x5000001b,0x4000001d};
-  book->defs[0x0002f0c5]->node[29] = (Node) {0x5000001c,0x4000001e};
-  book->defs[0x0002f0c5]->node[30] = (Node) {0x5000001d,0x4000001f};
-  book->defs[0x0002f0c5]->node[31] = (Node) {0x5000001e,0x40000020};
-  book->defs[0x0002f0c5]->node[32] = (Node) {0x5000001f,0x40000021};
-  book->defs[0x0002f0c5]->node[33] = (Node) {0x50000020,0x40000022};
-  book->defs[0x0002f0c5]->node[34] = (Node) {0x50000021,0x40000023};
-  book->defs[0x0002f0c5]->node[35] = (Node) {0x50000022,0x40000024};
-  book->defs[0x0002f0c5]->node[36] = (Node) {0x50000023,0x40000025};
-  book->defs[0x0002f0c5]->node[37] = (Node) {0x50000024,0x40000026};
-  book->defs[0x0002f0c5]->node[38] = (Node) {0x50000025,0x40000027};
-  book->defs[0x0002f0c5]->node[39] = (Node) {0x50000026,0x40000028};
-  book->defs[0x0002f0c5]->node[40] = (Node) {0x50000027,0x40000029};
-  book->defs[0x0002f0c5]->node[41] = (Node) {0x50000028,0x4000002a};
-  book->defs[0x0002f0c5]->node[42] = (Node) {0x50000029,0x4000002b};
-  book->defs[0x0002f0c5]->node[43] = (Node) {0x5000002a,0x4000002c};
-  book->defs[0x0002f0c5]->node[44] = (Node) {0x5000002b,0x4000002d};
-  book->defs[0x0002f0c5]->node[45] = (Node) {0x5000002c,0x4000002e};
-  book->defs[0x0002f0c5]->node[46] = (Node) {0x5000002d,0x4000002f};
-  book->defs[0x0002f0c5]->node[47] = (Node) {0x5000002e,0x50000030};
-  book->defs[0x0002f0c5]->node[48] = (Node) {0x40000018,0x5000002f};
+  0x00000031, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0xC0000001, 0xA0000030,  0xC0000002, 0xA000002F,  0xC0000003, 0xA000002E,  0xC0000004, 0xA000002D,
+  0xC0000005, 0xA000002C,  0xC0000006, 0xA000002B,  0xC0000007, 0xA000002A,  0xC0000008, 0xA0000029,
+  0xC0000009, 0xA0000028,  0xC000000A, 0xA0000027,  0xC000000B, 0xA0000026,  0xC000000C, 0xA0000025,
+  0xC000000D, 0xA0000024,  0xC000000E, 0xA0000023,  0xC000000F, 0xA0000022,  0xC0000010, 0xA0000021,
+  0xC0000011, 0xA0000020,  0xC0000012, 0xA000001F,  0xC0000013, 0xA000001E,  0xC0000014, 0xA000001D,
+  0xC0000015, 0xA000001C,  0xC0000016, 0xA000001B,  0xC0000017, 0xA000001A,  0xA0000018, 0xA0000019,
+  0x40000030, 0x40000019,  0x50000018, 0x4000001A,  0x50000019, 0x4000001B,  0x5000001A, 0x4000001C,
+  0x5000001B, 0x4000001D,  0x5000001C, 0x4000001E,  0x5000001D, 0x4000001F,  0x5000001E, 0x40000020,
+  0x5000001F, 0x40000021,  0x50000020, 0x40000022,  0x50000021, 0x40000023,  0x50000022, 0x40000024,
+  0x50000023, 0x40000025,  0x50000024, 0x40000026,  0x50000025, 0x40000027,  0x50000026, 0x40000028,
+  0x50000027, 0x40000029,  0x50000028, 0x4000002A,  0x50000029, 0x4000002B,  0x5000002A, 0x4000002C,
+  0x5000002B, 0x4000002D,  0x5000002C, 0x4000002E,  0x5000002D, 0x4000002F,  0x5000002E, 0x50000030,
+  0x40000018, 0x5000002F,
+  // .acts
   // low
-  book->defs[0x00030cfb]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x00030cfb]->root     = 0xa0000000;
-  book->defs[0x00030cfb]->alen     = 0;
-  book->defs[0x00030cfb]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x00030cfb]->nlen     = 4;
-  book->defs[0x00030cfb]->node     = (Node*) malloc(4 * sizeof(Node));
-  book->defs[0x00030cfb]->node[ 0] = (Node) {0xa0000001,0x50000003};
-  book->defs[0x00030cfb]->node[ 1] = (Node) {0x10c33ed9,0xa0000002};
-  book->defs[0x00030cfb]->node[ 2] = (Node) {0x10c33ed3,0xa0000003};
-  book->defs[0x00030cfb]->node[ 3] = (Node) {0x1000000f,0x50000000};
+  0x00000004, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0xA0000001, 0x50000003,  0x10000055, 0xA0000002,  0x10000054, 0xA0000003,  0x10000000, 0x50000000,
+  // .acts
   // mul
-  book->defs[0x00031e70]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x00031e70]->root     = 0xa0000000;
-  book->defs[0x00031e70]->alen     = 0;
-  book->defs[0x00031e70]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x00031e70]->nlen     = 5;
-  book->defs[0x00031e70]->node     = (Node*) malloc(5 * sizeof(Node));
-  book->defs[0x00031e70]->node[ 0] = (Node) {0xa0000001,0xa0000002};
-  book->defs[0x00031e70]->node[ 1] = (Node) {0x50000003,0x50000004};
-  book->defs[0x00031e70]->node[ 2] = (Node) {0xa0000003,0xa0000004};
-  book->defs[0x00031e70]->node[ 3] = (Node) {0x40000004,0x40000001};
-  book->defs[0x00031e70]->node[ 4] = (Node) {0x40000003,0x50000001};
+  0x00000005, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0xA0000001, 0xA0000002,  0x50000003, 0x50000004,  0xA0000003, 0xA0000004,  0x40000004, 0x40000001,
+  0x40000003, 0x50000001,
+  // .acts
   // nid
-  book->defs[0x00032b68]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x00032b68]->root     = 0xa0000000;
-  book->defs[0x00032b68]->alen     = 0;
-  book->defs[0x00032b68]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x00032b68]->nlen     = 3;
-  book->defs[0x00032b68]->node     = (Node*) malloc(3 * sizeof(Node));
-  book->defs[0x00032b68]->node[ 0] = (Node) {0xa0000001,0x50000002};
-  book->defs[0x00032b68]->node[ 1] = (Node) {0x10cada1d,0xa0000002};
-  book->defs[0x00032b68]->node[ 2] = (Node) {0x10000024,0x50000000};
+  0x00000003, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0xA0000001, 0x50000002,  0x10000056, 0xA0000002,  0x10000006, 0x50000000,
+  // .acts
   // not
-  book->defs[0x00032cf8]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x00032cf8]->root     = 0xa0000000;
-  book->defs[0x00032cf8]->alen     = 0;
-  book->defs[0x00032cf8]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x00032cf8]->nlen     = 5;
-  book->defs[0x00032cf8]->node     = (Node*) malloc(5 * sizeof(Node));
-  book->defs[0x00032cf8]->node[ 0] = (Node) {0xa0000001,0xa0000003};
-  book->defs[0x00032cf8]->node[ 1] = (Node) {0x40000004,0xa0000002};
-  book->defs[0x00032cf8]->node[ 2] = (Node) {0x40000003,0x50000004};
-  book->defs[0x00032cf8]->node[ 3] = (Node) {0x40000002,0xa0000004};
-  book->defs[0x00032cf8]->node[ 4] = (Node) {0x40000001,0x50000002};
+  0x00000005, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0xA0000001, 0xA0000003,  0x40000004, 0xA0000002,  0x40000003, 0x50000004,  0x40000002, 0xA0000004,
+  0x40000001, 0x50000002,
+  // .acts
   // run
-  book->defs[0x00036e72]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x00036e72]->root     = 0xa0000000;
-  book->defs[0x00036e72]->alen     = 0;
-  book->defs[0x00036e72]->acts     = (Wire*) malloc(0 * sizeof(Wire));
-  book->defs[0x00036e72]->nlen     = 4;
-  book->defs[0x00036e72]->node     = (Node*) malloc(4 * sizeof(Node));
-  book->defs[0x00036e72]->node[ 0] = (Node) {0xa0000001,0x50000003};
-  book->defs[0x00036e72]->node[ 1] = (Node) {0x10db9c99,0xa0000002};
-  book->defs[0x00036e72]->node[ 2] = (Node) {0x10db9c93,0xa0000003};
-  book->defs[0x00036e72]->node[ 3] = (Node) {0x1000000f,0x50000000};
+  0x00000004, // .nlen
+  0x00000000, // .alen
+  0xA0000000, // .root
+  // .node
+  0xA0000001, 0x50000003,  0x10000058, 0xA0000002,  0x10000057, 0xA0000003,  0x10000000, 0x50000000,
+  // .acts
   // brnS
-  book->defs[0x009b6c9d]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x009b6c9d]->root     = 0xa0000000;
-  book->defs[0x009b6c9d]->alen     = 2;
-  book->defs[0x009b6c9d]->acts     = (Wire*) malloc(2 * sizeof(Wire));
-  book->defs[0x009b6c9d]->acts[ 0] = mkwire(0x10026db2,0xa0000003);
-  book->defs[0x009b6c9d]->acts[ 1] = mkwire(0x10026db2,0xa0000004);
-  book->defs[0x009b6c9d]->nlen     = 5;
-  book->defs[0x009b6c9d]->node     = (Node*) malloc(5 * sizeof(Node));
-  book->defs[0x009b6c9d]->node[ 0] = (Node) {0xb0000001,0xa0000002};
-  book->defs[0x009b6c9d]->node[ 1] = (Node) {0x40000003,0x40000004};
-  book->defs[0x009b6c9d]->node[ 2] = (Node) {0x50000003,0x50000004};
-  book->defs[0x009b6c9d]->node[ 3] = (Node) {0x40000001,0x40000002};
-  book->defs[0x009b6c9d]->node[ 4] = (Node) {0x50000001,0x50000002};
+  0x00000005, // .nlen
+  0x00000002, // .alen
+  0xA0000000, // .root
+  // .node
+  0xB0000001, 0xA0000002,  0x40000003, 0x40000004,  0x50000003, 0x50000004,  0x40000001, 0x40000002,
+  0x50000001, 0x50000002,
+  // .acts
+  0x10000020, 0xA0000003,  0x10000020, 0xA0000004,
   // brnZ
-  book->defs[0x009b6ca4]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x009b6ca4]->root     = 0x50000000;
-  book->defs[0x009b6ca4]->alen     = 2;
-  book->defs[0x009b6ca4]->acts     = (Wire*) malloc(2 * sizeof(Wire));
-  book->defs[0x009b6ca4]->acts[ 0] = mkwire(0x10036e72,0xa0000000);
-  book->defs[0x009b6ca4]->acts[ 1] = mkwire(0x10031e70,0xa0000001);
-  book->defs[0x009b6ca4]->nlen     = 5;
-  book->defs[0x009b6ca4]->node     = (Node*) malloc(5 * sizeof(Node));
-  book->defs[0x009b6ca4]->node[ 0] = (Node) {0x50000004,0x30000000};
-  book->defs[0x009b6ca4]->node[ 1] = (Node) {0x100009c3,0xa0000002};
-  book->defs[0x009b6ca4]->node[ 2] = (Node) {0x100009c6,0xa0000003};
-  book->defs[0x009b6ca4]->node[ 3] = (Node) {0x10000013,0xa0000004};
-  book->defs[0x009b6ca4]->node[ 4] = (Node) {0x1000000f,0x40000000};
+  0x00000005, // .nlen
+  0x00000002, // .alen
+  0x50000000, // .root
+  // .node
+  0x50000004, 0x30000000,  0x1000000A, 0xA0000002,  0x1000000D, 0xA0000003,  0x10000002, 0xA0000004,
+  0x10000000, 0x40000000,
+  // .acts
+  0x1000004F, 0xA0000000,  0x1000004C, 0xA0000001,
   // decI
-  book->defs[0x00a299d3]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x00a299d3]->root     = 0xa0000000;
-  book->defs[0x00a299d3]->alen     = 1;
-  book->defs[0x00a299d3]->acts     = (Wire*) malloc(1 * sizeof(Wire));
-  book->defs[0x00a299d3]->acts[ 0] = mkwire(0x10030cfb,0xa0000001);
-  book->defs[0x00a299d3]->nlen     = 2;
-  book->defs[0x00a299d3]->node     = (Node*) malloc(2 * sizeof(Node));
-  book->defs[0x00a299d3]->node[ 0] = (Node) {0x40000001,0x50000001};
-  book->defs[0x00a299d3]->node[ 1] = (Node) {0x40000000,0x50000000};
+  0x00000002, // .nlen
+  0x00000001, // .alen
+  0xA0000000, // .root
+  // .node
+  0x40000001, 0x50000001,  0x40000000, 0x50000000,
+  // .acts
+  0x1000004B, 0xA0000001,
   // decO
-  book->defs[0x00a299d9]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x00a299d9]->root     = 0xa0000000;
-  book->defs[0x00a299d9]->alen     = 2;
-  book->defs[0x00a299d9]->acts     = (Wire*) malloc(2 * sizeof(Wire));
-  book->defs[0x00a299d9]->acts[ 0] = mkwire(0x10000013,0xa0000001);
-  book->defs[0x00a299d9]->acts[ 1] = mkwire(0x10028a67,0xa0000002);
-  book->defs[0x00a299d9]->nlen     = 3;
-  book->defs[0x00a299d9]->node     = (Node*) malloc(3 * sizeof(Node));
-  book->defs[0x00a299d9]->node[ 0] = (Node) {0x40000002,0x50000001};
-  book->defs[0x00a299d9]->node[ 1] = (Node) {0x50000002,0x50000000};
-  book->defs[0x00a299d9]->node[ 2] = (Node) {0x40000000,0x40000001};
+  0x00000003, // .nlen
+  0x00000002, // .alen
+  0xA0000000, // .root
+  // .node
+  0x40000002, 0x50000001,  0x50000002, 0x50000000,  0x40000000, 0x40000001,
+  // .acts
+  0x10000002, 0xA0000001,  0x10000034, 0xA0000002,
   // lowI
-  book->defs[0x00c33ed3]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x00c33ed3]->root     = 0xa0000000;
-  book->defs[0x00c33ed3]->alen     = 2;
-  book->defs[0x00c33ed3]->acts     = (Wire*) malloc(2 * sizeof(Wire));
-  book->defs[0x00c33ed3]->acts[ 0] = mkwire(0x10000013,0xa0000001);
-  book->defs[0x00c33ed3]->acts[ 1] = mkwire(0x10000019,0xa0000002);
-  book->defs[0x00c33ed3]->nlen     = 3;
-  book->defs[0x00c33ed3]->node     = (Node*) malloc(3 * sizeof(Node));
-  book->defs[0x00c33ed3]->node[ 0] = (Node) {0x40000001,0x50000002};
-  book->defs[0x00c33ed3]->node[ 1] = (Node) {0x40000000,0x40000002};
-  book->defs[0x00c33ed3]->node[ 2] = (Node) {0x50000001,0x50000000};
+  0x00000003, // .nlen
+  0x00000002, // .alen
+  0xA0000000, // .root
+  // .node
+  0x40000001, 0x50000002,  0x40000000, 0x40000002,  0x50000001, 0x50000000,
+  // .acts
+  0x10000002, 0xA0000001,  0x10000003, 0xA0000002,
   // lowO
-  book->defs[0x00c33ed9]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x00c33ed9]->root     = 0xa0000000;
-  book->defs[0x00c33ed9]->alen     = 2;
-  book->defs[0x00c33ed9]->acts     = (Wire*) malloc(2 * sizeof(Wire));
-  book->defs[0x00c33ed9]->acts[ 0] = mkwire(0x10000019,0xa0000001);
-  book->defs[0x00c33ed9]->acts[ 1] = mkwire(0x10000019,0xa0000002);
-  book->defs[0x00c33ed9]->nlen     = 3;
-  book->defs[0x00c33ed9]->node     = (Node*) malloc(3 * sizeof(Node));
-  book->defs[0x00c33ed9]->node[ 0] = (Node) {0x40000001,0x50000002};
-  book->defs[0x00c33ed9]->node[ 1] = (Node) {0x40000000,0x40000002};
-  book->defs[0x00c33ed9]->node[ 2] = (Node) {0x50000001,0x50000000};
+  0x00000003, // .nlen
+  0x00000002, // .alen
+  0xA0000000, // .root
+  // .node
+  0x40000001, 0x50000002,  0x40000000, 0x40000002,  0x50000001, 0x50000000,
+  // .acts
+  0x10000003, 0xA0000001,  0x10000003, 0xA0000002,
   // nidS
-  book->defs[0x00cada1d]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x00cada1d]->root     = 0xa0000000;
-  book->defs[0x00cada1d]->alen     = 2;
-  book->defs[0x00cada1d]->acts     = (Wire*) malloc(2 * sizeof(Wire));
-  book->defs[0x00cada1d]->acts[ 0] = mkwire(0x1000001d,0xa0000001);
-  book->defs[0x00cada1d]->acts[ 1] = mkwire(0x10032b68,0xa0000002);
-  book->defs[0x00cada1d]->nlen     = 3;
-  book->defs[0x00cada1d]->node     = (Node*) malloc(3 * sizeof(Node));
-  book->defs[0x00cada1d]->node[ 0] = (Node) {0x40000002,0x50000001};
-  book->defs[0x00cada1d]->node[ 1] = (Node) {0x50000002,0x50000000};
-  book->defs[0x00cada1d]->node[ 2] = (Node) {0x40000000,0x40000001};
+  0x00000003, // .nlen
+  0x00000002, // .alen
+  0xA0000000, // .root
+  // .node
+  0x40000002, 0x50000001,  0x50000002, 0x50000000,  0x40000000, 0x40000001,
+  // .acts
+  0x10000004, 0xA0000001,  0x1000004D, 0xA0000002,
   // runI
-  book->defs[0x00db9c93]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x00db9c93]->root     = 0xa0000000;
-  book->defs[0x00db9c93]->alen     = 3;
-  book->defs[0x00db9c93]->acts     = (Wire*) malloc(3 * sizeof(Wire));
-  book->defs[0x00db9c93]->acts[ 0] = mkwire(0x10036e72,0xa0000001);
-  book->defs[0x00db9c93]->acts[ 1] = mkwire(0x10028a67,0xa0000002);
-  book->defs[0x00db9c93]->acts[ 2] = mkwire(0x10000013,0xa0000003);
-  book->defs[0x00db9c93]->nlen     = 4;
-  book->defs[0x00db9c93]->node     = (Node*) malloc(4 * sizeof(Node));
-  book->defs[0x00db9c93]->node[ 0] = (Node) {0x40000003,0x50000001};
-  book->defs[0x00db9c93]->node[ 1] = (Node) {0x50000002,0x50000000};
-  book->defs[0x00db9c93]->node[ 2] = (Node) {0x50000003,0x40000001};
-  book->defs[0x00db9c93]->node[ 3] = (Node) {0x40000000,0x40000002};
+  0x00000004, // .nlen
+  0x00000003, // .alen
+  0xA0000000, // .root
+  // .node
+  0x40000003, 0x50000001,  0x50000002, 0x50000000,  0x50000003, 0x40000001,  0x40000000, 0x40000002,
+  // .acts
+  0x1000004F, 0xA0000001,  0x10000034, 0xA0000002,  0x10000002, 0xA0000003,
   // runO
-  book->defs[0x00db9c99]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x00db9c99]->root     = 0xa0000000;
-  book->defs[0x00db9c99]->alen     = 3;
-  book->defs[0x00db9c99]->acts     = (Wire*) malloc(3 * sizeof(Wire));
-  book->defs[0x00db9c99]->acts[ 0] = mkwire(0x10036e72,0xa0000001);
-  book->defs[0x00db9c99]->acts[ 1] = mkwire(0x10028a67,0xa0000002);
-  book->defs[0x00db9c99]->acts[ 2] = mkwire(0x10000019,0xa0000003);
-  book->defs[0x00db9c99]->nlen     = 4;
-  book->defs[0x00db9c99]->node     = (Node*) malloc(4 * sizeof(Node));
-  book->defs[0x00db9c99]->node[ 0] = (Node) {0x40000003,0x50000001};
-  book->defs[0x00db9c99]->node[ 1] = (Node) {0x50000002,0x50000000};
-  book->defs[0x00db9c99]->node[ 2] = (Node) {0x50000003,0x40000001};
-  book->defs[0x00db9c99]->node[ 3] = (Node) {0x40000000,0x40000002};
-}
+  0x00000004, // .nlen
+  0x00000003, // .alen
+  0xA0000000, // .root
+  // .node
+  0x40000003, 0x50000001,  0x50000002, 0x50000000,  0x50000003, 0x40000001,  0x40000000, 0x40000002,
+  // .acts
+  0x1000004F, 0xA0000001,  0x10000034, 0xA0000002,  0x10000003, 0xA0000003,
+};
 
-__host__ void boot(Net* net, u32 ref_id) {
-  net->root = mkptr(REF, ref_id);
-}
+const size_t BOOK_SIZE = sizeof(BOOK_DATA) / sizeof(u32);
 
 // Main
 // ----
@@ -3413,12 +2235,8 @@ int main() {
   cudaGetDeviceProperties(&prop, device);
   printf("CUDA Device: %s, Compute Capability: %d.%d\n\n", prop.name, prop.major, prop.minor);
 
-  // Allocates net and book on CPU
-  Net* cpu_net = mknet();
-  Book* cpu_book = mkbook();
-  populate(cpu_book);
-  boot(cpu_net, 0x00029f04); // initial term
-  //boot(cpu_net, 0x009b6ca4); // initial term
+  // Allocates net on CPU
+  Net* cpu_net = mknet(F_ex3);
 
   // Prints the input net
   printf("\nINPUT\n=====\n\n");
@@ -3426,7 +2244,7 @@ int main() {
 
   // Uploads net and book to GPU
   Net* gpu_net = net_to_gpu(cpu_net);
-  Book* gpu_book = book_to_gpu(cpu_book);
+  Book* gpu_book = init_book_on_gpu(BOOK_DATA, BOOK_SIZE);
 
   // Marks init time
   struct timespec start, end;
@@ -3449,9 +2267,9 @@ int main() {
   Net* norm = net_to_cpu(gpu_net);
 
   // Prints the output
-  //print_tree(norm, norm->root);
   printf("\nNORMAL ~ rewrites=%llu\n======\n\n", norm->rwts);
-  print_net(norm);
+  //print_tree(norm, norm->root);
+  //print_net(norm);
   printf("Time: %.3f s\n", ((double)delta_time) / 1000.0);
   printf("RPS : %.3f million\n", ((double)norm->rwts) / ((double)delta_time) / 1000.0);
 
@@ -3461,7 +2279,6 @@ int main() {
 
   // Clears GPU memory
   net_free_on_cpu(cpu_net);
-  book_free_on_cpu(cpu_book);
   net_free_on_cpu(norm);
 
   return 0;

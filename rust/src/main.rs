@@ -245,50 +245,103 @@ fn main() {
   let start = std::time::Instant::now();
 
   // Computes its normal form
-  net.expand(book, Ptr::new(VRR,0));
-  net.reduce(book);
-  //net.expand(book, Ptr::new(VRR,0));
-  //net.reduce(book);
   //net.normal(book);
 
   //Shows results and stats
-  //println!("[net]\n{}", show_net(&net));
-  println!("size: {}", net.node.len());
-  println!("used: {}", net.used);
-  println!("rwts: {}", net.rwts);
-  println!("time: {}ms", start.elapsed().as_millis());
-  println!("RPS : {}", (net.rwts as f64) / (start.elapsed().as_millis() as f64) / 1000.0);
+  println!("[net]\n{}", show_net(&net));
+  println!("Rwts: {}", net.rwts);
+  println!("Time: {} s", (start.elapsed().as_millis() as f64) / 1000.0);
+  println!("RPS : {} million", (net.rwts as f64) / (start.elapsed().as_millis() as f64) / 1000.0);
 
-  //println!("net.root = {:08x}", net.root.data);
-  //for i in 0 .. net.acts.len() {
-    //println!("net.acts[{:04x}] = {:08x} {:08x}", i, net.acts[i].0.data, net.acts[i].1.data);
-  //}
-  //for i in 0 .. net.node.len() {
-    //if net.node[i].ports[0].data != 0 || net.node[i].ports[1].data != 0 {
-      //println!("net.node[{:04x}] = {:08x} {:08x}", i, net.node[i].ports[0].data, net.node[i].ports[1].data);
-    //}
-  //}
-
-  populate_cuda(&book); // prints CUDA book
+  println!("{}", &compile_book(&book));
 }
 
-fn populate_cuda(book: &Book) {
-  println!("Term* term;");
-  let mut sorted_defs: Vec<(&u32, &Net)> = book.defs.iter().collect();
-  sorted_defs.sort_by_key(|&(key, _)| key);
-  for (key, def) in sorted_defs {
-    println!("  // {}", u32_to_name(*key));
-    println!("  book->defs[0x{:08x}]           = (Term*) malloc(sizeof(Term));", key);
-    println!("  book->defs[0x{:08x}]->root     = 0x{:08x};", key, def.root.data);
-    println!("  book->defs[0x{:08x}]->alen     = {};", key, def.acts.len());
-    println!("  book->defs[0x{:08x}]->acts     = (Wire*) malloc({} * sizeof(Wire));", key, def.acts.len());
-    for i in 0..def.acts.len() {
-        println!("  book->defs[0x{:08x}]->acts[{:2}] = mkwire(0x{:08x},0x{:08x});", key, i, def.acts[i].0.data, def.acts[i].1.data);
-    }
-    println!("  book->defs[0x{:08x}]->nlen     = {};", key, def.node.len());
-    println!("  book->defs[0x{:08x}]->node     = (Node*) malloc({} * sizeof(Node));", key, def.node.len());
-    for i in 0..def.node.len() {
-      println!("  book->defs[0x{:08x}]->node[{:2}] = (Node) {{0x{:08x},0x{:08x}}};", key, i, def.node[i].ports[P1].data, def.node[i].ports[P2].data);
+fn compile_book(book: &Book) -> String {
+  use std::collections::BTreeMap;
+
+  fn rename(ptr: &Ptr, name_to_id: &BTreeMap<u32, u32>) -> Ptr {
+    if ptr.is_ref() {
+      return Ptr::new(ptr.tag(), *name_to_id.get(&ptr.val()).unwrap());
+    } else {
+      return *ptr;
     }
   }
+
+  // Sort the book.defs by key
+  let sorted_defs: BTreeMap<u32, Net> = book.defs.iter().map(|(k, v)| (*k, v.clone())).collect();
+
+  // Initializes code
+  let mut code = String::new();
+
+  // Generate function ids
+  for (i, id) in sorted_defs.keys().enumerate() {
+    let term_name = crate::lang::u32_to_name(*id);
+    code.push_str(&format!("const u32 F_{} = 0x{:04x};\n", term_name, i));
+  }
+  code.push_str("\n");
+
+  // Create book
+  code.push_str("u32 BOOK_DATA[] = {\n");
+
+  // Build the name_to_id map
+  let mut name_to_id = BTreeMap::new();
+  for (idx, id) in sorted_defs.keys().enumerate() {
+    name_to_id.insert(*id, idx as u32);
+  }
+
+  // Compute indices for each net's data
+  let mut indices = Vec::new();
+  let mut index = sorted_defs.len() as u32;
+  for (_, net) in &sorted_defs {
+    indices.push(index);
+    index += 3 + 2 * net.node.len() as u32 + 2 * net.acts.len() as u32;
+  }
+
+  // Reserve space for function indices
+  for (i, id) in sorted_defs.keys().enumerate() {
+    let term_name = crate::lang::u32_to_name(*id);
+    code.push_str(&format!("  0x{:08X}, // {}\n", indices[i], term_name));
+  }
+
+  for (i, (id, net)) in sorted_defs.iter().enumerate() {
+    let node_len = net.node.len();
+    let acts_len = net.acts.len();
+
+    code.push_str(&format!("  // {}\n", crate::lang::u32_to_name(*id)));
+
+    // Collect all pointers from root, nodes and acts into a single buffer
+    code.push_str(&format!("  0x{:08X}, // .nlen\n", node_len));
+    code.push_str(&format!("  0x{:08X}, // .alen\n", acts_len));
+    code.push_str(&format!("  0x{:08X}, // .root\n", rename(&net.root, &name_to_id).data));
+
+    // .node
+    code.push_str("  // .node\n");
+    for (i, node) in net.node.iter().enumerate() {
+      code.push_str(&format!("  0x{:08X},", rename(node.port(P1), &name_to_id).data));
+      code.push_str(&format!(" 0x{:08X},", rename(node.port(P2), &name_to_id).data));
+      if (i + 1) % 4 == 0 {
+        code.push_str("\n");
+      }
+    }
+    if node_len % 4 != 0 {
+      code.push_str("\n");
+    }
+
+    // .acts
+    code.push_str("  // .acts\n");
+    for (i, (a, b)) in net.acts.iter().enumerate() {
+      code.push_str(&format!("  0x{:08X},", rename(a, &name_to_id).data));
+      code.push_str(&format!(" 0x{:08X},", rename(b, &name_to_id).data));
+      if (i + 1) % 4 == 0 {
+        code.push_str("\n");
+      }
+    }
+    if acts_len % 4 != 0 {
+      code.push_str("\n");
+    }
+  }
+
+  code.push_str("};\n");
+
+  return code;
 }
