@@ -226,7 +226,7 @@ fn main() {
   // Decreases many binary counters.
   define(book, "ex3", "
     $ res
-    & @mul ~ (0 @c5 (0 @c3 (0 @S (0 @Z dep))))
+    & @c17 ~ (0 @S (0 @Z dep))
     & @brn ~ (0 dep res)
   "); 
 
@@ -247,8 +247,8 @@ fn main() {
   // Computes its normal form
   net.expand(book, Ptr::new(VRR,0));
   net.reduce(book);
-  net.expand(book, Ptr::new(VRR,0));
-  net.reduce(book);
+  //net.expand(book, Ptr::new(VRR,0));
+  //net.reduce(book);
   //net.normal(book);
 
   //Shows results and stats
@@ -269,7 +269,7 @@ fn main() {
     //}
   //}
 
-  //populate_cuda(&book); // prints CUDA book
+  populate_cuda(&book); // prints CUDA book
 }
 
 fn populate_cuda(book: &Book) {

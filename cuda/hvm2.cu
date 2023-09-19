@@ -27,7 +27,7 @@ const u32 HEAD_SIZE     = 1 << HEAD_LOG2;            // max head pointers
 const u32 MAX_THREADS   = BLOCK_SIZE * BLOCK_SIZE;   // total number of active threads
 const u32 MAX_UNITS     = GROUP_SIZE * GROUP_SIZE;   // total number of active units
 const u32 MAX_NEW_REDEX = 4;                         // max new redexes per rewrite
-const u32 TERM_SIZE     = 32;                        // max number of nodes in a term = 32
+const u32 SMEM_SIZE     = 4;                         // u32's shared by unit
 const u32 RBAG_SIZE     = 32;                        // redexes per unit = 32
 const u32 LHDS_SIZE     = 32;                        // max local heads
 const u32 BAGS_SIZE     = MAX_UNITS * RBAG_SIZE;     // redexes per GPU
@@ -74,7 +74,7 @@ const u32 P2 = 1;
 typedef u32 Ptr;
 
 // Nodes are pairs of pointers
-typedef struct alignas(4) {
+typedef struct {
   Ptr ports[2];
 } Node;
 
@@ -115,7 +115,6 @@ typedef struct {
   u32   port; // worker port (P1|P2)
   u32   aloc; // where to alloc next node
   u64   rwts; // local rewrites performed
-  u32*  locs; // local alloc locs / expand ptrs
   u32*  sm32; // shared 32-bit buffer
   u64*  sm64; // shared 64-bit buffer
   u64*  rlen; // local redex bag length
@@ -273,22 +272,44 @@ __device__ inline Ptr* at(Net* net, Val idx, Port port) {
   return &net->node[idx].ports[port];
 }
 
-// Allocates a new node in memory
+// Allocates one node in memory
 __device__ inline u32 alloc(Worker *worker, Net *net) {
-  u32 K = 0;
-  bool back = true;
   while (true) {
-    u32  idx = worker->aloc % NODE_SIZE;
-    u64* ref = (u64*)&net->node[idx];
+    u64* ref = (u64*)&net->node[worker->aloc];
     u64  got = atomicCAS((u64*)ref, 0, ((u64)NEO << 32) | (u64)NEO);
+    worker->aloc = (worker->aloc + 1) % NODE_SIZE;
     if (got == 0) {
-      return idx;
+      return (worker->aloc - 1) % NODE_SIZE;
+    }
+  }
+}
+
+// Allocates many nodes in memory
+// TODO: use the entire squad to perform this
+__device__ inline u32 alloc_many(Worker *worker, Net *net, u32 size) {
+  u64 MKNEO = ((u64)NEO << 32) | (u64)NEO;
+  u32 space = 0;
+  while (true) {
+    if (worker->aloc + size - space > NODE_SIZE) {
+      worker->aloc = 0;
+    }
+    u64* ref = (u64*)&net->node[worker->aloc];
+    u64  got = atomicCAS(ref, 0, MKNEO);
+    if (got != 0) {
+      for (u32 i = 0; i < space; ++i) {
+        u32  index = (worker->aloc - space + i) % NODE_SIZE;
+        Node clear = mknode(mkptr(NIL,0), mkptr(NIL,0));
+        u64* ref = (u64*)&net->node[index];
+        u64  got = atomicCAS(ref, MKNEO, 0);
+      }
+      space = 0;
+    } else {
+      space += 1;
     }
     worker->aloc = (worker->aloc + 1) % NODE_SIZE;
-    //if (worker->aloc > 0 && worker->aloc % 256 == 0 && back) {
-      //back = false;
-      //worker->aloc -= 256;
-    //}
+    if (space == size) {
+      return (worker->aloc - space) % NODE_SIZE;
+    }
   }
 }
 
@@ -399,14 +420,12 @@ __device__ inline void put_redex(Worker* worker, Ptr a_ptr, Ptr b_ptr) {
 }
 
 // Adjusts a dereferenced pointer
-__device__ Ptr adjust(Worker* worker, Ptr ptr) {
-  return mkptr(tag(ptr), has_loc(ptr) ? worker->locs[val(ptr)] : val(ptr));
+__device__ Ptr adjust(Worker* worker, Ptr ptr, u32 delta) {
+  return mkptr(tag(ptr), has_loc(ptr) ? val(ptr) + delta : val(ptr));
 }
 
 // Dereferences a global definition
 __device__ void deref(Worker* worker, Net* net, Book* book, Ptr* deref_ptr, Ptr parent) {
-  //printf("deref\n");
-
   // Loads definition
   Term* term = NULL;
   if (deref_ptr != NULL) {
@@ -414,31 +433,26 @@ __device__ void deref(Worker* worker, Net* net, Book* book, Ptr* deref_ptr, Ptr 
   }
 
   // Allocates needed space
-  if (term != NULL) {
-    //printf("[%04X] deref: %x\n", worker->gid, val(*dref));
-    for (u32 i = 0; i < div(term->nlen, UNIT_SIZE); ++i) {
-      u32 loc = i * UNIT_SIZE + worker->quad;
-      if (loc < term->nlen) {
-        worker->locs[loc] = alloc(worker, net);
-      }
-    }
+  if (term != NULL && worker->quad == A1) {
+    worker->sm32[0] = alloc_many(worker, net, term->nlen);
   }
   __syncwarp();
+  u32 delta = 0;
+  if (term != NULL) {
+    delta = worker->sm32[0];
+  }
 
   // Loads dereferenced nodes, adjusted
   if (term != NULL) {
-    //printf("[%04X] deref B\n", worker->gid);
     for (u32 i = 0; i < div(term->nlen, UNIT_SIZE); ++i) {
       u32 loc = i * UNIT_SIZE + worker->quad;
       if (loc < term->nlen) {
         //printf("... node %u\n", loc);
         Node got = term->node[loc];
-        Ptr  p1  = adjust(worker, got.ports[P1]);
-        Ptr  p2  = adjust(worker, got.ports[P2]);
-        //*at(net, worker->locs[loc], P1) = p1;
-        //*at(net, worker->locs[loc], P2) = p2;
-        replace(at(net, worker->locs[loc], P1), NEO, p1);
-        replace(at(net, worker->locs[loc], P2), NEO, p2);
+        Ptr  p1  = adjust(worker, got.ports[P1], delta);
+        Ptr  p2  = adjust(worker, got.ports[P2], delta);
+        replace(at(net, delta + loc, P1), NEO, p1);
+        replace(at(net, delta + loc, P2), NEO, p2);
       }
     }
   }
@@ -449,8 +463,8 @@ __device__ void deref(Worker* worker, Net* net, Book* book, Ptr* deref_ptr, Ptr 
       u32 loc = i * UNIT_SIZE + worker->quad;
       if (loc < term->alen) {
         Wire got = term->acts[loc];
-        Ptr  p1  = adjust(worker, wire_lft(got));
-        Ptr  p2  = adjust(worker, wire_rgt(got));
+        Ptr  p1  = adjust(worker, wire_lft(got), delta);
+        Ptr  p2  = adjust(worker, wire_rgt(got), delta);
         put_redex(worker, p1, p2);
       }
     }
@@ -458,7 +472,7 @@ __device__ void deref(Worker* worker, Net* net, Book* book, Ptr* deref_ptr, Ptr 
 
   // Loads dereferenced root, adjusted
   if (term != NULL) {
-    *deref_ptr = adjust(worker, term->root);
+    *deref_ptr = adjust(worker, term->root, delta);
   }
   __syncwarp();
 
@@ -586,10 +600,10 @@ __device__ void link(Worker* worker, Net* net, Book* book, Ptr* src_ref, Ptr src
 // -------
 
 __device__ Worker init_worker(Net* net, bool flip) {
-  __shared__ u32 LOCS[GROUP_SIZE * TERM_SIZE];
+  __shared__ u32 SMEM[GROUP_SIZE * SMEM_SIZE];
 
-  for (u32 i = 0; i < GROUP_SIZE * TERM_SIZE / BLOCK_SIZE; ++i) {
-    LOCS[i * BLOCK_SIZE + threadIdx.x] = 0;
+  for (u32 i = 0; i < GROUP_SIZE * SMEM_SIZE / BLOCK_SIZE; ++i) {
+    SMEM[i * BLOCK_SIZE + threadIdx.x] = 0;
   }
   __syncthreads();
 
@@ -602,13 +616,12 @@ __device__ Worker init_worker(Net* net, bool flip) {
   Worker worker;
   worker.uid  = flip ? col * GROUP_SIZE + row : row * GROUP_SIZE + col;
   worker.tid  = threadIdx.x;
-  worker.aloc = rng(clock() * (gid + 1));
+  worker.aloc = rng(clock() * (gid + 1)) % NODE_SIZE;
   worker.rwts = 0;
   worker.quad = worker.tid % 4;
   worker.port = worker.tid % 2;
-  worker.locs = LOCS + worker.tid / UNIT_SIZE * TERM_SIZE;
-  worker.sm32 = (u32*)worker.locs;
-  worker.sm64 = (u64*)worker.locs;
+  worker.sm32 = (u32*)(SMEM + worker.tid / UNIT_SIZE * SMEM_SIZE);
+  worker.sm64 = (u64*)(SMEM + worker.tid / UNIT_SIZE * SMEM_SIZE);
   worker.rlen = net->bags + worker.uid * RBAG_SIZE;
   worker.rbag = worker.rlen + 1;
 
@@ -670,8 +683,6 @@ __global__ void global_rewrite(Net* net, Book* book, u32 repeat, u32 tick, bool 
     Ptr *ak_ref; // ref to our aux port
     Ptr *bk_ref; // ref to other aux port
     Ptr  ak_ptr; // val of our aux port
-    u32  mv_tag; // tag of ptr to send to other side
-    u32  mv_loc; // loc of ptr to send to other side
     Ptr  mv_ptr; // val of ptr to send to other side
     u32  y0_idx; // idx of other clone idx
 
@@ -703,21 +714,21 @@ __global__ void global_rewrite(Net* net, Book* book, u32 repeat, u32 tick, bool 
       mv_ptr = redir(ak_ptr);
     }
 
-    // If con_dup, send clone (CON)
-    if (rewrite && con_dup) {
-      mv_tag = tag(a_ptr);
-      mv_loc = alloc(&worker, net); // alloc a clone
-      mv_ptr = mkptr(mv_tag, mv_loc); // cloned ptr to send
-      worker.sm32[worker.quad] = mv_loc; // pass cloned index to other threads
+    // If con_dup, alloc clones base index
+    if (rewrite && con_dup && worker.quad == A1) {
+      worker.sm32[0] = alloc_many(&worker, net, 4);
     }
     __syncwarp();
 
     // If con_dup, create inner wires between clones
     if (rewrite && con_dup) {
-      u32 c1_loc = worker.sm32[(worker.quad <= A2 ? 2 : 0) + 0];
-      u32 c2_loc = worker.sm32[(worker.quad <= A2 ? 2 : 0) + 1];
-      replace(at(net, mv_loc, P1), NEO, mkptr(worker.port == P1 ? VR1 : VR2, c1_loc));
-      replace(at(net, mv_loc, P2), NEO, mkptr(worker.port == P1 ? VR1 : VR2, c2_loc));
+      u32 al_loc = worker.sm32[0];
+      u32 cx_loc = al_loc + worker.quad;
+      u32 c1_loc = al_loc + (worker.quad <= A2 ? 2 : 0);
+      u32 c2_loc = al_loc + (worker.quad <= A2 ? 3 : 1);
+      replace(at(net, cx_loc, P1), NEO, mkptr(worker.port == P1 ? VR1 : VR2, c1_loc));
+      replace(at(net, cx_loc, P2), NEO, mkptr(worker.port == P1 ? VR1 : VR2, c2_loc));
+      mv_ptr = mkptr(tag(a_ptr), cx_loc);
     }
     __syncwarp();
 
@@ -1319,6 +1330,16 @@ __host__ void populate(Book* book) {
   book->defs[0x00000024]->node     = (Node*) malloc(2 * sizeof(Node));
   book->defs[0x00000024]->node[ 0] = (Node) {0x20000000,0xa0000001};
   book->defs[0x00000024]->node[ 1] = (Node) {0x50000001,0x40000001};
+  // af
+  book->defs[0x0000096a]           = (Term*) malloc(sizeof(Term));
+  book->defs[0x0000096a]->root     = 0xa0000000;
+  book->defs[0x0000096a]->alen     = 0;
+  book->defs[0x0000096a]->acts     = (Wire*) malloc(0 * sizeof(Wire));
+  book->defs[0x0000096a]->nlen     = 3;
+  book->defs[0x0000096a]->node     = (Node*) malloc(3 * sizeof(Node));
+  book->defs[0x0000096a]->node[ 0] = (Node) {0xa0000001,0x50000002};
+  book->defs[0x0000096a]->node[ 1] = (Node) {0x10025a9d,0xa0000002};
+  book->defs[0x0000096a]->node[ 2] = (Node) {0x10025aa4,0x50000000};
   // c0
   book->defs[0x000009c1]           = (Term*) malloc(sizeof(Term));
   book->defs[0x000009c1]->root     = 0xa0000000;
@@ -1669,6 +1690,45 @@ __host__ void populate(Book* book) {
   book->defs[0x00000bca]->node[16] = (Node) {0x5000000f,0x40000011};
   book->defs[0x00000bca]->node[17] = (Node) {0x50000010,0x50000012};
   book->defs[0x00000bca]->node[18] = (Node) {0x40000009,0x50000011};
+  // afS
+  book->defs[0x00025a9d]           = (Term*) malloc(sizeof(Term));
+  book->defs[0x00025a9d]->root     = 0xa0000000;
+  book->defs[0x00025a9d]->alen     = 3;
+  book->defs[0x00025a9d]->acts     = (Wire*) malloc(3 * sizeof(Wire));
+  book->defs[0x00025a9d]->acts[ 0] = mkwire(0xa0000002,0x1000096a);
+  book->defs[0x00025a9d]->acts[ 1] = mkwire(0xa0000003,0x10025ca8);
+  book->defs[0x00025a9d]->acts[ 2] = mkwire(0xa0000005,0x1000096a);
+  book->defs[0x00025a9d]->nlen     = 6;
+  book->defs[0x00025a9d]->node     = (Node*) malloc(6 * sizeof(Node));
+  book->defs[0x00025a9d]->node[ 0] = (Node) {0xb0000001,0x50000004};
+  book->defs[0x00025a9d]->node[ 1] = (Node) {0x40000005,0x40000002};
+  book->defs[0x00025a9d]->node[ 2] = (Node) {0x50000001,0x40000004};
+  book->defs[0x00025a9d]->node[ 3] = (Node) {0x50000005,0xa0000004};
+  book->defs[0x00025a9d]->node[ 4] = (Node) {0x50000002,0x50000000};
+  book->defs[0x00025a9d]->node[ 5] = (Node) {0x40000001,0x40000003};
+  // afZ
+  book->defs[0x00025aa4]           = (Term*) malloc(sizeof(Term));
+  book->defs[0x00025aa4]->root     = 0x1000001e;
+  book->defs[0x00025aa4]->alen     = 0;
+  book->defs[0x00025aa4]->acts     = (Wire*) malloc(0 * sizeof(Wire));
+  book->defs[0x00025aa4]->nlen     = 0;
+  book->defs[0x00025aa4]->node     = (Node*) malloc(0 * sizeof(Node));
+  // and
+  book->defs[0x00025ca8]           = (Term*) malloc(sizeof(Term));
+  book->defs[0x00025ca8]->root     = 0xa0000000;
+  book->defs[0x00025ca8]->alen     = 0;
+  book->defs[0x00025ca8]->acts     = (Wire*) malloc(0 * sizeof(Wire));
+  book->defs[0x00025ca8]->nlen     = 9;
+  book->defs[0x00025ca8]->node     = (Node*) malloc(9 * sizeof(Node));
+  book->defs[0x00025ca8]->node[ 0] = (Node) {0xa0000001,0x50000005};
+  book->defs[0x00025ca8]->node[ 1] = (Node) {0xa0000002,0xa0000005};
+  book->defs[0x00025ca8]->node[ 2] = (Node) {0xa0000003,0x50000004};
+  book->defs[0x00025ca8]->node[ 3] = (Node) {0x1000001e,0xa0000004};
+  book->defs[0x00025ca8]->node[ 4] = (Node) {0x10000010,0x50000002};
+  book->defs[0x00025ca8]->node[ 5] = (Node) {0xa0000006,0x50000000};
+  book->defs[0x00025ca8]->node[ 6] = (Node) {0xa0000007,0x50000008};
+  book->defs[0x00025ca8]->node[ 7] = (Node) {0x10000010,0xa0000008};
+  book->defs[0x00025ca8]->node[ 8] = (Node) {0x10000010,0x50000006};
   // brn
   book->defs[0x00026db2]           = (Term*) malloc(sizeof(Term));
   book->defs[0x00026db2]->root     = 0xa0000000;
@@ -1900,7 +1960,7 @@ __host__ void populate(Book* book) {
   book->defs[0x00027087]->node[13] = (Node) {0xb000000e,0xa0000013};
   book->defs[0x00027087]->node[14] = (Node) {0xb000000f,0xa0000012};
   book->defs[0x00027087]->node[15] = (Node) {0xa0000010,0xa0000011};
-  book->defs[0x00027087]->node[16] = (Node) {0x40000020,0x40000011};
+  book->defs[0x00027087]->node[16] = (Node) {0x00000000,0x40000011};
   book->defs[0x00027087]->node[17] = (Node) {0x50000010,0x40000012};
   book->defs[0x00027087]->node[18] = (Node) {0x50000011,0x40000013};
   book->defs[0x00027087]->node[19] = (Node) {0x50000012,0x40000014};
@@ -1916,7 +1976,7 @@ __host__ void populate(Book* book) {
   book->defs[0x00027087]->node[29] = (Node) {0x5000001c,0x4000001e};
   book->defs[0x00027087]->node[30] = (Node) {0x5000001d,0x4000001f};
   book->defs[0x00027087]->node[31] = (Node) {0x5000001e,0x50000020};
-  book->defs[0x00027087]->node[32] = (Node) {0x40000010,0x5000001f};
+  book->defs[0x00027087]->node[32] = (Node) {0x00000000,0x5000001f};
   // c17
   book->defs[0x00027088]           = (Term*) malloc(sizeof(Term));
   book->defs[0x00027088]->root     = 0xa0000000;
@@ -2309,6 +2369,124 @@ __host__ void populate(Book* book) {
   book->defs[0x000270c5]->node[46] = (Node) {0x5000002d,0x4000002f};
   book->defs[0x000270c5]->node[47] = (Node) {0x5000002e,0x50000030};
   book->defs[0x000270c5]->node[48] = (Node) {0x40000018,0x5000002f};
+  // c25
+  book->defs[0x000270c6]           = (Term*) malloc(sizeof(Term));
+  book->defs[0x000270c6]->root     = 0xa0000000;
+  book->defs[0x000270c6]->alen     = 0;
+  book->defs[0x000270c6]->acts     = (Wire*) malloc(0 * sizeof(Wire));
+  book->defs[0x000270c6]->nlen     = 51;
+  book->defs[0x000270c6]->node     = (Node*) malloc(51 * sizeof(Node));
+  book->defs[0x000270c6]->node[ 0] = (Node) {0xb0000001,0xa0000032};
+  book->defs[0x000270c6]->node[ 1] = (Node) {0xb0000002,0xa0000031};
+  book->defs[0x000270c6]->node[ 2] = (Node) {0xb0000003,0xa0000030};
+  book->defs[0x000270c6]->node[ 3] = (Node) {0xb0000004,0xa000002f};
+  book->defs[0x000270c6]->node[ 4] = (Node) {0xb0000005,0xa000002e};
+  book->defs[0x000270c6]->node[ 5] = (Node) {0xb0000006,0xa000002d};
+  book->defs[0x000270c6]->node[ 6] = (Node) {0xb0000007,0xa000002c};
+  book->defs[0x000270c6]->node[ 7] = (Node) {0xb0000008,0xa000002b};
+  book->defs[0x000270c6]->node[ 8] = (Node) {0xb0000009,0xa000002a};
+  book->defs[0x000270c6]->node[ 9] = (Node) {0xb000000a,0xa0000029};
+  book->defs[0x000270c6]->node[10] = (Node) {0xb000000b,0xa0000028};
+  book->defs[0x000270c6]->node[11] = (Node) {0xb000000c,0xa0000027};
+  book->defs[0x000270c6]->node[12] = (Node) {0xb000000d,0xa0000026};
+  book->defs[0x000270c6]->node[13] = (Node) {0xb000000e,0xa0000025};
+  book->defs[0x000270c6]->node[14] = (Node) {0xb000000f,0xa0000024};
+  book->defs[0x000270c6]->node[15] = (Node) {0xb0000010,0xa0000023};
+  book->defs[0x000270c6]->node[16] = (Node) {0xb0000011,0xa0000022};
+  book->defs[0x000270c6]->node[17] = (Node) {0xb0000012,0xa0000021};
+  book->defs[0x000270c6]->node[18] = (Node) {0xb0000013,0xa0000020};
+  book->defs[0x000270c6]->node[19] = (Node) {0xb0000014,0xa000001f};
+  book->defs[0x000270c6]->node[20] = (Node) {0xb0000015,0xa000001e};
+  book->defs[0x000270c6]->node[21] = (Node) {0xb0000016,0xa000001d};
+  book->defs[0x000270c6]->node[22] = (Node) {0xb0000017,0xa000001c};
+  book->defs[0x000270c6]->node[23] = (Node) {0xb0000018,0xa000001b};
+  book->defs[0x000270c6]->node[24] = (Node) {0xa0000019,0xa000001a};
+  book->defs[0x000270c6]->node[25] = (Node) {0x00000000,0x40000032};
+  book->defs[0x000270c6]->node[26] = (Node) {0x50000019,0x4000001b};
+  book->defs[0x000270c6]->node[27] = (Node) {0x5000001a,0x4000001c};
+  book->defs[0x000270c6]->node[28] = (Node) {0x5000001b,0x4000001d};
+  book->defs[0x000270c6]->node[29] = (Node) {0x5000001c,0x4000001e};
+  book->defs[0x000270c6]->node[30] = (Node) {0x5000001d,0x4000001f};
+  book->defs[0x000270c6]->node[31] = (Node) {0x5000001e,0x40000020};
+  book->defs[0x000270c6]->node[32] = (Node) {0x5000001f,0x40000021};
+  book->defs[0x000270c6]->node[33] = (Node) {0x50000020,0x40000022};
+  book->defs[0x000270c6]->node[34] = (Node) {0x50000021,0x40000023};
+  book->defs[0x000270c6]->node[35] = (Node) {0x50000022,0x40000024};
+  book->defs[0x000270c6]->node[36] = (Node) {0x50000023,0x40000025};
+  book->defs[0x000270c6]->node[37] = (Node) {0x50000024,0x40000026};
+  book->defs[0x000270c6]->node[38] = (Node) {0x50000025,0x40000027};
+  book->defs[0x000270c6]->node[39] = (Node) {0x50000026,0x40000028};
+  book->defs[0x000270c6]->node[40] = (Node) {0x50000027,0x40000029};
+  book->defs[0x000270c6]->node[41] = (Node) {0x50000028,0x4000002a};
+  book->defs[0x000270c6]->node[42] = (Node) {0x50000029,0x4000002b};
+  book->defs[0x000270c6]->node[43] = (Node) {0x5000002a,0x4000002c};
+  book->defs[0x000270c6]->node[44] = (Node) {0x5000002b,0x4000002d};
+  book->defs[0x000270c6]->node[45] = (Node) {0x5000002c,0x4000002e};
+  book->defs[0x000270c6]->node[46] = (Node) {0x5000002d,0x4000002f};
+  book->defs[0x000270c6]->node[47] = (Node) {0x5000002e,0x40000030};
+  book->defs[0x000270c6]->node[48] = (Node) {0x5000002f,0x40000031};
+  book->defs[0x000270c6]->node[49] = (Node) {0x50000030,0x50000032};
+  book->defs[0x000270c6]->node[50] = (Node) {0x50000019,0x50000031};
+  // c26
+  book->defs[0x000270c7]           = (Term*) malloc(sizeof(Term));
+  book->defs[0x000270c7]->root     = 0xa0000000;
+  book->defs[0x000270c7]->alen     = 0;
+  book->defs[0x000270c7]->acts     = (Wire*) malloc(0 * sizeof(Wire));
+  book->defs[0x000270c7]->nlen     = 53;
+  book->defs[0x000270c7]->node     = (Node*) malloc(53 * sizeof(Node));
+  book->defs[0x000270c7]->node[ 0] = (Node) {0xb0000001,0xa0000034};
+  book->defs[0x000270c7]->node[ 1] = (Node) {0xb0000002,0xa0000033};
+  book->defs[0x000270c7]->node[ 2] = (Node) {0xb0000003,0xa0000032};
+  book->defs[0x000270c7]->node[ 3] = (Node) {0xb0000004,0xa0000031};
+  book->defs[0x000270c7]->node[ 4] = (Node) {0xb0000005,0xa0000030};
+  book->defs[0x000270c7]->node[ 5] = (Node) {0xb0000006,0xa000002f};
+  book->defs[0x000270c7]->node[ 6] = (Node) {0xb0000007,0xa000002e};
+  book->defs[0x000270c7]->node[ 7] = (Node) {0xb0000008,0xa000002d};
+  book->defs[0x000270c7]->node[ 8] = (Node) {0xb0000009,0xa000002c};
+  book->defs[0x000270c7]->node[ 9] = (Node) {0xb000000a,0xa000002b};
+  book->defs[0x000270c7]->node[10] = (Node) {0xb000000b,0xa000002a};
+  book->defs[0x000270c7]->node[11] = (Node) {0xb000000c,0xa0000029};
+  book->defs[0x000270c7]->node[12] = (Node) {0xb000000d,0xa0000028};
+  book->defs[0x000270c7]->node[13] = (Node) {0xb000000e,0xa0000027};
+  book->defs[0x000270c7]->node[14] = (Node) {0xb000000f,0xa0000026};
+  book->defs[0x000270c7]->node[15] = (Node) {0xb0000010,0xa0000025};
+  book->defs[0x000270c7]->node[16] = (Node) {0xb0000011,0xa0000024};
+  book->defs[0x000270c7]->node[17] = (Node) {0xb0000012,0xa0000023};
+  book->defs[0x000270c7]->node[18] = (Node) {0xb0000013,0xa0000022};
+  book->defs[0x000270c7]->node[19] = (Node) {0xb0000014,0xa0000021};
+  book->defs[0x000270c7]->node[20] = (Node) {0xb0000015,0xa0000020};
+  book->defs[0x000270c7]->node[21] = (Node) {0xb0000016,0xa000001f};
+  book->defs[0x000270c7]->node[22] = (Node) {0xb0000017,0xa000001e};
+  book->defs[0x000270c7]->node[23] = (Node) {0xb0000018,0xa000001d};
+  book->defs[0x000270c7]->node[24] = (Node) {0xb0000019,0xa000001c};
+  book->defs[0x000270c7]->node[25] = (Node) {0xa000001a,0xa000001b};
+  book->defs[0x000270c7]->node[26] = (Node) {0x00000000,0x4000001b};
+  book->defs[0x000270c7]->node[27] = (Node) {0x5000001a,0x40000034};
+  book->defs[0x000270c7]->node[28] = (Node) {0x5000001b,0x4000001d};
+  book->defs[0x000270c7]->node[29] = (Node) {0x5000001c,0x4000001e};
+  book->defs[0x000270c7]->node[30] = (Node) {0x5000001d,0x4000001f};
+  book->defs[0x000270c7]->node[31] = (Node) {0x5000001e,0x40000020};
+  book->defs[0x000270c7]->node[32] = (Node) {0x5000001f,0x40000021};
+  book->defs[0x000270c7]->node[33] = (Node) {0x50000020,0x40000022};
+  book->defs[0x000270c7]->node[34] = (Node) {0x50000021,0x40000023};
+  book->defs[0x000270c7]->node[35] = (Node) {0x50000022,0x40000024};
+  book->defs[0x000270c7]->node[36] = (Node) {0x50000023,0x40000025};
+  book->defs[0x000270c7]->node[37] = (Node) {0x50000024,0x40000026};
+  book->defs[0x000270c7]->node[38] = (Node) {0x50000025,0x40000027};
+  book->defs[0x000270c7]->node[39] = (Node) {0x50000026,0x40000028};
+  book->defs[0x000270c7]->node[40] = (Node) {0x50000027,0x40000029};
+  book->defs[0x000270c7]->node[41] = (Node) {0x50000028,0x4000002a};
+  book->defs[0x000270c7]->node[42] = (Node) {0x50000029,0x4000002b};
+  book->defs[0x000270c7]->node[43] = (Node) {0x5000002a,0x4000002c};
+  book->defs[0x000270c7]->node[44] = (Node) {0x5000002b,0x4000002d};
+  book->defs[0x000270c7]->node[45] = (Node) {0x5000002c,0x4000002e};
+  book->defs[0x000270c7]->node[46] = (Node) {0x5000002d,0x4000002f};
+  book->defs[0x000270c7]->node[47] = (Node) {0x5000002e,0x40000030};
+  book->defs[0x000270c7]->node[48] = (Node) {0x5000002f,0x40000031};
+  book->defs[0x000270c7]->node[49] = (Node) {0x50000030,0x40000032};
+  book->defs[0x000270c7]->node[50] = (Node) {0x50000031,0x40000033};
+  book->defs[0x000270c7]->node[51] = (Node) {0x50000032,0x50000034};
+  book->defs[0x000270c7]->node[52] = (Node) {0x5000001b,0x50000033};
   // c_s
   book->defs[0x00027ff7]           = (Term*) malloc(sizeof(Term));
   book->defs[0x00027ff7]->root     = 0xa0000000;
@@ -2364,28 +2542,40 @@ __host__ void populate(Book* book) {
   book->defs[0x00029f02]->node[ 1] = (Node) {0x1002bffe,0x30000000};
   // ex2
   book->defs[0x00029f03]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x00029f03]->root     = 0x50000000;
+  book->defs[0x00029f03]->root     = 0x50000002;
   book->defs[0x00029f03]->alen     = 2;
   book->defs[0x00029f03]->acts     = (Wire*) malloc(2 * sizeof(Wire));
-  book->defs[0x00029f03]->acts[ 0] = mkwire(0x10036e72,0xa0000000);
-  book->defs[0x00029f03]->acts[ 1] = mkwire(0x100009c8,0xa0000001);
+  book->defs[0x00029f03]->acts[ 0] = mkwire(0x100270c1,0xa0000000);
+  book->defs[0x00029f03]->acts[ 1] = mkwire(0x10036e72,0xa0000002);
   book->defs[0x00029f03]->nlen     = 3;
   book->defs[0x00029f03]->node     = (Node*) malloc(3 * sizeof(Node));
-  book->defs[0x00029f03]->node[ 0] = (Node) {0x50000002,0x30000000};
-  book->defs[0x00029f03]->node[ 1] = (Node) {0x10000013,0xa0000002};
-  book->defs[0x00029f03]->node[ 2] = (Node) {0x1000000f,0x40000000};
+  book->defs[0x00029f03]->node[ 0] = (Node) {0x10000013,0xa0000001};
+  book->defs[0x00029f03]->node[ 1] = (Node) {0x1000000f,0x40000002};
+  book->defs[0x00029f03]->node[ 2] = (Node) {0x50000001,0x30000000};
   // ex3
   book->defs[0x00029f04]           = (Term*) malloc(sizeof(Term));
-  book->defs[0x00029f04]->root     = 0x50000000;
+  book->defs[0x00029f04]->root     = 0x50000002;
   book->defs[0x00029f04]->alen     = 2;
   book->defs[0x00029f04]->acts     = (Wire*) malloc(2 * sizeof(Wire));
-  book->defs[0x00029f04]->acts[ 0] = mkwire(0x10026db2,0xa0000000);
-  book->defs[0x00029f04]->acts[ 1] = mkwire(0x10027086,0xa0000001);
+  book->defs[0x00029f04]->acts[ 0] = mkwire(0x10027088,0xa0000000);
+  book->defs[0x00029f04]->acts[ 1] = mkwire(0x10026db2,0xa0000002);
   book->defs[0x00029f04]->nlen     = 3;
   book->defs[0x00029f04]->node     = (Node*) malloc(3 * sizeof(Node));
-  book->defs[0x00029f04]->node[ 0] = (Node) {0x50000002,0x30000000};
-  book->defs[0x00029f04]->node[ 1] = (Node) {0x1000001d,0xa0000002};
-  book->defs[0x00029f04]->node[ 2] = (Node) {0x10000024,0x40000000};
+  book->defs[0x00029f04]->node[ 0] = (Node) {0x1000001d,0xa0000001};
+  book->defs[0x00029f04]->node[ 1] = (Node) {0x10000024,0x40000002};
+  book->defs[0x00029f04]->node[ 2] = (Node) {0x50000001,0x30000000};
+  // ex4
+  book->defs[0x00029f05]           = (Term*) malloc(sizeof(Term));
+  book->defs[0x00029f05]->root     = 0x50000000;
+  book->defs[0x00029f05]->alen     = 2;
+  book->defs[0x00029f05]->acts     = (Wire*) malloc(2 * sizeof(Wire));
+  book->defs[0x00029f05]->acts[ 0] = mkwire(0xa0000000,0x1000096a);
+  book->defs[0x00029f05]->acts[ 1] = mkwire(0xa0000001,0x100009c2);
+  book->defs[0x00029f05]->nlen     = 3;
+  book->defs[0x00029f05]->node     = (Node*) malloc(3 * sizeof(Node));
+  book->defs[0x00029f05]->node[ 0] = (Node) {0x50000002,0x30000000};
+  book->defs[0x00029f05]->node[ 1] = (Node) {0x1000001d,0xa0000002};
+  book->defs[0x00029f05]->node[ 2] = (Node) {0x10000024,0x40000000};
   // g_s
   book->defs[0x0002bff7]           = (Term*) malloc(sizeof(Term));
   book->defs[0x0002bff7]->root     = 0xa0000000;
@@ -3047,6 +3237,18 @@ __host__ void populate(Book* book) {
   book->defs[0x00030cfb]->node[ 1] = (Node) {0x10c33ed9,0xa0000002};
   book->defs[0x00030cfb]->node[ 2] = (Node) {0x10c33ed3,0xa0000003};
   book->defs[0x00030cfb]->node[ 3] = (Node) {0x1000000f,0x50000000};
+  // mul
+  book->defs[0x00031e70]           = (Term*) malloc(sizeof(Term));
+  book->defs[0x00031e70]->root     = 0xa0000000;
+  book->defs[0x00031e70]->alen     = 0;
+  book->defs[0x00031e70]->acts     = (Wire*) malloc(0 * sizeof(Wire));
+  book->defs[0x00031e70]->nlen     = 5;
+  book->defs[0x00031e70]->node     = (Node*) malloc(5 * sizeof(Node));
+  book->defs[0x00031e70]->node[ 0] = (Node) {0xa0000001,0xa0000002};
+  book->defs[0x00031e70]->node[ 1] = (Node) {0x50000003,0x50000004};
+  book->defs[0x00031e70]->node[ 2] = (Node) {0xa0000003,0xa0000004};
+  book->defs[0x00031e70]->node[ 3] = (Node) {0x40000004,0x40000001};
+  book->defs[0x00031e70]->node[ 4] = (Node) {0x40000003,0x50000001};
   // nid
   book->defs[0x00032b68]           = (Term*) malloc(sizeof(Term));
   book->defs[0x00032b68]->root     = 0xa0000000;
@@ -3100,12 +3302,14 @@ __host__ void populate(Book* book) {
   book->defs[0x009b6ca4]->alen     = 2;
   book->defs[0x009b6ca4]->acts     = (Wire*) malloc(2 * sizeof(Wire));
   book->defs[0x009b6ca4]->acts[ 0] = mkwire(0x10036e72,0xa0000000);
-  book->defs[0x009b6ca4]->acts[ 1] = mkwire(0x10027082,0xa0000001);
-  book->defs[0x009b6ca4]->nlen     = 3;
-  book->defs[0x009b6ca4]->node     = (Node*) malloc(3 * sizeof(Node));
-  book->defs[0x009b6ca4]->node[ 0] = (Node) {0x50000002,0x30000000};
-  book->defs[0x009b6ca4]->node[ 1] = (Node) {0x10000013,0xa0000002};
-  book->defs[0x009b6ca4]->node[ 2] = (Node) {0x1000000f,0x40000000};
+  book->defs[0x009b6ca4]->acts[ 1] = mkwire(0x10031e70,0xa0000001);
+  book->defs[0x009b6ca4]->nlen     = 5;
+  book->defs[0x009b6ca4]->node     = (Node*) malloc(5 * sizeof(Node));
+  book->defs[0x009b6ca4]->node[ 0] = (Node) {0x50000004,0x30000000};
+  book->defs[0x009b6ca4]->node[ 1] = (Node) {0x100009c3,0xa0000002};
+  book->defs[0x009b6ca4]->node[ 2] = (Node) {0x100009c6,0xa0000003};
+  book->defs[0x009b6ca4]->node[ 3] = (Node) {0x10000013,0xa0000004};
+  book->defs[0x009b6ca4]->node[ 4] = (Node) {0x1000000f,0x40000000};
   // decI
   book->defs[0x00a299d3]           = (Term*) malloc(sizeof(Term));
   book->defs[0x00a299d3]->root     = 0xa0000000;
@@ -3230,7 +3434,6 @@ int main() {
 
   // Normalizes
   do_global_expand(gpu_net, gpu_book);
-  do_global_rewrite(gpu_net, gpu_book, 1, 0, 0);
   for (u32 tick = 0; tick < 128; ++tick) {
     do_global_rewrite(gpu_net, gpu_book, 16, tick, (tick / GROUP_LOG2) % 2);
   }
