@@ -177,14 +177,17 @@ impl Node {
 }
 
 impl Book {
+  #[inline(always)]
   pub fn new() -> Self {
     Book { defs: vec![Net::new(0); 1 << 24] }
   }
 
+  #[inline(always)]
   pub fn def(&mut self, id: u32, net: Net) {
     self.defs[id as usize] = net;
   }
 
+  #[inline(always)]
   pub fn get(&self, id: u32) -> Option<&Net> {
     self.defs.get(id as usize)
   }
@@ -210,7 +213,6 @@ impl Net {
   }
 
   // Allocates a consecutive chunk of 'size' nodes. Returns the index.
-  #[inline(always)]
   pub fn alloc(&mut self, size: usize) -> Val {
     let mut space = 0;
     loop {
@@ -269,7 +271,6 @@ impl Net {
   // Links two pointers, forming a new wire.
   // - If one of the pointers is a variable, it will move the other value.
   // - Otherwise, this is an redexes, so we add it to 'acts'.
-  #[inline(always)]
   pub fn link(&mut self, a: Ptr, b: Ptr) {
     // Substitutes A
     if let Some(target) = a.target(self) {
@@ -288,18 +289,26 @@ impl Net {
   // Performs an interaction over a redex.
   pub fn interact(&mut self, book: &Book, a: &mut Ptr, b: &mut Ptr) {
     self.rwts += 1;
+
+    // Symmetry
+    if !a.is_era() && b.is_ref()
+    ||  a.is_num() && b.is_ctr()
+    ||  a.is_era() && b.is_ctr() {
+      std::mem::swap(a, b);
+    }
+
     // Dereference
     if a.tag() == REF && b.tag() != ERA {
       *a = self.deref(book, *a, Ptr::new(NIL,0));
     }
-    if a.tag() != ERA && b.tag() == REF {
-      *b = self.deref(book, *b, Ptr::new(NIL,0));
-    }
-    // VAR
+
+    // Substitute
     if a.is_var() || b.is_var() {
       self.link(*a, *b);
+    }
+
     // CON-CON
-    } else if a.is_ctr() && b.is_ctr() && a.tag() == b.tag() {
+    if a.is_ctr() && b.is_ctr() && a.tag() == b.tag() {
       let a1 = self.get(a.val(), P1);
       let b1 = self.get(b.val(), P1);
       self.link(a1, b1);
@@ -310,23 +319,15 @@ impl Net {
       self.free(b.val());
     // CON-DUP
     } else if a.is_ctr() && b.is_ctr() && a.tag() != b.tag() {
-      let lc = self.alloc(4);
-      let x1 = lc + 0;
-      let x2 = lc + 1;
-      let y1 = lc + 2;
-      let y2 = lc + 3;
-      self.set(x1, P1, Ptr::new(VR1, y1));
-      self.set(x1, P2, Ptr::new(VR1, y2));
-      self.set(x2, P1, Ptr::new(VR2, y1));
-      self.set(x2, P2, Ptr::new(VR2, y2));
-      self.set(y1, P1, Ptr::new(VR1, x1));
-      self.set(y1, P2, Ptr::new(VR1, x2));
-      self.set(y2, P1, Ptr::new(VR2, x1));
-      self.set(y2, P2, Ptr::new(VR2, x2));
-      self.link(self.get(a.val(), P1), Ptr::new(b.tag(), x1));
-      self.link(self.get(a.val(), P2), Ptr::new(b.tag(), x2));
-      self.link(self.get(b.val(), P1), Ptr::new(a.tag(), y1));
-      self.link(self.get(b.val(), P2), Ptr::new(a.tag(), y2));
+      let loc = self.alloc(4);
+      self.link(self.get(a.val(), P1), Ptr::new(b.tag(), loc+0));
+      self.link(self.get(b.val(), P1), Ptr::new(a.tag(), loc+2));
+      self.link(self.get(a.val(), P2), Ptr::new(b.tag(), loc+1));
+      self.link(self.get(b.val(), P2), Ptr::new(a.tag(), loc+3));
+      *self.at_mut(loc+0) = Node::new(Ptr::new(VR1, loc+2), Ptr::new(VR1, loc+3));
+      *self.at_mut(loc+1) = Node::new(Ptr::new(VR2, loc+2), Ptr::new(VR2, loc+3));
+      *self.at_mut(loc+2) = Node::new(Ptr::new(VR1, loc+0), Ptr::new(VR1, loc+1));
+      *self.at_mut(loc+3) = Node::new(Ptr::new(VR2, loc+0), Ptr::new(VR2, loc+1));
       self.free(a.val());
       self.free(b.val());
     // CTR-NUM
@@ -334,23 +335,16 @@ impl Net {
       self.link(self.get(a.val(), P1), Ptr::new(NUM, b.val()));
       self.link(self.get(a.val(), P2), Ptr::new(NUM, b.val()));
       self.free(a.val());
-    // NUM-CTR
-    } else if a.is_num() && b.is_ctr() { // TODO: test
-      self.interact(book, b, a);
     // CON-ERA
     } else if a.is_ctr() && b.is_era() {
       self.link(self.get(a.val(), P1), Ptr::new(ERA, 0));
       self.link(self.get(a.val(), P2), Ptr::new(ERA, 0));
       self.free(a.val());
-    // ERA-CON
-    } else if a.is_era() && b.is_ctr() {
-      self.link(self.get(b.val(), P1), Ptr::new(ERA, 0));
-      self.link(self.get(b.val(), P2), Ptr::new(ERA, 0));
-      self.free(b.val());
     }
   }
 
   // Expands a REF into its definition (a closed net).
+  #[inline(always)]
   pub fn deref(&mut self, book: &Book, ptr: Ptr, parent: Ptr) -> Ptr {
     self.dref += 1;
     let mut ptr = ptr;
