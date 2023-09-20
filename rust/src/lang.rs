@@ -88,14 +88,14 @@ fn consume(chars: &mut Peekable<Chars>, text: &str) {
   }
 }
 
-pub fn parse_num_lit(chars: &mut Peekable<Chars>) -> u32 {
-  let mut num : u32 = 0;
+pub fn parse_num_lit(chars: &mut Peekable<Chars>) -> Val {
+  let mut num : Val = 0;
   skip_spaces(chars);
   while let Some(c) = chars.peek() {
     if !c.is_digit(10) {
       break;
     }
-    num = num * 10 + c.to_digit(10).unwrap() as u32;
+    num = num * 10 + c.to_digit(10).unwrap() as Val;
     chars.next();
   }
   num
@@ -123,7 +123,7 @@ pub fn parse_ltree(chars: &mut Peekable<Chars>) -> LTree {
     },
     Some('(') => {
       chars.next();
-      let tag = CON + (parse_num_lit(chars) as u16);
+      let tag = CON + (parse_num_lit(chars) as Tag);
       let lft = Box::new(parse_ltree(chars));
       let rgt = Box::new(parse_ltree(chars));
       consume(chars, ")");
@@ -133,7 +133,7 @@ pub fn parse_ltree(chars: &mut Peekable<Chars>) -> LTree {
       chars.next();
       skip_spaces(chars);
       let name = parse_str_lit(chars);
-      LTree::Ref { nam: name_to_u32(&name) }
+      LTree::Ref { nam: name_to_val(&name) }
     },
     Some(c) if c.is_digit(10) => {
       LTree::NUM { val: parse_num_lit(chars) }
@@ -187,7 +187,7 @@ pub fn show_ltree(tree: &LTree) -> String {
       nam.clone()
     },
     LTree::Ref { nam } => {
-      format!("@{}", u32_to_name(*nam))
+      format!("@{}", val_to_name(*nam))
     },
     LTree::NUM { val } => {
       val.to_string()
@@ -281,7 +281,7 @@ pub fn letters_to_name(letters: Vec<u8>) -> String {
   return name;
 }
 
-pub fn u32_to_letters(num: u32) -> Vec<u8> {
+pub fn val_to_letters(num: Val) -> Vec<u8> {
   let mut letters = Vec::new();
   let mut num = num;
   while num > 0 {
@@ -292,20 +292,20 @@ pub fn u32_to_letters(num: u32) -> Vec<u8> {
   return letters;
 }
 
-pub fn letters_to_u32(letters: Vec<u8>) -> u32 {
+pub fn letters_to_val(letters: Vec<u8>) -> Val {
   let mut num = 0;
   for letter in letters {
-    num = num * 64 + letter as u32;
+    num = num * 64 + letter as Val;
   }
   return num;
 }
 
-pub fn name_to_u32(name: &str) -> u32 {
-  letters_to_u32(name_to_letters(name))
+pub fn name_to_val(name: &str) -> Val {
+  letters_to_val(name_to_letters(name))
 }
 
-pub fn u32_to_name(num: u32) -> String {
-  letters_to_name(u32_to_letters(num))
+pub fn val_to_name(num: Val) -> String {
+  letters_to_name(val_to_letters(num))
 }
 
 // Injection and Readback
@@ -442,8 +442,8 @@ pub fn readback_lnet(net: &Net) -> LNet {
 // Utils
 // -----
 
-pub fn define(book: &mut Book, name: &str, code: &str) -> u32 {
-  let id = name_to_u32(name);
+pub fn define(book: &mut Book, name: &str, code: &str) -> Val {
+  let id = name_to_val(name);
   book.def(id, lnet_to_net(&do_parse_lnet(code)));
   return id;
 }

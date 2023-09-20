@@ -9,7 +9,7 @@
 
 use std::collections::HashMap;
 
-pub type Tag = u16;
+pub type Tag = u8;
 pub type Val = u32;
 
 // Core terms
@@ -59,11 +59,11 @@ pub struct Book {
 impl Ptr {
   #[inline(always)]
   pub fn new(tag: Tag, val: Val) -> Self {
-    Ptr(((tag as u32) << 28) | (val & 0xFFF_FFFF))
+    Ptr(((tag as Val) << 28) | (val & 0xFFF_FFFF))
   }
 
   #[inline(always)]
-  pub fn data(&self) -> u32 {
+  pub fn data(&self) -> Val {
     return self.0;
   }
 
@@ -123,7 +123,7 @@ impl Ptr {
   }
 
   #[inline(always)]
-  pub fn adjust(&self, loc: u32) -> Ptr {
+  pub fn adjust(&self, loc: Val) -> Ptr {
     return Ptr::new(self.tag(), self.val() + if self.has_loc() { loc } else { 0 });
   }
 }
@@ -157,12 +157,12 @@ impl Book {
   }
 
   #[inline(always)]
-  pub fn def(&mut self, id: u32, net: Net) {
+  pub fn def(&mut self, id: Val, net: Net) {
     self.defs[id as usize] = net;
   }
 
   #[inline(always)]
-  pub fn get(&self, id: u32) -> Option<&Net> {
+  pub fn get(&self, id: Val) -> Option<&Net> {
     self.defs.get(id as usize)
   }
 }
@@ -182,7 +182,7 @@ impl Net {
   }
 
   // Creates a net and boots from a REF.
-  pub fn boot(&mut self, root_id: u32) {
+  pub fn boot(&mut self, root_id: Val) {
     self.root = Ptr::new(REF, root_id);
   }
 
@@ -216,7 +216,7 @@ impl Net {
 
   // Gets node at given index.
   #[inline(always)]
-  pub fn at(&self, index: u32) -> &Node {
+  pub fn at(&self, index: Val) -> &Node {
     unsafe {
       return self.node.get_unchecked(index as usize);
     }
@@ -224,7 +224,7 @@ impl Net {
 
   // Gets node at given index, mutable.
   #[inline(always)]
-  pub fn at_mut(&mut self, index: u32) -> &mut Node {
+  pub fn at_mut(&mut self, index: Val) -> &mut Node {
     unsafe {
       return self.node.get_unchecked_mut(index as usize);
     }
@@ -333,7 +333,7 @@ impl Net {
       if let Some(got) = book.get(ptr.val()) {
         let loc = self.alloc(got.node.len());
         // Loads nodes, adjusting locations...
-        for i in 0 .. got.node.len() as u32 {
+        for i in 0 .. got.node.len() as Val {
           unsafe {
             let got = got.node.get_unchecked(i as usize);
             let p1  = got.port(P1).adjust(loc);
