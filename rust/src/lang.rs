@@ -6,9 +6,9 @@
 // On the runtime, a net is represented by a list of active trees, plus a root tree. The textual
 // syntax reflects this representation. It is specified below:
 //
-// <net>    ::= <root> <acts>
+// <net>    ::= <root> <rdex>
 //   <root> ::= "$" <tree>
-//   <acts> ::= "&" <tree> "~" <tree> <net>
+//   <rdex> ::= "&" <tree> "~" <tree> <net>
 // <tree>   ::= <era> | <nod> | <var> | <num>
 //   <era>  ::= "*"
 //   <nod>  ::= "(" <num_lit> " " <tree> " " <tree> ")"
@@ -61,12 +61,12 @@ pub enum LTree {
   },
 }
 
-type LActs = Vec<(LTree,LTree)>;
+type LRdex = Vec<(LTree,LTree)>;
 
 #[derive(Debug)]
 pub struct LNet {
   pub root: LTree,
-  pub acts: LActs,
+  pub rdex: LRdex,
 }
 
 // Parser
@@ -145,7 +145,7 @@ pub fn parse_ltree(chars: &mut Peekable<Chars>) -> LTree {
 }
 
 pub fn parse_lnet(chars: &mut Peekable<Chars>) -> LNet {
-  let mut acts = Vec::new();
+  let mut rdex = Vec::new();
   let mut root = LTree::Era;
   while let Some(c) = { skip_spaces(chars); chars.peek() } {
     if *c == '$' {
@@ -156,12 +156,12 @@ pub fn parse_lnet(chars: &mut Peekable<Chars>) -> LNet {
       let tree1 = parse_ltree(chars);
       consume(chars, "~");
       let tree2 = parse_ltree(chars);
-      acts.push((tree1, tree2));
+      rdex.push((tree1, tree2));
     } else {
       break;
     }
   }
-  LNet { root, acts }
+  LNet { root, rdex }
 }
 
 pub fn do_parse_ltree(code: &str) -> LTree {
@@ -198,7 +198,7 @@ pub fn show_ltree(tree: &LTree) -> String {
 pub fn show_lnet(lnet: &LNet) -> String {
   let mut result = String::new();
   result.push_str(&format!("$ {}\n", show_ltree(&lnet.root)));
-  for (a, b) in &lnet.acts {
+  for (a, b) in &lnet.rdex {
     result.push_str(&format!("& {}\n~ {}\n", show_ltree(a), show_ltree(b)));
   }
   return result;
@@ -242,10 +242,10 @@ pub fn lnet_to_net(lnet: &LNet) -> Net {
   let mut vars = HashMap::new();
   let mut net = Net::new(1 << 16);
   net.root = alloc_ltree(&mut net, &lnet.root, &mut vars, Parent::Root);
-  for (tree1, tree2) in &lnet.acts {
-    let ptr1 = alloc_ltree(&mut net, tree1, &mut vars, Parent::Acts);
-    let ptr2 = alloc_ltree(&mut net, tree2, &mut vars, Parent::Acts);
-    net.acts.push((ptr1, ptr2));
+  for (tree1, tree2) in &lnet.rdex {
+    let ptr1 = alloc_ltree(&mut net, tree1, &mut vars, Parent::Rdex);
+    let ptr2 = alloc_ltree(&mut net, tree2, &mut vars, Parent::Rdex);
+    net.rdex.push((ptr1, ptr2));
   }
   net.node = net.node[0 .. net.used].to_vec();
   return net;
@@ -313,7 +313,7 @@ pub fn u32_to_name(num: u32) -> String {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Parent {
-  Acts,
+  Rdex,
   Root,
   Node { val: Val, port: Port },
 }
@@ -332,16 +332,16 @@ pub fn alloc_ltree(net: &mut Net, tree: &LTree, vars: &mut HashMap<String, Paren
       Ptr::new(*tag, val)
     },
     LTree::Var { nam } => {
-      if let Parent::Acts = parent {
+      if let Parent::Rdex = parent {
         panic!("By definition, can't have variable on active pairs.");
       };
       match vars.get(nam) {
-        Some(Parent::Acts) => {
+        Some(Parent::Rdex) => {
           unreachable!();
         },
         Some(Parent::Root) => {
           match parent {
-            Parent::Acts => {
+            Parent::Rdex => {
               unreachable!();
             }
             Parent::Node { val, port } => {
@@ -356,7 +356,7 @@ pub fn alloc_ltree(net: &mut Net, tree: &LTree, vars: &mut HashMap<String, Paren
         Some(Parent::Node { val: other_val, port: other_port }) => {
           //println!("linked {} | set {} {:?} as {} {:?}", nam, other_val, other_port, val, port);
           match parent {
-            Parent::Acts => {
+            Parent::Rdex => {
               unreachable!();
             }
             Parent::Node { val, port } => {
@@ -427,16 +427,16 @@ pub fn readback_ltree(net: &Net, ptr: Ptr, parent: Parent, vars: &mut HashMap<Pa
 }
 
 pub fn readback_lnet(net: &Net) -> LNet {
-  let mut vars = HashMap::new();
+  let mut vars  = HashMap::new();
   let mut fresh = 0;
-  let mut acts = Vec::new();
+  let mut rdex  = Vec::new();
   let root = readback_ltree(net, net.root, Parent::Root, &mut vars, &mut fresh);
-  for &(a, b) in &net.acts {
-    let tree_a = readback_ltree(net, a, Parent::Acts, &mut vars, &mut fresh);
-    let tree_b = readback_ltree(net, b, Parent::Acts, &mut vars, &mut fresh);
-    acts.push((tree_a, tree_b));
+  for &(a, b) in &net.rdex {
+    let tree_a = readback_ltree(net, a, Parent::Rdex, &mut vars, &mut fresh);
+    let tree_b = readback_ltree(net, b, Parent::Rdex, &mut vars, &mut fresh);
+    rdex.push((tree_a, tree_b));
   }
-  LNet { root, acts }
+  LNet { root, rdex }
 }
 
 // Utils

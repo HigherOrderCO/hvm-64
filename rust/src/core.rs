@@ -1,16 +1,11 @@
 // An efficient Interaction Combinator runtime
 // ===========================================
-//
-// This file implements interaction combinators with an efficient memory format. Nodes store only
-// aux ports, with the main port omitted. This segments the graph in trees, including parent-child
-// wires (P1|P2->P0). Main wires (P0<->P0) are then stored in a separate vector, called 'acts'
-// (active wires), and aux wires (P1|P2->P1|P2) are represented by VAR pointers. The 'acts' vector
-// is automatically updated during reduction, which allows us to always keep track of all active
-// wires. Pointers contain the tag of the pointed object. This allows for 1. unboxed ERAs, NUMs,
-// REFs; 2. omitting labels on nodes (as these are stored on their parent's pointers). This file
-// also includes REF pointers, which expand to pre-defined modules (closed nets with 1 free wire).
-// This expansion is performed on demand, and ERA-REF pointers are collected, allowing the runtime
-// to compute tail-recursive functions with constant memory usage.
+// This file implements an efficient interaction combinator runtime. Nodes are represented by 2 aux
+// ports (P1, P2), with the main port (P1) omitted. A separate vector, 'rdex', holds main ports,
+// and, thus, tracks active pairs that can be reduced in parallel. Pointers are unboxed, meaning
+// that ERAs, NUMs and REFs don't use any additional space. REFs lazily expand to closed nets when
+// they interact with nodes, and are cleared when they interact with ERAs, allowing for constant
+// space evaluation of recursive functions on Scott encoded datatypes.
 
 use std::collections::HashMap;
 
@@ -18,51 +13,45 @@ pub type Tag = u16;
 pub type Val = u32;
 
 // Core terms
-pub const NIL: Tag = 0x0; // empty node
-pub const REF: Tag = 0x1; // reference to a definition (closed net)
+pub const NIL: Tag = 0x0; // uninitialized
+pub const REF: Tag = 0x1; // closed net reference
 pub const ERA: Tag = 0x2; // unboxed eraser
-pub const VRR: Tag = 0x3; // variable pointing to root
-pub const VR1: Tag = 0x4; // variable pointing to aux1 port of node
-pub const VR2: Tag = 0x5; // variable pointing to aux2 port of node
-pub const RDR: Tag = 0x6; // redirection to root
-pub const RD1: Tag = 0x7; // redirection to aux1 port of node
-pub const RD2: Tag = 0x8; // redirection to aux2 port of node
-pub const NUM: Tag = 0x9; // redirection to aux2 port of node
-pub const CON: Tag = 0xA; // points to main port of con node
-pub const DUP: Tag = 0xB; // points to main port of dup node; higher labels also dups
+pub const VRR: Tag = 0x3; // aux port to root
+pub const VR1: Tag = 0x4; // aux port to aux port 1
+pub const VR2: Tag = 0x5; // aux port to aux port 2
+pub const RDR: Tag = 0x6; // redirect to root
+pub const RD1: Tag = 0x7; // redirect to aux port 1
+pub const RD2: Tag = 0x8; // redirect to aux port 2
+pub const NUM: Tag = 0x9; // unboxed number
+pub const CON: Tag = 0xA; // main port of con node
+pub const DUP: Tag = 0xB; // main port of dup node
 
-// A node port: 1 or 2. Main ports are omitted.
+// An auxiliary port.
 pub type Port = usize;
 pub const P1 : Port = 0;
 pub const P2 : Port = 1;
 
-// A tagged pointer. When tag >= VR1, it stores an absolute target location (node index).
+// A tagged pointer.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Ptr(pub Val);
 
-// A node is just a pair of two delta pointers. It uses 64 bits.
+// A node is just a pair of two pointers.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Node(pub (Ptr,Ptr));
 
-// A net has:
-// - root: a single free wire, used as the entrancy point.
-// - acts: a vector of redexes, updated automatically.
-// - node: a vector of nodes, with main ports omitted.
-// - used: total nodes currently allocated on the graph.
-// - rwts: total graph rewrites performed inside this net.
-// - next: next pointer to allocate memory (internal).
+// A interaction combinator net.
 #[derive(Debug, Clone)]
 pub struct Net {
-  pub root: Ptr,
-  pub acts: Vec<(Ptr, Ptr)>,
-  pub node: Vec<Node>,
-  pub used: usize,
-  pub rwts: usize,
-  pub dref: usize,
-      next: usize,
+  pub root: Ptr, // entrancy
+  pub rdex: Vec<(Ptr,Ptr)>, // redexes
+  pub node: Vec<Node>, // nodes
+  pub used: usize, // allocated nodes
+  pub rwts: usize, // rewrite count
+  pub dref: usize, // deref count
+  pub next: usize, // next alloc index
 }
 
-// A book is just a map of definitions, mapping ids to closed nets.
+// A map of id to definitions (closed nets).
 pub struct Book {
   defs: Vec<Net>,
 }
@@ -90,7 +79,7 @@ impl Ptr {
 
   #[inline(always)]
   pub fn is_nil(&self) -> bool {
-    return self.0 == 0x0000_0000;
+    return self.tag() == NIL;
   }
 
   #[inline(always)]
@@ -125,32 +114,17 @@ impl Ptr {
 
   #[inline(always)]
   pub fn is_pri(&self) -> bool {
-    return self.is_era()
-        || self.is_ctr()
-        || self.is_num()
-        || self.is_ref();
+    return self.is_era() || self.is_ctr() || self.is_num() || self.is_ref();
   }
 
   #[inline(always)]
   pub fn has_loc(&self) -> bool {
-    return self.is_ctr()
-        || self.is_var() && self.tag() != VRR
-        || self.is_red() && self.tag() != RDR;
-  }
-
-  #[inline(always)]
-  pub fn target<'a>(&'a self, net: &'a mut Net) -> Option<&mut Ptr> {
-    match self.tag() {
-      VRR => { Some(&mut net.root) }
-      VR1 => { Some(net.at_mut(self.val()).port_mut(P1)) }
-      VR2 => { Some(net.at_mut(self.val()).port_mut(P2)) }
-      _   => { None }
-    }
+    return self.is_ctr() || self.is_var() && self.tag() != VRR;
   }
 
   #[inline(always)]
   pub fn adjust(&self, loc: u32) -> Ptr {
-    return Ptr::new(self.tag(), if self.has_loc() { self.val() + loc } else { self.val() });
+    return Ptr::new(self.tag(), self.val() + if self.has_loc() { loc } else { 0 });
   }
 }
 
@@ -198,7 +172,7 @@ impl Net {
   pub fn new(size: usize) -> Self {
     Net {
       root: Ptr::new(NIL, 0),
-      acts: vec![],
+      rdex: vec![],
       node: vec![Node::nil(); size],
       next: 0,
       used: 0,
@@ -220,7 +194,7 @@ impl Net {
         space = 0;
         self.next = 0;
       }
-      if self.get(self.next as Val, P1).tag() == NIL {
+      if self.get(self.next as Val, P1).is_nil() {
         space += 1;
       } else {
         space = 0;
@@ -268,21 +242,30 @@ impl Net {
     *self.at_mut(index).port_mut(port) = value;
   }
 
+  // Gets a pointer target.
+  #[inline(always)]
+  pub fn target(&mut self, ptr: Ptr) -> Option<&mut Ptr> {
+    match ptr.tag() {
+      VRR => { Some(&mut self.root) }
+      VR1 => { Some(self.at_mut(ptr.val()).port_mut(P1)) }
+      VR2 => { Some(self.at_mut(ptr.val()).port_mut(P2)) }
+      _   => { None }
+    }
+  }
+
   // Links two pointers, forming a new wire.
-  // - If one of the pointers is a variable, it will move the other value.
-  // - Otherwise, this is an redexes, so we add it to 'acts'.
   pub fn link(&mut self, a: Ptr, b: Ptr) {
     // Substitutes A
-    if let Some(target) = a.target(self) {
+    if let Some(target) = self.target(a) {
       *target = b;
     }
     // Substitutes B
-    if let Some(target) = b.target(self) {
+    if let Some(target) = self.target(b) {
       *target = a;
     }
     // Creates redex A-B
     if a.is_pri() && b.is_pri() {
-      self.acts.push((a, b));
+      self.rdex.push((a, b));
     }
   }
 
@@ -309,12 +292,8 @@ impl Net {
 
     // CON-CON
     if a.is_ctr() && b.is_ctr() && a.tag() == b.tag() {
-      let a1 = self.get(a.val(), P1);
-      let b1 = self.get(b.val(), P1);
-      self.link(a1, b1);
-      let a2 = self.get(a.val(), P2);
-      let b2 = self.get(b.val(), P2);
-      self.link(a2, b2);
+      self.link(self.get(a.val(), P1), self.get(b.val(), P1));
+      self.link(self.get(a.val(), P2), self.get(b.val(), P2));
       self.free(a.val());
       self.free(b.val());
     // CON-DUP
@@ -343,7 +322,7 @@ impl Net {
     }
   }
 
-  // Expands a REF into its definition (a closed net).
+  // Expands a closed net.
   #[inline(always)]
   pub fn deref(&mut self, book: &Book, ptr: Ptr, parent: Ptr) -> Ptr {
     self.dref += 1;
@@ -363,45 +342,39 @@ impl Net {
           }
         }
         // Loads redexes, adjusting locations...
-        for got in &got.acts {
+        for got in &got.rdex {
           let p1 = got.0.adjust(loc);
           let p2 = got.1.adjust(loc);
-          self.acts.push((p1, p2));
+          self.rdex.push((p1, p2));
         }
         // Overwrites 'ptr' with the loaded root pointer, adjusting locations...
         ptr = got.root.adjust(loc);
         // Links root
         if ptr.is_var() {
-          if let Some(trg) = ptr.target(self) {
-            *trg = parent;
-          }
+          *self.target(ptr).unwrap() = parent;
         }
       }
     }
     return ptr;
   }
 
+  // Reduces all redexes.
   pub fn reduce(&mut self, book: &Book) {
-    let mut acts : Vec<(Ptr,Ptr)> = vec![];
-    // Swaps self.acts with acts
-    std::mem::swap(&mut self.acts, &mut acts);
-    // While there are redexes...
-    while acts.len() > 0 {
-      // Apply all redexes
-      for (a, b) in &mut acts {
+    let mut rdex : Vec<(Ptr,Ptr)> = vec![];
+    std::mem::swap(&mut self.rdex, &mut rdex);
+    while rdex.len() > 0 {
+      for (a, b) in &mut rdex {
         self.interact(book, a, b);
       }
-      // Sets acts's length to 0
-      acts.clear();
-      // Swaps acts and self.acts
-      std::mem::swap(&mut self.acts, &mut acts);
+      rdex.clear();
+      std::mem::swap(&mut self.rdex, &mut rdex);
     }
   }
 
   // Reduce a net to normal form.
   pub fn normal(&mut self, book: &Book) {
     self.expand(book, Ptr::new(VRR, 0));
-    while self.acts.len() > 0 {
+    while self.rdex.len() > 0 {
       self.reduce(book);
       self.expand(book, Ptr::new(VRR, 0));
     }
@@ -409,12 +382,12 @@ impl Net {
 
   // Expands heads.
   pub fn expand(&mut self, book: &Book, dir: Ptr) {
-    let ptr = *dir.target(self).unwrap();
+    let ptr = *self.target(dir).unwrap();
     if ptr.is_ctr() {
       self.expand(book, Ptr::new(VR1, ptr.val()));
       self.expand(book, Ptr::new(VR2, ptr.val()));
     } else if ptr.is_ref() {
-      *dir.target(self).unwrap() = self.deref(book, ptr, dir);
+      *self.target(dir).unwrap() = self.deref(book, ptr, dir);
     }
   }
 }
