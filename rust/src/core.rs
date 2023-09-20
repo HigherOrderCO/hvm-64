@@ -256,12 +256,12 @@ impl Net {
   // Links two pointers, forming a new wire.
   pub fn link(&mut self, a: Ptr, b: Ptr) {
     // Substitutes A
-    if let Some(target) = self.target(a) {
-      *target = b;
+    if a.is_var() {
+      *self.target(a).unwrap() = b;
     }
     // Substitutes B
-    if let Some(target) = self.target(b) {
-      *target = a;
+    if b.is_var() {
+      *self.target(b).unwrap() = a;
     }
     // Creates redex A-B
     if a.is_pri() && b.is_pri() {
