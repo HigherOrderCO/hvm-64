@@ -188,21 +188,25 @@ impl Net {
 
   // Allocates a consecutive chunk of 'size' nodes. Returns the index.
   pub fn alloc(&mut self, size: usize) -> Val {
-    let mut space = 0;
-    loop {
-      if self.next >= self.node.len() {
-        space = 0;
-        self.next = 0;
-      }
-      if self.get(self.next as Val, P1).is_nil() {
-        space += 1;
-      } else {
-        space = 0;
-      }
-      self.next += 1;
-      if space == size {
-        self.used += size;
-        return (self.next - space) as Val;
+    if size == 0 {
+      return 0;
+    } else {
+      let mut space = 0;
+      loop {
+        if self.next >= self.node.len() {
+          space = 0;
+          self.next = 0;
+        }
+        if self.get(self.next as Val, P1).is_nil() {
+          space += 1;
+        } else {
+          space = 0;
+        }
+        self.next += 1;
+        if space == size {
+          self.used += size;
+          return (self.next - space) as Val;
+        }
       }
     }
   }
