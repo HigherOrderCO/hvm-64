@@ -242,8 +242,8 @@ fn main() {
 
   // (x λp.p λp.p 0)
   define(book, "ex4", "
-    $ (0 x ret)
-    & @Uxxx ~ (0 x (0 34 ret))
+    $ ret
+    & 1 ~ {+ 2 ret}
   "); 
 
   // Initializes the net

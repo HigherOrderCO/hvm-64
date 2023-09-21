@@ -23,8 +23,10 @@ pub const RDR: Tag = 0x6; // redirect to root
 pub const RD1: Tag = 0x7; // redirect to aux port 1
 pub const RD2: Tag = 0x8; // redirect to aux port 2
 pub const NUM: Tag = 0x9; // unboxed number
-pub const CON: Tag = 0xA; // main port of con node
-pub const DUP: Tag = 0xB; // main port of dup node
+pub const OPX: Tag = 0xA; // operation on argument X
+pub const OPY: Tag = 0xB; // operation on argument Y
+pub const CON: Tag = 0xC; // main port of con node
+pub const DUP: Tag = 0xD; // main port of dup node
 
 // An auxiliary port.
 pub type Port = usize;
@@ -114,12 +116,25 @@ impl Ptr {
 
   #[inline(always)]
   pub fn is_pri(&self) -> bool {
-    return self.is_era() || self.is_ctr() || self.is_num() || self.is_ref();
+    return self.is_era() || self.is_ctr() || self.is_num()
+        || self.is_ref() || self.is_opX() || self.is_opY();
+  }
+
+  #[inline(always)]
+  pub fn is_opX(&self) -> bool {
+    return self.tag() == OPX;
+  }
+
+  #[inline(always)]
+  pub fn is_opY(&self) -> bool {
+    return self.tag() == OPY;
   }
 
   #[inline(always)]
   pub fn has_loc(&self) -> bool {
-    return self.is_ctr() || self.is_var() && self.tag() != VRR;
+    return self.is_ctr()
+        || self.is_var() && self.tag() != VRR
+        || self.is_opX() || self.is_opY();
   }
 
   #[inline(always)]
@@ -278,19 +293,26 @@ impl Net {
     self.rwts += 1;
 
     // Symmetry
-    if !a.is_era() && b.is_ref()
-    || !a.is_era() && b.is_num()
-    ||  a.is_era() && b.is_ctr() {
+    if a.is_ctr() && b.is_ref()
+    || a.is_ctr() && b.is_num()
+    || a.is_era() && b.is_ctr()
+    || a.is_num() && b.is_opX()
+    || a.is_num() && b.is_opY()
+    || a.is_ctr() && b.is_opX()
+    || a.is_ctr() && b.is_opY()
+    || a.is_era() && b.is_opX()
+    || a.is_era() && b.is_opY() {
       std::mem::swap(a, b);
     }
 
     // Number
-    if a.is_num() && !b.is_era() {
+    if a.is_num() && b.is_ctr() {
+      println!("denum");
       *a = self.denum(*a);
     }
 
     // Dereference
-    if a.is_ref() && !b.is_era() {
+    if a.is_ref() && b.is_ctr() {
       *a = self.deref(book, *a, Ptr::new(NIL,0));
     }
 
@@ -318,10 +340,49 @@ impl Net {
       *self.at_mut(loc+3) = Node::new(Ptr::new(VR2, loc+0), Ptr::new(VR2, loc+1));
       self.free(a.val());
       self.free(b.val());
-    // CTR-NUM
-    } else if a.is_ctr() && b.is_num() { // TODO: test
-      self.link(self.get(a.val(), P1), Ptr::new(NUM, b.val()));
-      self.link(self.get(a.val(), P2), Ptr::new(NUM, b.val()));
+    // OPX-NUM
+    } else if a.is_opX() && b.is_num() {
+      let v1 = self.get(a.val(), P1);
+      self.set(a.val(), P1, *b);
+      self.link(Ptr::new(OPY, a.val()), v1);
+    // OPY-NUM
+    } else if a.is_opY() && b.is_num() {
+      let v0 = self.get(a.val(), P1);
+      let rt = self.get(a.val(), P2);
+      self.link(Ptr::new(NUM, v0.val() + b.val()), rt); // TODO: OP TABLE
+      self.free(a.val());
+    // OPX-CTR
+    } else if a.is_opX() && b.is_ctr() {
+      let loc = self.alloc(4);
+      self.link(self.get(a.val(), P1), Ptr::new(b.tag(), loc+0));
+      self.link(self.get(b.val(), P1), Ptr::new(a.tag(), loc+2));
+      self.link(self.get(a.val(), P2), Ptr::new(b.tag(), loc+1));
+      self.link(self.get(b.val(), P2), Ptr::new(a.tag(), loc+3));
+      *self.at_mut(loc+0) = Node::new(Ptr::new(VR1, loc+2), Ptr::new(VR1, loc+3));
+      *self.at_mut(loc+1) = Node::new(Ptr::new(VR2, loc+2), Ptr::new(VR2, loc+3));
+      *self.at_mut(loc+2) = Node::new(Ptr::new(VR1, loc+0), Ptr::new(VR1, loc+1));
+      *self.at_mut(loc+3) = Node::new(Ptr::new(VR2, loc+0), Ptr::new(VR2, loc+1));
+      self.free(a.val());
+      self.free(b.val());
+    // OPY-CTR
+    } else if a.is_opY() && b.is_ctr() {
+      let loc = self.alloc(3);
+      self.link(self.get(a.val(), P2), Ptr::new(b.tag(), loc+0));
+      self.link(self.get(b.val(), P1), Ptr::new(a.tag(), loc+1));
+      self.link(self.get(b.val(), P2), Ptr::new(a.tag(), loc+2));
+      *self.at_mut(loc+0) = Node::new(Ptr::new(VR2, loc+1), Ptr::new(VR2, loc+2));
+      *self.at_mut(loc+1) = Node::new(Ptr::new(VR1, loc+0), Ptr::new(VR2, loc+0));
+      *self.at_mut(loc+2) = Node::new(self.get(a.val(),P1), self.get(a.val(),P1));
+      self.free(a.val());
+      self.free(b.val());
+    // OPX-ERA
+    } else if a.is_opX() && b.is_era() {
+      self.link(self.get(a.val(), P1), Ptr::new(ERA, 0));
+      self.link(self.get(a.val(), P2), Ptr::new(ERA, 0));
+      self.free(a.val());
+    // OPY-ERA
+    } else if a.is_opY() && b.is_era() {
+      self.link(self.get(a.val(), P2), Ptr::new(ERA, 0));
       self.free(a.val());
     // CON-ERA
     } else if a.is_ctr() && b.is_era() {
