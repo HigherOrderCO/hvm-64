@@ -9,8 +9,8 @@
 
 use std::collections::HashMap;
 
-pub type Tag = u8;
-pub type Val = u32;
+pub type Tag = u16;
+pub type Val = u64;
 
 // Core terms.
 pub const NIL: Tag = 0x0; // uninitialized
@@ -61,7 +61,7 @@ pub struct Book {
 impl Ptr {
   #[inline(always)]
   pub fn new(tag: Tag, val: Val) -> Self {
-    Ptr(((tag as Val) << 28) | (val & 0xFFF_FFFF))
+    Ptr(((tag as Val) << 48) | (val & 0xFFFF_FFFF_FFFF))
   }
 
   #[inline(always)]
@@ -71,12 +71,12 @@ impl Ptr {
 
   #[inline(always)]
   pub fn tag(&self) -> Tag {
-    (self.data() >> 28) as Tag
+    (self.data() >> 48) as Tag
   }
 
   #[inline(always)]
   pub fn val(&self) -> Val {
-    (self.data() & 0xFFF_FFFF) as Val
+    (self.data() & 0xFFFF_FFFF_FFFF) as Val
   }
 
   #[inline(always)]
@@ -396,7 +396,6 @@ impl Net {
   pub fn denum(&mut self, a: Ptr) -> Ptr {
     // O Case
     if a.val() > 0 && a.val() % 2 == 0 {
-      println!("o-case");
       let loc = self.alloc(4);
       let oc1 = Ptr::new(CON, loc + 3);
       let oc2 = Ptr::new(CON, loc + 1);
@@ -414,7 +413,6 @@ impl Net {
     }
     // I Case
     else if a.val() > 0 && a.val() % 2 == 1 {
-      println!("i-case");
       let loc = self.alloc(4);
       let oc1 = Ptr::new(ERA, 0);
       let oc2 = Ptr::new(CON, loc + 1);
@@ -432,7 +430,6 @@ impl Net {
     }
     // E Case
     else if a.val() == 0 {
-      println!("e-case");
       let loc = self.alloc(3);
       let oc1 = Ptr::new(ERA, 0);
       let oc2 = Ptr::new(CON, loc + 1);
