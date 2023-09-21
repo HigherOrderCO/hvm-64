@@ -327,7 +327,6 @@ impl Net {
   }
 
   // Expands a closed net.
-  #[inline(always)]
   pub fn deref(&mut self, book: &Book, ptr: Ptr, parent: Ptr) -> Ptr {
     self.dref += 1;
     let mut ptr = ptr;

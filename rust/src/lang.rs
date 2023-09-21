@@ -238,16 +238,18 @@ pub fn port_to_tag(port: Port) -> Tag {
   }
 }
 
-pub fn lnet_to_net(lnet: &LNet) -> Net {
+pub fn lnet_to_net(lnet: &LNet, size: Option<usize>) -> Net {
   let mut vars = HashMap::new();
-  let mut net = Net::new(1 << 16);
+  let mut net = Net::new(size.unwrap_or(1 << 16));
   net.root = alloc_ltree(&mut net, &lnet.root, &mut vars, Parent::Root);
   for (tree1, tree2) in &lnet.rdex {
     let ptr1 = alloc_ltree(&mut net, tree1, &mut vars, Parent::Rdex);
     let ptr2 = alloc_ltree(&mut net, tree2, &mut vars, Parent::Rdex);
     net.rdex.push((ptr1, ptr2));
   }
-  net.node = net.node[0 .. net.used].to_vec();
+  if size.is_none() {
+    net.node = net.node[0 .. net.used].to_vec();
+  }
   return net;
 }
 
@@ -444,6 +446,6 @@ pub fn readback_lnet(net: &Net) -> LNet {
 
 pub fn define(book: &mut Book, name: &str, code: &str) -> Val {
   let id = name_to_val(name);
-  book.def(id, lnet_to_net(&do_parse_lnet(code)));
+  book.def(id, lnet_to_net(&do_parse_lnet(code), None));
   return id;
 }
