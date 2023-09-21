@@ -233,22 +233,39 @@ fn main() {
     & @brn ~ (0 dep res)
   "); 
 
+  // Native Numbers
+  // Number literals lazily expand to λ-encoded bitstrings. For example, the number
+  // 26 will expand to `λo λi λe (o 13)`, then `λo λi λe (o λo λi λe (i 6))`, etc.
+
+  // Divides a native number by 2
+  define(book, "half", "$ (0 (0 (0 op op) (0 (0 ip ip) (0 0 ret))) ret)");
+
+  // (x λp.p λp.p 0)
+  define(book, "ex4", "
+    $ (0 x ret)
+    & @Uxxx ~ (0 x (0 34 ret))
+  "); 
+
   // Initializes the net
-  let net = &mut Net::new(1 << 28);
-  net.boot(name_to_val("ex3"));
+  let net = &mut Net::new(1 << 24);
+  net.boot(name_to_val("ex4"));
 
   // Marks initial time
   let start = std::time::Instant::now();
 
   // Computes its normal form
-  net.normal(book);
+  net.expand(book, Ptr::new(VRR,0));
+  net.reduce(book);
+  //net.normal(book);
 
   //Shows results and stats
-  //println!("[net]\n{}", show_net(&net));
+  println!("[net]\n{}", show_net(&net));
   println!("RWTS: {}", net.rwts);
   println!("DREF: {}", net.dref);
   println!("TIME: {:.3} s", (start.elapsed().as_millis() as f64) / 1000.0);
   println!("RPS : {:.3} million", (net.rwts as f64) / (start.elapsed().as_millis() as f64) / 1000.0);
+
+
 
   //println!("{}", &compile_book(&book));
 }

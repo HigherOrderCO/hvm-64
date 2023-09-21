@@ -12,7 +12,7 @@ use std::collections::HashMap;
 pub type Tag = u8;
 pub type Val = u32;
 
-// Core terms
+// Core terms.
 pub const NIL: Tag = 0x0; // uninitialized
 pub const REF: Tag = 0x1; // closed net reference
 pub const ERA: Tag = 0x2; // unboxed eraser
@@ -279,13 +279,18 @@ impl Net {
 
     // Symmetry
     if !a.is_era() && b.is_ref()
-    ||  a.is_num() && b.is_ctr()
+    || !a.is_era() && b.is_num()
     ||  a.is_era() && b.is_ctr() {
       std::mem::swap(a, b);
     }
 
+    // Number
+    if a.is_num() && !b.is_era() {
+      *a = self.denum(*a);
+    }
+
     // Dereference
-    if a.tag() == REF && b.tag() != ERA {
+    if a.is_ref() && !b.is_era() {
       *a = self.deref(book, *a, Ptr::new(NIL,0));
     }
 
@@ -324,6 +329,62 @@ impl Net {
       self.link(self.get(a.val(), P2), Ptr::new(ERA, 0));
       self.free(a.val());
     }
+  }
+
+  // Expands a number literal.
+  pub fn denum(&mut self, a: Ptr) -> Ptr {
+    // O Case
+    if a.val() > 0 && a.val() % 2 == 0 {
+      println!("o-case");
+      let loc = self.alloc(4);
+      let oc1 = Ptr::new(CON, loc + 3);
+      let oc2 = Ptr::new(CON, loc + 1);
+      let ic1 = Ptr::new(ERA, 0);
+      let ic2 = Ptr::new(CON, loc + 2);
+      let ec1 = Ptr::new(ERA, 0);
+      let ec2 = Ptr::new(VR2, loc + 3);
+      let ap1 = Ptr::new(NUM, a.val() / 2);
+      let ap2 = Ptr::new(VR2, loc + 2);
+      *self.at_mut(loc+0) = Node::new(oc1, oc2);
+      *self.at_mut(loc+1) = Node::new(ic1, ic2);
+      *self.at_mut(loc+2) = Node::new(ec1, ec2);
+      *self.at_mut(loc+3) = Node::new(ap1, ap2);
+      return Ptr::new(CON, loc + 0);
+    }
+    // I Case
+    else if a.val() > 0 && a.val() % 2 == 1 {
+      println!("i-case");
+      let loc = self.alloc(4);
+      let oc1 = Ptr::new(ERA, 0);
+      let oc2 = Ptr::new(CON, loc + 1);
+      let ic1 = Ptr::new(CON, loc + 3);
+      let ic2 = Ptr::new(CON, loc + 2);
+      let ec1 = Ptr::new(ERA, 0);
+      let ec2 = Ptr::new(VR2, loc + 3);
+      let ap1 = Ptr::new(NUM, a.val() / 2);
+      let ap2 = Ptr::new(VR2, loc + 2);
+      *self.at_mut(loc+0) = Node::new(oc1, oc2);
+      *self.at_mut(loc+1) = Node::new(ic1, ic2);
+      *self.at_mut(loc+2) = Node::new(ec1, ec2);
+      *self.at_mut(loc+3) = Node::new(ap1, ap2);
+      return Ptr::new(CON, loc + 0);
+    }
+    // E Case
+    else if a.val() == 0 {
+      println!("e-case");
+      let loc = self.alloc(3);
+      let oc1 = Ptr::new(ERA, 0);
+      let oc2 = Ptr::new(CON, loc + 1);
+      let ic1 = Ptr::new(ERA, 0);
+      let ic2 = Ptr::new(CON, loc + 2);
+      let ec1 = Ptr::new(VR2, loc + 2);
+      let ec2 = Ptr::new(VR1, loc + 2);
+      *self.at_mut(loc+0) = Node::new(oc1, oc2);
+      *self.at_mut(loc+1) = Node::new(ic1, ic2);
+      *self.at_mut(loc+2) = Node::new(ec1, ec2);
+      return Ptr::new(CON, loc + 0);
+    }
+    unreachable!();
   }
 
   // Expands a closed net.

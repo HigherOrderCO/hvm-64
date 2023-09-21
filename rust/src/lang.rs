@@ -257,11 +257,11 @@ pub fn name_to_letters(name: &str) -> Vec<u8> {
   let mut letters = Vec::new();
   for c in name.chars() {
     letters.push(match c {
-      '.'       => 0,
-      '0'..='9' => c as u8 - '0' as u8 + 1,
-      'A'..='Z' => c as u8 - 'A' as u8 + 11,
-      'a'..='z' => c as u8 - 'a' as u8 + 37,
-      '_'       => 63,
+      '0'..='9' => c as u8 - '0' as u8 + 0,
+      'A'..='Z' => c as u8 - 'A' as u8 + 10,
+      'a'..='z' => c as u8 - 'a' as u8 + 36,
+      '_'       => 62,
+      '.'       => 63,
       _         => panic!("Invalid character in name"),
     });
   }
@@ -272,11 +272,11 @@ pub fn letters_to_name(letters: Vec<u8>) -> String {
   let mut name = String::new();
   for letter in letters {
     name.push(match letter {
-            0 => '.',
-       1..=10 => (letter - 1 + '0' as u8) as char,
-      11..=36 => (letter - 11 + 'A' as u8) as char,
-      37..=62 => (letter - 37 + 'a' as u8) as char,
-           63 => '_',
+       0..=9  => (letter -  0 + '0' as u8) as char,
+      10..=35 => (letter - 10 + 'A' as u8) as char,
+      36..=61 => (letter - 36 + 'a' as u8) as char,
+           62 => '_',
+           63 => '.',
       _       => panic!("Invalid letter in name"),
     });
   }
