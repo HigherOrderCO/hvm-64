@@ -75,7 +75,7 @@ pub struct Ptr(pub Val);
 pub struct Node(pub (Ptr,Ptr));
 
 // A interaction combinator net.
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Net {
   pub root: Ptr, // entrancy
   pub rdex: Vec<(Ptr,Ptr)>, // redexes

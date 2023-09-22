@@ -45,7 +45,7 @@ use std::str::Chars;
 // AST
 // ---
 
-#[derive(Debug)]
+#[derive(Clone, Copy, Hash, PartialEq, Eq, Debug)]
 pub enum OP {
   ADD,
   SUB,
@@ -62,7 +62,7 @@ pub enum OP {
   OR ,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Hash, PartialEq, Eq, Debug)]
 pub enum LTree {
   Era,
   Nod { 
@@ -91,7 +91,7 @@ pub enum LTree {
 
 type LRdex = Vec<(LTree,LTree)>;
 
-#[derive(Debug)]
+#[derive(Clone, Hash, PartialEq, Eq, Debug)]
 pub struct LNet {
   pub root: LTree,
   pub rdex: LRdex,
