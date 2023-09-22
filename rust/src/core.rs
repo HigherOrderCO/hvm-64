@@ -13,20 +13,53 @@ pub type Tag = u16;
 pub type Val = u64;
 
 // Core terms.
-pub const NIL: Tag = 0x0; // uninitialized
-pub const REF: Tag = 0x1; // closed net reference
-pub const ERA: Tag = 0x2; // unboxed eraser
-pub const VRR: Tag = 0x3; // aux port to root
-pub const VR1: Tag = 0x4; // aux port to aux port 1
-pub const VR2: Tag = 0x5; // aux port to aux port 2
-pub const RDR: Tag = 0x6; // redirect to root
-pub const RD1: Tag = 0x7; // redirect to aux port 1
-pub const RD2: Tag = 0x8; // redirect to aux port 2
-pub const NUM: Tag = 0x9; // unboxed number
-pub const OPX: Tag = 0xA; // operation on argument X
-pub const OPY: Tag = 0xB; // operation on argument Y
-pub const CON: Tag = 0xC; // main port of con node
-pub const DUP: Tag = 0xD; // main port of dup node
+pub const NIL: Tag = 0x0000; // uninitialized
+pub const REF: Tag = 0x0001; // closed net reference
+pub const ERA: Tag = 0x0002; // unboxed eraser
+pub const VRR: Tag = 0x0003; // aux port to root
+pub const VR1: Tag = 0x0004; // aux port to aux port 1
+pub const VR2: Tag = 0x0005; // aux port to aux port 2
+pub const RDR: Tag = 0x0006; // redirect to root
+pub const RD1: Tag = 0x0007; // redirect to aux port 1
+pub const RD2: Tag = 0x0008; // redirect to aux port 2
+pub const U32: Tag = 0x0009; // unboxed u32
+pub const I32: Tag = 0x000A; // unboxed i32
+pub const CON: Tag = 0x1000; // main port of con node
+pub const DUP: Tag = 0x1001; // main port of dup node
+
+// Numeric Operations.
+pub const OPX_ADD: Tag = 0x0100;
+pub const OPY_ADD: Tag = 0x0200;
+pub const OPX_SUB: Tag = 0x0101;
+pub const OPY_SUB: Tag = 0x0201;
+pub const OPX_MUL: Tag = 0x0102;
+pub const OPY_MUL: Tag = 0x0202;
+pub const OPX_DIV: Tag = 0x0103;
+pub const OPY_DIV: Tag = 0x0203;
+pub const OPX_MOD: Tag = 0x0104;
+pub const OPY_MOD: Tag = 0x0204;
+pub const OPX_EQ : Tag = 0x0105;
+pub const OPY_EQ : Tag = 0x0205;
+pub const OPX_NEQ: Tag = 0x0106;
+pub const OPY_NEQ: Tag = 0x0206;
+pub const OPX_LT : Tag = 0x0107;
+pub const OPY_LT : Tag = 0x0207;
+pub const OPX_GT : Tag = 0x0108;
+pub const OPY_GT : Tag = 0x0208;
+pub const OPX_LTE: Tag = 0x0109;
+pub const OPY_LTE: Tag = 0x0209;
+pub const OPX_GTE: Tag = 0x010A;
+pub const OPY_GTE: Tag = 0x020A;
+pub const OPX_AND: Tag = 0x010B;
+pub const OPY_AND: Tag = 0x020B;
+pub const OPX_OR : Tag = 0x010C;
+pub const OPY_OR : Tag = 0x020C;
+
+// Operation ranges.
+pub const MIN_OPX: Tag = 0x0100;
+pub const MAX_OPX: Tag = 0x01FF;
+pub const MIN_OPY: Tag = 0x0200;
+pub const MAX_OPY: Tag = 0x02FF;
 
 // An auxiliary port.
 pub type Port = usize;
@@ -100,8 +133,18 @@ impl Ptr {
   }
 
   #[inline(always)]
+  pub fn is_u32(&self) -> bool {
+    return self.tag() == U32;
+  }
+
+  #[inline(always)]
+  pub fn is_i32(&self) -> bool {
+    return self.tag() == I32;
+  }
+
+  #[inline(always)]
   pub fn is_num(&self) -> bool {
-    return self.tag() == NUM;
+    return self.is_u32() || self.is_i32();
   }
 
   #[inline(always)]
@@ -122,12 +165,12 @@ impl Ptr {
 
   #[inline(always)]
   pub fn is_opX(&self) -> bool {
-    return self.tag() == OPX;
+    return self.tag() >= MIN_OPX && self.tag() <= MAX_OPX;
   }
 
   #[inline(always)]
   pub fn is_opY(&self) -> bool {
-    return self.tag() == OPY;
+    return self.tag() >= MIN_OPY && self.tag() <= MAX_OPY;
   }
 
   #[inline(always)]
@@ -305,10 +348,14 @@ impl Net {
       std::mem::swap(a, b);
     }
 
-    // Number
-    if a.is_num() && b.is_ctr() {
-      println!("denum");
-      *a = self.denum(*a);
+    // U32
+    if a.is_u32() && b.is_ctr() {
+      *a = self.unroll_u32(*a);
+    }
+
+    // I32
+    if a.is_i32() && b.is_ctr() {
+      *a = self.unroll_i32(*a);
     }
 
     // Dereference
@@ -340,16 +387,63 @@ impl Net {
       *self.at_mut(loc+3) = Node::new(Ptr::new(VR2, loc+0), Ptr::new(VR2, loc+1));
       self.free(a.val());
       self.free(b.val());
-    // OPX-NUM
-    } else if a.is_opX() && b.is_num() {
+    // OPX-U32
+    } else if a.is_opX() && b.is_u32() {
       let v1 = self.get(a.val(), P1);
       self.set(a.val(), P1, *b);
-      self.link(Ptr::new(OPY, a.val()), v1);
-    // OPY-NUM
-    } else if a.is_opY() && b.is_num() {
-      let v0 = self.get(a.val(), P1);
-      let rt = self.get(a.val(), P2);
-      self.link(Ptr::new(NUM, v0.val() + b.val()), rt); // TODO: OP TABLE
+      self.link(Ptr::new(a.tag() + (MIN_OPY - MIN_OPX), a.val()), v1);
+    // OPX-I32
+    } else if a.is_opX() && b.is_i32() {
+      let v1 = self.get(a.val(), P1);
+      self.set(a.val(), P1, *b);
+      self.link(Ptr::new(a.tag() + (MIN_OPY - MIN_OPX), a.val()), v1);
+    // OPY-U32
+    } else if a.is_opY() && b.is_u32() {
+      let p1 = self.get(a.val(), P1);
+      let p2 = self.get(a.val(), P2);
+      let v0 = p1.val() as u32;
+      let v1 = b.val() as u32;
+      let v2 = match a.tag() {
+        OPY_ADD => v0.wrapping_add(v1) as Val,
+        OPY_SUB => v0.wrapping_sub(v1) as Val,
+        OPY_MUL => v0.wrapping_mul(v1) as Val,
+        OPY_DIV => (if v1 != 0 { v0 / v1 } else { 0 }) as Val,
+        OPY_MOD => (if v1 != 0 { v0 % v1 } else { 0 }) as Val,
+        OPY_EQ  => (v0 == v1) as Val,
+        OPY_NEQ => (v0 != v1) as Val,
+        OPY_LT  => (v0 < v1) as Val,
+        OPY_GT  => (v0 > v1) as Val,
+        OPY_LTE => (v0 <= v1) as Val,
+        OPY_GTE => (v0 >= v1) as Val,
+        OPY_AND => (v0 & v1) as Val,
+        OPY_OR  => (v0 | v1) as Val,
+        _       => 0,
+      };
+      self.link(Ptr::new(U32, v2), p2);
+      self.free(a.val());
+    // OPY-I32
+    } else if a.is_opY() && b.is_i32() {
+      let p1 = self.get(a.val(), P1);
+      let p2 = self.get(a.val(), P2);
+      let v0 = p1.val() as i32;
+      let v1 = b.val() as i32;
+      let v2 = match a.tag() {
+        OPY_ADD => v0.wrapping_add(v1) as Val,
+        OPY_SUB => v0.wrapping_sub(v1) as Val,
+        OPY_MUL => v0.wrapping_mul(v1) as Val,
+        OPY_DIV => (if v1 != 0 { v0 / v1 } else { 0 }) as Val,
+        OPY_MOD => (if v1 != 0 { v0 % v1 } else { 0 }) as Val,
+        OPY_EQ  => (v0 == v1) as Val,
+        OPY_NEQ => (v0 != v1) as Val,
+        OPY_LT  => (v0 < v1) as Val,
+        OPY_GT  => (v0 > v1) as Val,
+        OPY_LTE => (v0 <= v1) as Val,
+        OPY_GTE => (v0 >= v1) as Val,
+        OPY_AND => (v0 & v1) as Val,
+        OPY_OR  => (v0 | v1) as Val,
+        _       => 0,
+      };
+      self.link(Ptr::new(U32, v2), p2);
       self.free(a.val());
     // OPX-CTR
     } else if a.is_opX() && b.is_ctr() {
@@ -392,8 +486,8 @@ impl Net {
     }
   }
 
-  // Expands a number literal.
-  pub fn denum(&mut self, a: Ptr) -> Ptr {
+  // Expands an U32 literal.
+  pub fn unroll_u32(&mut self, a: Ptr) -> Ptr {
     // O Case
     if a.val() > 0 && a.val() % 2 == 0 {
       let loc = self.alloc(4);
@@ -403,7 +497,7 @@ impl Net {
       let ic2 = Ptr::new(CON, loc + 2);
       let ec1 = Ptr::new(ERA, 0);
       let ec2 = Ptr::new(VR2, loc + 3);
-      let ap1 = Ptr::new(NUM, a.val() / 2);
+      let ap1 = Ptr::new(U32, a.val() / 2);
       let ap2 = Ptr::new(VR2, loc + 2);
       *self.at_mut(loc+0) = Node::new(oc1, oc2);
       *self.at_mut(loc+1) = Node::new(ic1, ic2);
@@ -420,7 +514,7 @@ impl Net {
       let ic2 = Ptr::new(CON, loc + 2);
       let ec1 = Ptr::new(ERA, 0);
       let ec2 = Ptr::new(VR2, loc + 3);
-      let ap1 = Ptr::new(NUM, a.val() / 2);
+      let ap1 = Ptr::new(U32, a.val() / 2);
       let ap2 = Ptr::new(VR2, loc + 2);
       *self.at_mut(loc+0) = Node::new(oc1, oc2);
       *self.at_mut(loc+1) = Node::new(ic1, ic2);
@@ -443,6 +537,12 @@ impl Net {
       return Ptr::new(CON, loc + 0);
     }
     unreachable!();
+  }
+
+  // Expands an I32 literal.
+  // FIXME: currently expanded as U32. Should use balanced ternary instead.
+  pub fn unroll_i32(&mut self, a: Ptr) -> Ptr {
+    self.unroll_u32(a)
   }
 
   // Expands a closed net.

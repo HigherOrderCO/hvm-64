@@ -243,12 +243,12 @@ fn main() {
   // (x λp.p λp.p 0)
   define(book, "ex4", "
     $ ret
-    & 1 ~ {+ 2 ret}
+    & +3 ~ {+ +5 ret}
   "); 
 
   // Initializes the net
   let net = &mut Net::new(1 << 28);
-  net.boot(name_to_val("ex3"));
+  net.boot(name_to_val("ex4"));
 
   // Marks initial time
   let start = std::time::Instant::now();
@@ -259,7 +259,7 @@ fn main() {
   net.normal(book);
 
   //Shows results and stats
-  //println!("[net]\n{}", show_net(&net));
+  println!("[net]\n{}", show_net(&net));
   println!("RWTS: {}", net.rwts);
   println!("DREF: {}", net.dref);
   println!("TIME: {:.3} s", (start.elapsed().as_millis() as f64) / 1000.0);
