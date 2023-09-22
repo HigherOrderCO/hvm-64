@@ -443,7 +443,7 @@ impl Net {
         OPY_OR  => (v0 | v1) as Val,
         _       => 0,
       };
-      self.link(Ptr::new(U32, v2), p2);
+      self.link(Ptr::new(I32, v2), p2);
       self.free(a.val());
     // OPX-CTR
     } else if a.is_opX() && b.is_ctr() {

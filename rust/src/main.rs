@@ -243,7 +243,8 @@ fn main() {
   // (x λp.p λp.p 0)
   define(book, "ex4", "
     $ ret
-    & +3 ~ {+ +5 ret}
+    & {+ -2 ret}
+    ~ +1
   "); 
 
   // Initializes the net
