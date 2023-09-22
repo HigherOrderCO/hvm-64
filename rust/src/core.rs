@@ -12,6 +12,10 @@ use std::collections::HashMap;
 pub type Tag = u16;
 pub type Val = u64;
 
+pub const TAG_WIDTH: u32 = 16;
+pub const VAL_WIDTH: u32 = 48;
+pub const VAL_MASK: Val = 0xFFFF_FFFF_FFFF;
+
 // Core terms.
 pub const NIL: Tag = 0x0; // uninitialized
 pub const REF: Tag = 0x1; // closed net reference
@@ -61,7 +65,7 @@ pub struct Book {
 impl Ptr {
   #[inline(always)]
   pub fn new(tag: Tag, val: Val) -> Self {
-    Ptr(((tag as Val) << 48) | (val & 0xFFFF_FFFF_FFFF))
+    Ptr(((tag as Val) << VAL_WIDTH) | (val & VAL_MASK))
   }
 
   #[inline(always)]
@@ -71,12 +75,12 @@ impl Ptr {
 
   #[inline(always)]
   pub fn tag(&self) -> Tag {
-    (self.data() >> 48) as Tag
+    (self.data() >> VAL_WIDTH) as Tag
   }
 
   #[inline(always)]
   pub fn val(&self) -> Val {
-    (self.data() & 0xFFFF_FFFF_FFFF) as Val
+    (self.data() & VAL_MASK) as Val
   }
 
   #[inline(always)]
