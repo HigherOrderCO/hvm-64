@@ -100,7 +100,7 @@ pub struct LNet {
 // Parser
 // ------
 
-fn skip_spaces(chars: &mut Peekable<Chars>) {
+pub fn skip_spaces(chars: &mut Peekable<Chars>) {
   while let Some(c) = chars.peek() {
     if *c != ' ' && *c != '\n' {
       break;
@@ -109,7 +109,7 @@ fn skip_spaces(chars: &mut Peekable<Chars>) {
   }
 }
 
-fn consume(chars: &mut Peekable<Chars>, text: &str) {
+pub fn consume(chars: &mut Peekable<Chars>, text: &str) {
   skip_spaces(chars);
   for c in text.chars() {
     assert_eq!(chars.next().unwrap(), c);
@@ -142,7 +142,7 @@ pub fn parse_string(chars: &mut Peekable<Chars>) -> String {
   str
 }
 
-fn parse_opx_lit(chars: &mut Peekable<Chars>) -> String {
+pub fn parse_opx_lit(chars: &mut Peekable<Chars>) -> String {
   let mut opx = String::new();
   skip_spaces(chars);
   while let Some(c) = chars.peek() {
@@ -370,7 +370,7 @@ pub fn val_to_name(num: Val) -> String {
   letters_to_name(val_to_letters(num))
 }
 
-fn string_to_opx(opx: &str) -> OP {
+pub fn string_to_opx(opx: &str) -> OP {
   match opx {
     "+"  => OP::ADD,
     "-"  => OP::SUB,
@@ -389,7 +389,7 @@ fn string_to_opx(opx: &str) -> OP {
   }
 }
 
-fn opx_to_string(opx: &OP) -> String {
+pub fn opx_to_string(opx: &OP) -> String {
   match opx {
     OP::ADD => "+".to_string(),
     OP::SUB => "-".to_string(),
@@ -407,7 +407,7 @@ fn opx_to_string(opx: &OP) -> String {
   }
 }
 
-fn opx_to_tag(opx: &OP) -> Tag {
+pub fn opx_to_tag(opx: &OP) -> Tag {
   match opx {
     OP::ADD => OPX_ADD,
     OP::SUB => OPX_SUB,
@@ -425,7 +425,7 @@ fn opx_to_tag(opx: &OP) -> Tag {
   }
 }
 
-fn tag_to_opx(tag: Tag) -> OP {
+pub fn tag_to_opx(tag: Tag) -> OP {
   match tag {
     OPX_ADD => OP::ADD,
     OPX_SUB => OP::SUB,
