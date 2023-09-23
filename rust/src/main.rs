@@ -249,18 +249,18 @@ fn main() {
 
   // Initializes the net
   let net = &mut Net::new(1 << 28);
-  net.boot(name_to_val("ex4"));
+  net.boot(name_to_val("ex3"));
 
   // Marks initial time
   let start = std::time::Instant::now();
 
   // Computes its normal form
-  net.expand(book, Ptr::new(VRR,0));
-  net.reduce(book);
+  //net.expand(book, Ptr::new(VRR,0));
+  //net.reduce(book);
   net.normal(book);
 
   //Shows results and stats
-  println!("[net]\n{}", show_net(&net));
+  //println!("[net]\n{}", show_net(&net));
   println!("RWTS: {}", net.rwts);
   println!("DREF: {}", net.dref);
   println!("TIME: {:.3} s", (start.elapsed().as_millis() as f64) / 1000.0);

@@ -62,7 +62,7 @@ pub const MIN_OPY: Tag = 0x0200;
 pub const MAX_OPY: Tag = 0x02FF;
 
 // An auxiliary port.
-pub type Port = usize;
+pub type Port = Val;
 pub const P1 : Port = 0;
 pub const P2 : Port = 1;
 
@@ -70,16 +70,12 @@ pub const P2 : Port = 1;
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Ptr(pub Val);
 
-// A node is just a pair of two pointers.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
-pub struct Node(pub (Ptr,Ptr));
-
 // A interaction combinator net.
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Net {
   pub root: Ptr, // entrancy
   pub rdex: Vec<(Ptr,Ptr)>, // redexes
-  pub node: Vec<Node>, // nodes
+  pub node: Vec<Ptr>, // nodes
   pub used: usize, // allocated nodes
   pub rwts: usize, // rewrite count
   pub dref: usize, // deref count
@@ -186,28 +182,6 @@ impl Ptr {
   }
 }
 
-impl Node {
-  #[inline(always)]
-  pub fn new(p1: Ptr, p2: Ptr) -> Self {
-    Node((p1, p2))
-  }
-
-  #[inline(always)]
-  pub fn nil() -> Self {
-    Self::new(Ptr::new(NIL,0), Ptr::new(NIL,0))
-  }
-
-  #[inline(always)]
-  pub fn port(&self, port: Port) -> Ptr {
-    return if port == P1 { self.0.0 } else { self.0.1 };
-  }
-
-  #[inline(always)]
-  pub fn port_mut(&mut self, port: Port) -> &mut Ptr {
-    return if port == P1 { &mut self.0.0 } else { &mut self.0.1 };
-  }
-}
-
 impl Book {
   #[inline(always)]
   pub fn new() -> Self {
@@ -231,7 +205,7 @@ impl Net {
     Net {
       root: Ptr::new(NIL, 0),
       rdex: vec![],
-      node: vec![Node::nil(); size],
+      node: vec![Ptr::new(NIL, 0); size],
       next: 0,
       used: 0,
       rwts: 0,
@@ -251,7 +225,7 @@ impl Net {
     } else {
       let mut space = 0;
       loop {
-        if self.next >= self.node.len() {
+        if self.next >= self.node.len() / 2 {
           space = 0;
           self.next = 0;
         }
@@ -273,20 +247,21 @@ impl Net {
   #[inline(always)]
   pub fn free(&mut self, val: Val) {
     self.used -= 1;
-    self.node[val as usize] = Node::nil();
+    self.node[(val * 2 + P1) as usize] = Ptr::new(NIL, 0);
+    self.node[(val * 2 + P2) as usize] = Ptr::new(NIL, 0);
   }
 
   // Gets node at given index.
-  #[inline(always)]
-  pub fn at(&self, index: Val) -> &Node {
+  //#[inline(always)]
+  pub fn at(&self, index: Val) -> &Ptr {
     unsafe {
       return self.node.get_unchecked(index as usize);
     }
   }
 
   // Gets node at given index, mutable.
-  #[inline(always)]
-  pub fn at_mut(&mut self, index: Val) -> &mut Node {
+  //#[inline(always)]
+  pub fn at_mut(&mut self, index: Val) -> &mut Ptr {
     unsafe {
       return self.node.get_unchecked_mut(index as usize);
     }
@@ -295,13 +270,13 @@ impl Net {
   // Gets the pointer stored on the port 1 or 2 of a node.
   #[inline(always)]
   pub fn get(&self, index: Val, port: Port) -> Ptr {
-    return self.at(index).port(port);
+    return *self.at(index * 2 + port);
   }
 
   // Sets the pointer stored on the port 1 or 2 of a node.
   #[inline(always)]
   pub fn set(&mut self, index: Val, port: Port, value: Ptr) {
-    *self.at_mut(index).port_mut(port) = value;
+    *self.at_mut(index * 2 + port) = value;
   }
 
   // Gets a pointer target.
@@ -309,8 +284,8 @@ impl Net {
   pub fn target(&mut self, ptr: Ptr) -> Option<&mut Ptr> {
     match ptr.tag() {
       VRR => { Some(&mut self.root) }
-      VR1 => { Some(self.at_mut(ptr.val()).port_mut(P1)) }
-      VR2 => { Some(self.at_mut(ptr.val()).port_mut(P2)) }
+      VR1 => { Some(self.at_mut(ptr.val() * 2 + P1)) }
+      VR2 => { Some(self.at_mut(ptr.val() * 2 + P2)) }
       _   => { None }
     }
   }
@@ -381,10 +356,14 @@ impl Net {
       self.link(self.get(b.val(), P1), Ptr::new(a.tag(), loc+2));
       self.link(self.get(a.val(), P2), Ptr::new(b.tag(), loc+1));
       self.link(self.get(b.val(), P2), Ptr::new(a.tag(), loc+3));
-      *self.at_mut(loc+0) = Node::new(Ptr::new(VR1, loc+2), Ptr::new(VR1, loc+3));
-      *self.at_mut(loc+1) = Node::new(Ptr::new(VR2, loc+2), Ptr::new(VR2, loc+3));
-      *self.at_mut(loc+2) = Node::new(Ptr::new(VR1, loc+0), Ptr::new(VR1, loc+1));
-      *self.at_mut(loc+3) = Node::new(Ptr::new(VR2, loc+0), Ptr::new(VR2, loc+1));
+      *self.at_mut(loc*2+0) = Ptr::new(VR1, loc+2);
+      *self.at_mut(loc*2+1) = Ptr::new(VR1, loc+3);
+      *self.at_mut(loc*2+2) = Ptr::new(VR2, loc+2);
+      *self.at_mut(loc*2+3) = Ptr::new(VR2, loc+3);
+      *self.at_mut(loc*2+4) = Ptr::new(VR1, loc+0);
+      *self.at_mut(loc*2+5) = Ptr::new(VR1, loc+1);
+      *self.at_mut(loc*2+6) = Ptr::new(VR2, loc+0);
+      *self.at_mut(loc*2+7) = Ptr::new(VR2, loc+1);
       self.free(a.val());
       self.free(b.val());
     // OPX-U32
@@ -452,10 +431,14 @@ impl Net {
       self.link(self.get(b.val(), P1), Ptr::new(a.tag(), loc+2));
       self.link(self.get(a.val(), P2), Ptr::new(b.tag(), loc+1));
       self.link(self.get(b.val(), P2), Ptr::new(a.tag(), loc+3));
-      *self.at_mut(loc+0) = Node::new(Ptr::new(VR1, loc+2), Ptr::new(VR1, loc+3));
-      *self.at_mut(loc+1) = Node::new(Ptr::new(VR2, loc+2), Ptr::new(VR2, loc+3));
-      *self.at_mut(loc+2) = Node::new(Ptr::new(VR1, loc+0), Ptr::new(VR1, loc+1));
-      *self.at_mut(loc+3) = Node::new(Ptr::new(VR2, loc+0), Ptr::new(VR2, loc+1));
+      *self.at_mut(loc*2+0) = Ptr::new(VR1, loc+2);
+      *self.at_mut(loc*2+1) = Ptr::new(VR1, loc+3);
+      *self.at_mut(loc*2+2) = Ptr::new(VR2, loc+2);
+      *self.at_mut(loc*2+3) = Ptr::new(VR2, loc+3);
+      *self.at_mut(loc*2+4) = Ptr::new(VR1, loc+0);
+      *self.at_mut(loc*2+5) = Ptr::new(VR1, loc+1);
+      *self.at_mut(loc*2+6) = Ptr::new(VR2, loc+0);
+      *self.at_mut(loc*2+7) = Ptr::new(VR2, loc+1);
       self.free(a.val());
       self.free(b.val());
     // OPY-CTR
@@ -464,9 +447,12 @@ impl Net {
       self.link(self.get(a.val(), P2), Ptr::new(b.tag(), loc+0));
       self.link(self.get(b.val(), P1), Ptr::new(a.tag(), loc+1));
       self.link(self.get(b.val(), P2), Ptr::new(a.tag(), loc+2));
-      *self.at_mut(loc+0) = Node::new(Ptr::new(VR2, loc+1), Ptr::new(VR2, loc+2));
-      *self.at_mut(loc+1) = Node::new(Ptr::new(VR1, loc+0), Ptr::new(VR2, loc+0));
-      *self.at_mut(loc+2) = Node::new(self.get(a.val(),P1), self.get(a.val(),P1));
+      *self.at_mut(loc*2+0) = Ptr::new(VR2, loc+1);
+      *self.at_mut(loc*2+1) = Ptr::new(VR2, loc+2);
+      *self.at_mut(loc*2+2) = Ptr::new(VR1, loc+0);
+      *self.at_mut(loc*2+3) = Ptr::new(VR2, loc+0);
+      *self.at_mut(loc*2+4) = self.get(a.val(),P1);
+      *self.at_mut(loc*2+5) = self.get(a.val(),P1);
       self.free(a.val());
       self.free(b.val());
     // OPX-ERA
@@ -499,41 +485,52 @@ impl Net {
       let ec2 = Ptr::new(VR2, loc + 3);
       let ap1 = Ptr::new(U32, a.val() / 2);
       let ap2 = Ptr::new(VR2, loc + 2);
-      *self.at_mut(loc+0) = Node::new(oc1, oc2);
-      *self.at_mut(loc+1) = Node::new(ic1, ic2);
-      *self.at_mut(loc+2) = Node::new(ec1, ec2);
-      *self.at_mut(loc+3) = Node::new(ap1, ap2);
+      *self.at_mut(loc+0) = oc1;
+      *self.at_mut(loc+1) = oc2;
+      *self.at_mut(loc+2) = ic1;
+      *self.at_mut(loc+3) = ic2;
+      *self.at_mut(loc+4) = ec1;
+      *self.at_mut(loc+5) = ec2;
+      *self.at_mut(loc+6) = ap1;
+      *self.at_mut(loc+7) = ap2;
       return Ptr::new(CON, loc + 0);
     }
     // I Case
     else if a.val() > 0 && a.val() % 2 == 1 {
       let loc = self.alloc(4);
       let oc1 = Ptr::new(ERA, 0);
-      let oc2 = Ptr::new(CON, loc + 1);
-      let ic1 = Ptr::new(CON, loc + 3);
-      let ic2 = Ptr::new(CON, loc + 2);
+      let oc2 = Ptr::new(CON, loc + 2);
+      let ic1 = Ptr::new(CON, loc + 6);
+      let ic2 = Ptr::new(CON, loc + 4);
       let ec1 = Ptr::new(ERA, 0);
-      let ec2 = Ptr::new(VR2, loc + 3);
+      let ec2 = Ptr::new(VR2, loc + 6);
       let ap1 = Ptr::new(U32, a.val() / 2);
-      let ap2 = Ptr::new(VR2, loc + 2);
-      *self.at_mut(loc+0) = Node::new(oc1, oc2);
-      *self.at_mut(loc+1) = Node::new(ic1, ic2);
-      *self.at_mut(loc+2) = Node::new(ec1, ec2);
-      *self.at_mut(loc+3) = Node::new(ap1, ap2);
+      let ap2 = Ptr::new(VR2, loc + 4);
+      *self.at_mut(loc+0) = oc1;
+      *self.at_mut(loc+1) = oc2;
+      *self.at_mut(loc+2) = ic1;
+      *self.at_mut(loc+3) = ic2;
+      *self.at_mut(loc+4) = ec1;
+      *self.at_mut(loc+5) = ec2;
+      *self.at_mut(loc+6) = ap1;
+      *self.at_mut(loc+7) = ap2;
       return Ptr::new(CON, loc + 0);
     }
     // E Case
     else if a.val() == 0 {
       let loc = self.alloc(3);
       let oc1 = Ptr::new(ERA, 0);
-      let oc2 = Ptr::new(CON, loc + 1);
+      let oc2 = Ptr::new(CON, loc + 2);
       let ic1 = Ptr::new(ERA, 0);
-      let ic2 = Ptr::new(CON, loc + 2);
-      let ec1 = Ptr::new(VR2, loc + 2);
-      let ec2 = Ptr::new(VR1, loc + 2);
-      *self.at_mut(loc+0) = Node::new(oc1, oc2);
-      *self.at_mut(loc+1) = Node::new(ic1, ic2);
-      *self.at_mut(loc+2) = Node::new(ec1, ec2);
+      let ic2 = Ptr::new(CON, loc + 4);
+      let ec1 = Ptr::new(VR2, loc + 4);
+      let ec2 = Ptr::new(VR1, loc + 4);
+      *self.at_mut(loc+0) = oc1;
+      *self.at_mut(loc+1) = oc2;
+      *self.at_mut(loc+2) = ic1;
+      *self.at_mut(loc+3) = ic2;
+      *self.at_mut(loc+4) = ec1;
+      *self.at_mut(loc+5) = ec2;
       return Ptr::new(CON, loc + 0);
     }
     unreachable!();
@@ -553,20 +550,22 @@ impl Net {
     while ptr.is_ref() {
       // Loads the referenced definition...
       if let Some(got) = book.get(ptr.val()) {
-        let loc = self.alloc(got.node.len());
+        let loc = self.alloc(got.node.len() / 2);
         // Loads nodes, adjusting locations...
-        for i in 0 .. got.node.len() as Val {
+        for i in 0 .. (got.node.len() / 2) as Val {
           unsafe {
-            let got = got.node.get_unchecked(i as usize);
-            let p1  = got.port(P1).adjust(loc);
-            let p2  = got.port(P2).adjust(loc);
-            *self.at_mut(loc + i) = Node::new(p1, p2);
+            let p1 = got.node.get_unchecked((i * 2 + P1) as usize).adjust(loc);
+            let p2 = got.node.get_unchecked((i * 2 + P2) as usize).adjust(loc);
+            //println!("got {:016x} {:016x} | alloc {} at {}", p1.data(), p2.data(), got.node.len() / 2, loc);
+            *self.at_mut((loc + i) * 2 + P1) = p1;
+            *self.at_mut((loc + i) * 2 + P2) = p2;
           }
         }
         // Loads redexes, adjusting locations...
         for got in &got.rdex {
           let p1 = got.0.adjust(loc);
           let p2 = got.1.adjust(loc);
+          //println!("rdx {:016x} {:016x}", p1.data(), p2.data());
           self.rdex.push((p1, p2));
         }
         // Overwrites 'ptr' with the loaded root pointer, adjusting locations...
