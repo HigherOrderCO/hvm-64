@@ -255,7 +255,7 @@ fn main() {
   let start = std::time::Instant::now();
 
   // Computes its normal form
-  //net.expand(book, Ptr::new(VRR,0));
+  //net.expand(book, ROOT);
   //net.reduce(book);
   net.normal(book);
 

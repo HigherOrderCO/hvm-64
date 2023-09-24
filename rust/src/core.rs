@@ -16,7 +16,7 @@ pub type Val = u64;
 pub const NIL: Tag = 0x0000; // uninitialized
 pub const REF: Tag = 0x0001; // closed net reference
 pub const ERA: Tag = 0x0002; // unboxed eraser
-pub const VRR: Tag = 0x0003; // aux port to root
+//pub const VRR: Tag = 0x0003; // aux port to root
 pub const VR1: Tag = 0x0004; // aux port to aux port 1
 pub const VR2: Tag = 0x0005; // aux port to aux port 2
 pub const RDR: Tag = 0x0006; // redirect to root
@@ -61,6 +61,9 @@ pub const MAX_OPX: Tag = 0x01FF;
 pub const MIN_OPY: Tag = 0x0200;
 pub const MAX_OPY: Tag = 0x02FF;
 
+// Root pointer.
+pub const ROOT: Ptr = Ptr(0x0005_0000_0000_0000);
+
 // An auxiliary port.
 pub type Port = Val;
 pub const P1 : Port = 0;
@@ -73,7 +76,7 @@ pub struct Ptr(pub Val);
 // A interaction combinator net.
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Net {
-  pub root: Ptr, // entrancy
+  //pub root: Ptr, // entrancy
   pub rdex: Vec<(Ptr,Ptr)>, // redexes
   pub node: Vec<Ptr>, // nodes
   pub used: usize, // allocated nodes
@@ -115,12 +118,7 @@ impl Ptr {
 
   #[inline(always)]
   pub fn is_var(&self) -> bool {
-    return self.tag() >= VRR && self.tag() <= VR2;
-  }
-
-  #[inline(always)]
-  pub fn is_red(&self) -> bool {
-    return self.tag() >= RDR && self.tag() <= RD2;
+    return self.tag() >= VR1 && self.tag() <= VR2;
   }
 
   #[inline(always)]
@@ -172,7 +170,7 @@ impl Ptr {
   #[inline(always)]
   pub fn has_loc(&self) -> bool {
     return self.is_ctr()
-        || self.is_var() && self.tag() != VRR
+        || self.is_var()
         || self.is_opX() || self.is_opY();
   }
 
@@ -203,10 +201,10 @@ impl Net {
   // Creates an empty net with given size.
   pub fn new(size: usize) -> Self {
     Net {
-      root: Ptr::new(NIL, 0),
+      //root: Ptr::new(NIL, 0),
       rdex: vec![],
       node: vec![Ptr::new(NIL, 0); size],
-      next: 0,
+      next: 1,
       used: 0,
       rwts: 0,
       dref: 0,
@@ -215,7 +213,7 @@ impl Net {
 
   // Creates a net and boots from a REF.
   pub fn boot(&mut self, root_id: Val) {
-    self.root = Ptr::new(REF, root_id);
+    self.set_root(Ptr::new(REF, root_id));
   }
 
   // Allocates a consecutive chunk of 'size' nodes. Returns the index.
@@ -247,8 +245,8 @@ impl Net {
   #[inline(always)]
   pub fn free(&mut self, val: Val) {
     self.used -= 1;
-    self.node[(val * 2 + P1) as usize] = Ptr::new(NIL, 0);
-    self.node[(val * 2 + P2) as usize] = Ptr::new(NIL, 0);
+    *unsafe { self.node.get_unchecked_mut((val * 2 + P1) as usize) } = Ptr::new(NIL, 0);
+    *unsafe { self.node.get_unchecked_mut((val * 2 + P2) as usize) } = Ptr::new(NIL, 0);
   }
 
   // Gets node at given index.
@@ -279,11 +277,24 @@ impl Net {
     *self.at_mut(index * 2 + port) = value;
   }
 
+
+  // Gets the root node.
+  #[inline(always)]
+  pub fn get_root(&self) -> Ptr {
+    return self.get(0, P2);
+  }
+
+  // Sets the root node.
+  #[inline(always)]
+  pub fn set_root(&mut self, value: Ptr) {
+    self.set(0, P2, value);
+  }
+
   // Gets a pointer target.
   #[inline(always)]
   pub fn target(&mut self, ptr: Ptr) -> Option<&mut Ptr> {
     match ptr.tag() {
-      VRR => { Some(&mut self.root) }
+      //VRR => { Some(&mut self.root) }
       VR1 => { Some(self.at_mut(ptr.val() * 2 + P1)) }
       VR2 => { Some(self.at_mut(ptr.val() * 2 + P2)) }
       _   => { None }
@@ -552,7 +563,7 @@ impl Net {
       if let Some(got) = book.get(ptr.val()) {
         let loc = self.alloc(got.node.len() / 2);
         // Loads nodes, adjusting locations...
-        for i in 0 .. (got.node.len() / 2) as Val {
+        for i in 1 .. (got.node.len() / 2) as Val {
           unsafe {
             let p1 = got.node.get_unchecked((i * 2 + P1) as usize).adjust(loc);
             let p2 = got.node.get_unchecked((i * 2 + P2) as usize).adjust(loc);
@@ -569,7 +580,7 @@ impl Net {
           self.rdex.push((p1, p2));
         }
         // Overwrites 'ptr' with the loaded root pointer, adjusting locations...
-        ptr = got.root.adjust(loc);
+        ptr = got.get_root().adjust(loc);
         // Links root
         if ptr.is_var() {
           *self.target(ptr).unwrap() = parent;
@@ -594,10 +605,10 @@ impl Net {
 
   // Reduce a net to normal form.
   pub fn normal(&mut self, book: &Book) {
-    self.expand(book, Ptr::new(VRR, 0));
+    self.expand(book, ROOT);
     while self.rdex.len() > 0 {
       self.reduce(book);
-      self.expand(book, Ptr::new(VRR, 0));
+      self.expand(book, ROOT);
     }
   }
 

@@ -301,14 +301,15 @@ pub fn port_to_tag(port: Port) -> Tag {
 pub fn lnet_to_net(lnet: &LNet, size: Option<usize>) -> Net {
   let mut vars = HashMap::new();
   let mut net = Net::new(size.unwrap_or(1 << 16));
-  net.root = alloc_ltree(&mut net, &lnet.root, &mut vars, Parent::Root);
+  let root = alloc_ltree(&mut net, &lnet.root, &mut vars, PARENT_ROOT);
+  net.set_root(root);
   for (tree1, tree2) in &lnet.rdex {
     let ptr1 = alloc_ltree(&mut net, tree1, &mut vars, Parent::Rdex);
     let ptr2 = alloc_ltree(&mut net, tree2, &mut vars, Parent::Rdex);
     net.rdex.push((ptr1, ptr2));
   }
   if size.is_none() {
-    net.node = net.node[0 .. net.used * 2].to_vec();
+    net.node = net.node[0 .. (net.used + 1) * 2].to_vec();
   }
   return net;
 }
@@ -450,9 +451,10 @@ pub fn tag_to_opx(tag: Tag) -> OP {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Parent {
   Rdex,
-  Root,
   Node { val: Val, port: Port },
 }
+
+const PARENT_ROOT : Parent = Parent::Node { val: 0, port: P2 };
 
 pub fn alloc_ltree(net: &mut Net, tree: &LTree, vars: &mut HashMap<String, Parent>, parent: Parent) -> Ptr {
   match tree {
@@ -475,20 +477,6 @@ pub fn alloc_ltree(net: &mut Net, tree: &LTree, vars: &mut HashMap<String, Paren
         Some(Parent::Rdex) => {
           unreachable!();
         },
-        Some(Parent::Root) => {
-          match parent {
-            Parent::Rdex => {
-              unreachable!();
-            }
-            Parent::Node { val, port } => {
-              net.root = Ptr::new(port_to_tag(port), val);
-            }
-            Parent::Root => {
-              net.root = Ptr::new(VRR, 0);
-            }
-          }
-          return Ptr::new(VRR, 0);
-        },
         Some(Parent::Node { val: other_val, port: other_port }) => {
           //println!("linked {} | set {} {:?} as {} {:?}", nam, other_val, other_port, val, port);
           match parent {
@@ -497,9 +485,6 @@ pub fn alloc_ltree(net: &mut Net, tree: &LTree, vars: &mut HashMap<String, Paren
             }
             Parent::Node { val, port } => {
               net.set(*other_val, *other_port, Ptr::new(port_to_tag(port), val))
-            }
-            Parent::Root => {
-              net.set(*other_val, *other_port, Ptr::new(VRR, 0))
             }
           }
           return Ptr::new(port_to_tag(*other_port), *other_val);
@@ -533,7 +518,7 @@ pub fn alloc_ltree(net: &mut Net, tree: &LTree, vars: &mut HashMap<String, Paren
 }
 
 pub fn do_alloc_ltree(net: &mut Net, tree: &LTree) -> Ptr {
-  alloc_ltree(net, tree, &mut HashMap::new(), Parent::Root)
+  alloc_ltree(net, tree, &mut HashMap::new(), PARENT_ROOT)
 }
 
 pub fn readback_ltree(net: &Net, ptr: Ptr, parent: Parent, vars: &mut HashMap<Parent,String>, fresh: &mut usize) -> LTree {
@@ -561,11 +546,10 @@ pub fn readback_ltree(net: &Net, ptr: Ptr, parent: Parent, vars: &mut HashMap<Pa
     MIN_OPY..=MAX_OPY => {
       todo!()
     },
-    VRR | VR1 | VR2 => {
+    VR1 | VR2 => {
       let key = match ptr.tag() {
         VR1 => Parent::Node { val: ptr.val(), port: P1 },
         VR2 => Parent::Node { val: ptr.val(), port: P2 },
-        VRR => Parent::Root,
         _   => unreachable!(),
       };
       if let Some(nam) = vars.get(&key) {
@@ -589,7 +573,7 @@ pub fn readback_lnet(net: &Net) -> LNet {
   let mut vars  = HashMap::new();
   let mut fresh = 0;
   let mut rdex  = Vec::new();
-  let root = readback_ltree(net, net.root, Parent::Root, &mut vars, &mut fresh);
+  let root = readback_ltree(net, net.get_root(), PARENT_ROOT, &mut vars, &mut fresh);
   for &(a, b) in &net.rdex {
     let tree_a = readback_ltree(net, a, Parent::Rdex, &mut vars, &mut fresh);
     let tree_b = readback_ltree(net, b, Parent::Rdex, &mut vars, &mut fresh);
