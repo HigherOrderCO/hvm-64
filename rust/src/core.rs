@@ -9,60 +9,56 @@
 
 use std::collections::HashMap;
 
-pub type Tag = u16;
-pub type Val = u64;
+pub type Tag = u8;
+pub type Val = u32;
 
 // Core terms.
-pub const NIL: Tag = 0x0000; // uninitialized
-pub const REF: Tag = 0x0001; // closed net reference
-pub const ERA: Tag = 0x0002; // unboxed eraser
-//pub const VRR: Tag = 0x0003; // aux port to root
-pub const VR1: Tag = 0x0004; // aux port to aux port 1
-pub const VR2: Tag = 0x0005; // aux port to aux port 2
-pub const RDR: Tag = 0x0006; // redirect to root
-pub const RD1: Tag = 0x0007; // redirect to aux port 1
-pub const RD2: Tag = 0x0008; // redirect to aux port 2
-pub const U32: Tag = 0x0009; // unboxed u32
-pub const I32: Tag = 0x000A; // unboxed i32
-pub const CON: Tag = 0x1000; // main port of con node
-pub const DUP: Tag = 0x1001; // main port of dup node
+//pub const NIL: Tag = 0x0000; // uninitialized
+pub const VR1: Tag = 0x0; // aux port to aux port 1
+pub const VR2: Tag = 0x1; // aux port to aux port 2
+pub const REF: Tag = 0x2; // closed net reference
+pub const ERA: Tag = 0x3; // unboxed eraser
+pub const CON: Tag = 0x4; // main port of con node
+pub const DUP: Tag = 0x5; // main port of dup node
 
 // Numeric Operations.
-pub const OPX_ADD: Tag = 0x0100;
-pub const OPY_ADD: Tag = 0x0200;
-pub const OPX_SUB: Tag = 0x0101;
-pub const OPY_SUB: Tag = 0x0201;
-pub const OPX_MUL: Tag = 0x0102;
-pub const OPY_MUL: Tag = 0x0202;
-pub const OPX_DIV: Tag = 0x0103;
-pub const OPY_DIV: Tag = 0x0203;
-pub const OPX_MOD: Tag = 0x0104;
-pub const OPY_MOD: Tag = 0x0204;
-pub const OPX_EQ : Tag = 0x0105;
-pub const OPY_EQ : Tag = 0x0205;
-pub const OPX_NEQ: Tag = 0x0106;
-pub const OPY_NEQ: Tag = 0x0206;
-pub const OPX_LT : Tag = 0x0107;
-pub const OPY_LT : Tag = 0x0207;
-pub const OPX_GT : Tag = 0x0108;
-pub const OPY_GT : Tag = 0x0208;
-pub const OPX_LTE: Tag = 0x0109;
-pub const OPY_LTE: Tag = 0x0209;
-pub const OPX_GTE: Tag = 0x010A;
-pub const OPY_GTE: Tag = 0x020A;
-pub const OPX_AND: Tag = 0x010B;
-pub const OPY_AND: Tag = 0x020B;
-pub const OPX_OR : Tag = 0x010C;
-pub const OPY_OR : Tag = 0x020C;
+//pub const OPX_ADD: Tag = 0x0100;
+//pub const OPY_ADD: Tag = 0x0200;
+//pub const OPX_SUB: Tag = 0x0101;
+//pub const OPY_SUB: Tag = 0x0201;
+//pub const OPX_MUL: Tag = 0x0102;
+//pub const OPY_MUL: Tag = 0x0202;
+//pub const OPX_DIV: Tag = 0x0103;
+//pub const OPY_DIV: Tag = 0x0203;
+//pub const OPX_MOD: Tag = 0x0104;
+//pub const OPY_MOD: Tag = 0x0204;
+//pub const OPX_EQ : Tag = 0x0105;
+//pub const OPY_EQ : Tag = 0x0205;
+//pub const OPX_NEQ: Tag = 0x0106;
+//pub const OPY_NEQ: Tag = 0x0206;
+//pub const OPX_LT : Tag = 0x0107;
+//pub const OPY_LT : Tag = 0x0207;
+//pub const OPX_GT : Tag = 0x0108;
+//pub const OPY_GT : Tag = 0x0208;
+//pub const OPX_LTE: Tag = 0x0109;
+//pub const OPY_LTE: Tag = 0x0209;
+//pub const OPX_GTE: Tag = 0x010A;
+//pub const OPY_GTE: Tag = 0x020A;
+//pub const OPX_AND: Tag = 0x010B;
+//pub const OPY_AND: Tag = 0x020B;
+//pub const OPX_OR : Tag = 0x010C;
+//pub const OPY_OR : Tag = 0x020C;
 
 // Operation ranges.
-pub const MIN_OPX: Tag = 0x0100;
-pub const MAX_OPX: Tag = 0x01FF;
-pub const MIN_OPY: Tag = 0x0200;
-pub const MAX_OPY: Tag = 0x02FF;
+//pub const MIN_OPX: Tag = 0x0100;
+//pub const MAX_OPX: Tag = 0x01FF;
+//pub const MIN_OPY: Tag = 0x0200;
+//pub const MAX_OPY: Tag = 0x02FF;
 
 // Root pointer.
-pub const ROOT: Ptr = Ptr(0x0005_0000_0000_0000);
+pub const ERAS: Ptr = Ptr(0x0000_0000 | ERA as Val);
+pub const ROOT: Ptr = Ptr(0x0000_0000 | VR2 as Val);
+pub const NULL: Ptr = Ptr(0x0000_0000);
 
 // An auxiliary port.
 pub type Port = Val;
@@ -73,6 +69,10 @@ pub const P2 : Port = 1;
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Ptr(pub Val);
 
+// Stats object.
+pub struct Stat {
+}
+
 // A interaction combinator net.
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Net {
@@ -80,8 +80,10 @@ pub struct Net {
   pub rdex: Vec<(Ptr,Ptr)>, // redexes
   pub node: Vec<Ptr>, // nodes
   pub used: usize, // allocated nodes
-  pub rwts: usize, // rewrite count
-  pub dref: usize, // deref count
+  pub anni: usize, // anni rewrites
+  pub comm: usize, // comm rewrites
+  pub eras: usize, // eras rewrites
+  pub dref: usize, // dref rewrites
   pub next: usize, // next alloc index
 }
 
@@ -93,7 +95,8 @@ pub struct Book {
 impl Ptr {
   #[inline(always)]
   pub fn new(tag: Tag, val: Val) -> Self {
-    Ptr(((tag as Val) << 48) | (val & 0xFFFF_FFFF_FFFF))
+    Ptr((val << 4) | (tag as Val))
+    //Ptr(((tag as Val) << 48) | (val & 0xFFFF_FFFF_FFFF))
   }
 
   #[inline(always)]
@@ -103,17 +106,17 @@ impl Ptr {
 
   #[inline(always)]
   pub fn tag(&self) -> Tag {
-    (self.data() >> 48) as Tag
+    (self.data() & 0xF) as Tag
   }
 
   #[inline(always)]
   pub fn val(&self) -> Val {
-    (self.data() & 0xFFFF_FFFF_FFFF) as Val
+    (self.data() >> 4) as Val
   }
 
   #[inline(always)]
   pub fn is_nil(&self) -> bool {
-    return self.tag() == NIL;
+    return self.data() == 0;
   }
 
   #[inline(always)]
@@ -126,20 +129,20 @@ impl Ptr {
     return self.tag() == ERA;
   }
 
-  #[inline(always)]
-  pub fn is_u32(&self) -> bool {
-    return self.tag() == U32;
-  }
+  //#[inline(always)]
+  //pub fn is_u32(&self) -> bool {
+    //return self.tag() == U32;
+  //}
 
-  #[inline(always)]
-  pub fn is_i32(&self) -> bool {
-    return self.tag() == I32;
-  }
+  //#[inline(always)]
+  //pub fn is_i32(&self) -> bool {
+    //return self.tag() == I32;
+  //}
 
-  #[inline(always)]
-  pub fn is_num(&self) -> bool {
-    return self.is_u32() || self.is_i32();
-  }
+  //#[inline(always)]
+  //pub fn is_num(&self) -> bool {
+    //return self.is_u32() || self.is_i32();
+  //}
 
   #[inline(always)]
   pub fn is_ctr(&self) -> bool {
@@ -153,25 +156,12 @@ impl Ptr {
 
   #[inline(always)]
   pub fn is_pri(&self) -> bool {
-    return self.is_era() || self.is_ctr() || self.is_num()
-        || self.is_ref() || self.is_opX() || self.is_opY();
-  }
-
-  #[inline(always)]
-  pub fn is_opX(&self) -> bool {
-    return self.tag() >= MIN_OPX && self.tag() <= MAX_OPX;
-  }
-
-  #[inline(always)]
-  pub fn is_opY(&self) -> bool {
-    return self.tag() >= MIN_OPY && self.tag() <= MAX_OPY;
+    return self.is_era() || self.is_ctr() || self.is_ref();
   }
 
   #[inline(always)]
   pub fn has_loc(&self) -> bool {
-    return self.is_ctr()
-        || self.is_var()
-        || self.is_opX() || self.is_opY();
+    return self.is_ctr() || self.is_var();
   }
 
   #[inline(always)]
@@ -203,10 +193,12 @@ impl Net {
     Net {
       //root: Ptr::new(NIL, 0),
       rdex: vec![],
-      node: vec![Ptr::new(NIL, 0); size],
+      node: vec![NULL; size * 2],
       next: 1,
       used: 0,
-      rwts: 0,
+      anni: 0,
+      comm: 0,
+      eras: 0,
       dref: 0,
     }
   }
@@ -245,12 +237,14 @@ impl Net {
   #[inline(always)]
   pub fn free(&mut self, val: Val) {
     self.used -= 1;
-    *unsafe { self.node.get_unchecked_mut((val * 2 + P1) as usize) } = Ptr::new(NIL, 0);
-    *unsafe { self.node.get_unchecked_mut((val * 2 + P2) as usize) } = Ptr::new(NIL, 0);
+    unsafe {
+      *self.node.get_unchecked_mut((val * 2 + P1) as usize) = NULL;
+      *self.node.get_unchecked_mut((val * 2 + P2) as usize) = NULL;
+    }
   }
 
   // Gets node at given index.
-  //#[inline(always)]
+  #[inline(always)]
   pub fn at(&self, index: Val) -> &Ptr {
     unsafe {
       return self.node.get_unchecked(index as usize);
@@ -258,7 +252,7 @@ impl Net {
   }
 
   // Gets node at given index, mutable.
-  //#[inline(always)]
+  #[inline(always)]
   pub fn at_mut(&mut self, index: Val) -> &mut Ptr {
     unsafe {
       return self.node.get_unchecked_mut(index as usize);
@@ -277,7 +271,6 @@ impl Net {
     *self.at_mut(index * 2 + port) = value;
   }
 
-
   // Gets the root node.
   #[inline(always)]
   pub fn get_root(&self) -> Ptr {
@@ -292,273 +285,108 @@ impl Net {
 
   // Gets a pointer target.
   #[inline(always)]
-  pub fn target(&mut self, ptr: Ptr) -> Option<&mut Ptr> {
-    match ptr.tag() {
-      //VRR => { Some(&mut self.root) }
-      VR1 => { Some(self.at_mut(ptr.val() * 2 + P1)) }
-      VR2 => { Some(self.at_mut(ptr.val() * 2 + P2)) }
-      _   => { None }
-    }
+  pub fn target(&mut self, ptr: Ptr) -> &mut Ptr {
+    return self.at_mut((ptr.val() << 1) | (ptr.0 & 1));
   }
 
   // Links two pointers, forming a new wire.
   pub fn link(&mut self, a: Ptr, b: Ptr) {
-    // Substitutes A
-    if a.is_var() {
-      *self.target(a).unwrap() = b;
-    }
-    // Substitutes B
-    if b.is_var() {
-      *self.target(b).unwrap() = a;
-    }
     // Creates redex A-B
     if a.is_pri() && b.is_pri() {
       self.rdex.push((a, b));
     }
+    // Substitutes A
+    if a.is_var() {
+      *self.target(a) = b;
+    }
+    // Substitutes B
+    if b.is_var() {
+      *self.target(b) = a;
+    }
   }
 
   // Performs an interaction over a redex.
-  pub fn interact(&mut self, book: &Book, a: &mut Ptr, b: &mut Ptr) {
-    self.rwts += 1;
+  pub fn interact(&mut self, book: &Book, a: Ptr, b: Ptr) {
+    let mut redex = Some((a, b));
 
-    // Symmetry
-    if a.is_ctr() && b.is_ref()
-    || a.is_ctr() && b.is_num()
-    || a.is_era() && b.is_ctr()
-    || a.is_num() && b.is_opX()
-    || a.is_num() && b.is_opY()
-    || a.is_ctr() && b.is_opX()
-    || a.is_ctr() && b.is_opY()
-    || a.is_era() && b.is_opX()
-    || a.is_era() && b.is_opY() {
-      std::mem::swap(a, b);
-    }
+    while let Some((mut a, mut b)) = redex {
+      redex = None;
 
-    // U32
-    if a.is_u32() && b.is_ctr() {
-      *a = self.unroll_u32(*a);
-    }
+      // Dereference A
+      if a.is_ref() && b.is_ctr() {
+        a = self.deref(book, a, b);
+      } else if b.is_ref() && a.is_ctr() {
+        b = self.deref(book, b, a);
+      }
 
-    // I32
-    if a.is_i32() && b.is_ctr() {
-      *a = self.unroll_i32(*a);
-    }
-
-    // Dereference
-    if a.is_ref() && b.is_ctr() {
-      *a = self.deref(book, *a, Ptr::new(NIL,0));
-    }
-
-    // Substitute
-    if a.is_var() || b.is_var() {
-      self.link(*a, *b);
-    }
-
-    // CON-CON
-    if a.is_ctr() && b.is_ctr() && a.tag() == b.tag() {
-      self.link(self.get(a.val(), P1), self.get(b.val(), P1));
-      self.link(self.get(a.val(), P2), self.get(b.val(), P2));
-      self.free(a.val());
-      self.free(b.val());
-    // CON-DUP
-    } else if a.is_ctr() && b.is_ctr() && a.tag() != b.tag() {
-      let loc = self.alloc(4);
-      self.link(self.get(a.val(), P1), Ptr::new(b.tag(), loc+0));
-      self.link(self.get(b.val(), P1), Ptr::new(a.tag(), loc+2));
-      self.link(self.get(a.val(), P2), Ptr::new(b.tag(), loc+1));
-      self.link(self.get(b.val(), P2), Ptr::new(a.tag(), loc+3));
-      *self.at_mut(loc*2+0) = Ptr::new(VR1, loc+2);
-      *self.at_mut(loc*2+1) = Ptr::new(VR1, loc+3);
-      *self.at_mut(loc*2+2) = Ptr::new(VR2, loc+2);
-      *self.at_mut(loc*2+3) = Ptr::new(VR2, loc+3);
-      *self.at_mut(loc*2+4) = Ptr::new(VR1, loc+0);
-      *self.at_mut(loc*2+5) = Ptr::new(VR1, loc+1);
-      *self.at_mut(loc*2+6) = Ptr::new(VR2, loc+0);
-      *self.at_mut(loc*2+7) = Ptr::new(VR2, loc+1);
-      self.free(a.val());
-      self.free(b.val());
-    // OPX-U32
-    } else if a.is_opX() && b.is_u32() {
-      let v1 = self.get(a.val(), P1);
-      self.set(a.val(), P1, *b);
-      self.link(Ptr::new(a.tag() + (MIN_OPY - MIN_OPX), a.val()), v1);
-    // OPX-I32
-    } else if a.is_opX() && b.is_i32() {
-      let v1 = self.get(a.val(), P1);
-      self.set(a.val(), P1, *b);
-      self.link(Ptr::new(a.tag() + (MIN_OPY - MIN_OPX), a.val()), v1);
-    // OPY-U32
-    } else if a.is_opY() && b.is_u32() {
-      let p1 = self.get(a.val(), P1);
-      let p2 = self.get(a.val(), P2);
-      let v0 = p1.val() as u32;
-      let v1 = b.val() as u32;
-      let v2 = match a.tag() {
-        OPY_ADD => v0.wrapping_add(v1) as Val,
-        OPY_SUB => v0.wrapping_sub(v1) as Val,
-        OPY_MUL => v0.wrapping_mul(v1) as Val,
-        OPY_DIV => (if v1 != 0 { v0 / v1 } else { 0 }) as Val,
-        OPY_MOD => (if v1 != 0 { v0 % v1 } else { 0 }) as Val,
-        OPY_EQ  => (v0 == v1) as Val,
-        OPY_NEQ => (v0 != v1) as Val,
-        OPY_LT  => (v0 < v1) as Val,
-        OPY_GT  => (v0 > v1) as Val,
-        OPY_LTE => (v0 <= v1) as Val,
-        OPY_GTE => (v0 >= v1) as Val,
-        OPY_AND => (v0 & v1) as Val,
-        OPY_OR  => (v0 | v1) as Val,
-        _       => 0,
-      };
-      self.link(Ptr::new(U32, v2), p2);
-      self.free(a.val());
-    // OPY-I32
-    } else if a.is_opY() && b.is_i32() {
-      let p1 = self.get(a.val(), P1);
-      let p2 = self.get(a.val(), P2);
-      let v0 = p1.val() as i32;
-      let v1 = b.val() as i32;
-      let v2 = match a.tag() {
-        OPY_ADD => v0.wrapping_add(v1) as Val,
-        OPY_SUB => v0.wrapping_sub(v1) as Val,
-        OPY_MUL => v0.wrapping_mul(v1) as Val,
-        OPY_DIV => (if v1 != 0 { v0 / v1 } else { 0 }) as Val,
-        OPY_MOD => (if v1 != 0 { v0 % v1 } else { 0 }) as Val,
-        OPY_EQ  => (v0 == v1) as Val,
-        OPY_NEQ => (v0 != v1) as Val,
-        OPY_LT  => (v0 < v1) as Val,
-        OPY_GT  => (v0 > v1) as Val,
-        OPY_LTE => (v0 <= v1) as Val,
-        OPY_GTE => (v0 >= v1) as Val,
-        OPY_AND => (v0 & v1) as Val,
-        OPY_OR  => (v0 | v1) as Val,
-        _       => 0,
-      };
-      self.link(Ptr::new(I32, v2), p2);
-      self.free(a.val());
-    // OPX-CTR
-    } else if a.is_opX() && b.is_ctr() {
-      let loc = self.alloc(4);
-      self.link(self.get(a.val(), P1), Ptr::new(b.tag(), loc+0));
-      self.link(self.get(b.val(), P1), Ptr::new(a.tag(), loc+2));
-      self.link(self.get(a.val(), P2), Ptr::new(b.tag(), loc+1));
-      self.link(self.get(b.val(), P2), Ptr::new(a.tag(), loc+3));
-      *self.at_mut(loc*2+0) = Ptr::new(VR1, loc+2);
-      *self.at_mut(loc*2+1) = Ptr::new(VR1, loc+3);
-      *self.at_mut(loc*2+2) = Ptr::new(VR2, loc+2);
-      *self.at_mut(loc*2+3) = Ptr::new(VR2, loc+3);
-      *self.at_mut(loc*2+4) = Ptr::new(VR1, loc+0);
-      *self.at_mut(loc*2+5) = Ptr::new(VR1, loc+1);
-      *self.at_mut(loc*2+6) = Ptr::new(VR2, loc+0);
-      *self.at_mut(loc*2+7) = Ptr::new(VR2, loc+1);
-      self.free(a.val());
-      self.free(b.val());
-    // OPY-CTR
-    } else if a.is_opY() && b.is_ctr() {
-      let loc = self.alloc(3);
-      self.link(self.get(a.val(), P2), Ptr::new(b.tag(), loc+0));
-      self.link(self.get(b.val(), P1), Ptr::new(a.tag(), loc+1));
-      self.link(self.get(b.val(), P2), Ptr::new(a.tag(), loc+2));
-      *self.at_mut(loc*2+0) = Ptr::new(VR2, loc+1);
-      *self.at_mut(loc*2+1) = Ptr::new(VR2, loc+2);
-      *self.at_mut(loc*2+2) = Ptr::new(VR1, loc+0);
-      *self.at_mut(loc*2+3) = Ptr::new(VR2, loc+0);
-      *self.at_mut(loc*2+4) = self.get(a.val(),P1);
-      *self.at_mut(loc*2+5) = self.get(a.val(),P1);
-      self.free(a.val());
-      self.free(b.val());
-    // OPX-ERA
-    } else if a.is_opX() && b.is_era() {
-      self.link(self.get(a.val(), P1), Ptr::new(ERA, 0));
-      self.link(self.get(a.val(), P2), Ptr::new(ERA, 0));
-      self.free(a.val());
-    // OPY-ERA
-    } else if a.is_opY() && b.is_era() {
-      self.link(self.get(a.val(), P2), Ptr::new(ERA, 0));
-      self.free(a.val());
-    // CON-ERA
-    } else if a.is_ctr() && b.is_era() {
-      self.link(self.get(a.val(), P1), Ptr::new(ERA, 0));
-      self.link(self.get(a.val(), P2), Ptr::new(ERA, 0));
-      self.free(a.val());
+      // CON-CON
+      if a.is_ctr() && b.is_ctr() && a.tag() == b.tag() {
+        self.anni(a, b);
+      // CON-DUP
+      } else if a.is_ctr() && b.is_ctr() && a.tag() != b.tag() {
+        self.comm(a, b);
+      // ERA-CON
+      } else if a.is_era() && b.is_ctr() {
+        self.eras(a, b);
+      // CON-ERA
+      } else if a.is_ctr() && b.is_era() {
+        self.eras(b, a);
+      // ERA-ERA
+      } else if a.is_era() && b.is_era() {
+        self.void(a, b);
+      }
     }
   }
 
-  // Expands an U32 literal.
-  pub fn unroll_u32(&mut self, a: Ptr) -> Ptr {
-    // O Case
-    if a.val() > 0 && a.val() % 2 == 0 {
-      let loc = self.alloc(4);
-      let oc1 = Ptr::new(CON, loc + 3);
-      let oc2 = Ptr::new(CON, loc + 1);
-      let ic1 = Ptr::new(ERA, 0);
-      let ic2 = Ptr::new(CON, loc + 2);
-      let ec1 = Ptr::new(ERA, 0);
-      let ec2 = Ptr::new(VR2, loc + 3);
-      let ap1 = Ptr::new(U32, a.val() / 2);
-      let ap2 = Ptr::new(VR2, loc + 2);
-      *self.at_mut(loc+0) = oc1;
-      *self.at_mut(loc+1) = oc2;
-      *self.at_mut(loc+2) = ic1;
-      *self.at_mut(loc+3) = ic2;
-      *self.at_mut(loc+4) = ec1;
-      *self.at_mut(loc+5) = ec2;
-      *self.at_mut(loc+6) = ap1;
-      *self.at_mut(loc+7) = ap2;
-      return Ptr::new(CON, loc + 0);
-    }
-    // I Case
-    else if a.val() > 0 && a.val() % 2 == 1 {
-      let loc = self.alloc(4);
-      let oc1 = Ptr::new(ERA, 0);
-      let oc2 = Ptr::new(CON, loc + 2);
-      let ic1 = Ptr::new(CON, loc + 6);
-      let ic2 = Ptr::new(CON, loc + 4);
-      let ec1 = Ptr::new(ERA, 0);
-      let ec2 = Ptr::new(VR2, loc + 6);
-      let ap1 = Ptr::new(U32, a.val() / 2);
-      let ap2 = Ptr::new(VR2, loc + 4);
-      *self.at_mut(loc+0) = oc1;
-      *self.at_mut(loc+1) = oc2;
-      *self.at_mut(loc+2) = ic1;
-      *self.at_mut(loc+3) = ic2;
-      *self.at_mut(loc+4) = ec1;
-      *self.at_mut(loc+5) = ec2;
-      *self.at_mut(loc+6) = ap1;
-      *self.at_mut(loc+7) = ap2;
-      return Ptr::new(CON, loc + 0);
-    }
-    // E Case
-    else if a.val() == 0 {
-      let loc = self.alloc(3);
-      let oc1 = Ptr::new(ERA, 0);
-      let oc2 = Ptr::new(CON, loc + 2);
-      let ic1 = Ptr::new(ERA, 0);
-      let ic2 = Ptr::new(CON, loc + 4);
-      let ec1 = Ptr::new(VR2, loc + 4);
-      let ec2 = Ptr::new(VR1, loc + 4);
-      *self.at_mut(loc+0) = oc1;
-      *self.at_mut(loc+1) = oc2;
-      *self.at_mut(loc+2) = ic1;
-      *self.at_mut(loc+3) = ic2;
-      *self.at_mut(loc+4) = ec1;
-      *self.at_mut(loc+5) = ec2;
-      return Ptr::new(CON, loc + 0);
-    }
-    unreachable!();
+  #[inline(always)]
+  pub fn anni(&mut self, a: Ptr, b: Ptr) {
+    self.anni += 1;
+    self.link(self.get(a.val(), P1), self.get(b.val(), P1));
+    self.link(self.get(a.val(), P2), self.get(b.val(), P2));
+    self.free(a.val());
+    self.free(b.val());
   }
 
-  // Expands an I32 literal.
-  // FIXME: currently expanded as U32. Should use balanced ternary instead.
-  pub fn unroll_i32(&mut self, a: Ptr) -> Ptr {
-    self.unroll_u32(a)
+  #[inline(always)]
+  pub fn comm(&mut self, a: Ptr, b: Ptr) {
+    self.comm += 1;
+    let loc = self.alloc(4);
+    self.link(self.get(a.val(), P1), Ptr::new(b.tag(), loc+0));
+    self.link(self.get(b.val(), P1), Ptr::new(a.tag(), loc+2));
+    self.link(self.get(a.val(), P2), Ptr::new(b.tag(), loc+1));
+    self.link(self.get(b.val(), P2), Ptr::new(a.tag(), loc+3));
+    *self.at_mut(loc*2+0) = Ptr::new(VR1, loc+2);
+    *self.at_mut(loc*2+1) = Ptr::new(VR1, loc+3);
+    *self.at_mut(loc*2+2) = Ptr::new(VR2, loc+2);
+    *self.at_mut(loc*2+3) = Ptr::new(VR2, loc+3);
+    *self.at_mut(loc*2+4) = Ptr::new(VR1, loc+0);
+    *self.at_mut(loc*2+5) = Ptr::new(VR1, loc+1);
+    *self.at_mut(loc*2+6) = Ptr::new(VR2, loc+0);
+    *self.at_mut(loc*2+7) = Ptr::new(VR2, loc+1);
+    self.free(a.val());
+    self.free(b.val());
+  }
+
+  #[inline(always)]
+  pub fn eras(&mut self, a: Ptr, b: Ptr) {
+    self.eras += 1;
+    self.link(self.get(b.val(), P1), ERAS);
+    self.link(self.get(b.val(), P2), ERAS);
+    self.free(b.val());
+  }
+
+  #[inline(always)]
+  pub fn void(&mut self, a: Ptr, b: Ptr) {
+    self.eras += 1;
   }
 
   // Expands a closed net.
+  #[inline(always)]
   pub fn deref(&mut self, book: &Book, ptr: Ptr, parent: Ptr) -> Ptr {
     self.dref += 1;
     let mut ptr = ptr;
     // White ptr is still a REF...
-    while ptr.is_ref() {
+    if ptr.is_ref() {
       // Loads the referenced definition...
       if let Some(got) = book.get(ptr.val()) {
         let loc = self.alloc(got.node.len() / 2);
@@ -567,7 +395,6 @@ impl Net {
           unsafe {
             let p1 = got.node.get_unchecked((i * 2 + P1) as usize).adjust(loc);
             let p2 = got.node.get_unchecked((i * 2 + P2) as usize).adjust(loc);
-            //println!("got {:016x} {:016x} | alloc {} at {}", p1.data(), p2.data(), got.node.len() / 2, loc);
             *self.at_mut((loc + i) * 2 + P1) = p1;
             *self.at_mut((loc + i) * 2 + P2) = p2;
           }
@@ -576,14 +403,13 @@ impl Net {
         for got in &got.rdex {
           let p1 = got.0.adjust(loc);
           let p2 = got.1.adjust(loc);
-          //println!("rdx {:016x} {:016x}", p1.data(), p2.data());
           self.rdex.push((p1, p2));
         }
         // Overwrites 'ptr' with the loaded root pointer, adjusting locations...
         ptr = got.get_root().adjust(loc);
         // Links root
         if ptr.is_var() {
-          *self.target(ptr).unwrap() = parent;
+          *self.target(ptr) = parent;
         }
       }
     }
@@ -595,8 +421,8 @@ impl Net {
     let mut rdex : Vec<(Ptr,Ptr)> = vec![];
     std::mem::swap(&mut self.rdex, &mut rdex);
     while rdex.len() > 0 {
-      for (a, b) in &mut rdex {
-        self.interact(book, a, b);
+      for (a, b) in &rdex {
+        self.interact(book, *a, *b);
       }
       rdex.clear();
       std::mem::swap(&mut self.rdex, &mut rdex);
@@ -614,12 +440,17 @@ impl Net {
 
   // Expands heads.
   pub fn expand(&mut self, book: &Book, dir: Ptr) {
-    let ptr = *self.target(dir).unwrap();
+    let ptr = *self.target(dir);
     if ptr.is_ctr() {
       self.expand(book, Ptr::new(VR1, ptr.val()));
       self.expand(book, Ptr::new(VR2, ptr.val()));
     } else if ptr.is_ref() {
-      *self.target(dir).unwrap() = self.deref(book, ptr, dir);
+      *self.target(dir) = self.deref(book, ptr, dir);
     }
+  }
+
+  // Total rewrite count.
+  pub fn rewrites(&mut self) -> usize {
+    return self.anni + self.comm + self.eras + self.dref;
   }
 }

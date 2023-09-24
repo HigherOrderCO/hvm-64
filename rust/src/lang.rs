@@ -45,22 +45,22 @@ use std::str::Chars;
 // AST
 // ---
 
-#[derive(Clone, Copy, Hash, PartialEq, Eq, Debug)]
-pub enum OP {
-  ADD,
-  SUB,
-  MUL,
-  DIV,
-  MOD,
-  EQ ,
-  NEQ,
-  LT ,
-  GT ,
-  LTE,
-  GTE,
-  AND,
-  OR ,
-}
+//#[derive(Clone, Copy, Hash, PartialEq, Eq, Debug)]
+//pub enum OP {
+  //ADD,
+  //SUB,
+  //MUL,
+  //DIV,
+  //MOD,
+  //EQ ,
+  //NEQ,
+  //LT ,
+  //GT ,
+  //LTE,
+  //GTE,
+  //AND,
+  //OR ,
+//}
 
 #[derive(Clone, Hash, PartialEq, Eq, Debug)]
 pub enum LTree {
@@ -76,17 +76,17 @@ pub enum LTree {
   Ref {
     nam: Val
   },
-  U32 {
-    val: u32
-  },
-  I32 {
-    val: i32
-  },
-  OpX {
-    opx: OP,
-    lft: Box<LTree>,
-    rgt: Box<LTree>,
-  },
+  //U32 {
+    //val: u32
+  //},
+  //I32 {
+    //val: i32
+  //},
+  //OpX {
+    //opx: OP,
+    //lft: Box<LTree>,
+    //rgt: Box<LTree>,
+  //},
 }
 
 type LRdex = Vec<(LTree,LTree)>;
@@ -116,7 +116,7 @@ pub fn consume(chars: &mut Peekable<Chars>, text: &str) {
   }
 }
 
-pub fn parse_decimal(chars: &mut Peekable<Chars>) -> u64 {
+pub fn parse_decimal(chars: &mut Peekable<Chars>) -> Val {
   let mut num : Val = 0;
   skip_spaces(chars);
   while let Some(c) = chars.peek() {
@@ -176,22 +176,22 @@ pub fn parse_ltree(chars: &mut Peekable<Chars>) -> LTree {
       let name = parse_string(chars);
       LTree::Ref { nam: name_to_val(&name) }
     },
-    Some(c) if c.is_digit(10) => {
-      LTree::U32 { val: parse_decimal(chars) as u32 }
-    },
-    Some(s) if *s == '+' || *s == '-' => {
-      let s = *s;
-      chars.next();
-      LTree::I32 { val: parse_decimal(chars) as i32 * (if s == '-' { -1 } else { 1 }) }
-    },
-    Some('{') => {
-      chars.next();
-      let opx = string_to_opx(&parse_opx_lit(chars));
-      let lft = Box::new(parse_ltree(chars));
-      let rgt = Box::new(parse_ltree(chars));
-      consume(chars, "}");
-      LTree::OpX { opx, lft, rgt }
-    },
+    //Some(c) if c.is_digit(10) => {
+      //LTree::U32 { val: parse_decimal(chars) as u32 }
+    //},
+    //Some(s) if *s == '+' || *s == '-' => {
+      //let s = *s;
+      //chars.next();
+      //LTree::I32 { val: parse_decimal(chars) as i32 * (if s == '-' { -1 } else { 1 }) }
+    //},
+    //Some('{') => {
+      //chars.next();
+      //let opx = string_to_opx(&parse_opx_lit(chars));
+      //let lft = Box::new(parse_ltree(chars));
+      //let rgt = Box::new(parse_ltree(chars));
+      //consume(chars, "}");
+      //LTree::OpX { opx, lft, rgt }
+    //},
     _ => {
       LTree::Var { nam: parse_string(chars) }
     },
@@ -243,15 +243,15 @@ pub fn show_ltree(tree: &LTree) -> String {
     LTree::Ref { nam } => {
       format!("@{}", val_to_name(*nam))
     },
-    LTree::U32 { val } => {
-      format!("{}", (*val as u32).to_string())
-    },
-    LTree::I32 { val } => {
-      format!("{}{}", if *val >= 0 { "+" } else { "" }, (*val as i32).to_string())
-    },
-    LTree::OpX { opx, lft, rgt } => {
-      format!("{{{} {} {}}}", opx_to_string(opx), show_ltree(&*lft), show_ltree(&*rgt))
-    },
+    //LTree::U32 { val } => {
+      //format!("{}", (*val as u32).to_string())
+    //},
+    //LTree::I32 { val } => {
+      //format!("{}{}", if *val >= 0 { "+" } else { "" }, (*val as i32).to_string())
+    //},
+    //LTree::OpX { opx, lft, rgt } => {
+      //format!("{{{} {} {}}}", opx_to_string(opx), show_ltree(&*lft), show_ltree(&*rgt))
+    //},
   }
 }
 
@@ -371,79 +371,79 @@ pub fn val_to_name(num: Val) -> String {
   letters_to_name(val_to_letters(num))
 }
 
-pub fn string_to_opx(opx: &str) -> OP {
-  match opx {
-    "+"  => OP::ADD,
-    "-"  => OP::SUB,
-    "*"  => OP::MUL,
-    "/"  => OP::DIV,
-    "%"  => OP::MOD,
-    "==" => OP::EQ,
-    "!=" => OP::NEQ,
-    "<"  => OP::LT,
-    ">"  => OP::GT,
-    "<=" => OP::LTE,
-    ">=" => OP::GTE,
-    "&&" => OP::AND,
-    "||" => OP::OR,
-    _    => panic!("Invalid operator"),
-  }
-}
+//pub fn string_to_opx(opx: &str) -> OP {
+  //match opx {
+    //"+"  => OP::ADD,
+    //"-"  => OP::SUB,
+    //"*"  => OP::MUL,
+    //"/"  => OP::DIV,
+    //"%"  => OP::MOD,
+    //"==" => OP::EQ,
+    //"!=" => OP::NEQ,
+    //"<"  => OP::LT,
+    //">"  => OP::GT,
+    //"<=" => OP::LTE,
+    //">=" => OP::GTE,
+    //"&&" => OP::AND,
+    //"||" => OP::OR,
+    //_    => panic!("Invalid operator"),
+  //}
+//}
 
-pub fn opx_to_string(opx: &OP) -> String {
-  match opx {
-    OP::ADD => "+".to_string(),
-    OP::SUB => "-".to_string(),
-    OP::MUL => "*".to_string(),
-    OP::DIV => "/".to_string(),
-    OP::MOD => "%".to_string(),
-    OP::EQ  => "==".to_string(),
-    OP::NEQ => "!=".to_string(),
-    OP::LT  => "<".to_string(),
-    OP::GT  => ">".to_string(),
-    OP::LTE => "<=".to_string(),
-    OP::GTE => ">=".to_string(),
-    OP::AND => "&&".to_string(),
-    OP::OR  => "||".to_string(),
-  }
-}
+//pub fn opx_to_string(opx: &OP) -> String {
+  //match opx {
+    //OP::ADD => "+".to_string(),
+    //OP::SUB => "-".to_string(),
+    //OP::MUL => "*".to_string(),
+    //OP::DIV => "/".to_string(),
+    //OP::MOD => "%".to_string(),
+    //OP::EQ  => "==".to_string(),
+    //OP::NEQ => "!=".to_string(),
+    //OP::LT  => "<".to_string(),
+    //OP::GT  => ">".to_string(),
+    //OP::LTE => "<=".to_string(),
+    //OP::GTE => ">=".to_string(),
+    //OP::AND => "&&".to_string(),
+    //OP::OR  => "||".to_string(),
+  //}
+//}
 
-pub fn opx_to_tag(opx: &OP) -> Tag {
-  match opx {
-    OP::ADD => OPX_ADD,
-    OP::SUB => OPX_SUB,
-    OP::MUL => OPX_MUL,
-    OP::DIV => OPX_DIV,
-    OP::MOD => OPX_MOD,
-    OP::EQ  => OPX_EQ ,
-    OP::NEQ => OPX_NEQ,
-    OP::LT  => OPX_LT ,
-    OP::GT  => OPX_GT ,
-    OP::LTE => OPX_LTE,
-    OP::GTE => OPX_GTE,
-    OP::AND => OPX_AND,
-    OP::OR  => OPX_OR ,
-  }
-}
+//pub fn opx_to_tag(opx: &OP) -> Tag {
+  //match opx {
+    //OP::ADD => OPX_ADD,
+    //OP::SUB => OPX_SUB,
+    //OP::MUL => OPX_MUL,
+    //OP::DIV => OPX_DIV,
+    //OP::MOD => OPX_MOD,
+    //OP::EQ  => OPX_EQ ,
+    //OP::NEQ => OPX_NEQ,
+    //OP::LT  => OPX_LT ,
+    //OP::GT  => OPX_GT ,
+    //OP::LTE => OPX_LTE,
+    //OP::GTE => OPX_GTE,
+    //OP::AND => OPX_AND,
+    //OP::OR  => OPX_OR ,
+  //}
+//}
 
-pub fn tag_to_opx(tag: Tag) -> OP {
-  match tag {
-    OPX_ADD => OP::ADD,
-    OPX_SUB => OP::SUB,
-    OPX_MUL => OP::MUL,
-    OPX_DIV => OP::DIV,
-    OPX_MOD => OP::MOD,
-    OPX_EQ  => OP::EQ ,
-    OPX_NEQ => OP::NEQ,
-    OPX_LT  => OP::LT ,
-    OPX_GT  => OP::GT ,
-    OPX_LTE => OP::LTE,
-    OPX_GTE => OP::GTE,
-    OPX_AND => OP::AND,
-    OPX_OR  => OP::OR ,
-    _       => panic!("Invalid operator"),
-  }
-}
+//pub fn tag_to_opx(tag: Tag) -> OP {
+  //match tag {
+    //OPX_ADD => OP::ADD,
+    //OPX_SUB => OP::SUB,
+    //OPX_MUL => OP::MUL,
+    //OPX_DIV => OP::DIV,
+    //OPX_MOD => OP::MOD,
+    //OPX_EQ  => OP::EQ ,
+    //OPX_NEQ => OP::NEQ,
+    //OPX_LT  => OP::LT ,
+    //OPX_GT  => OP::GT ,
+    //OPX_LTE => OP::LTE,
+    //OPX_GTE => OP::GTE,
+    //OPX_AND => OP::AND,
+    //OPX_OR  => OP::OR ,
+    //_       => panic!("Invalid operator"),
+  //}
+//}
 
 // Injection and Readback
 // ----------------------
@@ -459,7 +459,7 @@ const PARENT_ROOT : Parent = Parent::Node { val: 0, port: P2 };
 pub fn alloc_ltree(net: &mut Net, tree: &LTree, vars: &mut HashMap<String, Parent>, parent: Parent) -> Ptr {
   match tree {
     LTree::Era => {
-      Ptr::new(ERA, 0)
+      ERAS
     },
     LTree::Nod { tag, lft, rgt } => {
       let val = net.alloc(1);
@@ -492,28 +492,28 @@ pub fn alloc_ltree(net: &mut Net, tree: &LTree, vars: &mut HashMap<String, Paren
         None => {
           //println!("linkin {} | iam {} {:?}", nam, val, port);
           vars.insert(nam.clone(), parent);
-          Ptr::new(NIL, 0)
+          NULL
         }
       }
     },
     LTree::Ref { nam } => {
       Ptr::new(REF, *nam)
     },
-    LTree::U32 { val } => {
-      Ptr::new(U32, *val as Val)
-    },
-    LTree::I32 { val } => {
-      Ptr::new(I32, *val as Val)
-    },
-    LTree::OpX { opx, lft, rgt } => {
-      let tag = opx_to_tag(opx);
-      let val = net.alloc(1);
-      let p1 = alloc_ltree(net, &*lft, vars, Parent::Node { val, port: P1 });
-      net.set(val, P1, p1);
-      let p2 = alloc_ltree(net, &*rgt, vars, Parent::Node { val, port: P2 });
-      net.set(val, P2, p2);
-      Ptr::new(tag, val)
-    },
+    //LTree::U32 { val } => {
+      //Ptr::new(U32, *val as Val)
+    //},
+    //LTree::I32 { val } => {
+      //Ptr::new(I32, *val as Val)
+    //},
+    //LTree::OpX { opx, lft, rgt } => {
+      //let tag = opx_to_tag(opx);
+      //let val = net.alloc(1);
+      //let p1 = alloc_ltree(net, &*lft, vars, Parent::Node { val, port: P1 });
+      //net.set(val, P1, p1);
+      //let p2 = alloc_ltree(net, &*rgt, vars, Parent::Node { val, port: P2 });
+      //net.set(val, P2, p2);
+      //Ptr::new(tag, val)
+    //},
   }
 }
 
@@ -523,29 +523,29 @@ pub fn do_alloc_ltree(net: &mut Net, tree: &LTree) -> Ptr {
 
 pub fn readback_ltree(net: &Net, ptr: Ptr, parent: Parent, vars: &mut HashMap<Parent,String>, fresh: &mut usize) -> LTree {
   match ptr.tag() {
-    NIL => {
-      LTree::Var { nam: "?".to_string() }
-    },
+    //NIL => {
+      //LTree::Var { nam: "?".to_string() }
+    //},
     ERA => {
       LTree::Era
     },
     REF => {
       LTree::Ref { nam: ptr.val() }
     },
-    U32 => {
-      LTree::U32 { val: ptr.val() as u32 }
-    },
-    I32 => {
-      LTree::I32 { val: ptr.val() as i32 }
-    },
-    MIN_OPX..=MAX_OPX => {
-      let lft = readback_ltree(net, net.get(ptr.val(), P1), Parent::Node { val: ptr.val(), port: P1 }, vars, fresh);
-      let rgt = readback_ltree(net, net.get(ptr.val(), P2), Parent::Node { val: ptr.val(), port: P2 }, vars, fresh);
-      LTree::OpX { opx: tag_to_opx(ptr.tag()), lft: Box::new(lft), rgt: Box::new(rgt) }
-    },
-    MIN_OPY..=MAX_OPY => {
-      todo!()
-    },
+    //U32 => {
+      //LTree::U32 { val: ptr.val() as u32 }
+    //},
+    //I32 => {
+      //LTree::I32 { val: ptr.val() as i32 }
+    //},
+    //MIN_OPX..=MAX_OPX => {
+      //let lft = readback_ltree(net, net.get(ptr.val(), P1), Parent::Node { val: ptr.val(), port: P1 }, vars, fresh);
+      //let rgt = readback_ltree(net, net.get(ptr.val(), P2), Parent::Node { val: ptr.val(), port: P2 }, vars, fresh);
+      //LTree::OpX { opx: tag_to_opx(ptr.tag()), lft: Box::new(lft), rgt: Box::new(rgt) }
+    //},
+    //MIN_OPY..=MAX_OPY => {
+      //todo!()
+    //},
     VR1 | VR2 => {
       let key = match ptr.tag() {
         VR1 => Parent::Node { val: ptr.val(), port: P1 },

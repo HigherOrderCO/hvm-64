@@ -180,7 +180,7 @@ fn main() {
   define(book, "brnZ", "
     $ ret
     & @run ~ (0 val ret)
-    & @mul ~ (0 @c2 (0 @c5 (0 @I (0 @E val))))
+    & @c10 ~ (0 @I (0 @E val))
   ");
   define(book, "brnS", "
     $ (0 (1 p0 p1) (0 r0 r1))
@@ -233,20 +233,6 @@ fn main() {
     & @brn ~ (0 dep res)
   "); 
 
-  // Native Numbers
-  // Number literals lazily expand to λ-encoded bitstrings. For example, the number
-  // 26 will expand to `λo λi λe (o 13)`, then `λo λi λe (o λo λi λe (i 6))`, etc.
-
-  // Divides a native number by 2
-  define(book, "half", "$ (0 (0 (0 op op) (0 (0 ip ip) (0 0 ret))) ret)");
-
-  // (x λp.p λp.p 0)
-  define(book, "ex4", "
-    $ ret
-    & {+ -2 ret}
-    ~ +1
-  "); 
-
   // Initializes the net
   let net = &mut Net::new(1 << 28);
   net.boot(name_to_val("ex3"));
@@ -261,10 +247,13 @@ fn main() {
 
   //Shows results and stats
   //println!("[net]\n{}", show_net(&net));
-  println!("RWTS: {}", net.rwts);
+  println!("ANNI: {}", net.anni);
+  println!("COMM: {}", net.comm);
+  println!("ERAS: {}", net.eras);
   println!("DREF: {}", net.dref);
+  println!("RWTS: {}", net.rewrites());
   println!("TIME: {:.3} s", (start.elapsed().as_millis() as f64) / 1000.0);
-  println!("RPS : {:.3} million", (net.rwts as f64) / (start.elapsed().as_millis() as f64) / 1000.0);
+  println!("RPS : {:.3} million", (net.rewrites() as f64) / (start.elapsed().as_millis() as f64) / 1000.0);
 
   //println!("{}", &compile_book(&book));
 }
