@@ -44,8 +44,8 @@ impl Heap {
   #[inline(always)]
   pub fn free(&mut self, index: Val) {
     self.used -= 1;
-    *self.at_mut(index, P1) = NULL;
-    *self.at_mut(index, P2) = NULL;
+    self.set(index, P1, NULL);
+    self.set(index, P2, NULL);
   }
 
   #[inline(always)]
@@ -59,27 +59,17 @@ impl Heap {
   }
 
   #[inline(always)]
-  pub fn at(&self, index: Val, port: Port) -> &Ptr {
-    unsafe {
-      return self.data.get_unchecked((index * 2 + port) as usize);
-    }
-  }
-
-  #[inline(always)]
-  pub fn at_mut(&mut self, index: Val, port: Port) -> &mut Ptr {
-    unsafe {
-      return self.data.get_unchecked_mut((index * 2 + port) as usize);
-    }
-  }
-
-  #[inline(always)]
   pub fn get(&self, index: Val, port: Port) -> Ptr {
-    return *self.at(index, port);
+    unsafe {
+      return *self.data.get_unchecked((index * 2 + port) as usize);
+    }
   }
 
   #[inline(always)]
   pub fn set(&mut self, index: Val, port: Port, value: Ptr) {
-    *self.at_mut(index, port) = value;
+    unsafe {
+      *self.data.get_unchecked_mut((index * 2 + port) as usize) = value;
+    }
   }
 
   #[inline(always)]

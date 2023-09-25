@@ -35,6 +35,7 @@ pub const P2 : Port = 1;
 
 // A tagged pointer.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+#[repr(transparent)]
 pub struct Ptr(pub Val);
 
 // A interaction combinator net.
@@ -175,10 +176,16 @@ impl Net {
     return Def { root, rdex: self.rdex, node };
   }
 
-  // Gets a pointer target.
+  // Gets a pointer's target.
   #[inline(always)]
-  pub fn target(&mut self, ptr: Ptr) -> &mut Ptr {
-    return self.heap.at_mut(ptr.val(), ptr.0 & 1);
+  pub fn get_target(&self, ptr: Ptr) -> Ptr {
+    return self.heap.get(ptr.val(), ptr.0 & 1);
+  }
+
+  // Sets a pointer's target.
+  #[inline(always)]
+  pub fn set_target(&mut self, ptr: Ptr, val: Ptr) {
+    self.heap.set(ptr.val(), ptr.0 & 1, val)
   }
 
   // Links two pointers, forming a new wire.
@@ -189,11 +196,11 @@ impl Net {
     }
     // Substitutes A
     if a.is_var() {
-      *self.target(a) = b;
+      self.set_target(a, b);
     }
     // Substitutes B
     if b.is_var() {
-      *self.target(b) = a;
+      self.set_target(b, a);
     }
   }
 
@@ -244,14 +251,14 @@ impl Net {
     self.link(self.heap.get(b.val(), P1), Ptr::new(a.tag(), loc+2));
     self.link(self.heap.get(a.val(), P2), Ptr::new(b.tag(), loc+1));
     self.link(self.heap.get(b.val(), P2), Ptr::new(a.tag(), loc+3));
-    *self.heap.at_mut(loc+0,P1) = Ptr::new(VR1, loc+2);
-    *self.heap.at_mut(loc+0,P2) = Ptr::new(VR1, loc+3);
-    *self.heap.at_mut(loc+1,P1) = Ptr::new(VR2, loc+2);
-    *self.heap.at_mut(loc+1,P2) = Ptr::new(VR2, loc+3);
-    *self.heap.at_mut(loc+2,P1) = Ptr::new(VR1, loc+0);
-    *self.heap.at_mut(loc+2,P2) = Ptr::new(VR1, loc+1);
-    *self.heap.at_mut(loc+3,P1) = Ptr::new(VR2, loc+0);
-    *self.heap.at_mut(loc+3,P2) = Ptr::new(VR2, loc+1);
+    self.heap.set(loc+0,P1,Ptr::new(VR1, loc+2));
+    self.heap.set(loc+0,P2,Ptr::new(VR1, loc+3));
+    self.heap.set(loc+1,P1,Ptr::new(VR2, loc+2));
+    self.heap.set(loc+1,P2,Ptr::new(VR2, loc+3));
+    self.heap.set(loc+2,P1,Ptr::new(VR1, loc+0));
+    self.heap.set(loc+2,P2,Ptr::new(VR1, loc+1));
+    self.heap.set(loc+3,P1,Ptr::new(VR2, loc+0));
+    self.heap.set(loc+3,P2,Ptr::new(VR2, loc+1));
     self.heap.free(a.val());
     self.heap.free(b.val());
   }
@@ -285,8 +292,8 @@ impl Net {
           unsafe {
             let p1 = got.node.get_unchecked(i as usize).0.adjust(loc);
             let p2 = got.node.get_unchecked(i as usize).1.adjust(loc);
-            *self.heap.at_mut(loc+i,P1) = p1;
-            *self.heap.at_mut(loc+i,P2) = p2;
+            self.heap.set(loc+i,P1,p1);
+            self.heap.set(loc+i,P2,p2);
           }
         }
         // Load redexes, adjusted.
@@ -299,7 +306,7 @@ impl Net {
         ptr = got.root.adjust(loc);
         // Link root.
         if ptr.is_var() {
-          *self.target(ptr) = parent;
+          self.set_target(ptr, parent);
         }
       }
     }
@@ -330,12 +337,13 @@ impl Net {
 
   // Expands heads.
   pub fn expand(&mut self, book: &Book, dir: Ptr) {
-    let ptr = *self.target(dir);
+    let ptr = self.get_target(dir);
     if ptr.is_ctr() {
       self.expand(book, Ptr::new(VR1, ptr.val()));
       self.expand(book, Ptr::new(VR2, ptr.val()));
     } else if ptr.is_ref() {
-      *self.target(dir) = self.deref(book, ptr, dir);
+      let exp = self.deref(book, ptr, dir);
+      self.set_target(dir, exp);
     }
   }
 
@@ -344,3 +352,8 @@ impl Net {
     return self.anni + self.comm + self.eras + self.dref;
   }
 }
+
+// The Ptr type on the file above has been refactored. Now, instead of a wrapping struct, it will
+// be just a type alias to u32. Refactor the file above to be correct after that change. This will
+// require changing all the functions inside `impl Ptr` to independent functions that receive Ptr
+// as the first argument, 
