@@ -302,14 +302,11 @@ pub fn lnet_to_net(lnet: &LNet, size: Option<usize>) -> Net {
   let mut vars = HashMap::new();
   let mut net = Net::new(size.unwrap_or(1 << 16));
   let root = alloc_ltree(&mut net, &lnet.root, &mut vars, PARENT_ROOT);
-  net.set_root(root);
+  net.heap.set_root(root);
   for (tree1, tree2) in &lnet.rdex {
     let ptr1 = alloc_ltree(&mut net, tree1, &mut vars, Parent::Rdex);
     let ptr2 = alloc_ltree(&mut net, tree2, &mut vars, Parent::Rdex);
     net.rdex.push((ptr1, ptr2));
-  }
-  if size.is_none() {
-    net.node = net.node[0 .. (net.used + 1) * 2].to_vec();
   }
   return net;
 }
@@ -462,11 +459,11 @@ pub fn alloc_ltree(net: &mut Net, tree: &LTree, vars: &mut HashMap<String, Paren
       ERAS
     },
     LTree::Nod { tag, lft, rgt } => {
-      let val = net.alloc(1);
+      let val = net.heap.alloc(1);
       let p1 = alloc_ltree(net, &*lft, vars, Parent::Node { val, port: P1 });
-      net.set(val, P1, p1);
+      net.heap.set(val, P1, p1);
       let p2 = alloc_ltree(net, &*rgt, vars, Parent::Node { val, port: P2 });
-      net.set(val, P2, p2);
+      net.heap.set(val, P2, p2);
       Ptr::new(*tag, val)
     },
     LTree::Var { nam } => {
@@ -484,7 +481,7 @@ pub fn alloc_ltree(net: &mut Net, tree: &LTree, vars: &mut HashMap<String, Paren
               unreachable!();
             }
             Parent::Node { val, port } => {
-              net.set(*other_val, *other_port, Ptr::new(port_to_tag(port), val))
+              net.heap.set(*other_val, *other_port, Ptr::new(port_to_tag(port), val))
             }
           }
           return Ptr::new(port_to_tag(*other_port), *other_val);
@@ -562,8 +559,8 @@ pub fn readback_ltree(net: &Net, ptr: Ptr, parent: Parent, vars: &mut HashMap<Pa
       }
     },
     _ => {
-      let lft = readback_ltree(net, net.get(ptr.val(), P1), Parent::Node { val: ptr.val(), port: P1 }, vars, fresh);
-      let rgt = readback_ltree(net, net.get(ptr.val(), P2), Parent::Node { val: ptr.val(), port: P2 }, vars, fresh);
+      let lft = readback_ltree(net, net.heap.get(ptr.val(), P1), Parent::Node { val: ptr.val(), port: P1 }, vars, fresh);
+      let rgt = readback_ltree(net, net.heap.get(ptr.val(), P2), Parent::Node { val: ptr.val(), port: P2 }, vars, fresh);
       LTree::Nod { tag: ptr.tag(), lft: Box::new(lft), rgt: Box::new(rgt) }
     },
   }
@@ -573,7 +570,7 @@ pub fn readback_lnet(net: &Net) -> LNet {
   let mut vars  = HashMap::new();
   let mut fresh = 0;
   let mut rdex  = Vec::new();
-  let root = readback_ltree(net, net.get_root(), PARENT_ROOT, &mut vars, &mut fresh);
+  let root = readback_ltree(net, net.heap.get_root(), PARENT_ROOT, &mut vars, &mut fresh);
   for &(a, b) in &net.rdex {
     let tree_a = readback_ltree(net, a, Parent::Rdex, &mut vars, &mut fresh);
     let tree_b = readback_ltree(net, b, Parent::Rdex, &mut vars, &mut fresh);
@@ -587,6 +584,6 @@ pub fn readback_lnet(net: &Net) -> LNet {
 
 pub fn define(book: &mut Book, name: &str, code: &str) -> Val {
   let id = name_to_val(name);
-  book.def(id, lnet_to_net(&do_parse_lnet(code), None));
+  book.def(id, lnet_to_net(&do_parse_lnet(code), None).to_def());
   return id;
 }
