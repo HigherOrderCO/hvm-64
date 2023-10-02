@@ -2,7 +2,7 @@ use crate::core::{*};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Heap {
-  data: Vec<Ptr>,
+  data: Vec<(Ptr,Ptr)>,
   next: usize,
   used: usize,
 }
@@ -10,7 +10,7 @@ pub struct Heap {
 impl Heap {
   pub fn new(size: usize) -> Heap {
     return Heap {
-      data: vec![NULL; size * 2],
+      data: vec![(NULL,NULL); size],
       next: 1,
       used: 0,
     };
@@ -61,14 +61,24 @@ impl Heap {
   #[inline(always)]
   pub fn get(&self, index: Val, port: Port) -> Ptr {
     unsafe {
-      return *self.data.get_unchecked((index * 2 + port) as usize);
+      let node = self.data.get_unchecked(index as usize);
+      if port == P1 {
+        return node.0;
+      } else {
+        return node.1;
+      }
     }
   }
 
   #[inline(always)]
   pub fn set(&mut self, index: Val, port: Port, value: Ptr) {
     unsafe {
-      *self.data.get_unchecked_mut((index * 2 + port) as usize) = value;
+      let node = self.data.get_unchecked_mut(index as usize);
+      if port == P1 {
+        node.0 = value;
+      } else {
+        node.1 = value;
+      }
     }
   }
 
@@ -84,10 +94,10 @@ impl Heap {
 
   #[inline(always)]
   pub fn compact(&mut self) -> (Ptr, Vec<(Ptr,Ptr)>) {
-    let root = self.data[1];
+    let root = self.data[0].1;
     let mut node = vec![];
     for i in 0 .. self.used {
-      node.push((self.data[(i+1)*2+0], self.data[(i+1)*2+1]));
+      node.push((self.data[i+1].0, self.data[i+1].1));
     }
     return (root, node);
   }
