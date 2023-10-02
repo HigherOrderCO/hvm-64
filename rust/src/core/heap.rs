@@ -80,20 +80,17 @@ impl Heap {
   }
 
   #[inline(always)]
-  pub fn swap(&self, index: Val, port: Port, value: Ptr) -> Ptr {
+  pub fn take(&self, index: Val, port: Port) -> Ptr {
     unsafe {
-      return Ptr(self.data.get_unchecked((index * 2 + port) as usize).0.swap(value.0, Ordering::Relaxed));
+      return Ptr(self.data.get_unchecked((index * 2 + port) as usize).0.swap(LOCK.0, Ordering::Relaxed));
     }
   }
 
   #[inline(always)]
-  pub fn cas(&self, index: Val, port: Port, from: Ptr, to: Ptr) -> Ptr {
+  pub fn try_replace(&self, index: Val, port: Port, from: Ptr, to: Ptr) -> bool {
     unsafe {
       let ptr_ref = self.data.get_unchecked((index * 2 + port) as usize);
-      match ptr_ref.0.compare_exchange_weak(from.0, to.0, Ordering::Relaxed, Ordering::Relaxed) {
-        Ok(old)  => { Ptr(old) }
-        Err(old) => { Ptr(old) }
-      }
+      return ptr_ref.0.compare_exchange_weak(from.0, to.0, Ordering::Relaxed, Ordering::Relaxed).is_ok();
     }
   }
 
