@@ -7,10 +7,6 @@
 // they interact with nodes, and are cleared when they interact with ERAs, allowing for constant
 // space evaluation of recursive functions on Scott encoded datatypes.
 
-mod heap;
-
-use self::heap::*;
-
 pub type Tag = u8;
 pub type Val = u32;
 
@@ -36,6 +32,14 @@ pub const P2 : Port = 1;
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 #[repr(transparent)]
 pub struct Ptr(pub Val);
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub struct Heap {
+  data: Vec<(Ptr,Ptr)>,
+  next: usize,
+  used: usize,
+  full: bool,
+}
 
 // A interaction combinator net.
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -151,6 +155,114 @@ impl Def {
   }
 }
 
+impl Heap {
+  pub fn new(size: usize) -> Heap {
+    return Heap {
+      data: vec![(NULL,NULL); size],
+      next: 1,
+      used: 0,
+      full: false,
+    };
+  }
+
+  #[inline(always)]
+  pub fn alloc(&mut self, size: usize) -> Val {
+    if size == 0 {
+      return 0;
+    } else if !self.full && self.next + size <= self.data.len() {
+      self.used += size;
+      self.next += size;
+      return (self.next - size) as Val;
+    } else {
+      self.full = true;
+      let mut space = 0;
+      loop {
+        if self.next >= self.data.len() {
+          space = 0;
+          self.next = 1;
+        }
+        if self.get(self.next as Val, P1).is_nil() {
+          space += 1;
+        } else {
+          space = 0;
+        }
+        self.next += 1;
+        if space == size {
+          self.used += size;
+          return (self.next - space) as Val;
+        }
+      }
+    }
+  }
+
+  #[inline(always)]
+  pub fn free(&mut self, index: Val) {
+    self.used -= 1;
+    self.set(index, P1, NULL);
+    self.set(index, P2, NULL);
+  }
+
+  #[inline(always)]
+  pub fn lock(&self, index: Val) {
+    return;
+  }
+
+  #[inline(always)]
+  pub fn unlock(&self, index: Val) {
+    return;
+  }
+
+  #[inline(always)]
+  pub fn get(&self, index: Val, port: Port) -> Ptr {
+    unsafe {
+      let node = self.data.get_unchecked(index as usize);
+      if port == P1 {
+        return node.0;
+      } else {
+        return node.1;
+      }
+    }
+  }
+
+  #[inline(always)]
+  pub fn set(&mut self, index: Val, port: Port, value: Ptr) {
+    unsafe {
+      let node = self.data.get_unchecked_mut(index as usize);
+      if port == P1 {
+        node.0 = value;
+      } else {
+        node.1 = value;
+      }
+    }
+  }
+
+  #[inline(always)]
+  pub fn get_root(&self) -> Ptr {
+    return self.get(0, P2);
+  }
+
+  #[inline(always)]
+  pub fn set_root(&mut self, value: Ptr) {
+    self.set(0, P2, value);
+  }
+
+  #[inline(always)]
+  pub fn compact(&self) -> (Ptr, Vec<(Ptr,Ptr)>) {
+    let root = self.data[0].1;
+    let mut node = vec![];
+    loop {
+      let p1 = self.data[1+node.len()].0;
+      let p2 = self.data[1+node.len()].1;
+      if p1 != NULL && p2 != NULL {
+        node.push((p1, p2));
+      } else {
+        break;
+      }
+    }
+    return (root, node);
+  }
+}
+
 impl Net {
   // Creates an empty net with given size.
   pub fn new(size: usize) -> Self {
@@ -170,7 +282,7 @@ impl Net {
   }
 
   // Converts to a def.
-  pub fn to_def(mut self) -> Def {
+  pub fn to_def(self) -> Def {
     let (root,node) = self.heap.compact();
     return Def { root, rdex: self.rdex, node };
   }
@@ -207,14 +319,12 @@ impl Net {
   pub fn interact(&mut self, book: &Book, a: Ptr, b: Ptr) {
     let mut a = a;
     let mut b = b;
-
     // Dereference A
     if a.is_ref() && b.is_ctr() {
       a = self.deref(book, a, b);
     } else if b.is_ref() && a.is_ctr() {
       b = self.deref(book, b, a);
     }
-
     // CON-CON
     if a.is_ctr() && b.is_ctr() && a.tag() == b.tag() {
       self.anni(a, b);
