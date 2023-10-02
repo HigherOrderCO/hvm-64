@@ -15,7 +15,6 @@ pub type Tag = u8;
 pub type Val = u32;
 
 // Core terms.
-//pub const NIL: Tag = 0x0000; // uninitialized
 pub const VR1: Tag = 0x0; // aux port to aux port 1
 pub const VR2: Tag = 0x1; // aux port to aux port 2
 pub const REF: Tag = 0x2; // closed net reference
@@ -352,8 +351,3 @@ impl Net {
     return self.anni + self.comm + self.eras + self.dref;
   }
 }
-
-// The Ptr type on the file above has been refactored. Now, instead of a wrapping struct, it will
-// be just a type alias to u32. Refactor the file above to be correct after that change. This will
-// require changing all the functions inside `impl Ptr` to independent functions that receive Ptr
-// as the first argument, 
