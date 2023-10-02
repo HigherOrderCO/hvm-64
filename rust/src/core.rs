@@ -16,12 +16,14 @@ pub type Val = u32;
 
 // Core terms.
 //pub const NIL: Tag = 0x0000; // uninitialized
-pub const VR1: Tag = 0x0; // aux port to aux port 1
-pub const VR2: Tag = 0x1; // aux port to aux port 2
-pub const REF: Tag = 0x2; // closed net reference
-pub const ERA: Tag = 0x3; // unboxed eraser
-pub const CON: Tag = 0x4; // main port of con node
-pub const DUP: Tag = 0x5; // main port of dup node
+pub const VR1: Tag = 0x0; // variable to aux port 1
+pub const VR2: Tag = 0x1; // variable to aux port 2
+pub const RD1: Tag = 0x2; // redirect to aux port 1
+pub const RD2: Tag = 0x3; // redirect to aux port 2
+pub const REF: Tag = 0x4; // closed net reference
+pub const ERA: Tag = 0x5; // unboxed eraser
+pub const CON: Tag = 0x6; // main port of con node
+pub const DUP: Tag = 0x7; // main port of dup node
 
 pub const ERAS: Ptr = Ptr(0x0000_0000 | ERA as Val);
 pub const ROOT: Ptr = Ptr(0x0000_0000 | VR2 as Val);
@@ -94,6 +96,11 @@ impl Ptr {
   }
 
   #[inline(always)]
+  pub fn is_red(&self) -> bool {
+    return self.tag() >= RD1 && self.tag() <= RD2;
+  }
+
+  #[inline(always)]
   pub fn is_era(&self) -> bool {
     return self.tag() == ERA;
   }
@@ -116,6 +123,16 @@ impl Ptr {
   #[inline(always)]
   pub fn has_loc(&self) -> bool {
     return self.is_ctr() || self.is_var();
+  }
+
+  #[inline(always)]
+  pub fn as_redirect(&self) -> Ptr {
+    return Ptr::new(self.tag() + (if self.is_var() { 2 } else { 0 }), self.val());
+  }
+
+  #[inline(always)]
+  pub fn as_variable(&self) -> Ptr {
+    return Ptr::new(self.tag() - 2, self.val());
   }
 
   #[inline(always)]
@@ -187,19 +204,115 @@ impl Net {
     self.heap.set(ptr.val(), ptr.0 & 1, val)
   }
 
+  // Takes a pointer's target.
+  #[inline(always)]
+  pub fn swap_target(&mut self, ptr: Ptr, value: Ptr) -> Ptr {
+    self.heap.swap(ptr.val(), ptr.0 & 1, value)
+  }
+
+  // Replaces a pointer's target.
+  #[inline(always)]
+  pub fn cas_target(&mut self, ptr: Ptr, from: Ptr, to: Ptr) -> Ptr {
+    self.heap.cas(ptr.val(), ptr.0 & 1, from, to)
+  }
+
+  #[inline(never)]
+  pub fn redirect(&mut self, mut a_ptr: Ptr, a_dir: Ptr, b_ptr: Ptr) {
+    self.set_target(a_dir, b_ptr.as_redirect());
+    if b_ptr.is_pri() {
+      loop {
+        // Peek the target, which may not be owned by us.
+        let mut a_trg = self.get_target(a_ptr);
+        // If target is a redirection, clear and move forward.
+        if a_trg.is_red() {
+          // We own the redirection, so we can mutate it.
+          self.set_target(a_ptr, NULL);
+          a_ptr = a_trg;
+          continue;
+        }
+        // If target is a variable, try replacing it by the node.
+        else if a_trg.is_var() {
+          // Peeks the source node.
+          let b_ptr = self.get_target(a_dir);
+          // We don't own the var, so we must try replacing with a CAS.
+          if self.cas_target(a_ptr, a_trg, b_ptr) == a_trg {
+            // Collect the orphaned backward path.
+            a_ptr = a_trg;
+            a_trg = self.get_target(a_ptr);
+            while a_trg.is_red() {
+              self.set_target(a_ptr, NULL);
+              a_ptr = a_trg;
+              a_trg = self.get_target(a_ptr);
+            }
+            // Clear source location.
+            self.set_target(a_dir, NULL);
+            return;
+          }
+          // If the replace failed, the var changed, so we try again.
+          continue;
+        }
+        // If it is a node, two threads will reach this branch.
+        else if a_trg.is_pri() || a_trg == LOCK {
+          // Sort references, to avoid deadlocks.
+          let fst_dir = if a_dir.val() < a_ptr.val() { a_dir } else { a_ptr };
+          let snd_dir = if a_dir.val() < a_ptr.val() { a_ptr } else { a_dir };
+          // Swap first reference by LOCK placeholder.
+          let fst_ptr = self.swap_target(fst_dir, LOCK);
+          // First to arrive creates a redex.
+          if fst_ptr != LOCK {
+            let snd_ptr = self.swap_target(snd_dir, LOCK);
+            self.rdex.push((fst_ptr, snd_ptr));
+            return;
+          // Second to arrive clears up the memory.
+          } else {
+            self.set_target(fst_dir, NULL);
+            while self.cas_target(snd_dir, LOCK, NULL) != LOCK {};
+            return;
+          }
+        }
+        // If it is taken, we wait.
+        else if a_trg == LOCK {
+          continue;
+        }
+        // Shouldn't be reached.
+        else {
+          unreachable!();
+        }
+      }
+    }
+  }
+
+  #[inline(always)]
+  pub fn subst(&mut self, a_ptr: Ptr, a_dir: Ptr, b_ptr: Ptr) {
+    if a_ptr.is_var() {
+      let a_cas = self.cas_target(a_ptr, a_dir, b_ptr);
+      if a_cas == a_dir {
+        self.set_target(a_dir, NULL);
+      } else {
+        self.redirect(a_ptr, a_dir, b_ptr);
+      }
+    }
+  }
+
   // Links two pointers, forming a new wire.
-  pub fn link(&mut self, a: Ptr, b: Ptr) {
-    // Creates redex A-B
-    if a.is_pri() && b.is_pri() {
-      self.rdex.push((a, b));
+  pub fn link(&mut self, a_dir: Ptr, b_dir: Ptr) {
+    let a_ptr = self.swap_target(a_dir, LOCK);
+    let b_ptr = self.swap_target(b_dir, LOCK);
+    if a_ptr.is_pri() && b_ptr.is_pri() {
+      self.rdex.push((a_ptr, b_ptr));
+    } else {
+      self.subst(a_ptr, a_dir, b_ptr);
+      self.subst(b_ptr, b_dir, a_ptr);
     }
-    // Substitutes A
-    if a.is_var() {
-      self.set_target(a, b);
-    }
-    // Substitutes B
-    if b.is_var() {
-      self.set_target(b, a);
+  }
+
+  // Same as link, when b_ptr is a principal port.
+  pub fn link1(&mut self, a_dir: Ptr, b_ptr: Ptr) {
+    let a_ptr = self.swap_target(a_dir, LOCK);
+    if a_ptr.is_pri() {
+      self.rdex.push((a_ptr, b_ptr));
+    } else {
+      self.subst(a_ptr, a_dir, b_ptr);
     }
   }
 
@@ -236,38 +349,33 @@ impl Net {
   #[inline(always)]
   pub fn anni(&mut self, a: Ptr, b: Ptr) {
     self.anni += 1;
-    self.link(self.heap.get(a.val(), P1), self.heap.get(b.val(), P1));
-    self.link(self.heap.get(a.val(), P2), self.heap.get(b.val(), P2));
-    self.heap.free(a.val());
-    self.heap.free(b.val());
+    self.link(Ptr::new(VR1, a.val()), Ptr::new(VR1, b.val()));
+    self.link(Ptr::new(VR2, a.val()), Ptr::new(VR2, b.val()));
   }
 
   #[inline(always)]
   pub fn comm(&mut self, a: Ptr, b: Ptr) {
     self.comm += 1;
     let loc = self.heap.alloc(4);
-    self.link(self.heap.get(a.val(), P1), Ptr::new(b.tag(), loc+0));
-    self.link(self.heap.get(b.val(), P1), Ptr::new(a.tag(), loc+2));
-    self.link(self.heap.get(a.val(), P2), Ptr::new(b.tag(), loc+1));
-    self.link(self.heap.get(b.val(), P2), Ptr::new(a.tag(), loc+3));
-    self.heap.set(loc+0,P1,Ptr::new(VR1, loc+2));
-    self.heap.set(loc+0,P2,Ptr::new(VR1, loc+3));
-    self.heap.set(loc+1,P1,Ptr::new(VR2, loc+2));
-    self.heap.set(loc+1,P2,Ptr::new(VR2, loc+3));
-    self.heap.set(loc+2,P1,Ptr::new(VR1, loc+0));
-    self.heap.set(loc+2,P2,Ptr::new(VR1, loc+1));
-    self.heap.set(loc+3,P1,Ptr::new(VR2, loc+0));
-    self.heap.set(loc+3,P2,Ptr::new(VR2, loc+1));
-    self.heap.free(a.val());
-    self.heap.free(b.val());
+    self.heap.set(loc+0, P1, Ptr::new(VR1, loc+2));
+    self.heap.set(loc+0, P2, Ptr::new(VR1, loc+3));
+    self.heap.set(loc+1, P1, Ptr::new(VR2, loc+2));
+    self.heap.set(loc+1, P2, Ptr::new(VR2, loc+3));
+    self.heap.set(loc+2, P1, Ptr::new(VR1, loc+0));
+    self.heap.set(loc+2, P2, Ptr::new(VR1, loc+1));
+    self.heap.set(loc+3, P1, Ptr::new(VR2, loc+0));
+    self.heap.set(loc+3, P2, Ptr::new(VR2, loc+1));
+    self.link1(Ptr::new(VR1, a.val()), Ptr::new(b.tag(), loc+0));
+    self.link1(Ptr::new(VR1, b.val()), Ptr::new(a.tag(), loc+2));
+    self.link1(Ptr::new(VR2, a.val()), Ptr::new(b.tag(), loc+1));
+    self.link1(Ptr::new(VR2, b.val()), Ptr::new(a.tag(), loc+3));
   }
 
   #[inline(always)]
   pub fn eras(&mut self, a: Ptr, b: Ptr) {
     self.eras += 1;
-    self.link(self.heap.get(b.val(), P1), ERAS);
-    self.link(self.heap.get(b.val(), P2), ERAS);
-    self.heap.free(b.val());
+    self.link1(Ptr::new(VR1, b.val()), ERAS);
+    self.link1(Ptr::new(VR2, b.val()), ERAS);
   }
 
   #[inline(always)]
