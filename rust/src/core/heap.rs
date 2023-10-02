@@ -1,23 +1,16 @@
 use crate::core::{*};
 
-use std::sync::atomic::{AtomicU32, Ordering};
-
-pub struct AtomicPtr(AtomicU32);
-
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Heap {
-  data: Vec<AtomicPtr>,
+  data: Vec<Ptr>,
   next: usize,
   used: usize,
 }
 
 impl Heap {
   pub fn new(size: usize) -> Heap {
-    let mut data = vec![];
-    for _ in 0 .. size * 2 {
-      data.push(AtomicPtr(AtomicU32::new(NULL.0)));
-    }
     return Heap {
-      data,
+      data: vec![NULL; size * 2],
       next: 1,
       used: 0,
     };
@@ -68,29 +61,14 @@ impl Heap {
   #[inline(always)]
   pub fn get(&self, index: Val, port: Port) -> Ptr {
     unsafe {
-      return Ptr(self.data.get_unchecked((index * 2 + port) as usize).0.load(Ordering::Relaxed));
+      return *self.data.get_unchecked((index * 2 + port) as usize);
     }
   }
 
   #[inline(always)]
   pub fn set(&mut self, index: Val, port: Port, value: Ptr) {
     unsafe {
-      self.data.get_unchecked_mut((index * 2 + port) as usize).0.store(value.0, Ordering::Relaxed);
-    }
-  }
-
-  #[inline(always)]
-  pub fn take(&self, index: Val, port: Port) -> Ptr {
-    unsafe {
-      return Ptr(self.data.get_unchecked((index * 2 + port) as usize).0.swap(LOCK.0, Ordering::Relaxed));
-    }
-  }
-
-  #[inline(always)]
-  pub fn try_replace(&self, index: Val, port: Port, from: Ptr, to: Ptr) -> bool {
-    unsafe {
-      let ptr_ref = self.data.get_unchecked((index * 2 + port) as usize);
-      return ptr_ref.0.compare_exchange_weak(from.0, to.0, Ordering::Relaxed, Ordering::Relaxed).is_ok();
+      *self.data.get_unchecked_mut((index * 2 + port) as usize) = value;
     }
   }
 
@@ -106,10 +84,10 @@ impl Heap {
 
   #[inline(always)]
   pub fn compact(&mut self) -> (Ptr, Vec<(Ptr,Ptr)>) {
-    let root = self.get(0, P2);
+    let root = self.data[1];
     let mut node = vec![];
     for i in 0 .. self.used {
-      node.push((self.get((i+1) as Val, P1), self.get((i+1) as Val, P2)));
+      node.push((self.data[(i+1)*2+0], self.data[(i+1)*2+1]));
     }
     return (root, node);
   }

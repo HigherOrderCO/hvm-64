@@ -23,10 +23,10 @@ pub const ERA: Tag = 0x3; // unboxed eraser
 pub const CON: Tag = 0x4; // main port of con node
 pub const DUP: Tag = 0x5; // main port of dup node
 
+// Root pointer.
 pub const ERAS: Ptr = Ptr(0x0000_0000 | ERA as Val);
 pub const ROOT: Ptr = Ptr(0x0000_0000 | VR2 as Val);
 pub const NULL: Ptr = Ptr(0x0000_0000);
-pub const LOCK: Ptr = Ptr(0xFFFF_FFFF);
 
 // An auxiliary port.
 pub type Port = Val;
@@ -39,6 +39,7 @@ pub const P2 : Port = 1;
 pub struct Ptr(pub Val);
 
 // A interaction combinator net.
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Net {
   //pub root: Ptr, // entrancy
   pub rdex: Vec<(Ptr,Ptr)>, // redexes
@@ -351,3 +352,8 @@ impl Net {
     return self.anni + self.comm + self.eras + self.dref;
   }
 }
+
+// The Ptr type on the file above has been refactored. Now, instead of a wrapping struct, it will
+// be just a type alias to u32. Refactor the file above to be correct after that change. This will
+// require changing all the functions inside `impl Ptr` to independent functions that receive Ptr
+// as the first argument, 
