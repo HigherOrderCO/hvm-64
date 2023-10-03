@@ -123,10 +123,7 @@ impl Ptr {
 
   #[inline(always)]
   pub fn adjust(&self, loc: Val) -> Ptr {
-    return Ptr::new(
-      self.tag(),
-      self.val() + if self.has_loc() { loc - 1 } else { 0 },
-    );
+    return Ptr::new(self.tag(), self.val() + if self.has_loc() { loc - 1 } else { 0 });
   }
 }
 
@@ -288,17 +285,13 @@ impl Net {
   // Converts to a def.
   pub fn to_def(self) -> Def {
     let (root, node) = self.heap.compact();
-    return Def {
-      root,
-      rdex: self.rdex,
-      node,
-    };
+    Def { root, rdex: self.rdex, node }
   }
 
   // Gets a pointer's target.
   #[inline(always)]
   pub fn get_target(&self, ptr: Ptr) -> Ptr {
-    return self.heap.get(ptr.val(), ptr.0 & 1);
+    self.heap.get(ptr.val(), ptr.0 & 1)
   }
 
   // Sets a pointer's target.

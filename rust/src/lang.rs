@@ -65,17 +65,9 @@ use std::str::Chars;
 #[derive(Clone, Hash, PartialEq, Eq, Debug)]
 pub enum LTree {
   Era,
-  Nod {
-    tag: Tag,
-    lft: Box<LTree>,
-    rgt: Box<LTree>,
-  },
-  Var {
-    nam: String,
-  },
-  Ref {
-    nam: Val,
-  },
+  Nod { tag: Tag, lft: Box<LTree>, rgt: Box<LTree> },
+  Var { nam: String },
+  Ref { nam: Val },
   //U32 {
   //val: u32
   //},
@@ -174,9 +166,7 @@ pub fn parse_ltree(chars: &mut Peekable<Chars>) -> LTree {
       chars.next();
       skip_spaces(chars);
       let name = parse_string(chars);
-      LTree::Ref {
-        nam: name_to_val(&name),
-      }
+      LTree::Ref { nam: name_to_val(&name) }
     }
     //Some(c) if c.is_digit(10) => {
     //LTree::U32 { val: parse_decimal(chars) as u32 }
@@ -194,9 +184,7 @@ pub fn parse_ltree(chars: &mut Peekable<Chars>) -> LTree {
     //consume(chars, "}");
     //LTree::OpX { opx, lft, rgt }
     //},
-    _ => LTree::Var {
-      nam: parse_string(chars),
-    },
+    _ => LTree::Var { nam: parse_string(chars) },
   }
 }
 
@@ -459,12 +447,7 @@ pub enum Parent {
 
 const PARENT_ROOT: Parent = Parent::Node { val: 0, port: P2 };
 
-pub fn alloc_ltree(
-  net: &mut Net,
-  tree: &LTree,
-  vars: &mut HashMap<String, Parent>,
-  parent: Parent,
-) -> Ptr {
+pub fn alloc_ltree(net: &mut Net, tree: &LTree, vars: &mut HashMap<String, Parent>, parent: Parent) -> Ptr {
   match tree {
     LTree::Era => ERAS,
     LTree::Nod { tag, lft, rgt } => {
@@ -492,11 +475,7 @@ pub fn alloc_ltree(
             Parent::Rdex => {
               unreachable!();
             }
-            Parent::Node { val, port } => {
-              net
-                .heap
-                .set(*other_val, *other_port, Ptr::new(port_to_tag(port), val))
-            }
+            Parent::Node { val, port } => net.heap.set(*other_val, *other_port, Ptr::new(port_to_tag(port), val)),
           }
           return Ptr::new(port_to_tag(*other_port), *other_val);
         }
@@ -530,13 +509,7 @@ pub fn do_alloc_ltree(net: &mut Net, tree: &LTree) -> Ptr {
   alloc_ltree(net, tree, &mut HashMap::new(), PARENT_ROOT)
 }
 
-pub fn readback_ltree(
-  net: &Net,
-  ptr: Ptr,
-  parent: Parent,
-  vars: &mut HashMap<Parent, String>,
-  fresh: &mut usize,
-) -> LTree {
+pub fn readback_ltree(net: &Net, ptr: Ptr, parent: Parent, vars: &mut HashMap<Parent, String>, fresh: &mut usize) -> LTree {
   match ptr.tag() {
     //NIL => {
     //LTree::Var { nam: "?".to_string() }
@@ -559,14 +532,8 @@ pub fn readback_ltree(
     //},
     VR1 | VR2 => {
       let key = match ptr.tag() {
-        VR1 => Parent::Node {
-          val: ptr.val(),
-          port: P1,
-        },
-        VR2 => Parent::Node {
-          val: ptr.val(),
-          port: P2,
-        },
+        VR1 => Parent::Node { val: ptr.val(), port: P1 },
+        VR2 => Parent::Node { val: ptr.val(), port: P2 },
         _ => unreachable!(),
       };
       if let Some(nam) = vars.get(&key) {
@@ -579,26 +546,8 @@ pub fn readback_ltree(
       }
     }
     _ => {
-      let lft = readback_ltree(
-        net,
-        net.heap.get(ptr.val(), P1),
-        Parent::Node {
-          val: ptr.val(),
-          port: P1,
-        },
-        vars,
-        fresh,
-      );
-      let rgt = readback_ltree(
-        net,
-        net.heap.get(ptr.val(), P2),
-        Parent::Node {
-          val: ptr.val(),
-          port: P2,
-        },
-        vars,
-        fresh,
-      );
+      let lft = readback_ltree(net, net.heap.get(ptr.val(), P1), Parent::Node { val: ptr.val(), port: P1 }, vars, fresh);
+      let rgt = readback_ltree(net, net.heap.get(ptr.val(), P2), Parent::Node { val: ptr.val(), port: P2 }, vars, fresh);
       LTree::Nod {
         tag: ptr.tag(),
         lft: Box::new(lft),

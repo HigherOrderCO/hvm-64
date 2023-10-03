@@ -36,14 +36,8 @@ fn main() {
   println!("-----");
   println!("INTR: {}", net.anni + net.comm + net.eras);
   println!("RWTS: {}", net.anni + net.comm + net.eras + net.dref);
-  println!(
-    "TIME: {:.3} s",
-    (start.elapsed().as_millis() as f64) / 1000.0
-  );
-  println!(
-    "RPS : {:.3} million",
-    (net.rewrites() as f64) / (start.elapsed().as_millis() as f64) / 1000.0
-  );
+  println!("TIME: {:.3} s", (start.elapsed().as_millis() as f64) / 1000.0);
+  println!("RPS : {:.3} million", (net.rewrites() as f64) / (start.elapsed().as_millis() as f64) / 1000.0);
 
   //println!("{}", &compile_book(&book));
 }
