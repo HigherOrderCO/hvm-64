@@ -1,0 +1,9 @@
+edition = "2021"
+version = "Two"
+max_width = 160
+newline_style = "Unix" # won't add \r\n on windows machines, better on diffs
+tab_spaces = 2
+imports_granularity = "Module"
+use_field_init_shorthand = true
+use_try_shorthand = true
+overflow_delimited_expr = true

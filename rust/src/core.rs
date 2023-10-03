@@ -25,8 +25,8 @@ pub const NULL: Ptr = Ptr(0x0000_0000);
 
 // An auxiliary port.
 pub type Port = Val;
-pub const P1 : Port = 0;
-pub const P2 : Port = 1;
+pub const P1: Port = 0;
+pub const P2: Port = 1;
 
 // A tagged pointer.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
@@ -34,7 +34,7 @@ pub struct Ptr(pub Val);
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Heap {
-  data: Vec<(Ptr,Ptr)>,
+  data: Vec<(Ptr, Ptr)>,
   next: usize,
   used: usize,
   full: bool,
@@ -44,20 +44,20 @@ pub struct Heap {
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Net {
   //pub root: Ptr, // entrancy
-  pub rdex: Vec<(Ptr,Ptr)>, // redexes
-  pub heap: Heap, // nodes
-  pub anni: usize, // anni rewrites
-  pub comm: usize, // comm rewrites
-  pub eras: usize, // eras rewrites
-  pub dref: usize, // dref rewrites
+  pub rdex: Vec<(Ptr, Ptr)>, // redexes
+  pub heap: Heap,            // nodes
+  pub anni: usize,           // anni rewrites
+  pub comm: usize,           // comm rewrites
+  pub eras: usize,           // eras rewrites
+  pub dref: usize,           // dref rewrites
 }
 
 // A compact closed net, used for dereferences.
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Def {
   pub root: Ptr,
-  pub rdex: Vec<(Ptr,Ptr)>,
-  pub node: Vec<(Ptr,Ptr)>,
+  pub rdex: Vec<(Ptr, Ptr)>,
+  pub node: Vec<(Ptr, Ptr)>,
 }
 
 // A map of id to definitions (closed nets).
@@ -130,7 +130,9 @@ impl Ptr {
 impl Book {
   #[inline(always)]
   pub fn new() -> Self {
-    Book { defs: vec![Def::new(); 1 << 24] }
+    Book {
+      defs: vec![Def::new(); 1 << 24],
+    }
   }
 
   #[inline(always)]
@@ -157,7 +159,7 @@ impl Def {
 impl Heap {
   pub fn new(size: usize) -> Heap {
     return Heap {
-      data: vec![(NULL,NULL); size],
+      data: vec![(NULL, NULL); size],
       next: 1,
       used: 0,
       full: false,
@@ -246,12 +248,12 @@ impl Heap {
   }
 
   #[inline(always)]
-  pub fn compact(&self) -> (Ptr, Vec<(Ptr,Ptr)>) {
+  pub fn compact(&self) -> (Ptr, Vec<(Ptr, Ptr)>) {
     let root = self.data[0].1;
     let mut node = vec![];
     loop {
-      let p1 = self.data[1+node.len()].0;
-      let p2 = self.data[1+node.len()].1;
+      let p1 = self.data[1 + node.len()].0;
+      let p2 = self.data[1 + node.len()].1;
       if p1 != NULL && p2 != NULL {
         node.push((p1, p2));
       } else {
@@ -282,14 +284,14 @@ impl Net {
 
   // Converts to a def.
   pub fn to_def(self) -> Def {
-    let (root,node) = self.heap.compact();
-    return Def { root, rdex: self.rdex, node };
+    let (root, node) = self.heap.compact();
+    Def { root, rdex: self.rdex, node }
   }
 
   // Gets a pointer's target.
   #[inline(always)]
   pub fn get_target(&self, ptr: Ptr) -> Ptr {
-    return self.heap.get(ptr.val(), ptr.0 & 1);
+    self.heap.get(ptr.val(), ptr.0 & 1)
   }
 
   // Sets a pointer's target.
@@ -355,18 +357,18 @@ impl Net {
   pub fn comm(&mut self, a: Ptr, b: Ptr) {
     self.comm += 1;
     let loc = self.heap.alloc(4);
-    self.link(self.heap.get(a.val(), P1), Ptr::new(b.tag(), loc+0));
-    self.link(self.heap.get(b.val(), P1), Ptr::new(a.tag(), loc+2));
-    self.link(self.heap.get(a.val(), P2), Ptr::new(b.tag(), loc+1));
-    self.link(self.heap.get(b.val(), P2), Ptr::new(a.tag(), loc+3));
-    self.heap.set(loc+0,P1,Ptr::new(VR1, loc+2));
-    self.heap.set(loc+0,P2,Ptr::new(VR1, loc+3));
-    self.heap.set(loc+1,P1,Ptr::new(VR2, loc+2));
-    self.heap.set(loc+1,P2,Ptr::new(VR2, loc+3));
-    self.heap.set(loc+2,P1,Ptr::new(VR1, loc+0));
-    self.heap.set(loc+2,P2,Ptr::new(VR1, loc+1));
-    self.heap.set(loc+3,P1,Ptr::new(VR2, loc+0));
-    self.heap.set(loc+3,P2,Ptr::new(VR2, loc+1));
+    self.link(self.heap.get(a.val(), P1), Ptr::new(b.tag(), loc + 0));
+    self.link(self.heap.get(b.val(), P1), Ptr::new(a.tag(), loc + 2));
+    self.link(self.heap.get(a.val(), P2), Ptr::new(b.tag(), loc + 1));
+    self.link(self.heap.get(b.val(), P2), Ptr::new(a.tag(), loc + 3));
+    self.heap.set(loc + 0, P1, Ptr::new(VR1, loc + 2));
+    self.heap.set(loc + 0, P2, Ptr::new(VR1, loc + 3));
+    self.heap.set(loc + 1, P1, Ptr::new(VR2, loc + 2));
+    self.heap.set(loc + 1, P2, Ptr::new(VR2, loc + 3));
+    self.heap.set(loc + 2, P1, Ptr::new(VR1, loc + 0));
+    self.heap.set(loc + 2, P2, Ptr::new(VR1, loc + 1));
+    self.heap.set(loc + 3, P1, Ptr::new(VR2, loc + 0));
+    self.heap.set(loc + 3, P2, Ptr::new(VR2, loc + 1));
     self.heap.free(a.val());
     self.heap.free(b.val());
   }
@@ -396,12 +398,12 @@ impl Net {
         let len = got.node.len();
         let loc = self.heap.alloc(len);
         // Load nodes, adjusted.
-        for i in 0 .. len as Val {
+        for i in 0..len as Val {
           unsafe {
             let p1 = got.node.get_unchecked(i as usize).0.adjust(loc);
             let p2 = got.node.get_unchecked(i as usize).1.adjust(loc);
-            self.heap.set(loc+i,P1,p1);
-            self.heap.set(loc+i,P2,p2);
+            self.heap.set(loc + i, P1, p1);
+            self.heap.set(loc + i, P2, p2);
           }
         }
         // Load redexes, adjusted.
@@ -423,7 +425,7 @@ impl Net {
 
   // Reduces all redexes.
   pub fn reduce(&mut self, book: &Book) {
-    let mut rdex : Vec<(Ptr,Ptr)> = vec![];
+    let mut rdex: Vec<(Ptr, Ptr)> = vec![];
     std::mem::swap(&mut self.rdex, &mut rdex);
     while rdex.len() > 0 {
       for (a, b) in &rdex {
