@@ -17,7 +17,7 @@ fn main() {
 
   // Initializes the net
   let net = &mut Net::new(1 << 28);
-  net.boot(name_to_val("ex3"));
+  net.boot(name_to_val("ex0"));
 
   // Marks initial time
   let start = std::time::Instant::now();
