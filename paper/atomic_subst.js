@@ -55,10 +55,10 @@ function* atomic_rewrite(tid, a_dir, b_dir) {
 function* atomic_subst(tid, a_ptr, a_dir, b_ptr) {
   var a_got = yield* atomic_cas(a_ptr, a_dir, b_ptr);
   yield* atomic_swap(a_dir, a_got == a_dir ? -1 : b_ptr+RED);
-  yield* atomic_link(tid, a_ptr);
+  yield* atomic_link(tid, a_ptr, b_ptr);
 }
 
-function* atomic_link(tid, dir) {
+function* atomic_link(tid, dir, val) {
   var ptr = yield* atomic_read(dir);
   if (is_var(ptr)) {
     while (1) {
@@ -68,10 +68,12 @@ function* atomic_link(tid, dir) {
         if (got == ptr) {
           yield* atomic_swap(ptr, -1);
           ptr = trg - RED;
-          continue;
         }
+      } else if (trg == GOT) {
+        continue;
+      } else {
+        break;
       }
-      break;
     }
   }
 }
@@ -94,11 +96,6 @@ function progress(ticks) {
   }
 }
 
-function link(dir) {
-  var t = atomic_link(0, dir);
-  while (!t.next().done) {};
-}
-
 function show(x) {
   if (typeof x == "number") {
     return x == -1 ? "  " : x == 0xFF ? "::" : ("00"+x.toString(16)).slice(-2);
@@ -117,6 +114,3 @@ progress(256);
 
 console.log(show(I));
 console.log(show(D));
-D.map((x,i) => link(i));
-console.log(show(D));
-console.log(T);
