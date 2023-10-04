@@ -45,15 +45,17 @@ const GOT = 0xFF; // "taken" placeholder
 const is_red = (x) => x >= RED && x < RED*2;
 const is_var = (x) => x >= 0 && x < RED;
 
-function* atomic_subst(tid, a_dir, b_dir) {
+function* atomic_rewrite(tid, a_dir, b_dir) {
   var a_ptr = yield* atomic_swap(a_dir, GOT);
   var b_ptr = yield* atomic_swap(b_dir, GOT);
+  yield* atomic_subst(tid, a_ptr, a_dir, b_ptr);
+  yield* atomic_subst(tid, b_ptr, b_dir, a_ptr);
+}
+
+function* atomic_subst(tid, a_ptr, a_dir, b_ptr) {
   var a_got = yield* atomic_cas(a_ptr, a_dir, b_ptr);
-  var b_got = yield* atomic_cas(b_ptr, b_dir, a_ptr);
   yield* atomic_swap(a_dir, a_got == a_dir ? -1 : b_ptr+RED);
-  yield* atomic_swap(b_dir, b_got == b_dir ? -1 : a_ptr+RED);
   yield* atomic_link(tid, a_ptr);
-  yield* atomic_link(tid, b_ptr);
 }
 
 function* atomic_link(tid, dir) {
@@ -110,7 +112,7 @@ function show(x) {
 
 var I = [0,1,2,3,4,5,6,7];
 var D = [1,0,3,2,5,4,7,6];
-var T = [atomic_subst(0,1,2), atomic_subst(1,3,4), atomic_subst(2,5,6)];
+var T = [atomic_rewrite(0,1,2), atomic_rewrite(1,3,4), atomic_rewrite(2,5,6)];
 progress(256);
 
 console.log(show(I));
