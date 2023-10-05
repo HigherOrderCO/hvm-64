@@ -13,10 +13,20 @@ pub type Val = u32;
 // Core terms.
 pub const VR1: Tag = 0x0; // aux port to aux port 1
 pub const VR2: Tag = 0x1; // aux port to aux port 2
-pub const REF: Tag = 0x2; // closed net reference
-pub const ERA: Tag = 0x3; // unboxed eraser
-pub const CON: Tag = 0x4; // main port of con node
-pub const DUP: Tag = 0x5; // main port of dup node
+pub const RD1: Tag = 0x2; // aux port to aux port 1
+pub const RD2: Tag = 0x3; // aux port to aux port 2
+pub const REF: Tag = 0x4; // closed net reference
+pub const ERA: Tag = 0x5; // unboxed eraser
+pub const CON: Tag = 0x6; // main port of con node
+pub const DUP: Tag = 0x7; // main port of dup node
+pub const TRI: Tag = 0x8;
+pub const QUA: Tag = 0x9;
+pub const QUI: Tag = 0xA;
+pub const SEX: Tag = 0xB;
+//pub const NUM: Tag = 0xC;
+//pub const OP2: Tag = 0xD;
+//pub const IFE: Tag = 0xE;
+//pub const USE: Tag = 0xF;
 
 // Root pointer.
 pub const ERAS: Ptr = Ptr(0x0000_0000 | ERA as Val);
@@ -55,14 +65,13 @@ pub struct Net {
 // A compact closed net, used for dereferences.
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Def {
-  pub root: Ptr,
   pub rdex: Vec<(Ptr, Ptr)>,
   pub node: Vec<(Ptr, Ptr)>,
 }
 
 // A map of id to definitions (closed nets).
 pub struct Book {
-  defs: Vec<Def>,
+  pub defs: Vec<Def>,
 }
 
 impl Ptr {
@@ -149,7 +158,6 @@ impl Book {
 impl Def {
   pub fn new() -> Self {
     Def {
-      root: NULL,
       rdex: vec![],
       node: vec![],
     }
@@ -248,19 +256,18 @@ impl Heap {
   }
 
   #[inline(always)]
-  pub fn compact(&self) -> (Ptr, Vec<(Ptr, Ptr)>) {
-    let root = self.data[0].1;
+  pub fn compact(&self) -> Vec<(Ptr, Ptr)> {
     let mut node = vec![];
     loop {
-      let p1 = self.data[1 + node.len()].0;
-      let p2 = self.data[1 + node.len()].1;
-      if p1 != NULL && p2 != NULL {
+      let p1 = self.data[node.len()].0;
+      let p2 = self.data[node.len()].1;
+      if p1 != NULL || p2 != NULL {
         node.push((p1, p2));
       } else {
         break;
       }
     }
-    return (root, node);
+    return node;
   }
 }
 
@@ -284,8 +291,7 @@ impl Net {
 
   // Converts to a def.
   pub fn to_def(self) -> Def {
-    let (root, node) = self.heap.compact();
-    Def { root, rdex: self.rdex, node }
+    Def { rdex: self.rdex, node: self.heap.compact() }
   }
 
   // Gets a pointer's target.
@@ -395,13 +401,13 @@ impl Net {
     if ptr.is_ref() {
       // Load the closed net.
       if let Some(got) = book.get(ptr.val()) {
-        let len = got.node.len();
+        let len = got.node.len() - 1;
         let loc = self.heap.alloc(len);
         // Load nodes, adjusted.
         for i in 0..len as Val {
           unsafe {
-            let p1 = got.node.get_unchecked(i as usize).0.adjust(loc);
-            let p2 = got.node.get_unchecked(i as usize).1.adjust(loc);
+            let p1 = got.node.get_unchecked(1 + i as usize).0.adjust(loc);
+            let p2 = got.node.get_unchecked(1 + i as usize).1.adjust(loc);
             self.heap.set(loc + i, P1, p1);
             self.heap.set(loc + i, P2, p2);
           }
@@ -413,7 +419,7 @@ impl Net {
           self.rdex.push((p1, p2));
         }
         // Load root, adjusted.
-        ptr = got.root.adjust(loc);
+        ptr = got.node[0].1.adjust(loc);
         // Link root.
         if ptr.is_var() {
           self.set_target(ptr, parent);
