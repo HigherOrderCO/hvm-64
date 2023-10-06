@@ -11,22 +11,40 @@ pub type Tag = u8;
 pub type Val = u32;
 
 // Core terms.
-pub const VR1: Tag = 0x0; // aux port to aux port 1
-pub const VR2: Tag = 0x1; // aux port to aux port 2
-pub const RD1: Tag = 0x2; // aux port to aux port 1
-pub const RD2: Tag = 0x3; // aux port to aux port 2
-pub const REF: Tag = 0x4; // closed net reference
+pub const VR1: Tag = 0x0; // variable to aux port 1
+pub const VR2: Tag = 0x1; // variable to aux port 2
+pub const RD1: Tag = 0x2; // redirect to aux port 1
+pub const RD2: Tag = 0x3; // redirect to aux port 2
+pub const REF: Tag = 0x4; // lazy closed net
 pub const ERA: Tag = 0x5; // unboxed eraser
-pub const CON: Tag = 0x6; // main port of con node
-pub const DUP: Tag = 0x7; // main port of dup node
-pub const TRI: Tag = 0x8;
-pub const QUA: Tag = 0x9;
-pub const QUI: Tag = 0xA;
-pub const SEX: Tag = 0xB;
-//pub const NUM: Tag = 0xC;
-//pub const OP2: Tag = 0xD;
-//pub const IFE: Tag = 0xE;
-//pub const USE: Tag = 0xF;
+pub const NUM: Tag = 0x6; // unboxed number
+pub const OP2: Tag = 0x7; // numeric operation binary
+pub const OP1: Tag = 0x8; // numeric operation unary
+pub const ITE: Tag = 0x9; // numeric if-then-else
+pub const CT0: Tag = 0xA; // main port of con node 0
+pub const CT1: Tag = 0xB; // main port of con node 1
+pub const CT2: Tag = 0xC; // main port of con node 2
+pub const CT3: Tag = 0xD; // main port of con node 3
+pub const CT4: Tag = 0xE; // main port of con node 4
+pub const CT5: Tag = 0xF; // main port of con node 5
+
+// Numeric operations.
+pub const USE: Tag = 0x0; // set-next-op
+pub const ADD: Tag = 0x1; // addition
+pub const SUB: Tag = 0x2; // subtraction
+pub const MUL: Tag = 0x3; // multiplication
+pub const DIV: Tag = 0x4; // division
+pub const MOD: Tag = 0x5; // modulus
+pub const EQ : Tag = 0x6; // equal-to
+pub const NE : Tag = 0x7; // not-equal-to
+pub const LT : Tag = 0x8; // less-than
+pub const GT : Tag = 0x9; // greater-than
+pub const AND: Tag = 0xA; // logical-and
+pub const OR : Tag = 0xB; // logical-or
+pub const XOR: Tag = 0xC; // logical-xor
+pub const NOT: Tag = 0xD; // logical-not
+pub const LSH: Tag = 0xE; // left-shift
+pub const RSH: Tag = 0xF; // right-shift
 
 // Root pointer.
 pub const ERAS: Ptr = Ptr(0x0000_0000 | ERA as Val);
@@ -53,13 +71,13 @@ pub struct Heap {
 // A interaction combinator net.
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Net {
-  //pub root: Ptr, // entrancy
-  pub rdex: Vec<(Ptr, Ptr)>, // redexes
-  pub heap: Heap,            // nodes
-  pub anni: usize,           // anni rewrites
-  pub comm: usize,           // comm rewrites
-  pub eras: usize,           // eras rewrites
-  pub dref: usize,           // dref rewrites
+  pub rdex: Vec<(Ptr,Ptr)>, // redexes
+  pub heap: Heap, // nodes
+  pub anni: usize, // anni rewrites
+  pub comm: usize, // comm rewrites
+  pub eras: usize, // eras rewrites
+  pub dref: usize, // dref rewrites
+  pub oper: usize, // oper rewrites
 }
 
 // A compact closed net, used for dereferences.
@@ -112,7 +130,7 @@ impl Ptr {
 
   #[inline(always)]
   pub fn is_ctr(&self) -> bool {
-    return self.tag() >= CON;
+    return self.tag() >= CT0;
   }
 
   #[inline(always)]
@@ -122,7 +140,27 @@ impl Ptr {
 
   #[inline(always)]
   pub fn is_pri(&self) -> bool {
-    return self.is_era() || self.is_ctr() || self.is_ref();
+    return self.tag() >= REF;
+  }
+
+  #[inline(always)]
+  pub fn is_num(&self) -> bool {
+    return self.tag() == NUM;
+  }
+
+  #[inline(always)]
+  pub fn is_op1(&self) -> bool {
+    return self.tag() == OP1;
+  }
+
+  #[inline(always)]
+  pub fn is_op2(&self) -> bool {
+    return self.tag() == OP2;
+  }
+
+  #[inline(always)]
+  pub fn is_ite(&self) -> bool {
+    return self.tag() == ITE;
   }
 
   #[inline(always)]
@@ -281,6 +319,7 @@ impl Net {
       comm: 0,
       eras: 0,
       dref: 0,
+      oper: 0,
     }
   }
 
@@ -332,25 +371,98 @@ impl Net {
     } else if b.is_ref() && a.is_ctr() {
       b = self.deref(book, b, a);
     }
-    // CON-CON
+    // CTR-CTR (eq)
     if a.is_ctr() && b.is_ctr() && a.tag() == b.tag() {
       self.anni(a, b);
-    // CON-DUP
+    // CTR-CTR (ne)
     } else if a.is_ctr() && b.is_ctr() && a.tag() != b.tag() {
       self.comm(a, b);
-    // ERA-CON
-    } else if a.is_era() && b.is_ctr() {
-      self.eras(a, b);
-    // CON-ERA
+    // CTR-ERA
     } else if a.is_ctr() && b.is_era() {
-      self.eras(b, a);
-    // ERA-ERA
-    } else {
+      self.era2(a);
+    // ERA-CTR
+    } else if a.is_era() && b.is_ctr() {
+      self.era2(b);
+    // REF-ERA
+    } else if a.is_ref() && b.is_era() {
       self.eras += 1;
+    // ERA-REF
+    } else if a.is_era() && b.is_ref() {
+      self.eras += 1;
+    // ERA-ERA
+    } else if a.is_era() && b.is_era() {
+      self.eras += 1;
+    // CTR-NUM
+    } else if a.is_ctr() && b.is_num() {
+      self.copy(a, b);
+    // NUM-CTR
+    } else if a.is_num() && b.is_ctr() {
+      self.copy(b, a);
+    // NUM-ERA
+    } else if a.is_num() && b.is_era() {
+      self.eras += 1;
+    // ERA-NUM
+    } else if a.is_era() && b.is_num() {
+      self.eras += 1;
+    // OP2-NUM
+    } else if a.is_op2() && b.is_num() {
+      self.op2n(a, b);
+    // NUM-OP2
+    } else if a.is_num() && b.is_op2() {
+      self.op2n(b, a);
+    // OP1-NUM
+    } else if a.is_op1() && b.is_num() {
+      self.op1n(a, b);
+    // NUM-OP1
+    } else if a.is_num() && b.is_op1() {
+      self.op1n(b, a);
+    // OP2-CTR
+    } else if a.is_op2() && b.is_ctr() {
+      self.comm(a, b);
+    // CTR-OP2
+    } else if a.is_ctr() && b.is_op2() {
+      self.comm(b, a);
+    // OP1-CTR
+    } else if a.is_op1() && b.is_ctr() {
+      self.pass(a, b);
+    // CTR-OP1
+    } else if a.is_ctr() && b.is_op1() {
+      self.pass(b, a);
+    // OP2-ERA
+    } else if a.is_op2() && b.is_era() {
+      self.era2(a);
+    // ERA-OP2
+    } else if a.is_era() && b.is_op2() {
+      self.era2(b);
+    // OP1-ERA
+    } else if a.is_op1() && b.is_era() {
+      self.era1(a);
+    // ERA-OP1
+    } else if a.is_era() && b.is_op1() {
+      self.era1(b);
+    // ITE-NUM
+    } else if a.is_ite() && b.is_num() {
+      self.cond(a, b);
+    // NUM-ITE
+    } else if a.is_num() && b.is_ite() {
+      self.cond(b, a);
+    // ITE-CTR
+    } else if a.is_ite() && b.is_ctr() {
+      self.comm(a, b);
+    // CTR-ITE
+    } else if a.is_ctr() && b.is_ite() {
+      self.comm(b, a);
+    // ITE-ERA
+    } else if a.is_ite() && b.is_era() {
+      self.era2(a);
+    // ERA-ITE
+    } else if a.is_era() && b.is_ite() {
+      self.era2(b);
+    } else {
+      panic!("undefined interaction: {:08x} {:08x}", a.0, b.0);
     }
   }
 
-  #[inline(always)]
   pub fn anni(&mut self, a: Ptr, b: Ptr) {
     self.anni += 1;
     self.link(self.heap.get(a.val(), P1), self.heap.get(b.val(), P1));
@@ -359,7 +471,6 @@ impl Net {
     self.heap.free(b.val());
   }
 
-  #[inline(always)]
   pub fn comm(&mut self, a: Ptr, b: Ptr) {
     self.comm += 1;
     let loc = self.heap.alloc(4);
@@ -379,17 +490,100 @@ impl Net {
     self.heap.free(b.val());
   }
 
-  #[inline(always)]
-  pub fn eras(&mut self, a: Ptr, b: Ptr) {
-    self.eras += 1;
-    self.link(self.heap.get(b.val(), P1), ERAS);
-    self.link(self.heap.get(b.val(), P2), ERAS);
+  pub fn pass(&mut self, a: Ptr, b: Ptr) {
+    self.comm += 1;
+    let loc = self.heap.alloc(3);
+    self.link(self.heap.get(a.val(), P2), Ptr::new(b.tag(), loc+0));
+    self.link(self.heap.get(b.val(), P1), Ptr::new(a.tag(), loc+1));
+    self.link(self.heap.get(b.val(), P2), Ptr::new(a.tag(), loc+2));
+    self.heap.set(loc + 0, P1, Ptr::new(VR2, loc+1));
+    self.heap.set(loc + 0, P2, Ptr::new(VR2, loc+2));
+    self.heap.set(loc + 1, P1, Ptr::new(VR1, loc+0));
+    self.heap.set(loc + 1, P2, Ptr::new(VR2, loc+0));
+    self.heap.set(loc + 2, P1, self.heap.get(a.val(),P1));
+    self.heap.set(loc + 2, P2, self.heap.get(a.val(),P1));
+    self.heap.free(a.val());
     self.heap.free(b.val());
   }
 
-  #[inline(always)]
-  pub fn void(&mut self, a: Ptr, b: Ptr) {
+  pub fn copy(&mut self, a: Ptr, b: Ptr) {
+    self.comm += 1;
+    self.link(self.heap.get(a.val(), P1), b);
+    self.link(self.heap.get(a.val(), P2), b);
+    self.heap.free(a.val());
+  }
+
+  pub fn era2(&mut self, a: Ptr) {
     self.eras += 1;
+    self.link(self.heap.get(a.val(), P1), ERAS);
+    self.link(self.heap.get(a.val(), P2), ERAS);
+    self.heap.free(a.val());
+  }
+
+  pub fn era1(&mut self, a: Ptr) {
+    self.eras += 1;
+    self.link(self.heap.get(a.val(), P2), ERAS);
+    self.heap.free(a.val());
+  }
+
+  pub fn op2n(&mut self, a: Ptr, b: Ptr) {
+    self.oper += 1;
+    let v1 = self.heap.get(a.val(), P1);
+    self.heap.set(a.val(), P1, b);
+    self.link(Ptr::new(OP1, a.val()), v1);
+  }
+
+  pub fn op1n(&mut self, a: Ptr, b: Ptr) {
+    self.oper += 1;
+    let p1 = self.heap.get(a.val(), P1);
+    let p2 = self.heap.get(a.val(), P2);
+    let v0 = p1.val() as u32;
+    let v1 = b.val() as u32;
+    let v2 = self.prim(v0, v1);
+    self.link(Ptr::new(NUM, v2), p2);
+    self.heap.free(a.val());
+  }
+
+  pub fn prim(&mut self, a: u32, b: u32) -> u32 {
+    let a_opr = (a >> 24) & 0xF;
+    let b_opr = (b >> 24) & 0xF; // not used yet
+    let a_val = a & 0xFFFFFF;
+    let b_val = b & 0xFFFFFF;
+    match a_opr as u8 {
+      USE => { (((a_val & 0xF) << 24) | b_val) & 0xFFFFFF }
+      ADD => { (a_val.wrapping_add(b_val)) & 0xFFFFFF }
+      SUB => { (a_val.wrapping_sub(b_val)) & 0xFFFFFF }
+      MUL => { (a_val.wrapping_mul(b_val)) & 0xFFFFFF }
+      DIV => { (a_val.wrapping_div(b_val)) & 0xFFFFFF }
+      MOD => { (a_val.wrapping_rem(b_val)) & 0xFFFFFF }
+      EQ  => { ((a_val == b_val) as Val) & 0xFFFFFF }
+      NE  => { ((a_val != b_val) as Val) & 0xFFFFFF }
+      LT  => { ((a_val < b_val) as Val) & 0xFFFFFF }
+      GT  => { ((a_val > b_val) as Val) & 0xFFFFFF }
+      AND => { (a_val & b_val) & 0xFFFFFF }
+      OR  => { (a_val | b_val) & 0xFFFFFF }
+      XOR => { (a_val ^ b_val) & 0xFFFFFF }
+      NOT => { (!b_val) & 0xFFFFFF }
+      LSH => { (a_val << b_val) & 0xFFFFFF }
+      RSH => { (a_val >> b_val) & 0xFFFFFF }
+      _   => { unreachable!() }
+    }
+  }
+
+  pub fn cond(&mut self, a: Ptr, b: Ptr) {
+    self.oper += 1;
+    let p1  = self.heap.get(a.val(), P1); // branch
+    let p2  = self.heap.get(a.val(), P2); // return
+    let loc = self.heap.alloc(1);
+    if b.val() > 0 {
+      self.heap.set(loc, P1, p2);
+      self.heap.set(loc, P2, ERAS);
+    } else {
+      self.heap.set(loc, P1, ERAS);
+      self.heap.set(loc, P2, p2);
+    }
+    self.link(p1, Ptr::new(CT0, loc));
+    self.heap.free(a.val());
   }
 
   // Expands a closed net.

@@ -169,7 +169,7 @@ pub fn setup_book() -> Book {
   define(&mut book, "brnZ", "
     $ ret
     & @run ~ (0 val ret)
-    & @c10 ~ (0 @I (0 @E val))
+    & @c11 ~ (0 @I (0 @E val))
   ");
   define(&mut book, "brnS", "
     $ (0 (1 p0 p1) (0 r0 r1))
@@ -216,11 +216,23 @@ pub fn setup_book() -> Book {
   "); 
 
   // Decreases many binary counters.
-  // NOTE: takes about 11s on Apple M1 (at 250m RPS)
+  // NOTE: takes about 25s on Apple M1 (at 250m RPS)
   define(&mut book, "ex3", "
     $ res
     & @c16 ~ (0 @S (0 @Z dep))
     & @brn ~ (0 dep res)
+  ");
+
+  // Performs '123 * 321'. ('3' is used for MUL.)
+  define(&mut book, "ex4", "
+    $ ret
+    & 3 ~ {123 {321 ret}}
+  ");
+
+  // Conditional: 'if 1 { 123 } else { 321 }'.
+  define(&mut book, "ex5", "
+    $ ret
+    & 1 ~ ? (0 123 321) ret
   ");
 
   book

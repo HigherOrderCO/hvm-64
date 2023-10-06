@@ -17,13 +17,14 @@ fn main() {
   let book = &book::setup_book();
 
   // Initializes the net
-  let net = &mut Net::new(1 << 28);
+  let net = &mut Net::new(1 << 24);
   net.boot(name_to_val("ex3"));
 
   // Marks initial time
   let start = std::time::Instant::now();
 
   // Computes its normal form
+  //net.expand(book, ROOT);
   net.normal(book);
 
   //Shows results and stats
@@ -38,15 +39,5 @@ fn main() {
   println!("TIME: {:.3} s", (start.elapsed().as_millis() as f64) / 1000.0);
   println!("RPS : {:.3} million", (net.rewrites() as f64) / (start.elapsed().as_millis() as f64) / 1000.0);
 
-  //println!("{}", &comp::compile_cuda_book(&book));
+  println!("{}", &comp::compile_cuda_book(&book));
 }
-
-//ANNI: 1605959706
-//COMM: 3276807
-//ERAS: 536608764
-//DREF: 801832962
-//-----
-//INTR: 2145845277
-//RWTS: 2947678239
-//TIME: 12.193 s
-//RPS : 241.752 million
