@@ -211,7 +211,7 @@ pub fn setup_book() -> Book {
   // Decrease a binary counter.
   define(&mut book, "ex2", "
     $ main
-    & @c22 ~ (0 @I (0 @E nie))
+    & @c26 ~ (0 @I (0 @E nie))
     & @run ~ (0 nie main)
   "); 
 

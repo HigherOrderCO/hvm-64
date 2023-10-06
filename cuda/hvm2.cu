@@ -614,6 +614,129 @@ __device__ void atomic_subst(Unit* unit, Net* net, Book* book, Ptr a_ptr, Ptr a_
   }
 }
 
+__device__ void interact(Unit* unit, Net* net, Book* book) {
+  // Checks if we're full
+  bool is_full = *unit->rlen > RBAG_SIZE - MAX_NEW_REDEX;
+
+  // Pops a redex from local bag
+  Wire redex = pop_redex(unit, is_full);
+  Ptr  a_ptr = wire_lft(redex);
+  Ptr  b_ptr = wire_rgt(redex);
+
+  // Flag to abort in case of failure
+  bool abort = false;
+
+  // Dereferences
+  Ptr* deref_ptr = NULL;
+  if (is_ref(a_ptr) && is_ctr(b_ptr)) {
+    deref_ptr = &a_ptr;
+  }
+  if (is_ref(b_ptr) && is_ctr(a_ptr)) {
+    deref_ptr = &b_ptr;
+  }
+  if (!deref(unit, net, book, deref_ptr, NONE)) {
+    abort = true;
+  }
+
+  // Defines type of interaction
+  bool rewrite = a_ptr != 0 && b_ptr != 0;
+  bool var_pri = rewrite && is_var(a_ptr) && is_pri(b_ptr) && unit->port == P1;
+  bool era_ctr = rewrite && is_era(a_ptr) && is_ctr(b_ptr);
+  bool ctr_era = rewrite && is_ctr(a_ptr) && is_era(b_ptr);
+  bool con_con = rewrite && is_ctr(a_ptr) && is_ctr(b_ptr) && tag(a_ptr) == tag(b_ptr);
+  bool con_dup = rewrite && is_ctr(a_ptr) && is_ctr(b_ptr) && tag(a_ptr) != tag(b_ptr);
+
+  // Local rewrite variables
+  Ptr  ak_dir; // dir to our aux port
+  Ptr  bk_dir; // dir to other aux port
+  Ptr *ak_ref; // ref to our aux port
+  Ptr *bk_ref; // ref to other aux port
+  Ptr  ak_ptr; // val of our aux port
+  Ptr  bk_ptr; // val to other aux port
+  Ptr  mv_ptr; // val of ptr to send to other side
+  u32  dp_loc; // duplication allocation index
+
+  // If con_dup, alloc clones base index
+  if (rewrite && con_dup) {
+    dp_loc = alloc(unit, net, 4);
+  }
+
+  // Aborts if allocation failed
+  if (rewrite && con_dup && dp_loc == FAIL) {
+    abort = true;
+  }
+
+  // Reverts when abort=true
+  if (rewrite && abort) {
+    rewrite = false;
+    put_redex(unit, a_ptr, b_ptr);
+  }
+  __syncwarp(unit->mask);
+
+  // Inc rewrite count
+  if (rewrite && unit->qid == A1) {
+    unit->rwts += 1;
+  }
+
+  // Gets port here
+  if (rewrite && (ctr_era || con_con || con_dup)) {
+    ak_dir = mkptr(VR1 + unit->port, val(a_ptr));
+    ak_ref = target(net, ak_dir);
+    ak_ptr = take(ak_ref);
+  }
+
+  // Gets port there
+  if (rewrite && (era_ctr || con_con || con_dup)) {
+    bk_dir = mkptr(VR1 + unit->port, val(b_ptr));
+    bk_ref = target(net, bk_dir);
+  }
+
+  // If era_ctr, send an erasure
+  if (rewrite && era_ctr) {
+    mv_ptr = mkptr(ERA, 0);
+  }
+
+  // If con_con, send a redirection
+  if (rewrite && con_con) {
+    mv_ptr = ak_ptr;
+  }
+
+  // If con_dup, create inner wires between clones
+  if (rewrite && con_dup) {
+    u32 cx_loc = dp_loc + unit->qid;
+    u32 c1_loc = dp_loc + (unit->qid <= A2 ? 2 : 0);
+    u32 c2_loc = dp_loc + (unit->qid <= A2 ? 3 : 1);
+    atomicExch(target(net, mkptr(VR1, cx_loc)), mkptr(unit->port == P1 ? VR1 : VR2, c1_loc));
+    atomicExch(target(net, mkptr(VR2, cx_loc)), mkptr(unit->port == P1 ? VR1 : VR2, c2_loc));
+    mv_ptr = mkptr(tag(a_ptr), cx_loc);
+  }
+  __syncwarp(unit->mask);
+
+  // Send ptr to other side
+  if (rewrite && (era_ctr || con_con || con_dup)) {
+    unit->sm32[unit->qid + (unit->qid <= A2 ? 2 : -2)] = mv_ptr;
+  }
+  __syncwarp(unit->mask);
+
+  // Receive ptr from other side
+  if (rewrite && (con_con || ctr_era || con_dup)) {
+    bk_ptr = unit->sm32[unit->qid];
+  }
+  __syncwarp(unit->mask);
+
+  // If var_pri, the var must be a deref root, so we just subst
+  if (rewrite && var_pri && unit->port == P1) {
+    atomicExch(target(net, a_ptr), b_ptr);
+  }
+  __syncwarp(unit->mask);
+
+  // Substitutes
+  if (rewrite && (con_con || ctr_era || con_dup)) {
+    atomic_subst(unit, net, book, ak_ptr, ak_dir, bk_ptr, ctr_era || con_dup);
+  }
+  __syncwarp(unit->mask);
+}
+
 // An active wire is reduced by 4 parallel threads, each one performing "1/4" of
 // the work. Each thread will be pointing to a node of the active pair, and an
 // aux port of that node. So, when nodes A-B interact, we have 4 thread quads:
@@ -628,132 +751,13 @@ __global__ void global_rewrite(Net* net, Book* book, u32 repeat, u32 tick, bool 
   // Initializes local vars
   Unit unit = init_unit(net, flip);
 
+  // Performs interactions
   for (u32 turn = 0; turn < repeat; ++turn) {
-    // Checks if we're full
-    bool is_full = *unit.rlen > RBAG_SIZE - MAX_NEW_REDEX;
-
-    // Pops a redex from local bag
-    Wire redex = pop_redex(&unit, is_full);
-    Ptr  a_ptr = wire_lft(redex);
-    Ptr  b_ptr = wire_rgt(redex);
-
-    // Flag to abort in case of failure
-    bool abort = false;
-
-    // Dereferences
-    Ptr* deref_ptr = NULL;
-    if (is_ref(a_ptr) && is_ctr(b_ptr)) {
-      deref_ptr = &a_ptr;
-    }
-    if (is_ref(b_ptr) && is_ctr(a_ptr)) {
-      deref_ptr = &b_ptr;
-    }
-    if (!deref(&unit, net, book, deref_ptr, NONE)) {
-      abort = true;
-    }
-
-    // Defines type of interaction
-    bool rewrite = a_ptr != 0 && b_ptr != 0;
-    bool var_pri = rewrite && is_var(a_ptr) && is_pri(b_ptr) && unit.port == P1;
-    bool era_ctr = rewrite && is_era(a_ptr) && is_ctr(b_ptr);
-    bool ctr_era = rewrite && is_ctr(a_ptr) && is_era(b_ptr);
-    bool con_con = rewrite && is_ctr(a_ptr) && is_ctr(b_ptr) && tag(a_ptr) == tag(b_ptr);
-    bool con_dup = rewrite && is_ctr(a_ptr) && is_ctr(b_ptr) && tag(a_ptr) != tag(b_ptr);
-
-    // Local rewrite variables
-    Ptr  ak_dir; // dir to our aux port
-    Ptr  bk_dir; // dir to other aux port
-    Ptr *ak_ref; // ref to our aux port
-    Ptr *bk_ref; // ref to other aux port
-    Ptr  ak_ptr; // val of our aux port
-    Ptr  bk_ptr; // val to other aux port
-    Ptr  mv_ptr; // val of ptr to send to other side
-    u32  dp_loc; // duplication allocation index
-
-    // If con_dup, alloc clones base index
-    if (rewrite && con_dup) {
-      dp_loc = alloc(&unit, net, 4);
-    }
-
-    // Aborts if allocation failed
-    if (rewrite && con_dup && dp_loc == FAIL) {
-      abort = true;
-    }
-
-    // Reverts when abort=true
-    if (rewrite && abort) {
-      rewrite = false;
-      put_redex(&unit, a_ptr, b_ptr);
-    }
-    __syncwarp(unit.mask);
-
-    // Inc rewrite count
-    if (rewrite && unit.qid == A1) {
-      unit.rwts += 1;
-    }
-
-    // Gets port here
-    if (rewrite && (ctr_era || con_con || con_dup)) {
-      ak_dir = mkptr(VR1 + unit.port, val(a_ptr));
-      ak_ref = target(net, ak_dir);
-      ak_ptr = take(ak_ref);
-    }
-
-    // Gets port there
-    if (rewrite && (era_ctr || con_con || con_dup)) {
-      bk_dir = mkptr(VR1 + unit.port, val(b_ptr));
-      bk_ref = target(net, bk_dir);
-    }
-
-    // If era_ctr, send an erasure
-    if (rewrite && era_ctr) {
-      mv_ptr = mkptr(ERA, 0);
-    }
-
-    // If con_con, send a redirection
-    if (rewrite && con_con) {
-      mv_ptr = ak_ptr;
-    }
-
-    // If con_dup, create inner wires between clones
-    if (rewrite && con_dup) {
-      u32 cx_loc = dp_loc + unit.qid;
-      u32 c1_loc = dp_loc + (unit.qid <= A2 ? 2 : 0);
-      u32 c2_loc = dp_loc + (unit.qid <= A2 ? 3 : 1);
-      atomicExch(target(net, mkptr(VR1, cx_loc)), mkptr(unit.port == P1 ? VR1 : VR2, c1_loc));
-      atomicExch(target(net, mkptr(VR2, cx_loc)), mkptr(unit.port == P1 ? VR1 : VR2, c2_loc));
-      mv_ptr = mkptr(tag(a_ptr), cx_loc);
-    }
-    __syncwarp(unit.mask);
-
-    // Send ptr to other side
-    if (rewrite && (era_ctr || con_con || con_dup)) {
-      unit.sm32[unit.qid + (unit.qid <= A2 ? 2 : -2)] = mv_ptr;
-    }
-    __syncwarp(unit.mask);
-
-    // Receive ptr from other side
-    if (rewrite && (con_con || ctr_era || con_dup)) {
-      bk_ptr = unit.sm32[unit.qid];
-    }
-    __syncwarp(unit.mask);
-
-    // If var_pri, the var must be a deref root, so we just subst
-    if (rewrite && var_pri && unit.port == P1) {
-      atomicExch(target(net, a_ptr), b_ptr);
-    }
-    __syncwarp(unit.mask);
-
-    // Substitutes
-    if (rewrite && (con_con || ctr_era || con_dup)) {
-      atomic_subst(&unit, net, book, ak_ptr, ak_dir, bk_ptr, ctr_era || con_dup);
-    }
-    __syncwarp(unit.mask);
+    interact(&unit, net, book);
   }
 
   // Shares redexes with paired neighbor
   share_redexes(&unit, net, book, tick, flip);
-  __syncthreads();
 
   // When the work ends, sum stats
   save_unit(&unit, net);
@@ -2173,7 +2177,7 @@ u32 BOOK_DATA[] = {
   // .node
   0x00000000, 0x00000011,  0x00000031, 0x00000001,  0x00000124, 0x00000036,  0x000000E4, 0x00000010,
   // .rdex
-  0x0035E314, 0x00000016,  0x00260404, 0x00000026,
+  0x0035E314, 0x00000016,  0x00260414, 0x00000026,
   // @decI
   // .nlen
   0x00000003,
@@ -2240,6 +2244,7 @@ u32 BOOK_DATA[] = {
   // .rdex
   0x0035E314, 0x00000026,  0x0027A264, 0x00000036,  0x00000184, 0x00000046,
 };
+
 u32 JUMP_DATA[] = {
   0x0000000E, 0x00000000, // @E
   0x0000000F, 0x0000000A, // @F
@@ -2344,6 +2349,35 @@ int main() {
   cudaGetDevice(&device);
   cudaGetDeviceProperties(&prop, device);
   printf("CUDA Device: %s, Compute Capability: %d.%d\n\n", prop.name, prop.major, prop.minor);
+  printf("Total global memory: %zu bytes\n", prop.totalGlobalMem);
+  printf("Shared memory per block: %zu bytes\n", prop.sharedMemPerBlock);
+  printf("Registers per block: %d\n", prop.regsPerBlock);
+  printf("Warp size: %d\n", prop.warpSize);
+  printf("Maximum threads per block: %d\n", prop.maxThreadsPerBlock);
+  printf("Maximum thread dimensions: (%d, %d, %d)\n", prop.maxThreadsDim[0], prop.maxThreadsDim[1], prop.maxThreadsDim[2]);
+  printf("Maximum grid dimensions: (%d, %d, %d)\n", prop.maxGridSize[0], prop.maxGridSize[1], prop.maxGridSize[2]);
+  printf("Clock rate: %d kHz\n", prop.clockRate);
+  printf("Total constant memory: %zu bytes\n", prop.totalConstMem);
+  printf("Compute capability: %d.%d\n", prop.major, prop.minor);
+  printf("Number of multiprocessors: %d\n", prop.multiProcessorCount);
+  printf("Concurrent copy and execution: %s\n", (prop.deviceOverlap ? "Yes" : "No"));
+  printf("Kernel execution timeout: %s\n", (prop.kernelExecTimeoutEnabled ? "Yes" : "No"));
+
+  // Prints info about the do_global_rewrite kernel
+  cudaFuncAttributes attr;
+  cudaError_t err = cudaFuncGetAttributes(&attr, global_rewrite);
+  if (err != cudaSuccess) {
+    printf("CUDA error: %s\n", cudaGetErrorString(err));
+  } else {
+    printf("\n");
+    printf("Number of registers used: %d\n", attr.numRegs);
+    printf("Shared memory used: %zu bytes\n", attr.sharedSizeBytes);
+    printf("Constant memory used: %zu bytes\n", attr.constSizeBytes);
+    printf("Size of local memory frame: %zu bytes\n", attr.localSizeBytes);
+    printf("Maximum number of threads per block: %d\n", attr.maxThreadsPerBlock);
+    printf("Number of PTX versions supported: %d\n", attr.ptxVersion);
+    printf("Number of Binary versions supported: %d\n", attr.binaryVersion);
+  }
 
   // Allocates net on CPU
   Net* cpu_net = mknet(F_ex3, JUMP_DATA, JUMP_DATA_SIZE);
@@ -2366,8 +2400,7 @@ int main() {
     do_global_rewrite(gpu_net, gpu_book, 16, tick, (tick / GROUP_LOG2) % 2);
   }
   do_global_expand(gpu_net, gpu_book);
-  do_global_rewrite(gpu_net, gpu_book, 100000, 0, 0);
-  do_global_expand(gpu_net, gpu_book);
+  do_global_rewrite(gpu_net, gpu_book, 200000, 0, 0);
   cudaDeviceSynchronize();
 
   // Gets end time
@@ -2390,7 +2423,7 @@ int main() {
 
   // Clears GPU memory
   net_free_on_cpu(cpu_net);
-  //net_free_on_cpu(norm);
+  net_free_on_cpu(norm);
 
   return 0;
 }
