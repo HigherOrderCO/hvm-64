@@ -14,27 +14,60 @@ typedef unsigned long long int u64;
 // -------------
 
 // This code is initially optimized for RTX 4090
-const u32 BLOCK_LOG2    = 9;                         // log2 of block size
-const u32 BLOCK_SIZE    = 1 << BLOCK_LOG2;           // threads per block
-const u32 SQUAD_LOG2    = 2;                         // log2 of squad size
-const u32 SQUAD_SIZE    = 1 << SQUAD_LOG2;           // threads per squad
-const u32 GROUP_LOG2    = BLOCK_LOG2 - SQUAD_LOG2;   // log2 of group size
-const u32 GROUP_SIZE    = 1 << GROUP_LOG2;           // squad per group
-const u32 HEAP_LOG2     = 28;                        // log2 of heap size
-const u32 HEAP_SIZE     = 1 << HEAP_LOG2;            // max total nodes (268m nodes = 2GB)
-const u32 HEAD_LOG2     = GROUP_LOG2 * 2;            // log2 of head size
-const u32 HEAD_SIZE     = 1 << HEAD_LOG2;            // max head pointers
-const u32 JUMP_LOG2     = 24;                        // log2 of book size
-const u32 JUMP_SIZE     = 1 << JUMP_LOG2;            // max book entries (16m definitions)
-const u32 ATTR_SIZE     = 2;                         // local vars per squad
-const u32 MAX_THREADS   = BLOCK_SIZE * BLOCK_SIZE;   // total number of active threads
-const u32 MAX_SQUADS    = GROUP_SIZE * GROUP_SIZE;   // total number of active squads
-const u32 MAX_NEW_REDEX = 16;                        // max new redexes per rewrite
-const u32 AREA_SIZE     = HEAP_SIZE / MAX_SQUADS;    // heap allocation area per thread
-const u32 SMEM_SIZE     = 4;                         // u32's shared by squad
-const u32 RBAG_SIZE     = 256;                       // max redexes per squad
-const u32 LHDS_SIZE     = 32;                        // max local heads
-const u32 BAGS_SIZE     = MAX_SQUADS * RBAG_SIZE;    // redexes per GPU
+
+// Bags dimensions (128x128 redex bags)
+const u32 BAGS_WIDTH_L2  = 7;
+const u32 BAGS_WIDTH     = 1 << BAGS_WIDTH_L2;
+const u32 BAGS_HEIGHT_L2 = 7;
+const u32 BAGS_HEIGHT    = 1 << BAGS_HEIGHT_L2;
+const u32 BAGS_TOTAL_L2  = BAGS_WIDTH_L2 + BAGS_HEIGHT_L2;
+const u32 BAGS_TOTAL     = 1 << BAGS_TOTAL_L2;
+
+// Threads per Squad (4)
+const u32 SQUAD_SIZE_L2 = 2;
+const u32 SQUAD_SIZE    = 1 << SQUAD_SIZE_L2;
+
+// Squads per Block (128)
+const u32 GROUP_SIZE_L2 = BAGS_WIDTH_L2;
+const u32 GROUP_SIZE    = 1 << GROUP_SIZE_L2;
+
+// Threads per Block (512)
+const u32 BLOCK_SIZE_L2 = GROUP_SIZE_L2 + SQUAD_SIZE_L2;
+const u32 BLOCK_SIZE    = 1 << BLOCK_SIZE_L2;
+
+// Heap Size (max total nodes = 256m = 2GB)
+const u32 HEAP_SIZE_L2 = 28;
+const u32 HEAP_SIZE    = 1 << HEAP_SIZE_L2;
+
+// Jump Table (max book entries = 16m definitions)
+const u32 JUMP_SIZE_L2 = 24;
+const u32 JUMP_SIZE    = 1 << JUMP_SIZE_L2;
+
+// Max Redexes per Interaction
+const u32 MAX_NEW_REDEX = 16; // FIXME: use to check full rbags
+
+// Local Attributes per Squad
+const u32 SMEM_SIZE = 4; // local attributes
+
+// Total Number of Squads
+const u32 SQUAD_TOTAL_L2 = BAGS_TOTAL_L2;
+const u32 SQUAD_TOTAL    = 1 << SQUAD_TOTAL_L2;
+
+// Total Allocation Nodes per Squad
+const u32 AREA_SIZE = HEAP_SIZE / SQUAD_TOTAL;
+
+// Redexes per Redex Bag
+const u32 RBAG_SIZE = 256;
+
+// Total Redexes on All Bags
+const u32 BAGS_SIZE = BAGS_TOTAL * RBAG_SIZE;
+
+// Max Global Expansion Ptrs (1 per squad)
+const u32 HEAD_SIZE_L2 = SQUAD_TOTAL_L2;
+const u32 HEAD_SIZE    = 1 << HEAD_SIZE_L2;
+
+// Max Local Expansion Ptrs per Squad
+const u32 EXPANSIONS_PER_SQUAD = 16;
 
 // Types
 // -----
@@ -97,16 +130,18 @@ typedef struct {
 // A unit local data
 typedef struct {
   u32   tid;  // thread id (local)
+  u32   gid;  // global id (global)
+  u32   sid;  // squad id (local)
   u32   uid;  // squad id (global)
-  u32   qid;  // squad id (local: A1|A2|B1|B2)
+  u32   qid;  // quarter id (A1|A2|B1|B2)
   u32   port; // unit port (P1|P2)
   u64   rwts; // local rewrites performed
   u32   mask; // squad warp mask
+  u32*  aloc; // where to alloc next node
   u32*  sm32; // shared 32-bit buffer
   u64*  sm64; // shared 64-bit buffer
-  u64*  BUFF; // persisted buffer (attr + bag)
+  u64*  RBAG; // init of my redex bag
   u32*  rlen; // local redex bag length
-  u32*  aloc; // where to alloc next node
   Wire* rbag; // local redex bag
 } Unit;
 
@@ -290,7 +325,7 @@ __device__ inline bool replace(Ptr* ref, Ptr exp, Ptr neo) {
 
 // Splits elements of two arrays evenly between each-other
 // FIXME: it is desirable to split when size=1, to rotate out of starving squads
-__device__ void split(u32 tid, u64* a_len, u64* a_arr, u64* b_len, u64* b_arr, u64 max_len) {
+__device__ __noinline__ void split(u32 tid, u64* a_len, u64* a_arr, u64* b_len, u64* b_arr, u64 max_len) {
   __syncthreads();
   u64* A_len = *a_len < *b_len ? a_len : b_len;
   u64* B_len = *a_len < *b_len ? b_len : a_len;
@@ -329,25 +364,24 @@ __device__ void split(u32 tid, u64* a_len, u64* a_arr, u64* b_len, u64* b_arr, u
 }
 
 // Pops a redex
-__device__ Wire pop_redex(Unit* unit, bool is_full) {
-  if (unit->qid == A1) {
-    Wire redex = mkwire(0,0);
-    if (*unit->rlen > 0 && !is_full) {
-      u64 index = *unit->rlen - 1;
-      *unit->rlen -= 1;
-      redex = unit->rbag[index];
-      unit->rbag[index] = mkwire(0,0);
-    }
-    *unit->sm64 = redex;
+__device__ Wire pop_redex(Unit* unit) {
+  Wire redex = mkwire(0, 0);
+
+  u32 rlen = *unit->rlen;
+  if (rlen > 0 && rlen <= RBAG_SIZE - MAX_NEW_REDEX) {
+    redex = unit->rbag[rlen-1];
   }
   __syncwarp(unit->mask);
-  Wire got = *unit->sm64;
+  if (rlen > 0 && rlen <= RBAG_SIZE - MAX_NEW_REDEX) {
+    unit->rbag[rlen-1] = mkwire(0, 0);
+    *unit->rlen = rlen-1;
+  }
   __syncwarp(unit->mask);
-  *unit->sm64 = 0;
+
   if (unit->qid <= A2) {
-    return mkwire(wire_lft(got), wire_rgt(got));
+    return mkwire(wire_lft(redex), wire_rgt(redex));
   } else {
-    return mkwire(wire_rgt(got), wire_lft(got));
+    return mkwire(wire_rgt(redex), wire_lft(redex));
   }
 }
 
@@ -368,7 +402,7 @@ __device__ void put_redex(Unit* unit, Ptr a_ptr, Ptr b_ptr) {
 
   // pushes redex to end of bag
   u32 index = atomicAdd(unit->rlen, 1);
-  if (index < RBAG_SIZE - ATTR_SIZE) {
+  if (index < RBAG_SIZE - 1) {
     unit->rbag[index] = mkwire(a_ptr, b_ptr);
   } else {
     printf("ERROR: PUSHED TO FULL TBAG (NOT IMPLEMENTED YET)\n");
@@ -440,65 +474,70 @@ __device__ bool deref(Unit* unit, Net* net, Book* book, Ptr* ref, Ptr up) {
 // Rewrite
 // -------
 
+__device__ u32 interleave(u32 idx, u32 width, u32 height) {
+  u32 old_row = idx / width;
+  u32 old_col = idx % width;
+  u32 new_row = old_col % height;
+  u32 new_col = old_col / height + old_row * (width / height);
+  return new_row * width + new_col;
+}
+
+// Local Squad Id (sid) to Global Squad Id (uid)
+__device__ u32 sid_to_uid(u32 sid, bool flip) {
+  return flip ? interleave(sid, BAGS_WIDTH, BAGS_HEIGHT) : sid;
+}
+
 __device__ Unit init_unit(Net* net, bool flip) {
   __shared__ u32 SMEM[GROUP_SIZE * SMEM_SIZE];
-  __shared__ u32 ATTR[GROUP_SIZE * ATTR_SIZE];
+  __shared__ u32 ALOC[GROUP_SIZE];
 
   for (u32 i = 0; i < GROUP_SIZE * SMEM_SIZE / BLOCK_SIZE; ++i) {
     SMEM[i * BLOCK_SIZE + threadIdx.x] = 0;
   }
   __syncthreads();
 
-  for (u32 i = 0; i < GROUP_SIZE * ATTR_SIZE / BLOCK_SIZE; ++i) {
-    ATTR[i * BLOCK_SIZE + threadIdx.x] = 0;
+  for (u32 i = 0; i < GROUP_SIZE / BLOCK_SIZE; ++i) {
+    ALOC[i * BLOCK_SIZE + threadIdx.x] = 0;
   }
   __syncthreads();
 
-  u32 tid = threadIdx.x;
-  u32 gid = blockIdx.x * blockDim.x + tid;
-  u32 uid = gid / SQUAD_SIZE;
-  u32 row = uid / GROUP_SIZE;
-  u32 col = uid % GROUP_SIZE;
-
   Unit unit;
-  unit.uid  = flip ? col * GROUP_SIZE + row : row * GROUP_SIZE + col;
   unit.tid  = threadIdx.x;
+  unit.gid  = blockIdx.x * blockDim.x + unit.tid;
+  unit.sid  = unit.gid / SQUAD_SIZE;
+  unit.uid  = sid_to_uid(unit.sid, flip);
   unit.qid  = unit.tid % 4;
   unit.rwts = 0;
-  unit.mask = 0xF << (unit.tid % 32 / SQUAD_SIZE * SQUAD_SIZE);
+  unit.mask = ((1 << SQUAD_SIZE) - 1) << (unit.tid % 32 / SQUAD_SIZE * SQUAD_SIZE);
   unit.port = unit.tid % 2;
+  unit.aloc = (u32*)(ALOC + unit.tid / SQUAD_SIZE); // locally cached
   unit.sm32 = (u32*)(SMEM + unit.tid / SQUAD_SIZE * SMEM_SIZE);
   unit.sm64 = (u64*)(SMEM + unit.tid / SQUAD_SIZE * SMEM_SIZE);
-  unit.BUFF = net->bags + unit.uid * RBAG_SIZE;
-  unit.rlen = (u32*)(unit.BUFF + 0); // TODO: cache locally
-  unit.aloc = (u32*)(ATTR + unit.tid / SQUAD_SIZE + 1); // locally cached
-  unit.rbag = unit.BUFF + ATTR_SIZE;
-
-  if (unit.qid == A1) {
-    //*unit.rlen = *((u32*)(unit.BUFF + 0)); // TODO: requires updating split
-    *unit.aloc = *((u32*)(unit.BUFF + 1));
-  }
+  unit.RBAG = net->bags + unit.uid * RBAG_SIZE;
+  unit.rlen = (u32*)(unit.RBAG + 0); // TODO: cache locally
+  unit.rbag = unit.RBAG + 1;
+  *unit.aloc = 0; // TODO: randomize or persist
 
   return unit;
 }
 
 __device__ void save_unit(Unit* unit, Net* net) {
-  //*((u32*)(unit->BUFF + 0)) = *unit->aloc; // TODO: requires updating split
-  *((u32*)(unit->BUFF + 1)) = *unit->aloc;
   if (unit->rwts > 0) {
     atomicAdd(&net->rwts, unit->rwts);
   }
 }
 
 __device__ void share_redexes(Unit* unit, Net* net, Book* book, u32 tick, bool flip) {
-  u32  side  = ((unit->tid / SQUAD_SIZE) >> (GROUP_LOG2 - 1 - (tick % GROUP_LOG2))) & 1;
-  u32  lpad  = (1 << (GROUP_LOG2 - 1)) >> (tick % GROUP_LOG2);
-  u32  gpad  = flip ? lpad * GROUP_SIZE : lpad;
-  u32  a_uid = unit->uid;
-  u32  b_uid = side ? unit->uid - gpad : unit->uid + gpad;
+  u32  side  = ((unit->tid / SQUAD_SIZE) >> (BAGS_WIDTH_L2 - 1 - (tick % BAGS_WIDTH_L2))) & 1;
+  u32  shift = (1 << (BAGS_WIDTH_L2 - 1)) >> (tick % BAGS_WIDTH_L2);
+  u32  a_sid = unit->sid;
+  u32  b_sid = side ? a_sid - shift : a_sid + shift;
+  u32  a_uid = sid_to_uid(a_sid, flip);
+  u32  b_uid = sid_to_uid(b_sid, flip);
   u64* a_len = net->bags + a_uid * RBAG_SIZE;
   u64* b_len = net->bags + b_uid * RBAG_SIZE;
-  split(unit->qid + side * SQUAD_SIZE, a_len, a_len+ATTR_SIZE, b_len, b_len+ATTR_SIZE, RBAG_SIZE);
+  u32  sp_id = unit->tid % SQUAD_SIZE + side * SQUAD_SIZE;
+  split(sp_id, a_len, a_len+1, b_len, b_len+1, RBAG_SIZE);
 }
 
 __device__ void atomic_join(Unit* unit, Net* net, Book* book, Ptr a_ptr, Ptr* a_ref, Ptr b_ptr) {
@@ -615,11 +654,8 @@ __device__ void atomic_subst(Unit* unit, Net* net, Book* book, Ptr a_ptr, Ptr a_
 }
 
 __device__ void interact(Unit* unit, Net* net, Book* book) {
-  // Checks if we're full
-  bool is_full = *unit->rlen > RBAG_SIZE - MAX_NEW_REDEX;
-
   // Pops a redex from local bag
-  Wire redex = pop_redex(unit, is_full);
+  Wire redex = pop_redex(unit);
   Ptr  a_ptr = wire_lft(redex);
   Ptr  b_ptr = wire_rgt(redex);
 
@@ -747,6 +783,7 @@ __device__ void interact(Unit* unit, Net* net, Book* book) {
 // This is organized so that local threads can perform the same instructions
 // whenever possible. So, for example, in a commutation rule, all the 4 clones
 // would be allocated at the same time.
+__launch_bounds__(BLOCK_SIZE, 1)
 __global__ void global_rewrite(Net* net, Book* book, u32 repeat, u32 tick, bool flip) {
   // Initializes local vars
   Unit unit = init_unit(net, flip);
@@ -764,7 +801,7 @@ __global__ void global_rewrite(Net* net, Book* book, u32 repeat, u32 tick, bool 
 }
 
 void do_global_rewrite(Net* net, Book* book, u32 repeat, u32 tick, bool flip) {
-  global_rewrite<<<GROUP_SIZE, BLOCK_SIZE>>>(net, book, repeat, tick, flip);
+  global_rewrite<<<BAGS_HEIGHT, BLOCK_SIZE>>>(net, book, repeat, tick, flip);
   cudaError_t err = cudaGetLastError();
   if (err != cudaSuccess) {
     printf("CUDA error: %s\n", cudaGetErrorString(err));
@@ -782,7 +819,7 @@ __device__ void expand(Unit* unit, Net* net, Book* book, Ptr dir, u32* len, u32*
     expand(unit, net, book, mkptr(VR2, val(ptr)), len, lhds);
   } else if (is_red(ptr)) {
     expand(unit, net, book, ptr, len, lhds);
-  } else if (is_ref(ptr) && *len < LHDS_SIZE) {
+  } else if (is_ref(ptr) && *len < EXPANSIONS_PER_SQUAD) {
     lhds[(*len)++] = dir;
   }
 }
@@ -795,7 +832,7 @@ __global__ void global_expand_prepare(Net* net) {
   u32 key = uid;
   Ptr dir = ROOT;
   Ptr ptr, *ref;
-  for (u32 depth = 0; depth < HEAD_LOG2; ++depth) {
+  for (u32 depth = 0; depth < BAGS_TOTAL_L2; ++depth) {
     dir = enter(net, dir);
     ref = target(net, dir);
     if (is_var(dir)) {
@@ -825,16 +862,16 @@ __global__ void global_expand_prepare(Net* net) {
 
 // Performs global expansion of heads
 __global__ void global_expand(Net* net, Book* book) {
-  __shared__ u32 HEAD[GROUP_SIZE * LHDS_SIZE];
+  __shared__ u32 HEAD[GROUP_SIZE * EXPANSIONS_PER_SQUAD];
 
-  for (u32 i = 0; i < GROUP_SIZE * LHDS_SIZE / BLOCK_SIZE; ++i) {
+  for (u32 i = 0; i < GROUP_SIZE * EXPANSIONS_PER_SQUAD / BLOCK_SIZE; ++i) {
     HEAD[i * BLOCK_SIZE + threadIdx.x] = 0;
   }
   __syncthreads();
 
   Unit unit = init_unit(net, 0);
 
-  u32* head = HEAD + unit.tid / SQUAD_SIZE * LHDS_SIZE;
+  u32* head = HEAD + unit.tid / SQUAD_SIZE * EXPANSIONS_PER_SQUAD;
 
   Wire got = net->head[unit.uid];
   Ptr  dir = wire_lft(got);
@@ -852,7 +889,7 @@ __global__ void global_expand(Net* net, Book* book) {
   }
   __syncthreads();
 
-  for (u32 i = 0; i < LHDS_SIZE; ++i) {
+  for (u32 i = 0; i < EXPANSIONS_PER_SQUAD; ++i) {
     Ptr  dir = head[i];
     Ptr* ref = target(net, dir);
     if (!deref(&unit, net, book, ref, dir)) {
@@ -864,10 +901,10 @@ __global__ void global_expand(Net* net, Book* book) {
   save_unit(&unit, net);
 }
 
-// Performs a global head expansion
+// Performs a global head expansion (1 deref per bag)
 void do_global_expand(Net* net, Book* book) {
-  global_expand_prepare<<<GROUP_SIZE, GROUP_SIZE>>>(net);
-  global_expand<<<GROUP_SIZE, BLOCK_SIZE>>>(net, book);
+  global_expand_prepare<<<BAGS_HEIGHT, GROUP_SIZE>>>(net);
+  global_expand<<<BAGS_HEIGHT, BLOCK_SIZE>>>(net, book);
 }
 
 // Host<->Device
@@ -1023,7 +1060,7 @@ void print_net(Net* net) {
   for (u32 i = 0; i < BAGS_SIZE; ++i) {
     if (i % RBAG_SIZE == 0 && net->bags[i] > 0) {
       printf("- [%07X] LEN=%llu\n", i, net->bags[i]);
-    } else if (i % RBAG_SIZE >= ATTR_SIZE) {
+    } else if (i % RBAG_SIZE >= 1) {
       //Ptr a = wire_lft(net->bags[i]);
       //Ptr b = wire_rgt(net->bags[i]);
       //if (a != 0 || b != 0) {
@@ -2397,7 +2434,7 @@ int main() {
   // Normalizes
   do_global_expand(gpu_net, gpu_book);
   for (u32 tick = 0; tick < 128; ++tick) {
-    do_global_rewrite(gpu_net, gpu_book, 16, tick, (tick / GROUP_LOG2) % 2);
+    do_global_rewrite(gpu_net, gpu_book, 16, tick, (tick / BAGS_WIDTH_L2) % 2);
   }
   do_global_expand(gpu_net, gpu_book);
   do_global_rewrite(gpu_net, gpu_book, 200000, 0, 0);
