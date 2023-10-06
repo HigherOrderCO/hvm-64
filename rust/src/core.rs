@@ -345,8 +345,8 @@ impl Net {
     } else if a.is_ctr() && b.is_era() {
       self.eras(b, a);
     // ERA-ERA
-    } else if a.is_era() && b.is_era() {
-      self.void(a, b);
+    } else {
+      self.eras += 1;
     }
   }
 
