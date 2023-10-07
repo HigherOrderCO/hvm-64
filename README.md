@@ -105,7 +105,7 @@ complete list of all term variants:
 
 - `OP2`: a binary operation on u24 operands.
 
-- `ITE`: an if-then-else operator over u32 condition.
+- `ITE`: an if-then-else operator with a u24 condition.
 
 Note that terms form a tree-like structure. Yet, interaction combinators are not
 trees, but graphs; terms aren't enough to express all possible nets. To fix
