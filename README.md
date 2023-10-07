@@ -342,24 +342,24 @@ called "load-op-type" is used to load the next operation on the left operand.
 See the `/examples` directory for more info. Below is a table with all available
 operations:
 
-N | operation
-- | ---------
-0 | load-op-type
-1 | addition
-2 | subtraction
-3 | multiplication
-4 | division
-5 | modulus
-6 | equal-to
-7 | not-equal-to
-8 | less-than
-9 | greater-than
-A | logical-and
-B | logical-or
-C | logical-xor
-D | logical-not
-E | left-shift
-F | right-shift
+N   | operation
+--- | ---------
+  0 | load-op-type
+  1 | addition
+  2 | subtraction
+  3 | multiplication
+  4 | division
+  5 | modulus
+  6 | equal-to
+  7 | not-equal-to
+  8 | less-than
+  9 | greater-than
+  A | logical-and
+  B | logical-or
+  C | logical-xor
+  D | logical-not
+  E | left-shift
+  F | right-shift
 
 Since HVM already provides plenty of solutions for branching (global references,
 lambda encoded booleans and pattern-matching, etc.), the If-Then-Else operation
