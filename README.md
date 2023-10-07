@@ -1,14 +1,12 @@
-# HVM-Core: a fast Interaction Combinator evaluator
+# HVM-Core: a parallel Interaction Combinator evaluator
 
-HVM-Core is a fast Interaction Combinator evaluator, based on the [symmetric
-variant, by Mazza](https://www-lipn.univ-paris13.fr/~mazza/papers/CombSem-MSCS.pdf).
+HVM-Core is a parallel evaluator for extended [Symmetric Interaction Combinators](https://www-lipn.univ-paris13.fr/~mazza/papers/CombSem-MSCS.pdf).
 
 We provide a raw syntax for specifying nets, a reference implementation in Rust,
 and a massively parallel evaluator in CUDA. In our benchmarks, HVMC performs up
-to **6.8 billion interactions** per second in a RTX 4090. When evaluating
-functional programs, HVMC performed several times faster than all state-of-art
-solutions, making it the ultimate compile target for high-level languages
-seeking massive parallelism.
+to **6.8 billion interactions** per second in an RTX 4090. When evaluating
+functional programs, it performed 5x faster than the best alternatives, making
+it a great compile target for high-level languages seeking massive parallelism.
 
 ## Usage
 
@@ -31,11 +29,13 @@ hvmc bend file.hvmc -s
 ```
 
 **Note**: `bend` wasn't implemented yet; if you're here *today* and wants to run
-it on the GPU, you'll need to figure it out and hack your way into doing it ;)
+it on the GPU, you'll need to hack up and manually edit `hvm2.cu` using the
+`hvmc gen-cuda-book file.hvmc` command. Compile with `-arch=compute_89`.
 
 ## Example
 
-The file below performs Church Nat exponentiation (2^2):
+HVMC is a low-level compile target for high-level programming languages. The
+file below performs 2^2 with [Church Nats](https://en.wikipedia.org/wiki/Church_encoding):
 
 ```
 // closed net for the Church Nat 2
@@ -136,6 +136,112 @@ as a `*`. The wires from an aux port to a main port are denoted by the tree
 hierarchy, the wires between aux ports are denoted by named variables, and the
 single wire between main ports is denoted by the `& A ~ B` syntax. Note this
 always represents an active pair (or redex)!
+
+## Evaluator
+
+HVMC comes with 2 evaluators: a reference interpreter in Rust, and a massively
+parallel runtime in CUDA. Both evaluators are completely eager, which means they
+will reduce *every* generated active pair (redex) in an ultra-greedy fashion.
+Because of that, to perform recursion, it is advisable to pre-compile the source
+language to a [supercombinator](https://en.wikipedia.org/wiki/Supercombinator)
+formulation, as it allows sub-expressions to be unrolled lazily, preventing HVMC
+from infinitely expanding recursive function bodies. For the same reason, terms
+like the Y-Combinator aren't compatible with current HVMC. A lazy evaluator
+version will be provided in the future.
+
+The eager evaluator works by keeping a vector of current active pairs (redexes)
+and, for-each redex, performing an "interaction", as described above. On the
+single-core version, that "for-each" is done in a sequential loop. On the
+multi-core version, the vector of redexes is actually split into a grid of
+"redex bags", each bag owned by a "rewrite squad", which continuously pops and
+executes a redex in parallel. Since interaction rules are symmetric on the 4
+surrounding ports, we actually use 4 threads to perform an interaction, thus the
+name "squad".
+
+For example, on NVidia's RTX 4090, we keep a grid of 128x128 redex bags. Each
+bag is processed by a rewrite squad. There are `16,384` active squads, for a
+total of `65,536` active threads. Below is a visual representation:
+
+```
+REDEX ::= (Ptr32, Ptr32)
+
+    A1 --|\        /|-- B2
+         | |A0--B0| |
+    A2 --|/        \|-- B1
+
+REDEX_BAG ::= Vec<REDEX>
+
+    [(A0,B0), (C0,D0), (E0,F0), ...]
+
+REDEX_GRID ::= Matrix<128, 128 REDEX_BAG>
+
+    [ ] -- [ ] -- [ ] -- [ ] -- [ ] -- [ ] -- [ ] -- [ ] ...
+     |      |      |      |      |      |      |      |
+    [ ] -- [ ] -- [ ] -- [ ] -- [ ] -- [ ] -- [ ] -- [ ] ...
+     |      |      |      |      |      |      |      |
+    [ ] -- [ ] -- [ ] -- [ ] -- [ ] -- [ ] -- [ ] -- [ ] ...
+     |      |      |      |      |      |      |      |
+    [ ] -- [ ] -- [ ] -- [ ] -- [ ] -- [ ] -- [ ] -- [ ] ...
+     |      |      |      |      |      |      |      |
+    [ ] -- [ ] -- [ ] -- [ ] -- [ ] -- [ ] -- [ ] -- [ ] ...
+     |      |      |      |      |      |      |      |
+    [ ] -- [ ] -- [ ] -- [ ] -- [ ] -- [ ] -- [ ] -- [ ] ...
+     |      |      |      |      |      |      |      |
+    [ ] -- [ ] -- [ ] -- [ ] -- [ ] -- [ ] -- [ ] -- [ ] ...
+     |      |      |      |      |      |      |      |
+    [ ] -- [ ] -- [ ] -- [ ] -- [ ] -- [ ] -- [ ] -- [ ] ...
+     |      |      |      |      |      |      |      |
+    ...    ...    ...    ...    ...    ...    ...    ... 
+
+SQUAD ::= Vec<4, THREAD>
+
+THREAD ::=
+
+    loop {
+      if (A, B) = pop_redex():
+        atomic_rewrite(A, B)
+      share_redexes()
+    }
+
+    atomic_rewrite(A, B):
+      if con-con:
+        thread 0: atomic_subst(A.1, B.1)
+        thread 1: atomic_subst(A.2, B.2)
+        thread 2: atomic_subst(B.1, A.1)
+        thread 3: atomic_subst(B.2, A.2)
+      else if con-dup:
+        ...
+
+    atomic_subst(a, b):
+      a_ok = CAS(a, a.rev(), b)
+      b_ok = CAS(b, b.rev(), a)
+      if not (a_ok and b_ok):
+        atomic_link(a, a.rev(), b)
+
+    atomic_link(a, b):
+      see algorith on 'paper/'
+
+RESULT:
+
+    - thread 0 links A1 -> B1
+    - thread 1 links B1 -> A1
+    - thread 2 links A2 -> B2
+    - thread 3 links B2 -> A2
+
+OUTPUT:
+
+    A1 <--------------> B1
+
+    A2 <--------------> B2
+```
+
+With this setup, a program reaches the peak parallelism when there are about 16k
+active redexes, resulting in a maximum theoretical speedup of 65536x. Note that
+even a "maximally sequential" interaction combinator program (i.e., one that, at
+any point of the reduction, always has exactly 1 active pair) still benefits
+from a "4x" degree of parallelism, due to squads having 4 threads; although,
+obviously, at that point a CPU version would be much faster, as CPU cores are
+way faster than 4 GPU cores.
 
 ## Interactions
 
@@ -275,112 +381,6 @@ A1 --| |
 
 Note that some interactions like NUM-ERA are omitted, but should logically
 follow from the ones described above.
-
-## Evaluator
-
-HVMC comes with 2 evaluators: a reference interpreter in Rust, and a massively
-parallel runtime in CUDA. Both evaluators are completely eager, which means they
-will reduce *every* generated active pair (redex) in an ultra-greedy fashion.
-Because of that, to perform recursion, it is advisable to pre-compile the source
-language to a [supercombinator](https://en.wikipedia.org/wiki/Supercombinator)
-formulation, as it allows sub-expressions to be unrolled lazily, preventing HVMC
-from infinitely expanding recursive function bodies. For the same reason, terms
-like the Y-Combinator aren't compatible with current HVMC. A lazy evaluator
-version will be provided in the future.
-
-The eager evaluator works by keeping a vector of current active pairs (redexes)
-and, for-each redex, performing an "interaction", as described above. On the
-single-core version, that "for-each" is done in a sequential loop. On the
-multi-core version, the vector of redexes is actually split into a grid of
-"redex bags", each bag owned by a "rewrite squad", which continuously pops and
-executes a redex in parallel. Since interaction rules are symmetric on the 4
-surrounding ports, we actually use 4 threads to perform an interaction, thus the
-name "squad".
-
-For example, on NVidia's RTX 4090, we keep a grid of 128x128 redex bags. Each
-bag is processed by a rewrite squad. There are `16,384` active squads, for a
-total of `65,536` active threads. Below is a visual representation:
-
-```
-REDEX ::= (Ptr32, Ptr32)
-
-    A1 --|\        /|-- B2
-         | |A0--B0| |
-    A2 --|/        \|-- B1
-
-REDEX_BAG ::= Vec<REDEX>
-
-    [(A0,B0), (C0,D0), (E0,F0), ...]
-
-REDEX_GRID ::= Matrix<128, 128 REDEX_BAG>
-
-    [ ] -- [ ] -- [ ] -- [ ] -- [ ] -- [ ] -- [ ] -- [ ] ...
-     |      |      |      |      |      |      |      |
-    [ ] -- [ ] -- [ ] -- [ ] -- [ ] -- [ ] -- [ ] -- [ ] ...
-     |      |      |      |      |      |      |      |
-    [ ] -- [ ] -- [ ] -- [ ] -- [ ] -- [ ] -- [ ] -- [ ] ...
-     |      |      |      |      |      |      |      |
-    [ ] -- [ ] -- [ ] -- [ ] -- [ ] -- [ ] -- [ ] -- [ ] ...
-     |      |      |      |      |      |      |      |
-    [ ] -- [ ] -- [ ] -- [ ] -- [ ] -- [ ] -- [ ] -- [ ] ...
-     |      |      |      |      |      |      |      |
-    [ ] -- [ ] -- [ ] -- [ ] -- [ ] -- [ ] -- [ ] -- [ ] ...
-     |      |      |      |      |      |      |      |
-    [ ] -- [ ] -- [ ] -- [ ] -- [ ] -- [ ] -- [ ] -- [ ] ...
-     |      |      |      |      |      |      |      |
-    [ ] -- [ ] -- [ ] -- [ ] -- [ ] -- [ ] -- [ ] -- [ ] ...
-     |      |      |      |      |      |      |      |
-    ...    ...    ...    ...    ...    ...    ...    ... 
-
-SQUAD ::= Vec<4, THREAD>
-
-THREAD ::=
-
-    loop {
-      if (A, B) = pop_redex():
-        atomic_rewrite(A, B)
-      share_redexes()
-    }
-
-    atomic_rewrite(A, B):
-      if con-con:
-        thread 0: atomic_subst(A.1, B.1)
-        thread 1: atomic_subst(A.2, B.2)
-        thread 2: atomic_subst(B.1, A.1)
-        thread 3: atomic_subst(B.2, A.2)
-      else if con-dup:
-        ...
-
-    atomic_subst(a, b):
-      a_ok = CAS(a, a.rev(), b)
-      b_ok = CAS(b, b.rev(), a)
-      if not (a_ok and b_ok):
-        atomic_link(a, a.rev(), b)
-
-    atomic_link(a, b):
-      see algorith on 'paper/'
-
-RESULT:
-
-    - thread 0 links A1 -> B1
-    - thread 1 links B1 -> A1
-    - thread 2 links A2 -> B2
-    - thread 3 links B2 -> A2
-
-OUTPUT:
-
-    A1 <--------------> B1
-
-    A2 <--------------> B2
-```
-
-With this setup, a program reaches the peak parallelism when there are about 16k
-active redexes, resulting in a maximum theoretical speedup of 65536x. Note that
-even a "maximally sequential" interaction combinator program (i.e., one that, at
-any point of the reduction, always has exactly 1 active pair) still benefits
-from a "4x" degree of parallelism, due to squads having 4 threads; although,
-obviously, at that point a CPU version would be much faster, as CPU cores are
-way faster than 4 GPU cores.
 
 ## Memory Layout
 
