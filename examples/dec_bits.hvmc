@@ -1,0 +1,24 @@
+// Decreases a binary counter until it is 0
+
+@c24 = ([[[[[[[[[[[[[[[[[[[[[[[(x w) (w v)] (v u)] (u t)] (t s)] (s r)] (r q)] (q p)] (p o)] (o n)] (n m)] (m l)] (l k)] (k j)] (j i)] (i h)] (h g)] (g f)] (f e)] (e d)] (d c)] (c b)] (b a)] (a R)] (x R))
+
+@O = (xs ((xs r) (* (* r))))
+@I = (xs (* ((xs r) (* r))))
+@E = (* (* (e e)))
+
+@decO = (p idecp) & @I ~ (decp idecp) & @dec ~ (p decp)
+@decI = (p lowp) & @low ~ (p lowp)
+@dec  = ((@decO (@decI (@E R))) R)
+
+@lowO = (p oop) & @O ~ (p op) & @O ~ (op oop)
+@lowI = (p oip) & @I ~ (p ip) & @O ~ (ip oip)
+@low  = ((@lowO (@lowI (@E R))) R)
+
+@runO = (p R) & @run ~ (decop R) & @dec ~ (op decop) & @O ~ (p op)
+@runI = (p R) & @run ~ (decip R) & @dec ~ (ip decip) & @I ~ (p ip)
+@run  = ((@runO (@runI (@E R))) R)
+
+@main
+  = R
+  & @c24 ~ (@I (@E nie))
+  & @run ~ (nie R)

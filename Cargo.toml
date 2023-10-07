@@ -1,0 +1,14 @@
+[package]
+name = "hvm-core"
+version = "0.1.0"
+edition = "2021"
+description = "HVM-Core is a massively parallel Interaction Combinator evaluator."
+license = "MIT"
+
+[[bin]]
+name = "hvmc"
+path = "src/main.rs"
+
+[lib]
+name = "hvmc"
+path = "src/lib.rs"

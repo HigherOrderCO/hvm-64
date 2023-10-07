@@ -1,0 +1,7 @@
+@c8  = ([[[[[[[(h g) (g f)] (f e)] (e d)] (d c)] (c b)] (b a)] (a R)] (h R))
+@g_s = ({2 r0 r1} ((r0 (r1 r)) r))
+@g_z = (x x)
+
+@main
+  = R
+  & @c8 ~ (@g_s (@g_z R))

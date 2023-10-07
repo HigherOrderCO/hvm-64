@@ -333,6 +333,17 @@ impl Net {
     Def { rdex: self.rdex, node: self.heap.compact() }
   }
 
+  // Reads back from a def.
+  pub fn from_def(def: Def) -> Self {
+    let mut net = Net::new(def.node.len());
+    for (i, &(p1, p2)) in def.node.iter().enumerate() {
+      net.heap.set(i as Val, P1, p1);
+      net.heap.set(i as Val, P2, p2);
+    }
+    net.rdex = def.rdex;
+    net
+  }
+
   // Gets a pointer's target.
   #[inline(always)]
   pub fn get_target(&self, ptr: Ptr) -> Ptr {
@@ -550,7 +561,7 @@ impl Net {
     let a_val = a & 0xFFFFFF;
     let b_val = b & 0xFFFFFF;
     match a_opr as u8 {
-      USE => { (((a_val & 0xF) << 24) | b_val) & 0xFFFFFF }
+      USE => { ((a_val & 0xF) << 24) | b_val }
       ADD => { (a_val.wrapping_add(b_val)) & 0xFFFFFF }
       SUB => { (a_val.wrapping_sub(b_val)) & 0xFFFFFF }
       MUL => { (a_val.wrapping_mul(b_val)) & 0xFFFFFF }
@@ -594,7 +605,8 @@ impl Net {
     // White ptr is still a REF...
     if ptr.is_ref() {
       // Load the closed net.
-      if let Some(got) = book.get(ptr.val()) {
+      let got = unsafe { book.defs.get_unchecked((ptr.val() as usize) & 0xFFFFFF) };
+      if got.node.len() > 0 {
         let len = got.node.len() - 1;
         let loc = self.heap.alloc(len);
         // Load nodes, adjusted.

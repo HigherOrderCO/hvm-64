@@ -1,42 +1,5 @@
-// An interaction combinator language
-// ----------------------------------
-//
-// This file implements a textual syntax to interact with the runtime. It includes a pure AST for
-// nets, as well as functions for parsing, stringifying, and converting pure ASTs to runtime nets.
-// On the runtime, a net is represented by a list of active trees, plus a root tree. The textual
-// syntax reflects this representation. It is specified below:
-//
-// <net>    ::= <root> <rdex>
-//   <root> ::= "$" <tree>
-//   <rdex> ::= "&" <tree> "~" <tree> <net>
-// <tree>   ::= <era> | <nod> | <var> | <dec>
-//   <era>  ::= "*"
-//   <nod>  ::= "(" <decimal> " " <tree> " " <tree> ")"
-//   <var>  ::= <string>
-//   <num>  ::= <decimal>
-//   <ref>  ::= "@" <string>
-//   <op2>  ::= "{" <tree> " " <tree> "}"
-//   <ite>  ::= "?" <tree> <tree>
-//
-// For example, below is the church nat 2, encoded as an interaction net:
-//
-// $ (0 (1 (0 b a) (0 a R)) (0 b R))
-//
-// The '$' symbol denotes the net's root. A node is denoted as `(LABEL CHILD_1 CHILD_2)`.
-// The label 0 is used for CT0 nodes, while labels >1 are used for DUP nodes. A node has two
-// children, representing Port1->Port0 and Port2->Port0 wires. Variables are denoted by
-// alphanumeric names, and used to represent auxiliary wires (Port1->Port2 and Port2->Port1).
-// Active wires (Port0->Port0) are represented with by '& left_tree ~ right_tree'. For example:
-//
-// & (0 x x)
-// ~ (0 y y)
-//
-// The net above represents two identity CT0 nodes connected by their main ports. This net has no
-// root, so it will just reduce to nothingness. Numbers are represented by numeric literals.
-// References (to closed nets) are denoted by '@name', where the name must have at most 5 letters,
-// from the following alphabet: ".0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_".
-
 use crate::core::*;
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::iter::Peekable;
 use std::str::Chars;
@@ -47,7 +10,7 @@ use std::str::Chars;
 #[derive(Clone, Hash, PartialEq, Eq, Debug)]
 pub enum LTree {
   Era,
-  Nod { lab: u8, lft: Box<LTree>, rgt: Box<LTree> },
+  Ctr { lab: u8, lft: Box<LTree>, rgt: Box<LTree> },
   Var { nam: String },
   Ref { nam: Val },
   Num { val: u32 },
@@ -63,54 +26,74 @@ pub struct LNet {
   pub rdex: LRdex,
 }
 
+type LBook = BTreeMap<String, LNet>;
+
 // Parser
 // ------
 
-pub fn skip_spaces(chars: &mut Peekable<Chars>) {
+fn skip(chars: &mut Peekable<Chars>) {
   while let Some(c) = chars.peek() {
-    if *c != ' ' && *c != '\n' {
+    if *c == '/' {
+      chars.next();
+      while let Some(c) = chars.peek() {
+        if *c == '\n' {
+          break;
+        }
+        chars.next();
+      }
+    } else if *c != ' ' && *c != '\n' {
       break;
+    } else {
+      chars.next();
     }
-    chars.next();
   }
 }
 
-pub fn consume(chars: &mut Peekable<Chars>, text: &str) {
-  skip_spaces(chars);
+pub fn consume(chars: &mut Peekable<Chars>, text: &str) -> Result<(), String> {
+  skip(chars);
   for c in text.chars() {
-    assert_eq!(chars.next().unwrap(), c);
+    if chars.next() != Some(c) {
+      return Err(format!("Expected '{}', found {:?}", text, chars.peek()));
+    }
   }
+  return Ok(());
 }
 
-pub fn parse_decimal(chars: &mut Peekable<Chars>) -> Val {
-  let mut num: Val = 0;
-  skip_spaces(chars);
+pub fn parse_decimal(chars: &mut Peekable<Chars>) -> Result<u32, String> {
+  let mut num: u32 = 0;
+  skip(chars);
+  if !chars.peek().map_or(false, |c| c.is_digit(10)) {
+    return Err(format!("Expected a decimal number, found {:?}", chars.peek()));
+  }
   while let Some(c) = chars.peek() {
     if !c.is_digit(10) {
       break;
     }
-    num = num * 10 + c.to_digit(10).unwrap() as Val;
+    num = num * 10 + c.to_digit(10).unwrap() as u32;
     chars.next();
   }
-  num
+  Ok(num)
 }
 
-pub fn parse_string(chars: &mut Peekable<Chars>) -> String {
-  let mut str = String::new();
-  skip_spaces(chars);
+pub fn parse_name(chars: &mut Peekable<Chars>) -> Result<String, String> {
+  let mut txt = String::new();
+  skip(chars);
+  if !chars.peek().map_or(false, |c| c.is_alphanumeric() || *c == '_' || *c == '.') {
+    return Err(format!("Expected a name character, found {:?}", chars.peek()))
+  }
   while let Some(c) = chars.peek() {
     if !c.is_alphanumeric() && *c != '_' && *c != '.' {
       break;
     }
-    str.push(*c);
+    txt.push(*c);
     chars.next();
   }
-  str
+  Ok(txt)
 }
 
-pub fn parse_opx_lit(chars: &mut Peekable<Chars>) -> String {
+pub fn parse_opx_lit(chars: &mut Peekable<Chars>) -> Result<String, String> {
   let mut opx = String::new();
-  skip_spaces(chars);
+  skip(chars);
   while let Some(c) = chars.peek() {
     if !"+-=*/%<>|&^!?".contains(*c) {
       break;
@@ -118,81 +101,122 @@ pub fn parse_opx_lit(chars: &mut Peekable<Chars>) -> String {
     opx.push(*c);
     chars.next();
   }
-  opx
+  Ok(opx)
 }
 
-pub fn parse_ltree(chars: &mut Peekable<Chars>) -> LTree {
-  skip_spaces(chars);
+pub fn parse_ltree(chars: &mut Peekable<Chars>) -> Result<LTree, String> {
+  skip(chars);
   match chars.peek() {
     Some('*') => {
       chars.next();
-      LTree::Era
+      Ok(LTree::Era)
     }
     Some('(') => {
       chars.next();
-      let lab = parse_decimal(chars) as u8;
-      let lft = Box::new(parse_ltree(chars));
-      let rgt = Box::new(parse_ltree(chars));
-      consume(chars, ")");
-      LTree::Nod { lab, lft, rgt }
+      let lab = 0;
+      let lft = Box::new(parse_ltree(chars)?);
+      let rgt = Box::new(parse_ltree(chars)?);
+      consume(chars, ")")?;
+      Ok(LTree::Ctr { lab, lft, rgt })
     }
-    Some('@') => {
+    Some('[') => {
       chars.next();
-      skip_spaces(chars);
-      let name = parse_string(chars);
-      LTree::Ref { nam: name_to_val(&name) }
-    }
-    Some(c) if c.is_digit(10) => {
-      LTree::Num { val: parse_decimal(chars) as u32 }
+      let lab = 1;
+      let lft = Box::new(parse_ltree(chars)?);
+      let rgt = Box::new(parse_ltree(chars)?);
+      consume(chars, "]")?;
+      Ok(LTree::Ctr { lab, lft, rgt })
     }
     Some('{') => {
       chars.next();
-      let lft = Box::new(parse_ltree(chars));
-      let rgt = Box::new(parse_ltree(chars));
-      consume(chars, "}");
-      LTree::Op2 { lft, rgt }
+      let lab = parse_decimal(chars)? as u8;
+      let lft = Box::new(parse_ltree(chars)?);
+      let rgt = Box::new(parse_ltree(chars)?);
+      consume(chars, "}")?;
+      Ok(LTree::Ctr { lab, lft, rgt })
+    }
+    Some('@') => {
+      chars.next();
+      skip(chars);
+      let name = parse_name(chars)?;
+      Ok(LTree::Ref { nam: name_to_val(&name) })
+    }
+    Some('#') => {
+      chars.next();
+      Ok(LTree::Num { val: parse_decimal(chars)? as u32 })
+    }
+    Some('<') => {
+      chars.next();
+      let lft = Box::new(parse_ltree(chars)?);
+      let rgt = Box::new(parse_ltree(chars)?);
+      consume(chars, ">")?;
+      Ok(LTree::Op2 { lft, rgt })
     }
     Some('?') => {
       chars.next();
-      let sel = Box::new(parse_ltree(chars));
-      let ret = Box::new(parse_ltree(chars));
-      LTree::Ite { sel, ret }
+      let sel = Box::new(parse_ltree(chars)?);
+      let ret = Box::new(parse_ltree(chars)?);
+      Ok(LTree::Ite { sel, ret })
     }
     _ => {
-      LTree::Var { nam: parse_string(chars) }
+      Ok(LTree::Var { nam: parse_name(chars)? })
     },
   }
 }
 
-pub fn parse_lnet(chars: &mut Peekable<Chars>) -> LNet {
+pub fn parse_lnet(chars: &mut Peekable<Chars>) -> Result<LNet, String> {
   let mut rdex = Vec::new();
-  let mut root = LTree::Era;
-  while let Some(c) = {
-    skip_spaces(chars);
-    chars.peek()
-  } {
-    if *c == '$' {
+  let root = parse_ltree(chars)?;
+  while let Some(c) = { skip(chars); chars.peek() } {
+    if *c == '&' {
       chars.next();
-      root = parse_ltree(chars);
-    } else if *c == '&' {
-      chars.next();
-      let tree1 = parse_ltree(chars);
-      consume(chars, "~");
-      let tree2 = parse_ltree(chars);
+      let tree1 = parse_ltree(chars)?;
+      consume(chars, "~")?;
+      let tree2 = parse_ltree(chars)?;
       rdex.push((tree1, tree2));
     } else {
       break;
     }
   }
-  LNet { root, rdex }
+  Ok(LNet { root, rdex })
+}
+
+pub fn parse_lbook(chars: &mut Peekable<Chars>) -> Result<LBook, String> {
+  let mut book = BTreeMap::new();
+  while let Some(c) = { skip(chars); chars.peek() } {
+    if *c == '@' {
+      chars.next();
+      let name = parse_name(chars)?;
+      consume(chars, "=")?;
+      let net = parse_lnet(chars)?;
+      book.insert(name, net);
+    } else {
+      break;
+    }
+  }
+  Ok(book)
+}
+
+fn do_parse<T>(code: &str, parse_fn: impl Fn(&mut Peekable<Chars>) -> Result<T, String>) -> T {
+  match parse_fn(&mut code.chars().peekable()) {
+    Ok(result) => result,
+    Err(err) => {
+      eprintln!("{}", err);
+      std::process::exit(1);
+    }
+  }
 }
 
 pub fn do_parse_ltree(code: &str) -> LTree {
-  parse_ltree(&mut code.chars().peekable())
+  do_parse(code, parse_ltree)
 }
 
 pub fn do_parse_lnet(code: &str) -> LNet {
-  parse_lnet(&mut code.chars().peekable())
+  do_parse(code, parse_lnet)
+}
+
+pub fn do_parse_lbook(code: &str) -> LBook {
+  do_parse(code, parse_lbook)
 }
 
 // Stringifier
@@ -203,8 +227,12 @@ pub fn show_ltree(tree: &LTree) -> String {
     LTree::Era => {
       "*".to_string()
     }
-    LTree::Nod { lab, lft, rgt } => {
-      format!("({} {} {})", lab, show_ltree(&*lft), show_ltree(&*rgt))
+    LTree::Ctr { lab, lft, rgt } => {
+      match lab {
+        0 => { format!("({} {})", show_ltree(&*lft), show_ltree(&*rgt)) }
+        1 => { format!("[{} {}]", show_ltree(&*lft), show_ltree(&*rgt)) }
+        _ => { format!("{{{} {} {}}}", lab, show_ltree(&*lft), show_ltree(&*rgt)) }
+      } 
     }
     LTree::Var { nam } => {
       nam.clone()
@@ -213,10 +241,10 @@ pub fn show_ltree(tree: &LTree) -> String {
       format!("@{}", val_to_name(*nam))
     }
     LTree::Num { val } => {
-      format!("{}", (*val as u32).to_string())
+      format!("#{}", (*val as u32).to_string())
     }
     LTree::Op2 { lft, rgt } => {
-      format!("{{{} {}}}", show_ltree(&*lft), show_ltree(&*rgt))
+      format!("<{} {}>", show_ltree(&*lft), show_ltree(&*rgt))
     }
     LTree::Ite { sel, ret } => {
       format!("? {} {}", show_ltree(&*sel), show_ltree(&*ret))
@@ -226,15 +254,27 @@ pub fn show_ltree(tree: &LTree) -> String {
 
 pub fn show_lnet(lnet: &LNet) -> String {
   let mut result = String::new();
-  result.push_str(&format!("$ {}\n", show_ltree(&lnet.root)));
+  result.push_str(&format!("{}", show_ltree(&lnet.root)));
   for (a, b) in &lnet.rdex {
-    result.push_str(&format!("& {}\n~ {}\n", show_ltree(a), show_ltree(b)));
+    result.push_str(&format!("\n& {} ~ {}", show_ltree(a), show_ltree(b)));
   }
   return result;
 }
 
 pub fn show_net(net: &Net) -> String {
   show_lnet(&readback_lnet(net))
+}
+
+pub fn show_lbook(lbook: &LBook) -> String {
+  let mut result = String::new();
+  for (name, lnet) in lbook {
+    result.push_str(&format!("{} = {}", name, show_lnet(lnet)));
+  }
+  return result;
+}
+
+pub fn show_book(book: &Book) -> String {
+  show_lbook(&readback_lbook(book))
 }
 
 // Conversion
@@ -353,7 +393,7 @@ pub fn alloc_ltree(net: &mut Net, tree: &LTree, vars: &mut HashMap<String, Paren
     LTree::Era => {
       ERAS
     }
-    LTree::Nod { lab, lft, rgt } => {
+    LTree::Ctr { lab, lft, rgt } => {
       let val = net.heap.alloc(1);
       let p1 = alloc_ltree(net, &*lft, vars, Parent::Node { val, port: P1 });
       net.heap.set(val, P1, p1);
@@ -413,6 +453,21 @@ pub fn do_alloc_ltree(net: &mut Net, tree: &LTree) -> Ptr {
   alloc_ltree(net, tree, &mut HashMap::new(), PARENT_ROOT)
 }
 
+pub fn define(book: &mut Book, name: &str, code: &str) -> Val {
+  let id = name_to_val(name);
+  book.def(id, lnet_to_net(&do_parse_lnet(code), None).to_def());
+  return id;
+}
+
+pub fn lbook_to_book(lbook: &LBook) -> Book {
+  let mut book = Book::new();
+  for (name, lnet) in lbook {
+    let id = name_to_val(name);
+    book.def(id, lnet_to_net(lnet, None).to_def());
+  }
+  book
+}
+
 pub fn readback_ltree(net: &Net, ptr: Ptr, parent: Parent, vars: &mut HashMap<Parent, String>, fresh: &mut usize) -> LTree {
   match ptr.tag() {
     ERA => {
@@ -454,7 +509,7 @@ pub fn readback_ltree(net: &Net, ptr: Ptr, parent: Parent, vars: &mut HashMap<Pa
       let p2  = net.heap.get(ptr.val(), P2);
       let lft = readback_ltree(net, p1, Parent::Node { val: ptr.val(), port: P1 }, vars, fresh);
       let rgt = readback_ltree(net, p2, Parent::Node { val: ptr.val(), port: P2 }, vars, fresh);
-      LTree::Nod {
+      LTree::Ctr {
         lab: ptr.tag() - CT0,
         lft: Box::new(lft),
         rgt: Box::new(rgt),
@@ -476,11 +531,15 @@ pub fn readback_lnet(net: &Net) -> LNet {
   LNet { root, rdex }
 }
 
-// Utils
-// -----
-
-pub fn define(book: &mut Book, name: &str, code: &str) -> Val {
-  let id = name_to_val(name);
-  book.def(id, lnet_to_net(&do_parse_lnet(code), None).to_def());
-  return id;
+pub fn readback_lbook(book: &Book) -> LBook {
+  let mut lbook = BTreeMap::new();
+  for id in 0 .. book.defs.len() {
+    let def = &book.defs[id];
+    if def.node.len() > 0 {
+      let name = val_to_name(id as u32);
+      let lnet = readback_lnet(&Net::from_def(def.clone()));
+      lbook.insert(name, lnet);
+    }
+  }
+  lbook
 }
