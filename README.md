@@ -34,7 +34,7 @@ it on the GPU, you'll need to hack up and manually edit `hvm2.cu` using the
 
 ## Example
 
-HVMC is a low-level compile target for high-level programming languages. The
+HVMC is a low-level compile target for high-level languages. The
 file below performs 2^2 with [Church Nats](https://en.wikipedia.org/wiki/Church_encoding):
 
 ```javascript
