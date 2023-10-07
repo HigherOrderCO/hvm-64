@@ -56,7 +56,7 @@ To understand this syntax, see below. More on [`/examples`](/examples).
 HVM-Core provides a textual syntax that allows us to construct interaction
 combinator nets using a simple AST:
 
-```javascript
+```
 <TERM> ::=
   <ERA> ::= "*"
   <CON> ::= "(" <TERM> " " <TERM> ")"
