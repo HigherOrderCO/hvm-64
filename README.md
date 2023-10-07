@@ -151,7 +151,7 @@ like the Y-Combinator aren't compatible with current HVMC. A lazy evaluator
 version will be provided in the future.
 
 The eager evaluator works by keeping a vector of current active pairs (redexes)
-and, for-each redex, performing an "interaction", as described above. On the
+and, for-each redex, performing an "interaction", as described below. On the
 single-core version, that "for-each" is done in a sequential loop. On the
 multi-core version, the vector of redexes is actually split into a grid of
 "redex bags", each bag owned by a "rewrite squad", which continuously pops and
