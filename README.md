@@ -37,7 +37,7 @@ it on the GPU, you'll need to hack up and manually edit `hvm2.cu` using the
 HVMC is a low-level compile target for high-level programming languages. The
 file below performs 2^2 with [Church Nats](https://en.wikipedia.org/wiki/Church_encoding):
 
-```
+```javascript
 // closed net for the Church Nat 2
 @c2_a = ([(b a) (a R)] (b R))
 
@@ -56,7 +56,7 @@ To understand this syntax, see below. More on [`/examples`](/examples).
 HVM-Core provides a textual syntax that allows us to construct interaction
 combinator nets using a simple AST:
 
-```
+```javascript
 <TERM> ::=
   <ERA> ::= "*"
   <CON> ::= "(" <TERM> " " <TERM> ")"
@@ -231,7 +231,6 @@ RESULT:
 OUTPUT:
 
     A1 <--------------> B1
-
     A2 <--------------> B2
 ```
 
@@ -252,7 +251,7 @@ interactions are:
 
 ```
 ()---()
-======= ERA-ERA
+~~~~~~~ ERA-ERA
 nothing
 ```
 
@@ -260,9 +259,8 @@ nothing
 A1 --|\
      |a|-- ()
 A2 --|/
-============= CTR-ERA
+~~~~~~~~~~~~~ CTR-ERA
 A1 ------- ()
-         
 A2 ------- ()
 ```
 
@@ -270,7 +268,7 @@ A2 ------- ()
 A1 --|\     /|-- B2
      |a|---|b|   
 A2 --|/     \|-- B1
-=================== CTR-CTR (if a == b)
+~~~~~~~~~~~~~~~~~~~ CTR-CTR (if a ~~ b)
 A1 -----, ,----- B2
          X
 A2 -----' '----- B1
@@ -280,7 +278,7 @@ A2 -----' '----- B1
 A1 --|\         /|-- B2
      |a|-------|b|   
 A2 --|/         \|-- B1
-========================= CTR-CTR (if a != b)
+~~~~~~~~~~~~~~~~~~~~~~~~~ CTR-CTR (if a !~ b)
       /|-------|\
 A1 --|b|       |a|-- B2
       \|--, ,--|/
@@ -301,7 +299,7 @@ collected, allowing recursive functions to halt without infinite expansions.
 
 ```
 () -- @REF
-========== ERA-REF
+~~~~~~~~~~ ERA-REF
 nothing
 ```
 
@@ -309,7 +307,7 @@ nothing
 A1 --|\
      | |-- @REF
 A2 --|/
-================ CTR-REF
+~~~~~~~~~~~~~~~~ CTR-REF
 A1 --|\
      | |-- {val}
 A2 --|/
@@ -326,13 +324,13 @@ computation, and connects the result to the return wire.
 A1 --,
      [}-- #X
 A2 --' 
-============== OP2-NUM
+~~~~~~~~~~~~~~ OP2-NUM
 A2 --[#X}-- A1
 ```
 
 ```
 A1 --[#X}-- #Y
-============== OP1-NUM
+~~~~~~~~~~~~~~ OP1-NUM
 A1 -- #Z
 ```
 
@@ -373,7 +371,7 @@ it does the opposite. Below is the reduction when #X is 1:
 A1 --,
      (?)-- #X
 A2 --' 
-============= ITE-NUM
+~~~~~~~~~~~~~ ITE-NUM
       /|-- ()
 A1 --| |
       \|-- A2
@@ -417,7 +415,7 @@ two 32-bit pointers and, thus, uses exactly 64 bits. Pointers include a 4-bit
 tag and a 28-bit value, which allows addressing a 2 GB space per instance. There
 are 16 pointer types:
 
-```
+```rust
 VR1 = 0x0; // variable to aux port 1
 VR2 = 0x1; // variable to aux port 2
 RD1 = 0x2; // redirect to aux port 1
@@ -446,7 +444,7 @@ We also provide unboxed 24-bit unsigned integers, which allows HVMC to store raw
 data with minimal loss. For example, to store a raw 3 KB buffer, one could use a
 perfect binary tree of CON nodes with a depth of 9, as follows:
 
-```
+```javascript
 @buff = ((((((((((X0 X1) (X2 X3)) ((X4 X5) (X6 X7))) ...)))))))
 ```
 
