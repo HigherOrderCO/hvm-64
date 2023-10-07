@@ -293,8 +293,8 @@ A2 --|b|       |a|-- B1
 
 The dereference interactions happen when a @REF node interacts with another
 node. When that node is a constructor, the dereference will be unrolled
-efficiently. This makes HVM practical, because, on raw interaction combinators,
-top-level definitions must be implemented with DUP nodes. This results in a
+efficiently. This makes HVM practical, because, without it, top-level
+definitions would need to be implemented with DUP nodes. This would cause
 considerable overhead when trying to implement functions, due to their
 incremental copying nature. When the other node is anything else, that implies
 two closed nets got disconnected from the main graph, so both nodes are
