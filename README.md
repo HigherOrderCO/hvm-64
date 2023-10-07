@@ -29,8 +29,9 @@ hvmc bend file.hvmc -s
 ```
 
 **Note**: `bend` wasn't implemented yet; if you're here *today* and wants to run
-it on the GPU, you'll need to hack up and manually edit `hvm2.cu` using the
-`hvmc gen-cuda-book file.hvmc` command. Compile with `-arch=compute_89`.
+it on the GPU, you'll need to manually edit `hvm2.cu` using the
+`hvmc gen-cuda-book file.hvmc` command. Compile with `-arch=compute_89`. I'll
+add that to the CLI soon. Accepting PRs though :)
 
 ## Example
 
