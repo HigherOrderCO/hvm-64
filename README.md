@@ -8,7 +8,8 @@ to **6.8 billion interactions** per second in an RTX 4090. When evaluating
 functional programs, it performed 5x faster than the best alternatives, making
 it a great compile target for high-level languages seeking massive parallelism.
 
-HVM-Core will be used as the compile target for [HVM](https://github.com/higherorderco/hvm) on its upcoming update.
+HVM-Core will be used as the compile target for [HVM](https://github.com/higherorderco/hvm)
+on its upcoming update.
 
 ## Usage
 
