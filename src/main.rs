@@ -6,7 +6,6 @@
 
 mod core;
 mod lang;
-mod book;
 
 use crate::core::*;
 use crate::lang::*;
