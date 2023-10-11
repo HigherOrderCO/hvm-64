@@ -165,7 +165,7 @@ impl Ptr {
 
   #[inline(always)]
   pub fn has_loc(&self) -> bool {
-    return self.is_ctr() || self.is_var();
+    return self.is_var() || self.is_op2() || self.is_op1() || self.is_ite() || self.is_ctr();
   }
 
   #[inline(always)]
