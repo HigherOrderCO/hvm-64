@@ -479,7 +479,7 @@ pub fn readback_ltree(net: &Net, ptr: Ptr, parent: Parent, vars: &mut HashMap<Pa
     NUM => {
       LTree::Num { val: ptr.val() as u32 }
     }
-    OP2 => {
+    OP1 | OP2 => {
       let lft = readback_ltree(net, net.heap.get(ptr.val(), P1), Parent::Node { val: ptr.val(), port: P1 }, vars, fresh);
       let rgt = readback_ltree(net, net.heap.get(ptr.val(), P2), Parent::Node { val: ptr.val(), port: P2 }, vars, fresh);
       LTree::Op2 { lft: Box::new(lft), rgt: Box::new(rgt) }
