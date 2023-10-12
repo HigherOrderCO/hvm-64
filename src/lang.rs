@@ -268,7 +268,7 @@ pub fn show_net(net: &Net) -> String {
 pub fn show_lbook(lbook: &LBook) -> String {
   let mut result = String::new();
   for (name, lnet) in lbook {
-    result.push_str(&format!("{} = {}\n", name, show_lnet(lnet)));
+    result.push_str(&format!("@{} = {}\n", name, show_lnet(lnet)));
   }
   return result;
 }
