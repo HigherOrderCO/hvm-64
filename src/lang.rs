@@ -26,7 +26,7 @@ pub struct LNet {
   pub rdex: LRdex,
 }
 
-type LBook = BTreeMap<String, LNet>;
+pub type LBook = BTreeMap<String, LNet>;
 
 // Parser
 // ------
