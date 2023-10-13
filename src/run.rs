@@ -159,6 +159,11 @@ impl Ptr {
   }
 
   #[inline(always)]
+  pub fn is_skp(&self) -> bool {
+    return self.is_era() || self.is_num() || self.is_ref();
+  }
+
+  #[inline(always)]
   pub fn is_mat(&self) -> bool {
     return self.tag() == MAT;
   }
@@ -171,6 +176,15 @@ impl Ptr {
   #[inline(always)]
   pub fn adjust(&self, loc: Val) -> Ptr {
     return Ptr::new(self.tag(), self.val() + if self.has_loc() { loc - 1 } else { 0 });
+  }
+
+  // Can this redex be skipped (as an optimization)?
+  #[inline(always)]
+  pub fn can_skip(a: Ptr, b: Ptr) -> bool {
+    return a.is_era() && b.is_era()
+        || a.is_ref() && b.is_era()
+        || a.is_era() && b.is_ref()
+        || a.is_ref() && b.is_ref();
   }
 }
 
@@ -360,7 +374,12 @@ impl Net {
   pub fn link(&mut self, a: Ptr, b: Ptr) {
     // Creates redex A-B
     if a.is_pri() && b.is_pri() {
-      self.rdex.push((a, b));
+      if Ptr::can_skip(a, b) {
+        self.eras += 1;
+      } else {
+        self.rdex.push((a, b));
+      }
+      return;
     }
     // Substitutes A
     if a.is_var() {
@@ -377,9 +396,9 @@ impl Net {
     let mut a = a;
     let mut b = b;
     // Dereference A
-    if a.is_ref() && b.is_ctr() {
+    if a.is_ref() && b.is_pri() && !b.is_skp() {
       a = self.deref(book, a, b);
-    } else if b.is_ref() && a.is_ctr() {
+    } else if b.is_ref() && a.is_pri() && !a.is_skp() {
       b = self.deref(book, b, a);
     }
     // CTR-CTR (eq)
