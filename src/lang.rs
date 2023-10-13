@@ -26,7 +26,7 @@ pub struct LNet {
   pub rdex: LRdex,
 }
 
-type LBook = BTreeMap<String, LNet>;
+pub type LBook = BTreeMap<String, LNet>;
 
 // Parser
 // ------
@@ -268,7 +268,7 @@ pub fn show_net(net: &Net) -> String {
 pub fn show_lbook(lbook: &LBook) -> String {
   let mut result = String::new();
   for (name, lnet) in lbook {
-    result.push_str(&format!("{} = {}", name, show_lnet(lnet)));
+    result.push_str(&format!("@{} = {}\n", name, show_lnet(lnet)));
   }
   return result;
 }
