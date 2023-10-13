@@ -422,6 +422,12 @@ impl Net {
     // ERA-ERA
     } else if a.is_era() && b.is_era() {
       self.eras += 1;
+    // VAR-ANY
+    } else if a.is_var() {
+      self.link(a, b);
+    // ANY-VAR
+    } else if b.is_var() {
+      self.link(b, a);
     // CTR-NUM
     } else if a.is_ctr() && b.is_num() {
       self.copy(a, b);
@@ -626,8 +632,8 @@ impl Net {
   pub fn deref(&mut self, book: &Book, ptr: Ptr, parent: Ptr) -> Ptr {
     self.dref += 1;
     let mut ptr = ptr;
-    // White ptr is still a REF...
-    if ptr.is_ref() {
+    // FIXME: change "while" to "if" once lang prevents refs from returning refs
+    while ptr.is_ref() {
       // Load the closed net.
       let got = unsafe { book.defs.get_unchecked((ptr.val() as usize) & 0xFFFFFF) };
       if got.node.len() > 0 {
