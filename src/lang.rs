@@ -15,7 +15,7 @@ pub enum LTree {
   Ref { nam: Val },
   Num { val: u32 },
   Op2 { lft: Box<LTree>, rgt: Box<LTree> },
-  Ite { sel: Box<LTree>, ret: Box<LTree> },
+  Mat { sel: Box<LTree>, ret: Box<LTree> },
 }
 
 type LRdex = Vec<(LTree, LTree)>;
@@ -156,7 +156,7 @@ pub fn parse_ltree(chars: &mut Peekable<Chars>) -> Result<LTree, String> {
       chars.next();
       let sel = Box::new(parse_ltree(chars)?);
       let ret = Box::new(parse_ltree(chars)?);
-      Ok(LTree::Ite { sel, ret })
+      Ok(LTree::Mat { sel, ret })
     }
     _ => {
       Ok(LTree::Var { nam: parse_name(chars)? })
@@ -246,7 +246,7 @@ pub fn show_ltree(tree: &LTree) -> String {
     LTree::Op2 { lft, rgt } => {
       format!("<{} {}>", show_ltree(&*lft), show_ltree(&*rgt))
     }
-    LTree::Ite { sel, ret } => {
+    LTree::Mat { sel, ret } => {
       format!("? {} {}", show_ltree(&*sel), show_ltree(&*ret))
     }
   }
@@ -438,13 +438,13 @@ pub fn alloc_ltree(net: &mut Net, tree: &LTree, vars: &mut HashMap<String, Paren
       net.heap.set(val, P2, p2);
       Ptr::new(OP2, val)
     }
-    LTree::Ite { sel, ret } => {
+    LTree::Mat { sel, ret } => {
       let val = net.heap.alloc(1);
       let p1 = alloc_ltree(net, &*sel, vars, Parent::Node { val, port: P1 });
       net.heap.set(val, P1, p1);
       let p2 = alloc_ltree(net, &*ret, vars, Parent::Node { val, port: P2 });
       net.heap.set(val, P2, p2);
-      Ptr::new(ITE, val)
+      Ptr::new(MAT, val)
     }
   }
 }
@@ -484,10 +484,10 @@ pub fn readback_ltree(net: &Net, ptr: Ptr, parent: Parent, vars: &mut HashMap<Pa
       let rgt = readback_ltree(net, net.heap.get(ptr.val(), P2), Parent::Node { val: ptr.val(), port: P2 }, vars, fresh);
       LTree::Op2 { lft: Box::new(lft), rgt: Box::new(rgt) }
     }
-    ITE => {
+    MAT => {
       let sel = readback_ltree(net, net.heap.get(ptr.val(), P1), Parent::Node { val: ptr.val(), port: P1 }, vars, fresh);
       let ret = readback_ltree(net, net.heap.get(ptr.val(), P2), Parent::Node { val: ptr.val(), port: P2 }, vars, fresh);
-      LTree::Ite { sel: Box::new(sel), ret: Box::new(ret) }
+      LTree::Mat { sel: Box::new(sel), ret: Box::new(ret) }
     }
     VR1 | VR2 => {
       let key = match ptr.tag() {

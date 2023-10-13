@@ -20,7 +20,7 @@ pub const ERA: Tag = 0x5; // unboxed eraser
 pub const NUM: Tag = 0x6; // unboxed number
 pub const OP2: Tag = 0x7; // numeric operation binary
 pub const OP1: Tag = 0x8; // numeric operation unary
-pub const ITE: Tag = 0x9; // numeric if-then-else
+pub const MAT: Tag = 0x9; // numeric if-then-else
 pub const CT0: Tag = 0xA; // main port of con node 0
 pub const CT1: Tag = 0xB; // main port of con node 1
 pub const CT2: Tag = 0xC; // main port of con node 2
@@ -159,13 +159,13 @@ impl Ptr {
   }
 
   #[inline(always)]
-  pub fn is_ite(&self) -> bool {
-    return self.tag() == ITE;
+  pub fn is_mat(&self) -> bool {
+    return self.tag() == MAT;
   }
 
   #[inline(always)]
   pub fn has_loc(&self) -> bool {
-    return self.is_var() || self.is_op2() || self.is_op1() || self.is_ite() || self.is_ctr();
+    return self.is_var() || self.is_op2() || self.is_op1() || self.is_mat() || self.is_ctr();
   }
 
   #[inline(always)]
@@ -451,23 +451,23 @@ impl Net {
     // ERA-OP1
     } else if a.is_era() && b.is_op1() {
       self.era1(b);
-    // ITE-NUM
-    } else if a.is_ite() && b.is_num() {
-      self.cond(a, b);
-    // NUM-ITE
-    } else if a.is_num() && b.is_ite() {
-      self.cond(b, a);
-    // ITE-CTR
-    } else if a.is_ite() && b.is_ctr() {
+    // MAT-NUM
+    } else if a.is_mat() && b.is_num() {
+      self.mtch(a, b);
+    // NUM-MAT
+    } else if a.is_num() && b.is_mat() {
+      self.mtch(b, a);
+    // MAT-CTR
+    } else if a.is_mat() && b.is_ctr() {
       self.comm(a, b);
-    // CTR-ITE
-    } else if a.is_ctr() && b.is_ite() {
+    // CTR-MAT
+    } else if a.is_ctr() && b.is_mat() {
       self.comm(b, a);
-    // ITE-ERA
-    } else if a.is_ite() && b.is_era() {
+    // MAT-ERA
+    } else if a.is_mat() && b.is_era() {
       self.era2(a);
-    // ERA-ITE
-    } else if a.is_era() && b.is_ite() {
+    // ERA-MAT
+    } else if a.is_era() && b.is_mat() {
       self.era2(b);
     } else {
       panic!("undefined interaction: {:08x} {:08x}", a.0, b.0);
@@ -581,20 +581,25 @@ impl Net {
     }
   }
 
-  pub fn cond(&mut self, a: Ptr, b: Ptr) {
+  pub fn mtch(&mut self, a: Ptr, b: Ptr) {
     self.oper += 1;
-    let p1  = self.heap.get(a.val(), P1); // branch
-    let p2  = self.heap.get(a.val(), P2); // return
-    let loc = self.heap.alloc(1);
-    if b.val() > 0 {
-      self.heap.set(loc, P1, p2);
-      self.heap.set(loc, P2, ERAS);
+    let p1 = self.heap.get(a.val(), P1); // branch
+    let p2 = self.heap.get(a.val(), P2); // return
+    if b.val() == 0 {
+      let loc = self.heap.alloc(1);
+      self.heap.set(loc+0, P1, p2);
+      self.heap.set(loc+0, P2, ERAS);
+      self.link(p1, Ptr::new(CT0, loc+0));
+      self.heap.free(a.val());
     } else {
-      self.heap.set(loc, P1, ERAS);
-      self.heap.set(loc, P2, p2);
+      let loc = self.heap.alloc(2);
+      self.heap.set(loc+0, P1, ERAS);
+      self.heap.set(loc+0, P2, Ptr::new(CT0, loc + 1));
+      self.heap.set(loc+1, P1, Ptr::new(NUM, b.val() - 1));
+      self.heap.set(loc+1, P2, p2);
+      self.link(p1, Ptr::new(CT0, loc+0));
+      self.heap.free(a.val());
     }
-    self.link(p1, Ptr::new(CT0, loc));
-    self.heap.free(a.val());
   }
 
   // Expands a closed net.

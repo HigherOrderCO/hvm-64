@@ -69,7 +69,7 @@ combinator nets using a simple AST:
   <REF> ::= "@" <name>
   <U24> ::= "#" <value>
   <OP2> ::= "<" <TERM> " " <TERM> ">"
-  <ITE> ::= "?" <TERM> <TERM>
+  <MAT> ::= "?" <TERM> <TERM>
   <VAR> ::= <name>
 
 <NET> ::=
@@ -106,7 +106,7 @@ complete list of all term variants:
 
 - `OP2`: a binary operation on u24 operands.
 
-- `ITE`: an if-then-else operator with a u24 condition.
+- `MAT`: a pattern-matching operator on u24 values.
 
 Note that terms form a tree-like structure. Yet, interaction combinators are not
 trees, but graphs; terms aren't enough to express all possible nets. To fix
@@ -364,20 +364,32 @@ N   | operation
   F | right-shift
 
 Since HVM already provides plenty of solutions for branching (global references,
-lambda encoded booleans and pattern-matching, etc.), the If-Then-Else operation
+lambda encoded booleans and pattern-matching, etc.), the pattern-match operation
 is only necessary to read bits from numbers: otherwise, numbers would be "black
 boxes" that can't interact with the rest of the program. The way it works is
-simple: it receives a number, two branches (in a CON node) and a return wire. If
-the number is 0, it erases the first branch and returns the second. Otherwise,
-it does the opposite. Below is the reduction when #X is 1:
+simple: it receives a number, two branches (case-zero and case-succ, stored in a
+CON node) and a return wire. If the number is 0, it erases the case-succ branch
+and returns the case-zero branch. Otherwise, it erases the case-zero branch and
+returns the case-succ branch applied to the predecessor of the number.
 
 ```
 A1 --,
      (?)-- #X
 A2 --' 
-~~~~~~~~~~~~~ ITE-NUM
+~~~~~~~~~~~~~~~~~~ MAT-NUM (#X > 0)
+           /|-- A2
+      /|--| |
+A1 --| |   \|-- #(X-1)
+      \|-- ()
+```
+
+```
+A1 --,
+     (?)-- #X
+A2 --' 
+~~~~~~~~~~~~~~~~~~ MAT-NUM (#X == 0)
       /|-- ()
-A1 --| |
+A1 --| |   
       \|-- A2
 ```
 
