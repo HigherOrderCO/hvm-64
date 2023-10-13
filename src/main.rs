@@ -4,11 +4,8 @@
 #![allow(non_snake_case)]
 #![allow(non_upper_case_globals)]
 
-mod core;
-mod lang;
-
-use crate::core::*;
-use crate::lang::*;
+mod ast;
+mod run;
 
 use std::env;
 use std::fs;
@@ -27,9 +24,9 @@ fn main() {
   if action == "run" {
     let (book, mut net) = load(f_name);
     let start_time = std::time::Instant::now();
-    net.expand(&book, ROOT);
+    net.expand(&book, run::ROOT);
     net.normal(&book);
-    println!("{}", show_net(&net));
+    println!("{}", ast::show_runtime_net(&net));
     if args.len() >= 4 && args[3] == "-s" {
       println!("RWTS   : {}", net.anni + net.comm + net.eras + net.dref);
       println!("- ANNI : {}", net.anni);
@@ -53,16 +50,16 @@ fn main() {
 }
 
 // Load file and generate net
-fn load(file: &str) -> (Book, Net) {
+fn load(file: &str) -> (run::Book, run::Net) {
   let file = fs::read_to_string(file).unwrap();
-  let book = lbook_to_book(&do_parse_lbook(&file));
-  let mut net = Net::new(1 << 28);
-  net.boot(name_to_val("main"));
+  let book = ast::book_to_runtime(&ast::do_parse_book(&file));
+  let mut net = run::Net::new(1 << 28);
+  net.boot(ast::name_to_val("main"));
   return (book, net);
 }
 
 // Compile to a CUDA book (TODO: move to another repo)
-pub fn gen_cuda_book(book: &Book) -> String {
+pub fn gen_cuda_book(book: &run::Book) -> String {
   use std::collections::BTreeMap;
 
   // Sort the book.defs by key
@@ -78,7 +75,7 @@ pub fn gen_cuda_book(book: &Book) -> String {
 
   // Generate function ids
   for (i, id) in defs.keys().enumerate() {
-    code.push_str(&format!("const u32 F_{} = 0x{:x};\n", crate::lang::val_to_name(*id), id));
+    code.push_str(&format!("const u32 F_{} = 0x{:x};\n", crate::ast::val_to_name(*id), id));
   }
   code.push_str("\n");
 
@@ -96,7 +93,7 @@ pub fn gen_cuda_book(book: &Book) -> String {
     let node_len = net.node.len();
     let rdex_len = net.rdex.len();
 
-    code.push_str(&format!("  // @{}\n", crate::lang::val_to_name(*id)));
+    code.push_str(&format!("  // @{}\n", crate::ast::val_to_name(*id)));
 
     // Collect all pointers from root, nodes and rdex into a single buffer
     code.push_str(&format!("  // .nlen\n"));
@@ -137,7 +134,7 @@ pub fn gen_cuda_book(book: &Book) -> String {
 
   let mut index = 0;
   for (i, id) in defs.keys().enumerate() {
-    code.push_str(&format!("  0x{:08X}, 0x{:08X}, // @{}\n", id, index, crate::lang::val_to_name(*id)));
+    code.push_str(&format!("  0x{:08X}, 0x{:08X}, // @{}\n", id, index, crate::ast::val_to_name(*id)));
     index += 2 + 2 * defs[id].node.len() as u32 + 2 * defs[id].rdex.len() as u32;
   }
 
