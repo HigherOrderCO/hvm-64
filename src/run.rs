@@ -393,7 +393,6 @@ impl Net {
 
   // Performs an interaction over a redex.
   pub fn interact(&mut self, book: &Book, a: Ptr, b: Ptr) {
-    println!("{:08x} {:08x}", a.0, b.0);
     let mut a = a;
     let mut b = b;
     // Dereference A
@@ -613,17 +612,17 @@ impl Net {
     let p2 = self.heap.get(a.val(), P2); // return
     if b.val() == 0 {
       let loc = self.heap.alloc(1);
-      self.heap.set(loc+0, P1, p2);
       self.heap.set(loc+0, P2, ERAS);
       self.link(p1, Ptr::new(CT0, loc+0));
+      self.link(p2, Ptr::new(VR1, loc+0));
       self.heap.free(a.val());
     } else {
       let loc = self.heap.alloc(2);
       self.heap.set(loc+0, P1, ERAS);
       self.heap.set(loc+0, P2, Ptr::new(CT0, loc + 1));
       self.heap.set(loc+1, P1, Ptr::new(NUM, b.val() - 1));
-      self.heap.set(loc+1, P2, p2);
       self.link(p1, Ptr::new(CT0, loc+0));
+      self.link(p2, Ptr::new(VR2, loc+1));
       self.heap.free(a.val());
     }
   }
