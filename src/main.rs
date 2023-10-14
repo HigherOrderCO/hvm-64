@@ -28,7 +28,7 @@ fn main() {
     net.normal(&book);
     println!("{}", ast::show_runtime_net(&net));
     if args.len() >= 4 && args[3] == "-s" {
-      println!("RWTS   : {}", net.anni + net.comm + net.eras + net.dref);
+      println!("RWTS   : {}", net.anni + net.comm + net.eras + net.dref + net.oper);
       println!("- ANNI : {}", net.anni);
       println!("- COMM : {}", net.comm);
       println!("- ERAS : {}", net.eras);
