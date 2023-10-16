@@ -456,8 +456,8 @@ impl Net {
     } else if a.is_num() && b.is_op1() {
       self.op1n(b, a);
     // OP2-OP2
-    } else if a.is_op2() && b.is_op2() {
-      self.anni(a, b);
+    //} else if a.is_op2() && b.is_op2() {
+      //self.anni(a, b);
     // OP2-CTR
     } else if a.is_op2() && b.is_ctr() {
       self.comm(a, b);
@@ -465,8 +465,8 @@ impl Net {
     } else if a.is_ctr() && b.is_op2() {
       self.comm(b, a);
     // OP1-OP1
-    } else if a.is_op1() && b.is_op1() {
-      self.conn(a, b);
+    //} else if a.is_op1() && b.is_op1() {
+      //self.conn(a, b);
     // OP1-CTR
     } else if a.is_op1() && b.is_ctr() {
       self.pass(a, b);
