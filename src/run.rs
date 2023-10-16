@@ -440,6 +440,9 @@ impl Net {
     // ERA-NUM
     } else if a.is_era() && b.is_num() {
       self.eras += 1;
+    // NUM-NUM
+    } else if a.is_num() && b.is_num() {
+      self.eras += 1;
     // OP2-NUM
     } else if a.is_op2() && b.is_num() {
       self.op2n(a, b);
@@ -452,12 +455,18 @@ impl Net {
     // NUM-OP1
     } else if a.is_num() && b.is_op1() {
       self.op1n(b, a);
+    // OP2-OP2
+    } else if a.is_op2() && b.is_op2() {
+      self.anni(a, b);
     // OP2-CTR
     } else if a.is_op2() && b.is_ctr() {
       self.comm(a, b);
     // CTR-OP2
     } else if a.is_ctr() && b.is_op2() {
       self.comm(b, a);
+    // OP1-OP1
+    } else if a.is_op1() && b.is_op1() {
+      self.conn(a, b);
     // OP1-CTR
     } else if a.is_op1() && b.is_ctr() {
       self.pass(a, b);
@@ -497,6 +506,13 @@ impl Net {
     } else {
       panic!("undefined interaction: {:08x} {:08x}", a.0, b.0);
     }
+  }
+
+  pub fn conn(&mut self, a: Ptr, b: Ptr) {
+    self.anni += 1;
+    self.link(self.heap.get(a.val(), P2), self.heap.get(b.val(), P2));
+    self.heap.free(a.val());
+    self.heap.free(b.val());
   }
 
   pub fn anni(&mut self, a: Ptr, b: Ptr) {
