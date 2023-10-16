@@ -578,11 +578,41 @@ impl Net {
     self.heap.free(a.val());
   }
 
+
   pub fn op2n(&mut self, a: Ptr, b: Ptr) {
     self.oper += 1;
-    let v1 = self.heap.get(a.val(), P1);
+    let mut p1 = self.heap.get(a.val(), P1);
+    // Optimization: perform chained ops at once
+    if p1.is_num() {
+      let mut rt = b.val();
+      let mut p2 = self.heap.get(a.val(), P2);
+      loop {
+        self.oper += 1;
+        rt = self.prim(rt, p1.val());
+        // If P2 is OP2, keep looping
+        if p2.is_op2() {
+          p1 = self.heap.get(p2.val(), P1);
+          p2 = self.heap.get(p2.val(), P2);
+          if p1.is_num() {
+            self.oper += 1; // since OP1 is skipped
+            continue;
+          }
+        }
+        // If P2 is OP1, flip args and keep looping
+        if p2.is_op1() {
+          let tmp = rt;
+          rt = self.heap.get(p2.val(), P1).val();
+          p1 = Ptr::new(NUM, tmp);
+          p2 = self.heap.get(p2.val(), P2);
+          continue;
+        }
+        break;
+      }
+      self.link(Ptr::new(NUM, rt), p2);
+      return;
+    }
     self.heap.set(a.val(), P1, b);
-    self.link(Ptr::new(OP1, a.val()), v1);
+    self.link(Ptr::new(OP1, a.val()), p1);
   }
 
   pub fn op1n(&mut self, a: Ptr, b: Ptr) {
