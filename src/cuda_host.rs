@@ -4,6 +4,7 @@ use cudarc::driver::CudaFunction;
 use cudarc::driver::{DeviceRepr, ValidAsZeroBits, sys::CUdeviceptr};
 use cudarc::driver::{CudaDevice, CudaSlice, DriverError, DevicePtr};
 use cudarc::driver::{LaunchAsync, LaunchConfig};
+use cudarc::nvrtc::CompileError;
 use std::{collections::{BTreeMap, HashMap}, slice, sync::Arc};
 
 // TODO: Factor out duplication with `gen_cuda_book` in main.rs
@@ -203,6 +204,33 @@ pub fn run_on_gpu(book: &run::Book, entry_point_function: &str) -> Result<HostNe
     panic!("Entry point function not found: {}", entry_point_function);
   });
 
+  let gpu_index = 0; // TODO: Receive GPU index as argument to let user choose which GPU to use
+  let dev = CudaDevice::new(gpu_index)?;
+
+  // Load CUDA runtime
+  let ptx = match cudarc::nvrtc::compile_ptx(include_str!("cuda/runtime.cu")) {
+    Ok(ptx) => ptx,
+    Err(CompileError::CompileError { nvrtc, options, log }) => {
+      let log_str = log.to_str().unwrap();
+      println!("\n=== Error compiling CUDA runtime ===\n");
+      for diagnostic in log_str.split("default_program").filter(|s| {
+        !s.is_empty() && s.find(": ").map_or(false, |i| s[i + 2 ..].starts_with("error: "))
+      }) {
+        print!("{}", diagnostic);
+      }
+      return Err(CompileError::CompileError { nvrtc, options, log }.into());
+    }
+    Err(e) => return Err(e.into()),
+  };
+  const MODULE_NAME: &str = "runtime";
+  println!("Loading module `{}`...", MODULE_NAME);
+  dev.load_ptx(ptx, MODULE_NAME, &["global_expand_prepare", "global_expand", "global_rewrite"])?;
+  println!("Module `{}` loaded.", MODULE_NAME);
+  let global_expand_prepare = dev.get_func(MODULE_NAME, "global_expand_prepare").expect("Function `global_expand_prepare` not found");
+  let global_expand = dev.get_func(MODULE_NAME, "global_expand").expect("Function `global_expand` not found");
+  let global_rewrite = dev.get_func(MODULE_NAME, "global_rewrite").expect("Function `global_rewrite` not found");
+
+
   // Allocates net on CPU
   let cpu_net = mknet(root_fn_id, &jump_data);
 
@@ -210,24 +238,12 @@ pub fn run_on_gpu(book: &run::Book, entry_point_function: &str) -> Result<HostNe
   println!("\nINPUT\n=====\n");
   print_net(&cpu_net);
 
-  let gpu_index = 0; // TODO: Receive GPU index as argument to let user choose which GPU to use
-  let dev = CudaDevice::new(gpu_index)?;
-
   // Uploads net and book to GPU
   let gpu_net = net_to_gpu(&dev, &cpu_net)?;
 
   // Equivalent to: Book* gpu_book = init_book_on_gpu(BOOK_DATA, BOOK_DATA_SIZE);
   let gpu_book = book_to_gpu(&dev, &book_data)?;
 
-  // Load CUDA runtime
-  let ptx = cudarc::nvrtc::compile_ptx(include_str!("cuda/runtime.cu"))?;
-  const MODULE_NAME: &str = "runtime";
-  println!("Loading module `{}`...", MODULE_NAME);
-  dev.load_ptx(ptx, MODULE_NAME, &["do_global_expand", "do_global_rewrite"])?;
-  println!("Module `{}` loaded.", MODULE_NAME);
-  let global_expand_prepare = dev.get_func(MODULE_NAME, "global_expand_prepare").expect("Function `global_expand_prepare` not found");
-  let global_expand = dev.get_func(MODULE_NAME, "global_expand").expect("Function `global_expand` not found");
-  let global_rewrite = dev.get_func(MODULE_NAME, "global_rewrite").expect("Function `global_rewrite` not found");
 
   let time_before = std::time::Instant::now();
 
