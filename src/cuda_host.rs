@@ -1,5 +1,6 @@
 use crate::cuda_device::*;
 use crate::run;
+use cudarc::driver::CudaFunction;
 use cudarc::driver::{DeviceRepr, ValidAsZeroBits, sys::CUdeviceptr};
 use cudarc::driver::{CudaDevice, CudaSlice, DriverError, DevicePtr};
 use cudarc::driver::{LaunchAsync, LaunchConfig};
@@ -221,25 +222,24 @@ pub fn run_on_gpu(book: &run::Book, entry_point_function: &str) -> Result<HostNe
   // Load CUDA runtime
   let ptx = cudarc::nvrtc::compile_ptx(include_str!("cuda/runtime.cu"))?;
   const MODULE_NAME: &str = "runtime";
+  println!("Loading module `{}`...", MODULE_NAME);
   dev.load_ptx(ptx, MODULE_NAME, &["do_global_expand", "do_global_rewrite"])?;
-  let do_global_expand = dev.get_func(MODULE_NAME, "do_global_expand").expect("Function `do_global_expand` not found");
-  let do_global_rewrite = dev.get_func(MODULE_NAME, "do_global_rewrite").expect("Function `do_global_rewrite` not found");
+  println!("Module `{}` loaded.", MODULE_NAME);
+  let global_expand_prepare = dev.get_func(MODULE_NAME, "global_expand_prepare").expect("Function `global_expand_prepare` not found");
+  let global_expand = dev.get_func(MODULE_NAME, "global_expand").expect("Function `global_expand` not found");
+  let global_rewrite = dev.get_func(MODULE_NAME, "global_rewrite").expect("Function `global_rewrite` not found");
 
   let time_before = std::time::Instant::now();
 
-  // TODO: Uncomment and adjust
-  /* // Normalizes
+  // Normalizes
   // do_global_expand(gpu_net, gpu_book);
-  unsafe { do_global_expand.clone().launch(LaunchConfig::for_num_elems(1), (&gpu_net,)) }?;
+  do_global_expand(global_expand_prepare.clone(), global_expand.clone(), &gpu_net, &gpu_book)?;
   for tick in 0 .. 128 {
-    // do_global_rewrite(gpu_net, gpu_book, 16, tick, (tick / BAGS_WIDTH_L2) % 2);
-    unsafe { do_global_rewrite.clone().launch(LaunchConfig::for_num_elems(1), (&gpu_net, &gpu_book, 16, tick, (tick / BAGS_WIDTH_L2) % 2)) }?;
+    do_global_rewrite(global_rewrite.clone(), &gpu_net, &gpu_book, 16, tick, (tick / BAGS_WIDTH_L2) % 2 != 0)?;
   }
-  // do_global_expand(gpu_net, gpu_book);
-  unsafe { do_global_expand.launch(LaunchConfig::for_num_elems(1), (&gpu_net,)) }?;
-  // do_global_rewrite(gpu_net, gpu_book, 200000, 0, 0);
-  unsafe { do_global_rewrite.launch(LaunchConfig::for_num_elems(1), (&gpu_net, &gpu_book, 200000, 0, 0)) }?;
-  dev.synchronize()?; */
+  do_global_expand(global_expand_prepare, global_expand, &gpu_net, &gpu_book)?;
+  do_global_rewrite(global_rewrite, &gpu_net, &gpu_book, 200000, 0, false)?;
+  dev.synchronize()?;
 
   let time_elapsed_secs = time_before.elapsed().as_secs_f64();
 
@@ -261,4 +261,60 @@ pub fn run_on_gpu(book: &run::Book, entry_point_function: &str) -> Result<HostNe
   net_free_on_cpu(cpu_net);
   net_free_on_cpu(norm); */
   Ok(norm)
+}
+
+
+// Performs a global head expansion (1 deref per bag)
+fn do_global_expand(
+  global_expand_prepare: CudaFunction,
+  global_expand: CudaFunction,
+  gpu_net: &CudaSlice<CudaNet>,
+  gpu_book: &CudaSlice<u32>,
+) -> Result<(), DriverError> {
+  // global_expand_prepare<<<BAGS_HEIGHT, GROUP_SIZE>>>(net);
+  unsafe {
+    global_expand_prepare.launch(
+      LaunchConfig {
+        grid_dim: (BAGS_HEIGHT, 1, 1),
+        block_dim: (GROUP_SIZE, 1, 1),
+        shared_mem_bytes: 0,
+      },
+      (gpu_net,)
+    )
+  }?;
+
+  // global_expand<<<BAGS_HEIGHT, BLOCK_SIZE>>>(net, book);
+  unsafe {
+    global_expand.launch(
+      LaunchConfig {
+        grid_dim: (BAGS_HEIGHT, 1, 1),
+        block_dim: (BLOCK_SIZE, 1, 1),
+        shared_mem_bytes: 0,
+      },
+      (gpu_net, gpu_book)
+    )
+  }?;
+  Ok(())
+}
+
+fn do_global_rewrite(
+  global_rewrite: CudaFunction,
+  net: &CudaSlice<CudaNet>,
+  book: &CudaSlice<u32>,
+  repeat: u32,
+  tick: u32,
+  flip: bool,
+) -> Result<(), DriverError> {
+  // global_rewrite<<<BAGS_HEIGHT, BLOCK_SIZE>>>(net, book, repeat, tick, flip);
+  unsafe {
+    global_rewrite.launch(
+      LaunchConfig {
+        grid_dim: (BAGS_HEIGHT, 1, 1),
+        block_dim: (BLOCK_SIZE, 1, 1),
+        shared_mem_bytes: 0,
+      },
+      (net, book, repeat, tick, flip)
+    )
+  }?;
+  Ok(())
 }
