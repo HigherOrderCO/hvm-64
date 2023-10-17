@@ -347,6 +347,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "cudarc"
+version = "0.9.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dc4cab390f4a32340211f015292a4551742a63e528e9ade9e0bde0d1a989d2a1"
+
+[[package]]
 name = "derive_more"
 version = "0.99.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -419,6 +425,7 @@ name = "hvm-core"
 version = "0.1.11"
 dependencies = [
  "criterion",
+ "cudarc",
  "hvm-lang",
 ]
 

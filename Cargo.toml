@@ -15,6 +15,9 @@ name = "hvmc"
 path = "src/lib.rs"
 bench = false
 
+[dependencies]
+cudarc = "0.9.14"
+
 # Benchmark dependencies
 
 [dev-dependencies]

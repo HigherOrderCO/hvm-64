@@ -4,11 +4,9 @@
 #![allow(non_snake_case)]
 #![allow(non_upper_case_globals)]
 
-mod ast;
-mod run;
-mod cuda;
-
-use cuda::gen_cuda_book_data;
+use hvmc::ast;
+use hvmc::cuda_host::gen_cuda_book_data;
+use hvmc::run;
 use std::env;
 use std::fs;
 
