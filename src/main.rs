@@ -6,16 +6,18 @@
 
 use hvmc::ast;
 use hvmc::cuda_host::gen_cuda_book_data;
+use hvmc::cuda_host::run_on_gpu;
 use hvmc::run;
 use std::env;
 use std::fs;
 
-fn main() {
+// TODO: Proper error handling in `main` function
+fn main() -> Result<(), Box<dyn std::error::Error>> {
   let args: Vec<String> = env::args().collect();
 
   if args.len() < 3 {
     println!("Usage: hvmc <cmd> <file.hvmc> [-s]");
-    return;
+    std::process::exit(1);
   }
 
   let action = &args[1];
@@ -42,10 +44,8 @@ fn main() {
     }
     "run-gpu" => {
       let book = load(f_name).0;
-      let (book_data, jump_data, function_ids) = gen_cuda_book_data(&book);
-      println!("book_data: {{{}}}", book_data.iter().map(|x| format!("0x{:08X}", x)).collect::<Vec<_>>().join(", "));
-      println!("jump_data: {{{}}}", jump_data.iter().map(|x| format!("0x{:08X}", x)).collect::<Vec<_>>().join(", "));
-      println!("function_ids: {{{}}}", function_ids.iter().map(|(k, v)| format!("{}: 0x{:08X}", k, v)).collect::<Vec<_>>().join(", "));
+      // TODO: Receive function name as argument
+      run_on_gpu(&book, "main")?;
     }
     "gen-cuda-book" => {
       let book = load(f_name).0;
@@ -55,6 +55,7 @@ fn main() {
       println!("Invalid command. Usage: hvmc <cmd> <file.hvmc>");
     }
   }
+  Ok(())
 }
 
 // Load file and generate net
