@@ -12,3 +12,10 @@ path = "src/main.rs"
 [lib]
 name = "hvmc"
 path = "src/lib.rs"
+
+[dev-dependencies]
+criterion = "0.5.1"
+
+[[bench]]
+name = "hvm_cpu"
+harness = false
