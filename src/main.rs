@@ -6,7 +6,9 @@
 
 mod ast;
 mod run;
+mod cuda;
 
+use cuda::gen_cuda_book_data;
 use std::env;
 use std::fs;
 
@@ -14,40 +16,47 @@ fn main() {
   let args: Vec<String> = env::args().collect();
 
   if args.len() < 3 {
-    println!("Usage: hvmc run <file.hvmc> [-s]");
+    println!("Usage: hvmc <cmd> <file.hvmc> [-s]");
     return;
   }
 
   let action = &args[1];
   let f_name = &args[2];
 
-  if action == "run" {
-    let (book, mut net) = load(f_name);
-    let start_time = std::time::Instant::now();
-    net.expand(&book, run::ROOT);
-    net.normal(&book);
-    println!("{}", ast::show_runtime_net(&net));
-    if args.len() >= 4 && args[3] == "-s" {
-      println!("");
-      println!("RWTS   : {}", net.anni + net.comm + net.eras + net.dref + net.oper);
-      println!("- ANNI : {}", net.anni);
-      println!("- COMM : {}", net.comm);
-      println!("- ERAS : {}", net.eras);
-      println!("- DREF : {}", net.dref);
-      println!("- OPER : {}", net.oper);
-      println!("TIME   : {:.3} s", (start_time.elapsed().as_millis() as f64) / 1000.0);
-      println!("RPS    : {:.3} m", (net.rewrites() as f64) / (start_time.elapsed().as_millis() as f64) / 1000.0);
+  match action.as_str() {
+    "run" => {
+      let (book, mut net) = load(f_name);
+      let start_time = std::time::Instant::now();
+      net.expand(&book, run::ROOT);
+      net.normal(&book);
+      println!("{}", ast::show_runtime_net(&net));
+      if args.len() >= 4 && args[3] == "-s" {
+        println!("");
+        println!("RWTS   : {}", net.anni + net.comm + net.eras + net.dref + net.oper);
+        println!("- ANNI : {}", net.anni);
+        println!("- COMM : {}", net.comm);
+        println!("- ERAS : {}", net.eras);
+        println!("- DREF : {}", net.dref);
+        println!("- OPER : {}", net.oper);
+        println!("TIME   : {:.3} s", (start_time.elapsed().as_millis() as f64) / 1000.0);
+        println!("RPS    : {:.3} m", (net.rewrites() as f64) / (start_time.elapsed().as_millis() as f64) / 1000.0);
+      }
     }
-    return;
+    "run-gpu" => {
+      let book = load(f_name).0;
+      let (book_data, jump_data, function_ids) = gen_cuda_book_data(&book);
+      println!("book_data: {{{}}}", book_data.iter().map(|x| format!("0x{:08X}", x)).collect::<Vec<_>>().join(", "));
+      println!("jump_data: {{{}}}", jump_data.iter().map(|x| format!("0x{:08X}", x)).collect::<Vec<_>>().join(", "));
+      println!("function_ids: {{{}}}", function_ids.iter().map(|(k, v)| format!("{}: 0x{:08X}", k, v)).collect::<Vec<_>>().join(", "));
+    }
+    "gen-cuda-book" => {
+      let book = load(f_name).0;
+      println!("{}", gen_cuda_book(&book));
+    }
+    _ => {
+      println!("Invalid command. Usage: hvmc <cmd> <file.hvmc>");
+    }
   }
-
-  if action == "gen-cuda-book" {
-    let book = load(f_name).0;
-    println!("{}", gen_cuda_book(&book));
-    return;
-  }
-
-  println!("Invalid command. Usage: hvmc run <file.hvmc>");
 }
 
 // Load file and generate net
@@ -82,12 +91,6 @@ pub fn gen_cuda_book(book: &run::Book) -> String {
 
   // Create book
   code.push_str("u32 BOOK_DATA[] = {\n");
-
-  // Build the name_to_id map
-  let mut name_to_id = BTreeMap::new();
-  for (idx, id) in defs.keys().enumerate() {
-    name_to_id.insert(*id, idx as u32);
-  }
 
   // Generate book data
   for (i, (id, net)) in defs.iter().enumerate() {
