@@ -592,8 +592,8 @@ impl Net {
         // If P2 is OP2, keep looping
         if p2.is_op2() {
           p1 = self.heap.get(p2.val(), P1);
-          p2 = self.heap.get(p2.val(), P2);
           if p1.is_num() {
+            p2 = self.heap.get(p2.val(), P2);
             self.oper += 1; // since OP1 is skipped
             continue;
           }
