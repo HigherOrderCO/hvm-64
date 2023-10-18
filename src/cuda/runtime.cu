@@ -793,8 +793,8 @@ __device__ void interact(Unit* unit, Net* net, Book* book) {
 // This is organized so that local threads can perform the same instructions
 // whenever possible. So, for example, in a commutation rule, all the 4 clones
 // would be allocated at the same time.
-__launch_bounds__(BLOCK_SIZE, 1)
-__global__ void global_rewrite(Net* net, Book* book, u32 repeat, u32 tick, bool flip) {
+// __launch_bounds__(BLOCK_SIZE, 1)
+extern "C" __global__ void global_rewrite(Net* net, Book* book, u32 repeat, u32 tick, bool flip) {
   // Initializes local vars
   Unit unit = init_unit(net, flip);
 
@@ -835,7 +835,7 @@ __device__ void expand(Unit* unit, Net* net, Book* book, Ptr dir, u32* len, u32*
 }
 
 // Takes an initial head location for each squad
-__global__ void global_expand_prepare(Net* net) {
+extern "C" __global__ void global_expand_prepare(Net* net) {
   u32 uid = blockIdx.x * blockDim.x + threadIdx.x;
 
   // Traverses down
@@ -871,7 +871,7 @@ __global__ void global_expand_prepare(Net* net) {
 }
 
 // Performs global expansion of heads
-__global__ void global_expand(Net* net, Book* book) {
+extern "C" __global__ void global_expand(Net* net, Book* book) {
   __shared__ u32 HEAD[GROUP_SIZE * EXPANSIONS_PER_SQUAD];
 
   for (u32 i = 0; i < GROUP_SIZE * EXPANSIONS_PER_SQUAD / BLOCK_SIZE; ++i) {
