@@ -15,6 +15,11 @@ path = "src/lib.rs"
 
 [dev-dependencies]
 criterion = "0.5.1"
+hvm-lang = { git = "https://github.com/HigherOrderCO/hvm-lang.git" }
+
+[patch."https://github.com/HigherOrderCO/hvm-core.git"]
+hvm-core = { path = "." }
+
 
 [[bench]]
 name = "hvm_cpu"
