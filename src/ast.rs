@@ -48,7 +48,7 @@ fn skip(chars: &mut Peekable<Chars>) {
         }
         chars.next();
       }
-    } else if *c != ' ' && *c != '\n' {
+    } else if !c.is_ascii_whitespace() {
       break;
     } else {
       chars.next();
