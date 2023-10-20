@@ -468,3 +468,7 @@ This would use a total of 1023 nodes, which takes a space of almost exactly 8 KB
 on HVMC. As such, while buffers are not part of the spec, we can store raw data
 with a 37.5% efficiency using pure interaction nets, which is a reasonable price
 to pay to gain the ability of computing them with massive parallelism.
+
+## Contributing
+
+To verify if there's no performance regression, run `cargo bench` before and after your changes. You can run `cargo bench --bench hvm_cpu -- --quick` for a quicker but less accurate benchmark. Inside the `target/criterion/report/index.html` file, you can see the performance of each benchmark.

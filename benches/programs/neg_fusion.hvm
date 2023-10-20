@@ -1,0 +1,20 @@
+mul = λm λn λs λz (m (n s) z)
+
+// Church powers of two
+p1 = (mul C_2 C_1) // 2
+p2 = (mul C_2 p1)  // 4
+p3 = (mul C_2 p2)  // 8
+p4 = (mul C_2 p3)  // 16
+p5 = (mul C_2 p4)  // 32
+p6 = (mul C_2 p5)  // 64
+p7 = (mul C_2 p6)  // 128
+p8 = (mul C_2 p7)  // 256
+
+// Booleans
+true = λt λf t
+false = λt λf f
+not = λb ((b false) true)
+neg = λb λt λf (b f t)
+
+// Negates 'true' 256 times: 'neg' is faster than 'not' because it fuses
+Main = (p8 neg true)

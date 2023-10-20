@@ -1,0 +1,3 @@
+Mult = λm λn λs λz (m (n s) z)
+
+Main = (Mult C_{n} C_{n})
