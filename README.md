@@ -471,4 +471,4 @@ to pay to gain the ability of computing them with massive parallelism.
 
 ## Contributing
 
-To verify if there's no performance regression, run `cargo bench` before and after your changes. You can run `cargo bench --bench hvm_cpu -- --quick` for a quicker but less accurate benchmark.
+To verify if there's no performance regression, run `cargo bench` before and after your changes. You can run `cargo bench --bench hvm_cpu -- --quick` for a quicker but less accurate benchmark. Inside the `target/criterion/report/index.html` file, you can see the performance of each benchmark.
