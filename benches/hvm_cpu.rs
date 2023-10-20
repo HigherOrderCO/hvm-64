@@ -76,6 +76,14 @@ fn binary_counter_benchmark(c: &mut Criterion) {
   }
 }
 
+fn fusion_benchmark(c: &mut Criterion) {
+  let mut group = c.benchmark_group("fusion");
+  let (book, net) = load_from_lang("./benches/programs/neg_fusion.hvm", 1 << 8, None);
+  group.bench_function(criterion::BenchmarkId::new("neg", "256"), |b| {
+    b.iter(|| black_box(net.clone().normal(&book)));
+  });
+}
+
 criterion_group! {
   name = benches;
   config = Criterion::default()
@@ -85,5 +93,6 @@ criterion_group! {
     church_benchmark,
     tree_benchmark,
     binary_counter_benchmark,
+    fusion_benchmark,
 }
 criterion_main!(benches);
