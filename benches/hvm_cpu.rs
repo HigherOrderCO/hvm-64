@@ -2,6 +2,7 @@ use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use hvmc::ast::*;
 use hvmc::*;
 use std::fs;
+use std::time::Duration;
 
 // Loads file and generate net from hvm-core syntax
 fn load_from_core(file: &str, size: usize, replace: Option<(&str, &str)>) -> (run::Book, run::Net) {
@@ -77,7 +78,9 @@ fn binary_counter_benchmark(c: &mut Criterion) {
 
 criterion_group! {
   name = benches;
-  config = Criterion::default();
+  config = Criterion::default()
+    .measurement_time(Duration::from_secs(2))
+    .warm_up_time(Duration::from_secs(1));
   targets =
     church_benchmark,
     tree_benchmark,

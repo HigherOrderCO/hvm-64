@@ -13,13 +13,14 @@ path = "src/main.rs"
 name = "hvmc"
 path = "src/lib.rs"
 
+# Benchmark dependencies
+
 [dev-dependencies]
 criterion = "0.5.1"
-hvm-lang = { git = "https://github.com/HigherOrderCO/hvm-lang.git" }
+hvm-lang = { git = "https://github.com/HigherOrderCO/hvm-lang.git" } # allows us to use the hvm-lang syntax for tests/benchmarks
 
 [patch."https://github.com/HigherOrderCO/hvm-core.git"]
 hvm-core = { path = "." }
-
 
 [[bench]]
 name = "hvm_cpu"
