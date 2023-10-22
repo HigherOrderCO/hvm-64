@@ -746,7 +746,7 @@ impl Net {
   }
 
   // Total rewrite count.
-  pub fn rewrites(&mut self) -> usize {
+  pub fn rewrites(&self) -> usize {
     return self.anni + self.comm + self.eras + self.dref + self.oper;
   }
 }
