@@ -1,11 +1,11 @@
-use hvmc::ast::name_to_val;
-use hvmc::*;
+use hvm_lang::term::{parser, DefinitionBook};
+use hvmc::{ast::*, *};
 use std::fs;
 
 // Loads file and generate net from hvm-core syntax
 fn load_from_core(file: &str, size: usize) -> (run::Book, run::Net) {
   let code = fs::read_to_string(file).unwrap();
-  let book = ast::book_to_runtime(&ast::do_parse_book(&code));
+  let book = ast::book_to_runtime(&do_parse_book(&code));
   let mut net = run::Net::new(size);
   net.boot(name_to_val("main"));
   (book, net)
@@ -13,15 +13,14 @@ fn load_from_core(file: &str, size: usize) -> (run::Book, run::Net) {
 
 // Loads file and generate net from hvm-lang syntax
 fn load_from_lang(file: &str, size: usize) -> (run::Book, run::Net) {
-  let code = &fs::read_to_string(file).unwrap();
+  let code = fs::read_to_string(file).unwrap();
 
-  let mut book = hvm_lang::term::parser::parse_definition_book(&code).unwrap();
-  let main = book.check_has_main().unwrap();
-  let book = hvm_lang::compile_book(&mut book).unwrap();
-  let book = ast::book_to_runtime(&book);
+  let mut book = parser::parse_definition_book(&code).unwrap();
+  let (book, _) = hvm_lang::compile_book(&mut book).unwrap();
+  let book = book_to_runtime(&book);
 
   let mut net = run::Net::new(size);
-  net.boot(main.to_internal());
+  net.boot(name_to_val("main"));
   (book, net)
 }
 
