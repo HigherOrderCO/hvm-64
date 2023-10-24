@@ -7,9 +7,8 @@ use cudarc::driver::{LaunchAsync, LaunchConfig};
 use cudarc::nvrtc::CompileError;
 use std::{collections::{BTreeMap, HashMap}, slice, sync::Arc};
 
-// TODO: Factor out duplication with `gen_cuda_book` in main.rs
-
 // Generate data to pass to CUDA runtime.
+// Based on `gen_cuda_book`.
 // Returns (book_data, jump_data, function_ids)
 pub fn gen_cuda_book_data(book: &run::Book) -> (Vec<u32>, Vec<u32>, HashMap<String, u32>) {
   // Sort the book.defs by key
@@ -91,30 +90,38 @@ pub fn mknet(root_fn: u32, jump_data: &[u32]) -> HostNet {
   net
 }
 
-pub fn net_to_gpu(dev: &Arc<CudaDevice>, host_net: &HostNet) -> Result<CudaSlice<CudaNet>, DriverError> {
-	// TODO: Async copy? (Requires passing owned Vec)
-	let device_bags = dev.htod_sync_copy(&host_net.bags)?;
+pub struct CudaNetHandle {
+  device_net: CudaSlice<CudaNet>,
+  device_bags: CudaSlice<Wire>,
+  device_heap: CudaSlice<Node>,
+  device_head: CudaSlice<Wire>,
+  device_jump: CudaSlice<u32>,
+}
+
+pub fn net_to_gpu(dev: &Arc<CudaDevice>, host_net: &HostNet) -> Result<CudaNetHandle, DriverError> {
+  // TODO: Async copy? (Requires passing owned Vec)
+  let device_bags = dev.htod_sync_copy(&host_net.bags)?;
   let device_heap = dev.htod_sync_copy(&host_net.heap)?;
   let device_head = dev.htod_sync_copy(&host_net.head)?;
   let device_jump = dev.htod_sync_copy(&host_net.jump)?;
 
-	let temp_net = CudaNet {
+  let temp_net = CudaNet {
     bags: *(&device_bags).device_ptr() as _,
     heap: *(&device_heap).device_ptr() as _,
     head: *(&device_head).device_ptr() as _,
     jump: *(&device_jump).device_ptr() as _,
     rwts: 0,
-	};
+  };
 
-	let device_net = dev.htod_sync_copy(slice::from_ref(&temp_net))?;
+  let device_net = dev.htod_sync_copy(slice::from_ref(&temp_net))?;
 
-  // TODO: Keep these alive in the returned value
-  std::mem::forget(device_bags);
-  std::mem::forget(device_heap);
-  std::mem::forget(device_head);
-  std::mem::forget(device_jump);
-
-	Ok(device_net)
+  Ok(CudaNetHandle {
+    device_net,
+    device_bags,
+    device_heap,
+    device_head,
+    device_jump,
+  })
 }
 
 pub fn book_to_gpu(dev: &Arc<CudaDevice>, book_data: &[u32]) -> Result<CudaSlice<u32>, DriverError> {
@@ -123,48 +130,48 @@ pub fn book_to_gpu(dev: &Arc<CudaDevice>, book_data: &[u32]) -> Result<CudaSlice
 }
 
 pub fn net_to_cpu(dev: &Arc<CudaDevice>, device_net: CudaSlice<CudaNet>) -> Result<HostNet, DriverError> {
-	use cudarc::driver::{result, sys::CUdeviceptr};
+  use cudarc::driver::{result, sys::CUdeviceptr};
 
-	fn dtoh_sync_copy_into<T: DeviceRepr>(
-		dev: &Arc<CudaDevice>,
-		src: CUdeviceptr,
-		src_len: usize,
-		dst: &mut [T],
-	) -> Result<(), DriverError> {
-		assert_eq!(src_len, dst.len());
-		dev.bind_to_thread()?;
-		unsafe { result::memcpy_dtoh_sync(dst, src) }?;
-		dev.synchronize()
-	}
+  fn dtoh_sync_copy_into<T: DeviceRepr>(
+    dev: &Arc<CudaDevice>,
+    src: CUdeviceptr,
+    src_len: usize,
+    dst: &mut [T],
+  ) -> Result<(), DriverError> {
+    assert_eq!(src_len, dst.len());
+    dev.bind_to_thread()?;
+    unsafe { result::memcpy_dtoh_sync(dst, src) }?;
+    dev.synchronize()
+  }
 
-	fn dtoh_sync_copy<T: DeviceRepr>(
-		dev: &Arc<CudaDevice>,
-		src: CUdeviceptr,
-		src_len: usize,
-	) -> Result<Vec<T>, DriverError> {
-		let mut dst = Vec::with_capacity(src_len);
-		unsafe { dst.set_len(src_len) };
-		dtoh_sync_copy_into(dev, src, src_len, &mut dst)?;
-		Ok(dst)
-	}
+  fn dtoh_sync_copy<T: DeviceRepr>(
+    dev: &Arc<CudaDevice>,
+    src: CUdeviceptr,
+    src_len: usize,
+  ) -> Result<Vec<T>, DriverError> {
+    let mut dst = Vec::with_capacity(src_len);
+    unsafe { dst.set_len(src_len) };
+    dtoh_sync_copy_into(dev, src, src_len, &mut dst)?;
+    Ok(dst)
+  }
 
-	// let mut net_vec: Vec<CudaNet> = dev.sync_reclaim(device_net)?;
-	let mut net_vec = dev.dtoh_sync_copy(&device_net)?;
-	let net = net_vec.remove(0);
+  // let mut net_vec: Vec<CudaNet> = dev.sync_reclaim(device_net)?;
+  let mut net_vec = dev.dtoh_sync_copy(&device_net)?;
+  let net = net_vec.remove(0);
 
-	let bags = dtoh_sync_copy(dev, net.bags as CUdeviceptr, BAGS_SIZE as usize)?;
+  let bags = dtoh_sync_copy(dev, net.bags as CUdeviceptr, BAGS_SIZE as usize)?;
   let heap = dtoh_sync_copy(dev, net.heap as CUdeviceptr, HEAP_SIZE as usize)?;
   let head = dtoh_sync_copy(dev, net.head as CUdeviceptr, HEAD_SIZE as usize)?;
   let jump = dtoh_sync_copy(dev, net.jump as CUdeviceptr, JUMP_SIZE as usize)?;
 
-	let net = HostNet {
+  let net = HostNet {
     bags: bags.into_boxed_slice(),
     heap: heap.into_boxed_slice(),
     head: head.into_boxed_slice(),
     jump: jump.into_boxed_slice(),
     rwts: net.rwts,
-	};
-	Ok(net)
+  };
+  Ok(net)
 }
 
 // Prints a net in hexadecimal, limited to a given size
@@ -194,10 +201,6 @@ fn print_net(net: &HostNet) {
 
 pub fn run_on_gpu(book: &run::Book, entry_point_function: &str) -> Result<HostNet, Box<dyn std::error::Error>> {
   let (book_data, jump_data, function_ids) = gen_cuda_book_data(book);
-
-  // println!("book_data: {{{}}}", book_data.iter().map(|x| format!("0x{:08X}", x)).collect::<Vec<_>>().join(", "));
-  // println!("jump_data: {{{}}}", jump_data.iter().map(|x| format!("0x{:08X}", x)).collect::<Vec<_>>().join(", "));
-  // println!("function_ids: {{{}}}", function_ids.iter().map(|(k, v)| format!("{}: 0x{:08X}", k, v)).collect::<Vec<_>>().join(", "));
 
   let root_fn_id = *function_ids.get(entry_point_function).unwrap_or_else(|| {
     // TODO: Proper error handling
@@ -248,37 +251,40 @@ pub fn run_on_gpu(book: &run::Book, entry_point_function: &str) -> Result<HostNe
   let time_before = std::time::Instant::now();
 
   // Normalizes
-  // do_global_expand(gpu_net, gpu_book);
+  cuda_normalize_net(global_expand_prepare, global_expand, global_rewrite, &gpu_net.device_net, &gpu_book)?;
+  dev.synchronize()?;
+
+  let time_elapsed_secs = time_before.elapsed().as_secs_f64();
+
+  // Reads result back to cpu
+  let norm = net_to_cpu(&dev, gpu_net.device_net)?;
+
+  // Prints the output
+  println!("\nNORMAL ~ rewrites={}\n======\n", norm.rwts);
+  print_net(&norm);
+  println!("Time: {:.3} s", time_elapsed_secs);
+  println!("RPS : {:.3} million", norm.rwts as f64 / time_elapsed_secs / 1_000_000.);
+
+  Ok(norm)
+}
+
+#[inline(always)]
+fn cuda_normalize_net(
+  global_expand_prepare: CudaFunction,
+  global_expand: CudaFunction,
+  global_rewrite: CudaFunction,
+  gpu_net: &CudaSlice<CudaNet>,
+  gpu_book: &CudaSlice<u32>,
+) -> Result<(), DriverError> {
+  // Normalizes
   do_global_expand(global_expand_prepare.clone(), global_expand.clone(), &gpu_net, &gpu_book)?;
   for tick in 0 .. 128 {
     do_global_rewrite(global_rewrite.clone(), &gpu_net, &gpu_book, 16, tick, (tick / BAGS_WIDTH_L2) % 2 != 0)?;
   }
   do_global_expand(global_expand_prepare, global_expand, &gpu_net, &gpu_book)?;
   do_global_rewrite(global_rewrite, &gpu_net, &gpu_book, 200000, 0, false)?;
-  dev.synchronize()?;
-
-  let time_elapsed_secs = time_before.elapsed().as_secs_f64();
-
-  // Reads result back to cpu
-  let norm = net_to_cpu(&dev, gpu_net)?;
-
-  // Prints the output
-  println!("\nNORMAL ~ rewrites={}\n======\n", norm.rwts);
-  print_net(&norm);
-  println!("Time: {:.3} s", time_elapsed_secs);
-  println!("RPS : {:.3} million", norm.rwts as f64 / time_elapsed_secs);
-
-  // TODO: Uncomment and adjust
-  /* // Clears CPU memory
-  net_free_on_gpu(gpu_net);
-  book_free_on_gpu(gpu_book);
-
-  // Clears GPU memory
-  net_free_on_cpu(cpu_net);
-  net_free_on_cpu(norm); */
-  Ok(norm)
+  Ok(())
 }
-
 
 // Performs a global head expansion (1 deref per bag)
 fn do_global_expand(

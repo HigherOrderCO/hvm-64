@@ -44,7 +44,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     "run-gpu" => {
       let book = load(f_name).0;
-      // TODO: Receive function name as argument
+      // TODO: Receive function name as argument?
       run_on_gpu(&book, "main")?;
     }
     "gen-cuda-book" => {
