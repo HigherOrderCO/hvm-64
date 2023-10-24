@@ -548,12 +548,12 @@ impl Net {
     self.link(self.heap.get(a.val(), P2), Ptr::new(b.tag(), loc+0));
     self.link(self.heap.get(b.val(), P1), Ptr::new(a.tag(), loc+1));
     self.link(self.heap.get(b.val(), P2), Ptr::new(a.tag(), loc+2));
-    self.heap.set(loc + 0, P1, Ptr::new(VR1, loc+1));
-    self.heap.set(loc + 0, P2, Ptr::new(VR1, loc+2));
-    self.heap.set(loc + 1, P1, Ptr::new(VR1, loc+0));
-    self.heap.set(loc + 1, P2, self.heap.get(a.val(), P2));
-    self.heap.set(loc + 2, P1, Ptr::new(VR2, loc+0));
-    self.heap.set(loc + 2, P2, self.heap.get(a.val(), P2));
+    self.heap.set(loc + 0, P1, Ptr::new(VR2, loc+1));
+    self.heap.set(loc + 0, P2, Ptr::new(VR2, loc+2));
+    self.heap.set(loc + 1, P1, self.heap.get(a.val(), P1));
+    self.heap.set(loc + 1, P2, Ptr::new(VR1, loc+0));
+    self.heap.set(loc + 2, P1, self.heap.get(a.val(), P1));
+    self.heap.set(loc + 2, P2, Ptr::new(VR2, loc+0));
     self.heap.free(a.val());
     self.heap.free(b.val());
   }
