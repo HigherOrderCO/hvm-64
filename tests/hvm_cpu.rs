@@ -72,3 +72,22 @@ fn test_con_dup() {
   let (_, net) = net.normalize(16);
   assert_eq!(net, result_net("(b b)"));
 }
+
+#[test]
+fn test_church_mul() {
+  let (term, defs, info) = hvm_lang::run_book(
+    parser::parse_definition_book(
+      &"
+      C_2 = λa λb (a (a b))
+      C_3 = λa λb (a (a (a b)))
+      Mult = λm λn λs λz (m (n s) z)
+      main = (Mult C_2 C_3)",
+    )
+    .unwrap(),
+    64,
+  )
+  .unwrap();
+
+  assert_eq!(info.net, result_net("([([b c] d) {2 (d e) (e [c f])}] (b f))"));
+  assert_eq!(term.to_string(&defs), "λa λb (a (a (a (a (a (a b))))))");
+}
