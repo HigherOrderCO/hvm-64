@@ -1,6 +1,5 @@
-// NOTE: This file is adapted from hvm2.cu and must be kept in sync (for now)
-// The only changes are that only kernel functions and related types are kept,
-// host functions are removed, they are moved to the Rust host code.
+// NOTE: This file contains the HVM2 CUDA runtime which is imported by
+// hvm2_standalone.cu and loaded by the Rust host. (Single source of truth.)
 
 //// Prelude
 
