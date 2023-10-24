@@ -24,55 +24,51 @@ fn load_from_lang(file: &str, size: usize) -> (run::Book, run::Net) {
   (book, net)
 }
 
-fn result_net(code: &str) -> ast::Net {
-  ast::Net {
-    root: ast::parse_tree(&mut code.chars().peekable()).unwrap(),
-    rdex: vec![],
+fn result_net(code: &str) -> Net {
+  Net { root: parse_tree(&mut code.chars().peekable()).unwrap(), rdex: vec![] }
+}
+
+trait Normal {
+  fn normalize(self, size: usize) -> (run::Book, Net);
+}
+
+impl Normal for Net {
+  fn normalize(self, size: usize) -> (run::Book, Net) {
+    let mut rnet = run::Net::new(size);
+    net_to_runtime(&mut rnet, &self);
+
+    let book = book_to_runtime(&Book::default());
+    rnet.normal(&book);
+
+    let net = net_from_runtime(&rnet);
+    (book, net)
+  }
+}
+
+impl Normal for DefinitionBook {
+  fn normalize(mut self, size: usize) -> (run::Book, Net) {
+    let (book, _) = hvm_lang::compile_book(&mut self).unwrap();
+    let book = book_to_runtime(&book);
+
+    let mut net = run::Net::new(size);
+    net.boot(name_to_val("main"));
+    net.normal(&book);
+
+    let net = net_from_runtime(&net);
+    (book, net)
   }
 }
 
 #[test]
 fn test_era_era() {
-  let net = ast::Net {
-    root: ast::Tree::Era,
-    rdex: vec![(ast::Tree::Era, ast::Tree::Era)],
-  };
-  let mut rnet = run::Net::new(1 << 16);
-
-  ast::net_to_runtime(&mut rnet, &net);
-  let book = ast::Book::default();
-  let book = ast::book_to_runtime(&book);
-
-  rnet.normal(&book);
-
-  let net = ast::net_from_runtime(&rnet);
+  let net = Net { root: Tree::Era, rdex: vec![(Tree::Era, ast::Tree::Era)] };
+  let (_, net) = net.normalize(16);
   assert_eq!(net, result_net("*"));
 }
 
 #[test]
 fn test_con_dup() {
-  let net = ast::Net {
-    root: ast::Tree::Var { nam: "root".to_string() },
-    rdex: vec![(
-      ast::Tree::Ctr {
-        lab: 0,
-        lft: ast::Tree::Var { nam: "foo".to_string() }.into(),
-        rgt: ast::Tree::Var { nam: "foo".to_string() }.into(),
-      },
-      ast::Tree::Ctr {
-        lab: 2,
-        lft: ast::Tree::Era.into(),
-        rgt: ast::Tree::Var { nam: "root".to_string() }.into(),
-      },
-    )],
-  };
-  let book = ast::book_to_runtime(&ast::Book::default());
-
-  let mut rnet = run::Net::new(10);
-  ast::net_to_runtime(&mut rnet, &net);
-
-  rnet.normal(&book);
-
-  let net = ast::net_from_runtime(&rnet);
+  let net = do_parse_net(&"root & (x x) ~ {2 * root}");
+  let (_, net) = net.normalize(16);
   assert_eq!(net, result_net("(b b)"));
 }
