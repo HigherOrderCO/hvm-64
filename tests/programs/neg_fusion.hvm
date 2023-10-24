@@ -1,0 +1,22 @@
+// Church multiplication
+mul = λn λm λs (n (m s))
+
+// Church nat
+c2 = λf λx (f (f x))
+
+// Church powers of two
+p2 = (mul c2 c2) // 4
+p3 = (mul c2 p2) // 8
+p4 = (mul c2 p3) // 16
+p5 = (mul c2 p4) // 32
+p6 = (mul c2 p5) // 64
+p7 = (mul c2 p6) // 128
+p8 = (mul c2 p7) // 256
+
+// Booleans
+true = λt λf t
+false = λt λf f
+neg = λb λt λf (b f t)
+
+// Negates 'true' 256 times: 'neg' is faster than 'not' because it fuses
+main = (p8 neg true)

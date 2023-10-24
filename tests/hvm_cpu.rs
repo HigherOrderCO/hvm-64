@@ -5,7 +5,9 @@ use std::fs;
 
 // Loads file and generate net from hvm-core syntax
 fn load_from_core(file: &str, size: usize) -> (run::Book, run::Net) {
-  let code = fs::read_to_string(file).unwrap();
+  let path = format!("{}/tests/programs/{}", env!("CARGO_MANIFEST_DIR"), file);
+  let code = fs::read_to_string(path).unwrap();
+
   let book = book_to_runtime(&do_parse_book(&code));
   let mut net = run::Net::new(size);
   net.boot(name_to_val("main"));
@@ -13,16 +15,20 @@ fn load_from_core(file: &str, size: usize) -> (run::Book, run::Net) {
 }
 
 // Loads file and generate net from hvm-lang syntax
-fn load_from_lang(file: &str, size: usize) -> (run::Book, run::Net) {
-  let code = fs::read_to_string(file).unwrap();
+fn load_from_lang(file: &str, size: usize) -> (run::Net, Net) {
+  let path = format!("{}/tests/programs/{}", env!("CARGO_MANIFEST_DIR"), file);
+  let code = fs::read_to_string(path).unwrap();
 
   let mut book = parser::parse_definition_book(&code).unwrap();
   let (book, _) = hvm_lang::compile_book(&mut book).unwrap();
   let book = book_to_runtime(&book);
 
-  let mut net = run::Net::new(size);
-  net.boot(name_to_val("main"));
-  (book, net)
+  let mut rnet = run::Net::new(size);
+  rnet.boot(name_to_val("main"));
+  rnet.normal(&book);
+  let net = net_from_runtime(&rnet);
+
+  (rnet, net)
 }
 
 trait Normal {
@@ -107,4 +113,13 @@ fn test_bool_and() {
 
   let (_, net) = book.normalize(64);
   assert_snapshot!(show_net(&net), @"(b (c c))");
+}
+
+#[test]
+fn test_neg_fusion() {
+  let (rnet, net) = load_from_lang("neg_fusion.hvm", 516);
+  let rwts = rnet.anni + rnet.comm + rnet.eras + rnet.dref + rnet.oper;
+
+  assert_snapshot!(show_net(&net), @"(b (* b))");
+  assert_snapshot!(rwts.to_string(), @"153");
 }
