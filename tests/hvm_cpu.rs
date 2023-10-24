@@ -1,5 +1,7 @@
 use hvm_lang::term::{parser, DefinitionBook};
-use hvmc::{ast::*, *};
+use hvmc::ast::*;
+use hvmc::*;
+use insta::assert_snapshot;
 use std::fs;
 
 // Loads file and generate net from hvm-core syntax
@@ -22,10 +24,6 @@ fn load_from_lang(file: &str, size: usize) -> (run::Book, run::Net) {
   let mut net = run::Net::new(size);
   net.boot(name_to_val("main"));
   (book, net)
-}
-
-fn result_net(code: &str) -> Net {
-  Net { root: parse_tree(&mut code.chars().peekable()).unwrap(), rdex: vec![] }
 }
 
 trait Normal {
@@ -61,16 +59,16 @@ impl Normal for DefinitionBook {
 
 #[test]
 fn test_era_era() {
-  let net = Net { root: Tree::Era, rdex: vec![(Tree::Era, ast::Tree::Era)] };
+  let net = do_parse_net(&"* & * ~ *");
   let (_, net) = net.normalize(16);
-  assert_eq!(net, result_net("*"));
+  assert_snapshot!(show_net(&net), @"*");
 }
 
 #[test]
 fn test_con_dup() {
   let net = do_parse_net(&"root & (x x) ~ {2 * root}");
   let (_, net) = net.normalize(16);
-  assert_eq!(net, result_net("(b b)"));
+  assert_snapshot!(show_net(&net), @"(b b)");
 }
 
 #[test]
@@ -88,6 +86,6 @@ fn test_church_mul() {
   )
   .unwrap();
 
-  assert_eq!(info.net, result_net("([([b c] d) {2 (d e) (e [c f])}] (b f))"));
-  assert_eq!(term.to_string(&defs), "λa λb (a (a (a (a (a (a b))))))");
+  assert_snapshot!(show_net(&info.net), @"([([b c] d) {2 (d e) (e [c f])}] (b f))");
+  assert_snapshot!(term.to_string(&defs), @"λa λb (a (a (a (a (a (a b))))))");
 }
