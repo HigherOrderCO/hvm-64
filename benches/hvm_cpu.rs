@@ -36,13 +36,13 @@ fn church_benchmark(c: &mut Criterion) {
     group.throughput(criterion::Throughput::Elements(n));
     let (book, net) = load_from_lang("./benches/programs/church_mul.hvm", 1 << 12, Some(("{n}", &n.to_string())));
     group.bench_with_input(criterion::BenchmarkId::new("multiplication", n), &n, |b, &_n| {
-      b.iter(|| black_box(net.clone().normal(&book)));
+      b.iter_batched(|| net.clone(), |mut net| black_box(net.normal(&book)), criterion::BatchSize::SmallInput);
     });
     // Church exponentiation
     // n=24 uses at most 1107 elements in heap(1 << 12 = 4096)
     let (book, net) = load_from_core("./benches/programs/church_exp.hvmc", 1 << 12, Some(("{n}", &n.to_string())));
     group.bench_with_input(criterion::BenchmarkId::new("exponentiation", n), &n, |b, &_n| {
-      b.iter(|| black_box(net.clone().normal(&book)));
+      b.iter_batched(|| net.clone(), |mut net| black_box(net.normal(&book)), criterion::BatchSize::SmallInput);
     });
   }
 }
@@ -50,10 +50,10 @@ fn church_benchmark(c: &mut Criterion) {
 fn tree_benchmark(c: &mut Criterion) {
   let mut group = c.benchmark_group("tree");
   // Allocates a big tree
-  for n in [4, 8, 16, 20] {
+  for n in [4, 8, 16] {
     let (book, net) = load_from_core("./benches/programs/alloc_big_tree.hvmc", 16 << n, Some(("{n}", &n.to_string())));
     group.bench_with_input(criterion::BenchmarkId::new("allocation", n), &n, |b, &_n| {
-      b.iter(|| black_box(net.clone().normal(&book)));
+      b.iter_batched(|| net.clone(), |mut net| black_box(net.normal(&book)), criterion::BatchSize::SmallInput);
     });
   }
 }
@@ -61,17 +61,17 @@ fn tree_benchmark(c: &mut Criterion) {
 fn binary_counter_benchmark(c: &mut Criterion) {
   let mut group = c.benchmark_group("binary-counter");
   // Decrements a BitString until it is zero
-  for n in [4, 8, 16, 20] {
+  for n in [4, 8, 16] {
     let (book, net) = load_from_core("./benches/programs/dec_bits.hvmc", 16 << n, Some(("{n}", &n.to_string())));
     group.bench_with_input(criterion::BenchmarkId::new("single", n), &n, |b, &_n| {
-      b.iter(|| black_box(net.clone().normal(&book)));
+      b.iter_batched(|| net.clone(), |mut net| black_box(net.normal(&book)), criterion::BatchSize::SmallInput);
     });
   }
   // Decrements 2^N BitStrings until they reach zero (ex3)
-  for n in [4, 8, 10] {
+  for n in [4, 6, 8] {
     let (book, net) = load_from_core("./benches/programs/dec_bits_tree.hvmc", 128 << n, Some(("{n}", &n.to_string())));
     group.bench_with_input(criterion::BenchmarkId::new("many", n), &n, |b, &_n| {
-      b.iter(|| black_box(net.clone().normal(&book)));
+      b.iter_batched(|| net.clone(), |mut net| black_box(net.normal(&book)), criterion::BatchSize::SmallInput);
     });
   }
 }
@@ -80,15 +80,15 @@ fn fusion_benchmark(c: &mut Criterion) {
   let mut group = c.benchmark_group("fusion");
   let (book, net) = load_from_lang("./benches/programs/neg_fusion.hvm", 1 << 8, None);
   group.bench_function(criterion::BenchmarkId::new("neg", "256"), |b| {
-    b.iter(|| black_box(net.clone().normal(&book)));
+    b.iter_batched(|| net.clone(), |mut net| black_box(net.normal(&book)), criterion::BatchSize::SmallInput);
   });
 }
 
 criterion_group! {
   name = benches;
   config = Criterion::default()
-    .measurement_time(Duration::from_secs(2))
-    .warm_up_time(Duration::from_secs(1));
+    .measurement_time(Duration::from_millis(700))
+    .warm_up_time(Duration::from_millis(300));
   targets =
     church_benchmark,
     tree_benchmark,

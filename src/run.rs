@@ -401,111 +401,52 @@ impl Net {
     } else if b.is_ref() && a.is_pri() && !a.is_skp() {
       b = self.deref(book, b, a);
     }
-    // CTR-CTR (eq)
-    if a.is_ctr() && b.is_ctr() && a.tag() == b.tag() {
-      self.anni(a, b);
-    // CTR-CTR (ne)
-    } else if a.is_ctr() && b.is_ctr() && a.tag() != b.tag() {
-      self.comm(a, b);
-    // CTR-ERA
-    } else if a.is_ctr() && b.is_era() {
-      self.era2(a);
-    // ERA-CTR
-    } else if a.is_era() && b.is_ctr() {
-      self.era2(b);
-    // REF-ERA
-    } else if a.is_ref() && b.is_era() {
-      self.eras += 1;
-    // ERA-REF
-    } else if a.is_era() && b.is_ref() {
-      self.eras += 1;
-    // ERA-ERA
-    } else if a.is_era() && b.is_era() {
-      self.eras += 1;
-    // VAR-ANY
-    } else if a.is_var() {
-      self.link(a, b);
-    // ANY-VAR
-    } else if b.is_var() {
-      self.link(b, a);
-    // CTR-NUM
-    } else if a.is_ctr() && b.is_num() {
-      self.copy(a, b);
-    // NUM-CTR
-    } else if a.is_num() && b.is_ctr() {
-      self.copy(b, a);
-    // NUM-ERA
-    } else if a.is_num() && b.is_era() {
-      self.eras += 1;
-    // ERA-NUM
-    } else if a.is_era() && b.is_num() {
-      self.eras += 1;
-    // NUM-NUM
-    } else if a.is_num() && b.is_num() {
-      self.eras += 1;
-    // OP2-NUM
-    } else if a.is_op2() && b.is_num() {
-      self.op2n(a, b);
-    // NUM-OP2
-    } else if a.is_num() && b.is_op2() {
-      self.op2n(b, a);
-    // OP1-NUM
-    } else if a.is_op1() && b.is_num() {
-      self.op1n(a, b);
-    // NUM-OP1
-    } else if a.is_num() && b.is_op1() {
-      self.op1n(b, a);
-    // OP2-OP2
-    //} else if a.is_op2() && b.is_op2() {
-      //self.anni(a, b);
-    // OP2-CTR
-    } else if a.is_op2() && b.is_ctr() {
-      self.comm(a, b);
-    // CTR-OP2
-    } else if a.is_ctr() && b.is_op2() {
-      self.comm(b, a);
-    // OP1-OP1
-    //} else if a.is_op1() && b.is_op1() {
-      //self.conn(a, b);
-    // OP1-CTR
-    } else if a.is_op1() && b.is_ctr() {
-      self.pass(a, b);
-    // CTR-OP1
-    } else if a.is_ctr() && b.is_op1() {
-      self.pass(b, a);
-    // OP2-ERA
-    } else if a.is_op2() && b.is_era() {
-      self.era2(a);
-    // ERA-OP2
-    } else if a.is_era() && b.is_op2() {
-      self.era2(b);
-    // OP1-ERA
-    } else if a.is_op1() && b.is_era() {
-      self.era1(a);
-    // ERA-OP1
-    } else if a.is_era() && b.is_op1() {
-      self.era1(b);
-    // MAT-NUM
-    } else if a.is_mat() && b.is_num() {
-      self.mtch(a, b);
-    // NUM-MAT
-    } else if a.is_num() && b.is_mat() {
-      self.mtch(b, a);
-    // MAT-CTR
-    } else if a.is_mat() && b.is_ctr() {
-      self.comm(a, b);
-    // CTR-MAT
-    } else if a.is_ctr() && b.is_mat() {
-      self.comm(b, a);
-    // MAT-ERA
-    } else if a.is_mat() && b.is_era() {
-      self.era2(a);
-    // ERA-MAT
-    } else if a.is_era() && b.is_mat() {
-      self.era2(b);
-    } else {
-      panic!("undefined interaction: {:08x} {:08x}", a.0, b.0);
-    }
+    match (a.tag(), b.tag()) {
+      (CT0.., CT0..) if a.tag() == b.tag() => self.anni(a, b),
+      (CT0.., CT0..) => self.comm(a, b),
+      (CT0.., ERA)   => self.era2(a),
+      (ERA, CT0..)   => self.era2(b),
+      (CT0.., REF)   => self.eras += 1,
+      (REF, CT0..)   => self.eras += 1,
+      (ERA, ERA)     => self.eras += 1,
+      (VR1..=VR2, _) => self.link(a, b),
+      (_, VR1..=VR2) => self.link(b, a),
+      (CT0.., NUM)   => self.copy(a, b),
+      (NUM, CT0..)   => self.copy(b, a),
+      (NUM, ERA)     => self.eras += 1,
+      (ERA, NUM)     => self.eras += 1,
+      (NUM, NUM)     => self.eras += 1,
+      (OP2, NUM)     => self.op2n(a, b),
+      (NUM, OP2)     => self.op2n(b, a),
+      (OP1, NUM)     => self.op1n(a, b),
+      (NUM, OP1)     => self.op1n(b, a),
+      (OP2, CT0..)   => self.comm(a, b),
+      (CT0.., OP2)   => self.comm(b, a),
+      (OP1, CT0..)   => self.pass(a, b),
+      (CT0.., OP1)   => self.pass(b, a),
+      (OP2, ERA)     => self.era2(a),
+      (ERA, OP2)     => self.era2(b),
+      (OP1, ERA)     => self.era1(a),
+      (ERA, OP1)     => self.era1(b),
+      (MAT, NUM)     => self.mtch(a, b),
+      (NUM, MAT)     => self.mtch(b, a),
+      (MAT, CT0..)   => self.comm(a, b),
+      (CT0.., MAT)   => self.comm(b, a),
+      (MAT, ERA)     => self.era2(a),
+      (ERA, MAT)     => self.era2(b),
+
+      // because of the deref above this match
+      // we know that A and B are not REFs
+      (REF, _)       => unreachable!(),
+      (_, REF)       => unreachable!(),
+
+      // undefined numerical interactions resulting from a sort of "type error"
+      (OP2..=MAT, OP2..=MAT) => unreachable!(),
+
+      // TODO: this will change when we implement the multi-threaded version
+      (RD1..=RD2, _) => unreachable!(),
+      (_, RD1..=RD2) => unreachable!(),
+    };
   }
 
   pub fn conn(&mut self, a: Ptr, b: Ptr) {
