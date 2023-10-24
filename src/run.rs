@@ -440,10 +440,8 @@ impl Net {
       (REF, _)       => unreachable!(),
       (_, REF)       => unreachable!(),
 
-      // TODO: what happens in these cases?
-      (MAT, OP2..=MAT) => unimplemented!(),
-      (OP2, OP2..=MAT) => unimplemented!(),
-      (OP1, OP2..=MAT) => unimplemented!(),
+      // undefined numerical interactions resulting from a sort of "type error"
+      (OP2..=MAT, OP2..=MAT) => unreachable!(),
 
       // TODO: this will change when we implement the multi-threaded version
       (RD1..=RD2, _) => unreachable!(),
