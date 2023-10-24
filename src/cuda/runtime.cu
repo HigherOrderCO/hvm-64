@@ -1,5 +1,7 @@
 // NOTE: This file contains the HVM2 CUDA runtime which is imported by
 // hvm2_standalone.cu and loaded by the Rust host. (Single source of truth.)
+// This file only contains device functions, not host functions,
+// those are defined in hvm2_standalone.cu and in the Rust host.
 
 //// Prelude
 

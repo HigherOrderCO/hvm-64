@@ -12,6 +12,8 @@
 // #include "book.dec_bits.cu"
 // #include "book.dec_bits_tree.cu"
 
+// This file contains the host functions for the standalone C++ version
+
 const size_t BOOK_DATA_SIZE = sizeof(BOOK_DATA) / sizeof(u32);
 const size_t JUMP_DATA_SIZE = sizeof(JUMP_DATA) / sizeof(u32);
 
