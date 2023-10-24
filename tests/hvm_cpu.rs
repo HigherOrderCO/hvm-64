@@ -1,13 +1,12 @@
 use hvm_lang::term::{parser, DefinitionBook};
-use hvmc::ast::*;
-use hvmc::*;
+use hvmc::{ast::*, *};
 use insta::assert_snapshot;
 use std::fs;
 
 // Loads file and generate net from hvm-core syntax
 fn load_from_core(file: &str, size: usize) -> (run::Book, run::Net) {
   let code = fs::read_to_string(file).unwrap();
-  let book = ast::book_to_runtime(&do_parse_book(&code));
+  let book = book_to_runtime(&do_parse_book(&code));
   let mut net = run::Net::new(size);
   net.boot(name_to_val("main"));
   (book, net)
@@ -43,17 +42,22 @@ impl Normal for Net {
   }
 }
 
-impl Normal for DefinitionBook {
-  fn normalize(mut self, size: usize) -> (run::Book, Net) {
-    let (book, _) = hvm_lang::compile_book(&mut self).unwrap();
-    let book = book_to_runtime(&book);
-
+impl Normal for Book {
+  fn normalize(self, size: usize) -> (run::Book, Net) {
+    let book = book_to_runtime(&self);
     let mut net = run::Net::new(size);
     net.boot(name_to_val("main"));
     net.normal(&book);
 
     let net = net_from_runtime(&net);
     (book, net)
+  }
+}
+
+impl Normal for DefinitionBook {
+  fn normalize(mut self, size: usize) -> (run::Book, Net) {
+    let (book, _) = hvm_lang::compile_book(&mut self).unwrap();
+    book.normalize(size)
   }
 }
 
@@ -88,4 +92,19 @@ fn test_church_mul() {
 
   assert_snapshot!(show_net(&info.net), @"([([b c] d) {2 (d e) (e [c f])}] (b f))");
   assert_snapshot!(term.to_string(&defs), @"λa λb (a (a (a (a (a (a b))))))");
+}
+
+#[test]
+fn test_bool_and() {
+  let book = do_parse_book(
+    &"
+    @true = (b (c b))
+    @fals = (b (c c))
+    @and  = ((b (@fals c)) (b c))
+    @main = root & @and ~ (@true (@fals root))
+  ",
+  );
+
+  let (_, net) = book.normalize(64);
+  assert_snapshot!(show_net(&net), @"(b (c c))");
 }
