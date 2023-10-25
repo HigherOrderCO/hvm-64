@@ -1,4 +1,4 @@
-use hvm_lang::term::{parser, DefinitionBook};
+use hvm_lang::term::{parser, DefNames, DefinitionBook, Term};
 use hvmc::{ast::*, *};
 use insta::assert_snapshot;
 use std::fs;
@@ -15,20 +15,12 @@ fn load_from_core(file: &str, size: usize) -> (run::Book, run::Net) {
 }
 
 // Loads file and generate net from hvm-lang syntax
-fn load_from_lang(file: &str, size: usize) -> (run::Net, Net) {
+fn load_from_lang(file: &str, size: usize) -> (Term, DefNames, hvm_lang::RunInfo) {
   let path = format!("{}/tests/programs/{}", env!("CARGO_MANIFEST_DIR"), file);
   let code = fs::read_to_string(path).unwrap();
 
-  let mut book = parser::parse_definition_book(&code).unwrap();
-  let (book, _) = hvm_lang::compile_book(&mut book).unwrap();
-  let book = book_to_runtime(&book);
-
-  let mut rnet = run::Net::new(size);
-  rnet.boot(name_to_val("main"));
-  rnet.normal(&book);
-  let net = net_from_runtime(&rnet);
-
-  (rnet, net)
+  let book = parser::parse_definition_book(&code).unwrap();
+  hvm_lang::run_book(book, size).unwrap()
 }
 
 trait Normal {
@@ -69,14 +61,14 @@ impl Normal for DefinitionBook {
 
 #[test]
 fn test_era_era() {
-  let net = do_parse_net(&"* & * ~ *");
+  let net = do_parse_net("* & * ~ *");
   let (_, net) = net.normalize(16);
   assert_snapshot!(show_net(&net), @"*");
 }
 
 #[test]
 fn test_con_dup() {
-  let net = do_parse_net(&"root & (x x) ~ {2 * root}");
+  let net = do_parse_net("root & (x x) ~ {2 * root}");
   let (_, net) = net.normalize(16);
   assert_snapshot!(show_net(&net), @"(b b)");
 }
@@ -85,7 +77,7 @@ fn test_con_dup() {
 fn test_church_mul() {
   let (term, defs, info) = hvm_lang::run_book(
     parser::parse_definition_book(
-      &"
+      "
       C_2 = λa λb (a (a b))
       C_3 = λa λb (a (a (a b)))
       Mult = λm λn λs λz (m (n s) z)
@@ -103,7 +95,7 @@ fn test_church_mul() {
 #[test]
 fn test_bool_and() {
   let book = do_parse_book(
-    &"
+    "
     @true = (b (c b))
     @fals = (b (c c))
     @and  = ((b (@fals c)) (b c))
@@ -117,9 +109,16 @@ fn test_bool_and() {
 
 #[test]
 fn test_neg_fusion() {
-  let (rnet, net) = load_from_lang("neg_fusion.hvm", 516);
-  let rwts = rnet.anni + rnet.comm + rnet.eras + rnet.dref + rnet.oper;
+  let (_, _, info) = load_from_lang("neg_fusion.hvm", 516);
 
-  assert_snapshot!(show_net(&net), @"(b (* b))");
-  assert_snapshot!(rwts.to_string(), @"153");
+  assert_snapshot!(show_net(&info.net), @"(b (* b))");
+  assert_snapshot!(info.stats.rewrites.total_rewrites().to_string(), @"153");
+}
+
+#[test]
+fn test_tree_alloc() {
+  let (_, _, info) = load_from_lang("tree_alloc.hvm", 4096);
+
+  assert_snapshot!(show_net(&info.net), @"(b (* b))");
+  assert_snapshot!(info.stats.rewrites.total_rewrites().to_string(), @"104");
 }
