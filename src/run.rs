@@ -7,44 +7,64 @@
 // they interact with nodes, and are cleared when they interact with ERAs, allowing for constant
 // space evaluation of recursive functions on Scott encoded datatypes.
 
-pub type Tag = u8;
 pub type Val = u32;
 
 // Core terms.
-pub const VR1: Tag = 0x0; // variable to aux port 1
-pub const VR2: Tag = 0x1; // variable to aux port 2
-pub const RD1: Tag = 0x2; // redirect to aux port 1
-pub const RD2: Tag = 0x3; // redirect to aux port 2
-pub const REF: Tag = 0x4; // lazy closed net
-pub const ERA: Tag = 0x5; // unboxed eraser
-pub const NUM: Tag = 0x6; // unboxed number
-pub const OP2: Tag = 0x7; // numeric operation binary
-pub const OP1: Tag = 0x8; // numeric operation unary
-pub const MAT: Tag = 0x9; // numeric if-then-else
-pub const CT0: Tag = 0xA; // main port of con node 0
-pub const CT1: Tag = 0xB; // main port of con node 1
-pub const CT2: Tag = 0xC; // main port of con node 2
-pub const CT3: Tag = 0xD; // main port of con node 3
-pub const CT4: Tag = 0xE; // main port of con node 4
-pub const CT5: Tag = 0xF; // main port of con node 5
+#[repr(u8)]
+#[derive(Eq, PartialEq, PartialOrd, Ord, Clone, Copy)]
+pub enum Tag {
+  /// Variable to aux port 1
+  VR1,
+  /// Variable to aux port 2
+  VR2,
+  /// Redirect to aux port 1
+  RD1,
+  /// Redirect to aux port 2
+  RD2,
+  /// Lazy closed net
+  REF,
+  /// Unboxed eraser
+  ERA,
+  /// Unboxed number
+  NUM,
+  /// Binary numeric operation
+  OP2,
+  /// Unary numeric operation
+  OP1,
+  /// Numeric if-then-else(MATCH)
+  MAT,
+  /// Main port of con node(label 0)
+  CT0,
+  /// Main port of con node(label 1)
+  CT1,
+  /// Main port of con node(label 2)
+  CT2,
+  /// Main port of con node(label 3)
+  CT3,
+  /// Main port of con node(label 4)
+  CT4,
+  /// Main port of con node(label 5)
+  CT5,
+}
+
 
 // Numeric operations.
-pub const USE: Tag = 0x0; // set-next-op
-pub const ADD: Tag = 0x1; // addition
-pub const SUB: Tag = 0x2; // subtraction
-pub const MUL: Tag = 0x3; // multiplication
-pub const DIV: Tag = 0x4; // division
-pub const MOD: Tag = 0x5; // modulus
-pub const EQ : Tag = 0x6; // equal-to
-pub const NE : Tag = 0x7; // not-equal-to
-pub const LT : Tag = 0x8; // less-than
-pub const GT : Tag = 0x9; // greater-than
-pub const AND: Tag = 0xA; // logical-and
-pub const OR : Tag = 0xB; // logical-or
-pub const XOR: Tag = 0xC; // logical-xor
-pub const NOT: Tag = 0xD; // logical-not
-pub const LSH: Tag = 0xE; // left-shift
-pub const RSH: Tag = 0xF; // right-shift
+pub const USE: u8 = 0x0; // set-next-op
+pub const ADD: u8 = 0x1; // addition
+pub const SUB: u8 = 0x2; // subtraction
+pub const MUL: u8 = 0x3; // multiplication
+pub const DIV: u8 = 0x4; // division
+pub const MOD: u8 = 0x5; // modulus
+pub const EQ : u8 = 0x6; // equal-to
+pub const NE : u8 = 0x7; // not-equal-to
+pub const LT : u8 = 0x8; // less-than
+pub const GT : u8 = 0x9; // greater-than
+pub const AND: u8 = 0xA; // logical-and
+pub const OR : u8 = 0xB; // logical-or
+pub const XOR: u8 = 0xC; // logical-xor
+pub const NOT: u8 = 0xD; // logical-not
+pub const LSH: u8 = 0xE; // left-shift
+pub const RSH: u8 = 0xF; // right-shift
 
 // Root pointer.
 pub const ERAS: Ptr = Ptr(0x0000_0000 | ERA as Val);
@@ -81,7 +101,7 @@ pub struct Net {
 }
 
 // A compact closed net, used for dereferences.
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Default)]
 pub struct Def {
   pub rdex: Vec<(Ptr, Ptr)>,
   pub node: Vec<(Ptr, Ptr)>,
@@ -92,6 +112,30 @@ pub struct Book {
   pub defs: Vec<Def>,
 }
 
+// Patterns for easier matching on tags
+macro_rules! CTR{() => {CT0 | CT1 | CT2 | CT3 | CT4 | CT5}}
+macro_rules! VAR{() => {VR1 | VR2}}
+macro_rules! RED{() => {RD1 | RD2}}
+macro_rules! OPS{() => {OP2 | OP1 | MAT}}
+macro_rules! PRI{() => {REF | ERA | NUM | OPS!() | CTR!()}}
+
+impl From<Tag> for u8 {
+  #[inline(always)]
+  fn from(tag: Tag) -> Self {
+    tag as u8
+  }
+}
+
+impl From<u8> for Tag {
+  #[inline(always)]
+  fn from(value: u8) -> Self {
+    unsafe {
+      std::mem::transmute(value)
+    }
+  }
+}
+pub use Tag::*;
+
 impl Ptr {
   #[inline(always)]
   pub fn new(tag: Tag, val: Val) -> Self {
@@ -100,12 +144,13 @@ impl Ptr {
 
   #[inline(always)]
   pub fn data(&self) -> Val {
-    return self.0;
+    self.0
   }
 
   #[inline(always)]
   pub fn tag(&self) -> Tag {
-    (self.data() & 0xF) as Tag
+    let tag_bits = (self.data() & 0xF) as u8;
+    tag_bits.into()
   }
 
   #[inline(always)]
@@ -115,76 +160,73 @@ impl Ptr {
 
   #[inline(always)]
   pub fn is_nil(&self) -> bool {
-    return self.data() == 0;
+    self.data() == 0
   }
 
   #[inline(always)]
   pub fn is_var(&self) -> bool {
-    return self.tag() >= VR1 && self.tag() <= VR2;
+    matches!(self.tag(), VAR!())
   }
 
   #[inline(always)]
   pub fn is_era(&self) -> bool {
-    return self.tag() == ERA;
+    matches!(self.tag(), ERA)
   }
 
   #[inline(always)]
   pub fn is_ctr(&self) -> bool {
-    return self.tag() >= CT0;
+    matches!(self.tag(), CTR!())
   }
 
   #[inline(always)]
   pub fn is_ref(&self) -> bool {
-    return self.tag() == REF;
+    matches!(self.tag(), REF)
   }
 
   #[inline(always)]
   pub fn is_pri(&self) -> bool {
-    return self.tag() >= REF;
+    matches!(self.tag(), PRI!())
   }
 
   #[inline(always)]
   pub fn is_num(&self) -> bool {
-    return self.tag() == NUM;
+    matches!(self.tag(), NUM)
   }
 
   #[inline(always)]
   pub fn is_op1(&self) -> bool {
-    return self.tag() == OP1;
+    matches!(self.tag(), OP1)
   }
 
   #[inline(always)]
   pub fn is_op2(&self) -> bool {
-    return self.tag() == OP2;
+    matches!(self.tag(), OP2)
   }
 
   #[inline(always)]
   pub fn is_skp(&self) -> bool {
-    return self.is_era() || self.is_num() || self.is_ref();
+    matches!(self.tag(), ERA | NUM | REF)
   }
 
   #[inline(always)]
   pub fn is_mat(&self) -> bool {
-    return self.tag() == MAT;
+    matches!(self.tag(), MAT)
   }
 
   #[inline(always)]
   pub fn has_loc(&self) -> bool {
-    return self.is_var() || self.is_op2() || self.is_op1() || self.is_mat() || self.is_ctr();
+    matches!(self.tag(), VAR!() | OP2 | OP1 | MAT | CTR!())
   }
 
   #[inline(always)]
   pub fn adjust(&self, loc: Val) -> Ptr {
-    return Ptr::new(self.tag(), self.val() + if self.has_loc() { loc - 1 } else { 0 });
+    Ptr::new(self.tag(), self.val() + if self.has_loc() { loc - 1 } else { 0 })
   }
 
   // Can this redex be skipped (as an optimization)?
   #[inline(always)]
   pub fn can_skip(a: Ptr, b: Ptr) -> bool {
-    return a.is_era() && b.is_era()
-        || a.is_ref() && b.is_era()
-        || a.is_era() && b.is_ref()
-        || a.is_ref() && b.is_ref();
+    matches!((a.tag(), b.tag()), (ERA | REF, ERA | REF))
   }
 }
 
@@ -192,7 +234,7 @@ impl Book {
   #[inline(always)]
   pub fn new() -> Self {
     Book {
-      defs: vec![Def::new(); 1 << 24],
+      defs: vec![Def::default(); 1 << 24],
     }
   }
 
@@ -204,15 +246,6 @@ impl Book {
   #[inline(always)]
   pub fn get(&self, id: Val) -> Option<&Def> {
     self.defs.get(id as usize)
-  }
-}
-
-impl Def {
-  pub fn new() -> Self {
-    Def {
-      rdex: vec![],
-      node: vec![],
-    }
   }
 }
 
@@ -395,57 +428,62 @@ impl Net {
   pub fn interact(&mut self, book: &Book, a: Ptr, b: Ptr) {
     let mut a = a;
     let mut b = b;
-    // Dereference A
-    if a.is_ref() && b.is_pri() && !b.is_skp() {
-      a = self.deref(book, a, b);
-    } else if b.is_ref() && a.is_pri() && !a.is_skp() {
-      b = self.deref(book, b, a);
-    }
+
+    // Dereference A or B
     match (a.tag(), b.tag()) {
-      (CT0.., CT0..) if a.tag() == b.tag() => self.anni(a, b),
-      (CT0.., CT0..) => self.comm(a, b),
-      (CT0.., ERA)   => self.era2(a),
-      (ERA, CT0..)   => self.era2(b),
-      (REF, ERA)     => self.eras += 1,
-      (ERA, REF)     => self.eras += 1,
-      (ERA, ERA)     => self.eras += 1,
-      (VR1..=VR2, _) => self.link(a, b),
-      (_, VR1..=VR2) => self.link(b, a),
-      (CT0.., NUM)   => self.copy(a, b),
-      (NUM, CT0..)   => self.copy(b, a),
-      (NUM, ERA)     => self.eras += 1,
-      (ERA, NUM)     => self.eras += 1,
-      (NUM, NUM)     => self.eras += 1,
-      (OP2, NUM)     => self.op2n(a, b),
-      (NUM, OP2)     => self.op2n(b, a),
-      (OP1, NUM)     => self.op1n(a, b),
-      (NUM, OP1)     => self.op1n(b, a),
-      (OP2, CT0..)   => self.comm(a, b),
-      (CT0.., OP2)   => self.comm(b, a),
-      (OP1, CT0..)   => self.pass(a, b),
-      (CT0.., OP1)   => self.pass(b, a),
-      (OP2, ERA)     => self.era2(a),
-      (ERA, OP2)     => self.era2(b),
-      (OP1, ERA)     => self.era1(a),
-      (ERA, OP1)     => self.era1(b),
-      (MAT, NUM)     => self.mtch(a, b),
-      (NUM, MAT)     => self.mtch(b, a),
-      (MAT, CT0..)   => self.comm(a, b),
-      (CT0.., MAT)   => self.comm(b, a),
-      (MAT, ERA)     => self.era2(a),
-      (ERA, MAT)     => self.era2(b),
+      (REF, OPS!() | CTR!()) => a = self.deref(book, a, b),
+      (OPS!() | CTR!(), REF) => b = self.deref(book, b, a),
+      _ => {}
+    }
+
+    match (a.tag(), b.tag()) {
+      // CTR-CTR when same labels
+      (CT0, CT0) | (CT1, CT1) | (CT2, CT2) | (CT3, CT3) | (CT4, CT4) | (CT5, CT5)
+        => self.anni(a, b),
+      // CTR-CTR when different labels
+      (CTR!(), CTR!()) => self.comm(a, b),
+      (CTR!(), ERA)    => self.era2(a),
+      (ERA, CTR!())    => self.era2(b),
+      (REF, ERA)       => self.eras += 1,
+      (ERA, REF)       => self.eras += 1,
+      (ERA, ERA)       => self.eras += 1,
+      (VAR!(), _)      => self.link(a, b),
+      (_, VAR!())      => self.link(b, a),
+      (CTR!(), NUM)    => self.copy(a, b),
+      (NUM, CTR!())    => self.copy(b, a),
+      (NUM, ERA)       => self.eras += 1,
+      (ERA, NUM)       => self.eras += 1,
+      (NUM, NUM)       => self.eras += 1,
+      (OP2, NUM)       => self.op2n(a, b),
+      (NUM, OP2)       => self.op2n(b, a),
+      (OP1, NUM)       => self.op1n(a, b),
+      (NUM, OP1)       => self.op1n(b, a),
+      (OP2, CTR!())    => self.comm(a, b),
+      (CTR!(), OP2)    => self.comm(b, a),
+      (OP1, CTR!())    => self.pass(a, b),
+      (CTR!(), OP1)    => self.pass(b, a),
+      (OP2, ERA)       => self.era2(a),
+      (ERA, OP2)       => self.era2(b),
+      (OP1, ERA)       => self.era1(a),
+      (ERA, OP1)       => self.era1(b),
+      (MAT, NUM)       => self.mtch(a, b),
+      (NUM, MAT)       => self.mtch(b, a),
+      (MAT, CTR!())    => self.comm(a, b),
+      (CTR!(), MAT)    => self.comm(b, a),
+      (MAT, ERA)       => self.era2(a),
+      (ERA, MAT)       => self.era2(b),
 
       // because of the deref above this match
       // we know that A and B are not REFs
-      (REF, _)       => unreachable!(),
-      (_, REF)       => unreachable!(),
+      (REF, _) => unreachable!(),
+      (_, REF) => unreachable!(),
 
       // undefined numerical interactions resulting from a sort of "type error"
-      (OP2..=MAT, OP2..=MAT) => unreachable!(),
+      (OPS!(), OPS!()) => unreachable!(),
 
       // TODO: this will change when we implement the multi-threaded version
-      (RD1..=RD2, _) => unreachable!(),
-      (_, RD1..=RD2) => unreachable!(),
+      (RED!(), _) => unreachable!(),
+      (_, RED!()) => unreachable!(),
     };
   }
 
@@ -688,6 +726,6 @@ impl Net {
 
   // Total rewrite count.
   pub fn rewrites(&self) -> usize {
-    return self.anni + self.comm + self.eras + self.dref + self.oper;
+    self.anni + self.comm + self.eras + self.dref + self.oper
   }
 }

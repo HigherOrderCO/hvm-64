@@ -398,7 +398,7 @@ pub fn tree_to_runtime_go(rt_net: &mut run::Net, tree: &Tree, vars: &mut HashMap
       rt_net.heap.set(val, run::P1, p1);
       let p2 = tree_to_runtime_go(rt_net, &*rgt, vars, Parent::Node { val, port: run::P2 });
       rt_net.heap.set(val, run::P2, p2);
-      run::Ptr::new(*lab + run::CT0, val)
+      run::Ptr::new((*lab + u8::from(run::CT0)).into(), val)
     }
     Tree::Var { nam } => {
       if let Parent::Redex = parent {
@@ -518,7 +518,7 @@ pub fn tree_from_runtime_go(rt_net: &run::Net, ptr: run::Ptr, parent: Parent, va
       let lft = tree_from_runtime_go(rt_net, p1, Parent::Node { val: ptr.val(), port: run::P1 }, vars, fresh);
       let rgt = tree_from_runtime_go(rt_net, p2, Parent::Node { val: ptr.val(), port: run::P2 }, vars, fresh);
       Tree::Ctr {
-        lab: ptr.tag() - run::CT0,
+        lab: (u8::from(ptr.tag()) - u8::from(run::CT0)).into(),
         lft: Box::new(lft),
         rgt: Box::new(rgt),
       }
