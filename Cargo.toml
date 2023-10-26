@@ -8,10 +8,12 @@ license = "MIT"
 [[bin]]
 name = "hvmc"
 path = "src/main.rs"
+bench = false
 
 [lib]
 name = "hvmc"
 path = "src/lib.rs"
+bench = false
 
 # Benchmark dependencies
 
