@@ -615,6 +615,7 @@ impl Net {
       ADD => { (a_val.wrapping_add(b_val)) & 0xFFFFFF }
       SUB => { (a_val.wrapping_sub(b_val)) & 0xFFFFFF }
       MUL => { (a_val.wrapping_mul(b_val)) & 0xFFFFFF }
+      DIV if b_val == 0 => { 0xFFFFFF }
       DIV => { (a_val.wrapping_div(b_val)) & 0xFFFFFF }
       MOD => { (a_val.wrapping_rem(b_val)) & 0xFFFFFF }
       EQ  => { ((a_val == b_val) as Val) & 0xFFFFFF }

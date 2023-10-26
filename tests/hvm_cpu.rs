@@ -226,3 +226,10 @@ fn test_rsh() {
   let (_, net) = net.normalize(16);
   assert_snapshot!(show_net(&net), @"#2");
 }
+
+#[test]
+fn test_div_by_0() {
+  let net = op_net(9, run::DIV, 0);
+  let (_, net) = net.normalize(16);
+  assert_snapshot!(show_net(&net), @"#16777215");
+}
