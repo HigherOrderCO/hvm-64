@@ -1,6 +1,6 @@
 use hvm_lang::term::{parser, DefNames, DefinitionBook, Term};
 use hvmc::{ast::*, *};
-use insta::assert_snapshot;
+use insta::{assert_snapshot, assert_debug_snapshot};
 use std::fs;
 
 // Loads file and generate net from hvm-core syntax
@@ -112,7 +112,7 @@ fn test_neg_fusion() {
   let (_, _, info) = load_from_lang("neg_fusion.hvm", 516);
 
   assert_snapshot!(show_net(&info.net), @"(b (* b))");
-  assert_snapshot!(info.stats.rewrites.total_rewrites().to_string(), @"153");
+  assert_debug_snapshot!(info.stats.rewrites.total_rewrites(), @"153");
 }
 
 #[test]
@@ -120,46 +120,46 @@ fn test_tree_alloc() {
   let (_, _, info) = load_from_lang("tree_alloc.hvm", 516);
 
   assert_snapshot!(show_net(&info.net), @"(b (* b))");
-  assert_snapshot!(info.stats.rewrites.total_rewrites().to_string(), @"104");
+  assert_debug_snapshot!(info.stats.rewrites.total_rewrites(), @"104");
 }
 
 const QUEUE: &'static str = include_str!("./programs/queue.hvm");
 
-fn make_queue(lenght: u32) -> String {
+fn make_queue(len: u32) -> String {
   let mut body = String::new();
 
-  for i in 1 ..= lenght {
+  for i in 1 ..= len {
     body += &format!("let q = (Qadd {i} q)\n")
   }
 
-  for i in 0 .. lenght {
+  for i in 0 .. len {
     body += &format!("(Qrem q λv{i} λq\n");
   }
 
-  for i in 1 ..= lenght {
+  for i in 1 ..= len {
     body += &format!("(Cons {i} ");
   }
 
-  format!("{QUEUE}\nmain = let q = Qnew\n{body} Nil{}", ")".repeat(lenght as usize * 2))
+  format!("{QUEUE}\nmain = let q = Qnew\n{body} Nil{}", ")".repeat(len as usize * 2))
 }
 
-fn run_queue(lenght: u32, mem_size: usize) -> (Term, DefNames, hvm_lang::RunInfo) {
-  let a = make_queue(lenght);
-  hvm_lang::run_book(parser::parse_definition_book(&a).unwrap(), mem_size).unwrap()
+fn run_queue(len: u32, mem_size: usize) -> (Term, DefNames, hvm_lang::RunInfo) {
+  let queue = make_queue(len);
+  hvm_lang::run_book(parser::parse_definition_book(&queue).unwrap(), mem_size).unwrap()
 }
 
 #[test]
 fn test_queues() {
   let (term, defs, info_3) = run_queue(3, 512);
-  assert_snapshot!(info_3.stats.rewrites.total_rewrites().to_string(), @"62");
+  assert_debug_snapshot!(info_3.stats.rewrites.total_rewrites(), @"62");
   let (_, _, info) = run_queue(4, 512);
-  assert_snapshot!(info.stats.rewrites.total_rewrites().to_string(), @"81");
+  assert_debug_snapshot!(info.stats.rewrites.total_rewrites(), @"81");
   let (_, _, info) = run_queue(5, 512);
-  assert_snapshot!(info.stats.rewrites.total_rewrites().to_string(), @"100");
+  assert_debug_snapshot!(info.stats.rewrites.total_rewrites(), @"100");
   let (_, _, info) = run_queue(10, 512);
-  assert_snapshot!(info.stats.rewrites.total_rewrites().to_string(), @"195");
+  assert_debug_snapshot!(info.stats.rewrites.total_rewrites(), @"195");
   let (_, _, info) = run_queue(20, 512);
-  assert_snapshot!(info.stats.rewrites.total_rewrites().to_string(), @"385");
+  assert_debug_snapshot!(info.stats.rewrites.total_rewrites(), @"385");
 
   assert_snapshot!(show_net(&info_3.net), @"((#1 (((#2 (((#3 ((* @7) b)) (* b)) c)) (* c)) d)) (* d))");
   assert_snapshot!(term.to_string(&defs), @"λa λ* ((a 1) λb λ* ((b 2) λc λ* ((c 3) λ* λd d)))");
@@ -270,6 +270,8 @@ fn test_rsh() {
 }
 
 #[test]
+/// Division by zero always return the value of 0xFFFFFF,
+/// that is read as the unsigned integer `16777215`
 fn test_div_by_0() {
   let net = op_net(9, run::DIV, 0);
   let (_, net) = net.normalize(16);
