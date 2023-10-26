@@ -123,6 +123,48 @@ fn test_tree_alloc() {
   assert_snapshot!(info.stats.rewrites.total_rewrites().to_string(), @"104");
 }
 
+const QUEUE: &'static str = include_str!("./programs/queue.hvm");
+
+fn make_queue(lenght: u32) -> String {
+  let mut body = String::new();
+
+  for i in 1 ..= lenght {
+    body += &format!("let q = (Qadd {i} q)\n")
+  }
+
+  for i in 0 .. lenght {
+    body += &format!("(Qrem q λv{i} λq\n");
+  }
+
+  for i in 1 ..= lenght {
+    body += &format!("(Cons {i} ");
+  }
+
+  format!("{QUEUE}\nmain = let q = Qnew\n{body} Nil{}", ")".repeat(lenght as usize * 2))
+}
+
+fn run_queue(lenght: u32, mem_size: usize) -> (Term, DefNames, hvm_lang::RunInfo) {
+  let a = make_queue(lenght);
+  hvm_lang::run_book(parser::parse_definition_book(&a).unwrap(), mem_size).unwrap()
+}
+
+#[test]
+fn test_queues() {
+  let (term, defs, info_3) = run_queue(3, 512);
+  assert_snapshot!(info_3.stats.rewrites.total_rewrites().to_string(), @"62");
+  let (_, _, info) = run_queue(4, 512);
+  assert_snapshot!(info.stats.rewrites.total_rewrites().to_string(), @"81");
+  let (_, _, info) = run_queue(5, 512);
+  assert_snapshot!(info.stats.rewrites.total_rewrites().to_string(), @"100");
+  let (_, _, info) = run_queue(10, 512);
+  assert_snapshot!(info.stats.rewrites.total_rewrites().to_string(), @"195");
+  let (_, _, info) = run_queue(20, 512);
+  assert_snapshot!(info.stats.rewrites.total_rewrites().to_string(), @"385");
+
+  assert_snapshot!(show_net(&info_3.net), @"((#1 (((#2 (((#3 ((* @7) b)) (* b)) c)) (* c)) d)) (* d))");
+  assert_snapshot!(term.to_string(&defs), @"λa λ* ((a 1) λb λ* ((b 2) λc λ* ((c 3) λ* λd d)))");
+}
+
 // Numeric Operations test
 
 fn op_net(lnum: u32, op: u8, rnum: u32) -> Net {
