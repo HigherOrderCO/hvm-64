@@ -8,42 +8,32 @@
 // space evaluation of recursive functions on Scott encoded datatypes.
 
 pub type Tag = u8;
+pub type Ari = u8;
+pub type Lab = u32;
 pub type Val = u32;
+pub type Data = u64;
 
 // Core terms.
 
 /// Variable to aux port 1
-pub const VR1: Tag = 0x0;
-/// Variable to aux port 2
-pub const VR2: Tag = 0x1;
+pub const VAR: Tag = 0x0;
 /// Redirect to aux port 1
-pub const RD1: Tag = 0x2;
-/// Redirect to aux port 2
-pub const RD2: Tag = 0x3;
+pub const RDR: Tag = 0x1;
 /// Lazy closed net
-pub const REF: Tag = 0x4;
+pub const REF: Tag = 0x2;
 /// Unboxed eraser
-pub const ERA: Tag = 0x5;
+pub const ERA: Tag = 0x3;
 /// Unboxed number
-pub const NUM: Tag = 0x6;
+pub const NUM: Tag = 0x4;
 /// Binary numeric operation
-pub const OP2: Tag = 0x7;
+pub const OP2: Tag = 0x5;
 /// Unary numeric operation
-pub const OP1: Tag = 0x8;
+pub const OP1: Tag = 0x6;
 /// Numeric if-then-else(MATCH)
-pub const MAT: Tag = 0x9;
-/// Main port of con node(label 0)
-pub const CT0: Tag = 0xA;
-/// Main port of con node(label 1)
-pub const CT1: Tag = 0xB;
-/// Main port of con node(label 2)
-pub const CT2: Tag = 0xC;
-/// Main port of con node(label 3)
-pub const CT3: Tag = 0xD;
-/// Main port of con node(label 4)
-pub const CT4: Tag = 0xE;
-/// Main port of con node(label 5)
-pub const CT5: Tag = 0xF;
+pub const MAT: Tag = 0x7;
+/// Main port of con node
+pub const CTR: Tag = 0x8;
+
 
 // Numeric operations.
 pub type NumericOp = u8;
@@ -69,9 +59,9 @@ pub const ROOT_PORT: Val = 0 + P2;
 pub const FIRST_PORT: Val = 2 + P1;
 
 // Root pointer.
-pub const ERAS: Ptr = Ptr::new(ERA, 0x0000_0000);
-pub const ROOT: Ptr = Ptr::new(VR2, ROOT_PORT);
-pub const NULL: Ptr = Ptr(0x0000_0000);
+pub const ERAS: Ptr = Ptr::new_val(ERA, 0x0000_0000);
+pub const ROOT: Ptr = Ptr::new_val(VAR, ROOT_PORT);
+pub const NULL: Ptr = Ptr(0x0000_0000_0000_0000);
 
 // An auxiliary port.
 pub type Port = Val;
@@ -81,7 +71,7 @@ pub const P2: Port = 1;
 
 // A tagged pointer.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
-pub struct Ptr(pub Val);
+pub struct Ptr(pub Data);
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Heap {
@@ -117,12 +107,22 @@ pub struct Book {
 
 impl Ptr {
   #[inline(always)]
-  pub const fn new(tag: Tag, val: Val) -> Self {
-    Ptr((val << 4) | (tag as Val))
+  pub const fn new(tag: Tag, ari: Ari, lab: Lab, val: Val) -> Self {
+    Ptr((val as Data) << 32 | (lab as Data) << 8 | (ari as Data) << 4 | (tag as Data))
   }
 
   #[inline(always)]
-  pub fn data(&self) -> Val {
+  pub const fn new_val(tag: Tag, val: Val) -> Self {
+    Ptr((val as Data) << 32 |  (tag as Data))
+  }
+
+  #[inline(always)]
+  pub fn copy(&self, val: Val) -> Self {
+    Ptr(self.data() & 0xFFFF_FFFF | (val as Data) << 32)
+  }
+
+  #[inline(always)]
+  pub fn data(&self) -> Data {
     return self.0;
   }
 
@@ -132,8 +132,18 @@ impl Ptr {
   }
 
   #[inline(always)]
+  pub fn ari(&self) -> Ari {
+    (self.data() >> 4 & 0xF) as Ari
+  }
+
+  #[inline(always)]
+  pub fn lab(&self) -> Lab {
+    (self.data() >> 8 & 0xFF_FFFF) as Lab
+  }
+
+  #[inline(always)]
   pub fn val(&self) -> Val {
-    (self.data() >> 4) as Val
+    (self.data() >> 32) as Val
   }
 
   #[inline(always)]
@@ -143,7 +153,7 @@ impl Ptr {
 
   #[inline(always)]
   pub fn is_var(&self) -> bool {
-    return matches!(self.tag(), VR1..=VR2);
+    return matches!(self.tag(), VAR);
   }
 
   #[inline(always)]
@@ -153,7 +163,7 @@ impl Ptr {
 
   #[inline(always)]
   pub fn is_ctr(&self) -> bool {
-    return matches!(self.tag(), CT0..);
+    return matches!(self.tag(), CTR);
   }
 
   #[inline(always)]
@@ -193,12 +203,12 @@ impl Ptr {
 
   #[inline(always)]
   pub fn has_loc(&self) -> bool {
-    return matches!(self.tag(), VR1..=VR2 | OP2..);
+    return matches!(self.tag(), VAR | OP2..);
   }
 
   #[inline(always)]
   pub fn adjust(&self, loc: Val) -> Ptr {
-    return Ptr::new(self.tag(), self.val() + if self.has_loc() { loc - FIRST_PORT } else { 0 });
+    return Ptr::new(self.tag(), self.ari(), self.lab(), self.val() + if self.has_loc() { loc - FIRST_PORT } else { 0 });
   }
 
   // Can this redex be skipped (as an optimization)?
@@ -285,12 +295,12 @@ impl Heap {
   }
 
   #[inline(always)]
-  pub fn lock(&self, index: Val) {
+  pub fn lock(&self, index: Data) {
     return;
   }
 
   #[inline(always)]
-  pub fn unlock(&self, index: Val) {
+  pub fn unlock(&self, index: Data) {
     return;
   }
 
@@ -352,7 +362,7 @@ impl Net {
 
   // Creates a net and boots from a REF.
   pub fn boot(&mut self, root_id: Val) {
-    self.heap.set_root(Ptr::new(REF, root_id));
+    self.heap.set_root(Ptr::new(REF, 0, 0, root_id));
   }
 
   // Converts to a def.
@@ -414,50 +424,53 @@ impl Net {
       b = self.deref(book, b, a);
     }
     match (a.tag(), b.tag()) {
-      (CT0.., CT0..) if a.tag() == b.tag() => self.anni(a, b),
-      (CT0.., CT0..) => self.comm(a, b),
-      (CT0.., ERA)   => self.era2(a),
-      (ERA, CT0..)   => self.era2(b),
-      (REF, ERA)     => self.eras += 1,
-      (ERA, REF)     => self.eras += 1,
-      (ERA, ERA)     => self.eras += 1,
-      (VR1..=VR2, _) => self.link(a, b),
-      (_, VR1..=VR2) => self.link(b, a),
-      (CT0.., NUM)   => self.copy(a, b),
-      (NUM, CT0..)   => self.copy(b, a),
-      (NUM, ERA)     => self.eras += 1,
-      (ERA, NUM)     => self.eras += 1,
-      (NUM, NUM)     => self.eras += 1,
-      (OP2, NUM)     => self.op2n(a, b),
-      (NUM, OP2)     => self.op2n(b, a),
-      (OP1, NUM)     => self.op1n(a, b),
-      (NUM, OP1)     => self.op1n(b, a),
-      (OP2, CT0..)   => self.comm(a, b),
-      (CT0.., OP2)   => self.comm(b, a),
-      (OP1, CT0..)   => self.pass(a, b),
-      (CT0.., OP1)   => self.pass(b, a),
-      (OP2, ERA)     => self.era2(a),
-      (ERA, OP2)     => self.era2(b),
-      (OP1, ERA)     => self.era1(a),
-      (ERA, OP1)     => self.era1(b),
-      (MAT, NUM)     => self.mtch(a, b),
-      (NUM, MAT)     => self.mtch(b, a),
-      (MAT, CT0..)   => self.comm(a, b),
-      (CT0.., MAT)   => self.comm(b, a),
-      (MAT, ERA)     => self.era2(a),
-      (ERA, MAT)     => self.era2(b),
+      (CTR, CTR) if a.tag() == b.tag() => self.anni(a, b),
+      (CTR, CTR) => self.comm(a, b),
+      (CTR, ERA) => self.era2(a),
+      (ERA, CTR) => self.era2(b),
+      (REF, ERA) => self.eras += 1,
+      (ERA, REF) => self.eras += 1,
+      (ERA, ERA) => self.eras += 1,
+      (VAR,   _) => self.link(a, b),
+      (_  , VAR) => self.link(b, a),
+      (CTR, NUM) => self.copy(a, b),
+      (NUM, CTR) => self.copy(b, a),
+      (NUM, ERA) => self.eras += 1,
+      (ERA, NUM) => self.eras += 1,
+      (NUM, NUM) => self.eras += 1,
+      (OP2, NUM) => self.op2n(a, b),
+      (NUM, OP2) => self.op2n(b, a),
+      (OP1, NUM) => self.op1n(a, b),
+      (NUM, OP1) => self.op1n(b, a),
+      (OP2, CTR) => self.comm(a, b),
+      (CTR, OP2) => self.comm(b, a),
+      (OP1, CTR) => self.pass(a, b),
+      (CTR, OP1) => self.pass(b, a),
+      (OP2, ERA) => self.era2(a),
+      (ERA, OP2) => self.era2(b),
+      (OP1, ERA) => self.era1(a),
+      (ERA, OP1) => self.era1(b),
+      (MAT, NUM) => self.mtch(a, b),
+      (NUM, MAT) => self.mtch(b, a),
+      (MAT, CTR) => self.comm(a, b),
+      (CTR, MAT) => self.comm(b, a),
+      (MAT, ERA) => self.era2(a),
+      (ERA, MAT) => self.era2(b),
 
       // because of the deref above this match
       // we know that A and B are not REFs
-      (REF, _)       => unreachable!(),
-      (_, REF)       => unreachable!(),
+      (REF, _) => unreachable!(),
+      (_, REF) => unreachable!(),
 
       // undefined numerical interactions resulting from a sort of "type error"
       (OP2..=MAT, OP2..=MAT) => unreachable!(),
 
       // TODO: this will change when we implement the multi-threaded version
-      (RD1..=RD2, _) => unreachable!(),
-      (_, RD1..=RD2) => unreachable!(),
+      (RDR, _) => unreachable!(),
+      (_, RDR) => unreachable!(),
+      
+      // All the other unused numbers
+      (_, _) => unreachable!(),
     };
   }
 
@@ -480,19 +493,19 @@ impl Net {
     self.comm += 1;
     let loc = self.heap.alloc(8);
     // Link 4 main ports of the new nodes
-    self.link(self.heap.get(a.val() + P1), Ptr::new(b.tag(), loc + 0));
-    self.link(self.heap.get(b.val() + P1), Ptr::new(a.tag(), loc + 4));
-    self.link(self.heap.get(a.val() + P2), Ptr::new(b.tag(), loc + 2));
-    self.link(self.heap.get(b.val() + P2), Ptr::new(a.tag(), loc + 6));
+    self.link(self.heap.get(a.val() + P1), b.copy(loc + 0));
+    self.link(self.heap.get(b.val() + P1), a.copy(loc + 4));
+    self.link(self.heap.get(a.val() + P2), b.copy(loc + 2));
+    self.link(self.heap.get(b.val() + P2), a.copy(loc + 6));
     // List the 8 aux ports
-    self.heap.set(loc + 0, Ptr::new(VR1, loc + 4));
-    self.heap.set(loc + 1, Ptr::new(VR1, loc + 6));
-    self.heap.set(loc + 2, Ptr::new(VR2, loc + 5));
-    self.heap.set(loc + 3, Ptr::new(VR2, loc + 7));
-    self.heap.set(loc + 4, Ptr::new(VR1, loc + 0));
-    self.heap.set(loc + 5, Ptr::new(VR1, loc + 2));
-    self.heap.set(loc + 6, Ptr::new(VR2, loc + 1));
-    self.heap.set(loc + 7, Ptr::new(VR2, loc + 3));
+    self.heap.set(loc + 0, Ptr::new_val(VAR, loc + 4));
+    self.heap.set(loc + 1, Ptr::new_val(VAR, loc + 6));
+    self.heap.set(loc + 2, Ptr::new_val(VAR, loc + 5));
+    self.heap.set(loc + 3, Ptr::new_val(VAR, loc + 7));
+    self.heap.set(loc + 4, Ptr::new_val(VAR, loc + 0));
+    self.heap.set(loc + 5, Ptr::new_val(VAR, loc + 2));
+    self.heap.set(loc + 6, Ptr::new_val(VAR, loc + 1));
+    self.heap.set(loc + 7, Ptr::new_val(VAR, loc + 3));
     self.heap.free(a.val());
     self.heap.free(b.val());
   }
@@ -500,15 +513,15 @@ impl Net {
   pub fn pass(&mut self, a: Ptr, b: Ptr) {
     self.comm += 1;
     let loc = self.heap.alloc(6);
-    self.link(self.heap.get(a.val() + P2), Ptr::new(b.tag(), loc+0));
-    self.link(self.heap.get(b.val() + P1), Ptr::new(a.tag(), loc+2));
-    self.link(self.heap.get(b.val() + P2), Ptr::new(a.tag(), loc+4));
-    self.heap.set(loc + 0, Ptr::new(VR2, loc+3));
-    self.heap.set(loc + 1, Ptr::new(VR2, loc+5));
+    self.link(self.heap.get(a.val() + P2), b.copy(loc+0));
+    self.link(self.heap.get(b.val() + P1), a.copy(loc+2));
+    self.link(self.heap.get(b.val() + P2), a.copy(loc+4));
+    self.heap.set(loc + 0, Ptr::new_val(VAR, loc+3));
+    self.heap.set(loc + 1, Ptr::new_val(VAR, loc+5));
     self.heap.set(loc + 2, self.heap.get(a.val()+P1));
-    self.heap.set(loc + 3, Ptr::new(VR1, loc+0));
+    self.heap.set(loc + 3, Ptr::new_val(VAR, loc+0));
     self.heap.set(loc + 4, self.heap.get(a.val()+P1));
-    self.heap.set(loc + 5, Ptr::new(VR2, loc+1));
+    self.heap.set(loc + 5, Ptr::new_val(VAR, loc+1));
     self.heap.free(a.val());
     self.heap.free(b.val());
   }
@@ -557,31 +570,31 @@ impl Net {
         if p2.is_op1() {
           let tmp = rt;
           rt = self.heap.get(p2.val() + P1).val();
-          p1 = Ptr::new(NUM, tmp);
+          p1 = Ptr::new_val(NUM, tmp);
           p2 = self.heap.get(p2.val() + P2);
           continue;
         }
         break;
       }
-      self.link(Ptr::new(NUM, rt), p2);
+      self.link(Ptr::new_val(NUM, rt), p2);
       return;
     }
     self.heap.set(a.val() + P1, b);
-    self.link(Ptr::new(OP1, a.val()), p1);
+    self.link(Ptr::new(OP1, 0, 0, a.val()), p1);
   }
 
   pub fn op1n(&mut self, a: Ptr, b: Ptr) {
     self.oper += 1;
     let p1 = self.heap.get(a.val() + P1);
     let p2 = self.heap.get(a.val() + P2);
-    let v0 = p1.val() as u32;
-    let v1 = b.val() as u32;
+    let v0 = p1.val() as Val;
+    let v1 = b.val() as Val;
     let v2 = self.prim(v0, v1);
-    self.link(Ptr::new(NUM, v2), p2);
+    self.link(Ptr::new_val(NUM, v2), p2);
     self.heap.free(a.val());
   }
 
-  pub fn prim(&mut self, a: u32, b: u32) -> u32 {
+  pub fn prim(&mut self, a: Val, b: Val) -> Val {
     let a_opr = (a >> 24) & 0xF;
     let b_opr = (b >> 24) & 0xF; // not used yet
     let a_val = a & 0xFFFFFF;
@@ -615,16 +628,16 @@ impl Net {
     if b.val() == 0 {
       let loc = self.heap.alloc(2);
       self.heap.set(loc+0+P2, ERAS);
-      self.link(p1, Ptr::new(CT0, loc+0));
-      self.link(p2, Ptr::new(VR1, loc+0));
+      self.link(p1, Ptr::new(CTR, 2, 0, loc+0));
+      self.link(p2, Ptr::new_val(VAR, loc+0));
       self.heap.free(a.val());
     } else {
       let loc = self.heap.alloc(4);
       self.heap.set(loc+0+P1, ERAS);
-      self.heap.set(loc+0+P2, Ptr::new(CT0, loc + 2));
-      self.heap.set(loc+2+P1, Ptr::new(NUM, b.val() - 1));
-      self.link(p1, Ptr::new(CT0, loc+0));
-      self.link(p2, Ptr::new(VR2, loc+3));
+      self.heap.set(loc+0+P2, Ptr::new(CTR, 2, 0, loc + 2));
+      self.heap.set(loc+2+P1, Ptr::new_val(NUM, b.val() - 1));
+      self.link(p1, Ptr::new(CTR, 2, 0, loc+0));
+      self.link(p2, Ptr::new(VAR, 0, 0, loc+3));
       self.heap.free(a.val());
     }
   }
@@ -666,6 +679,11 @@ impl Net {
 
   // Reduces all redexes.
   pub fn reduce(&mut self, book: &Book) {
+    /* while !self.rdex.is_empty() {
+      //eprintln!("{}\n", crate::ast::show_runtime_net(self));
+      let (a, b) = self.rdex.remove(0);
+      self.interact(book, a, b);
+    } */
     let mut rdex: Vec<(Ptr, Ptr)> = vec![];
     std::mem::swap(&mut self.rdex, &mut rdex);
     while rdex.len() > 0 {
@@ -687,7 +705,10 @@ impl Net {
 
   // Reduce a net to normal form.
   pub fn normal(&mut self, book: &Book) {
+    //eprintln!("{}", crate::ast::show_runtime_net(self));
+    //eprintln!("Normalizing...");
     self.expand(book, ROOT);
+    //eprintln!("Expanded");
     while self.rdex.len() > 0 {
       self.reduce(book);
       self.expand(book, ROOT);
@@ -698,8 +719,8 @@ impl Net {
   pub fn expand(&mut self, book: &Book, dir: Ptr) {
     let ptr = self.get_target(dir);
     if ptr.is_ctr() {
-      self.expand(book, Ptr::new(VR1, ptr.val()+P1));
-      self.expand(book, Ptr::new(VR2, ptr.val()+P2));
+      self.expand(book, Ptr::new_val(VAR, ptr.val() + P1));
+      self.expand(book, Ptr::new_val(VAR, ptr.val() + P2));
     } else if ptr.is_ref() {
       let exp = self.deref(book, ptr, dir);
       self.set_target(dir, exp);
