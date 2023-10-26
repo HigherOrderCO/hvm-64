@@ -15,9 +15,9 @@ pub type Data = u64;
 
 // Core terms.
 
-/// Variable to aux port 1
+/// Variable to aux port
 pub const VAR: Tag = 0x0;
-/// Redirect to aux port 1
+/// Redirect to aux port
 pub const RDR: Tag = 0x1;
 /// Lazy closed net
 pub const REF: Tag = 0x2;
@@ -112,8 +112,9 @@ impl Ptr {
   }
 
   #[inline(always)]
+  // Creates a Ptr containing an unboxed value (VAR, REF, NUM, etc)
   pub const fn new_val(tag: Tag, val: Val) -> Self {
-    Ptr((val as Data) << 32 |  (tag as Data))
+    Ptr((val as Data) << 32 | (tag as Data))
   }
 
   #[inline(always)]
@@ -637,7 +638,7 @@ impl Net {
       self.heap.set(loc+0+P2, Ptr::new(CTR, 2, 0, loc + 2));
       self.heap.set(loc+2+P1, Ptr::new_val(NUM, b.val() - 1));
       self.link(p1, Ptr::new(CTR, 2, 0, loc+0));
-      self.link(p2, Ptr::new(VAR, 0, 0, loc+3));
+      self.link(p2, Ptr::new_val(VAR, loc+3));
       self.heap.free(a.val());
     }
   }
@@ -679,11 +680,6 @@ impl Net {
 
   // Reduces all redexes.
   pub fn reduce(&mut self, book: &Book) {
-    /* while !self.rdex.is_empty() {
-      //eprintln!("{}\n", crate::ast::show_runtime_net(self));
-      let (a, b) = self.rdex.remove(0);
-      self.interact(book, a, b);
-    } */
     let mut rdex: Vec<(Ptr, Ptr)> = vec![];
     std::mem::swap(&mut self.rdex, &mut rdex);
     while rdex.len() > 0 {
@@ -705,10 +701,7 @@ impl Net {
 
   // Reduce a net to normal form.
   pub fn normal(&mut self, book: &Book) {
-    //eprintln!("{}", crate::ast::show_runtime_net(self));
-    //eprintln!("Normalizing...");
     self.expand(book, ROOT);
-    //eprintln!("Expanded");
     while self.rdex.len() > 0 {
       self.reduce(book);
       self.expand(book, ROOT);
@@ -719,8 +712,8 @@ impl Net {
   pub fn expand(&mut self, book: &Book, dir: Ptr) {
     let ptr = self.get_target(dir);
     if ptr.is_ctr() {
-      self.expand(book, Ptr::new_val(VAR, ptr.val() + P1));
-      self.expand(book, Ptr::new_val(VAR, ptr.val() + P2));
+      self.expand(book, Ptr::new_val(VAR, ptr.val()+P1));
+      self.expand(book, Ptr::new_val(VAR, ptr.val()+P2));
     } else if ptr.is_ref() {
       let exp = self.deref(book, ptr, dir);
       self.set_target(dir, exp);
