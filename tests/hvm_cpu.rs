@@ -88,7 +88,7 @@ fn test_church_mul() {
   )
   .unwrap();
 
-  assert_snapshot!(show_net(&info.net), @"([([b c] d) {2 (d e) (e [c f])}] (b f))");
+  assert_snapshot!(show_net(&info.net), @"({2 ({2 b c} d) {3 (d e) (e {2 c f})}} (b f))");
   assert_snapshot!(term.to_string(&defs), @"λa λb (a (a (a (a (a (a b))))))");
 }
 
@@ -117,8 +117,112 @@ fn test_neg_fusion() {
 
 #[test]
 fn test_tree_alloc() {
-  let (_, _, info) = load_from_lang("tree_alloc.hvm", 4096);
+  let (_, _, info) = load_from_lang("tree_alloc.hvm", 516);
 
   assert_snapshot!(show_net(&info.net), @"(b (* b))");
   assert_snapshot!(info.stats.rewrites.total_rewrites().to_string(), @"104");
+}
+
+// Numeric Operations test
+
+fn op_net(lnum: u32, op: u8, rnum: u32) -> Net {
+  do_parse_net(&format!("root & <#{lnum} <#{rnum} root>> ~ #{op}"))
+}
+
+#[test]
+fn test_add() {
+  let net = op_net(10, run::ADD, 2);
+  let (_, net) = net.normalize(16);
+  assert_snapshot!(show_net(&net), @"#12");
+}
+
+#[test]
+fn test_sub() {
+  let net = op_net(10, run::SUB, 2);
+  let (_, net) = net.normalize(16);
+  assert_snapshot!(show_net(&net), @"#8");
+}
+
+#[test]
+fn test_mul() {
+  let net = op_net(10, run::MUL, 2);
+  let (_, net) = net.normalize(16);
+  assert_snapshot!(show_net(&net), @"#20");
+}
+
+#[test]
+fn test_div() {
+  let net = op_net(10, run::DIV, 2);
+  let (_, net) = net.normalize(16);
+  assert_snapshot!(show_net(&net), @"#5");
+}
+
+#[test]
+fn test_mod() {
+  let net = op_net(10, run::MOD, 2);
+  let (_, net) = net.normalize(16);
+  assert_snapshot!(show_net(&net), @"#0");
+}
+
+#[test]
+fn test_eq() {
+  let net = op_net(10, run::EQ, 2);
+  let (_, net) = net.normalize(16);
+  assert_snapshot!(show_net(&net), @"#0");
+}
+
+#[test]
+fn test_ne() {
+  let net = op_net(10, run::NE, 2);
+  let (_, net) = net.normalize(16);
+  assert_snapshot!(show_net(&net), @"#1");
+}
+
+#[test]
+fn test_lt() {
+  let net = op_net(10, run::LT, 2);
+  let (_, net) = net.normalize(16);
+  assert_snapshot!(show_net(&net), @"#0");
+}
+
+#[test]
+fn test_gt() {
+  let net = op_net(10, run::GT, 2);
+  let (_, net) = net.normalize(16);
+  assert_snapshot!(show_net(&net), @"#1");
+}
+
+#[test]
+fn test_and() {
+  let net = op_net(10, run::AND, 2);
+  let (_, net) = net.normalize(16);
+  assert_snapshot!(show_net(&net), @"#2");
+}
+
+#[test]
+fn test_or() {
+  let net = op_net(10, run::OR, 2);
+  let (_, net) = net.normalize(16);
+  assert_snapshot!(show_net(&net), @"#10");
+}
+
+#[test]
+fn test_xor() {
+  let net = op_net(10, run::XOR, 2);
+  let (_, net) = net.normalize(16);
+  assert_snapshot!(show_net(&net), @"#8");
+}
+
+#[test]
+fn test_lsh() {
+  let net = op_net(10, run::LSH, 2);
+  let (_, net) = net.normalize(16);
+  assert_snapshot!(show_net(&net), @"#40");
+}
+
+#[test]
+fn test_rsh() {
+  let net = op_net(10, run::RSH, 2);
+  let (_, net) = net.normalize(16);
+  assert_snapshot!(show_net(&net), @"#2");
 }

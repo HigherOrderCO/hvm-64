@@ -451,7 +451,7 @@ dependencies = [
 [[package]]
 name = "hvm-lang"
 version = "0.1.0"
-source = "git+https://github.com/HigherOrderCO/hvm-lang.git#1af526f1d6fefe0aa970a5c6ba92c1679487a302"
+source = "git+https://github.com/HigherOrderCO/hvm-lang.git#77064428e69d36d8f3aca2d45e567332043de4c0"
 dependencies = [
  "anyhow",
  "bimap",
