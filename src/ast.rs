@@ -17,7 +17,7 @@ use std::str::Chars;
 #[derive(Clone, Hash, PartialEq, Eq, Debug)]
 pub enum Tree {
   Era,
-  Ctr { lab: run::Lab, lft: Box<Tree>, rgt: Box<Tree> },
+  Ctr { lab: run::Lab, args: Vec<Tree> },
   Var { nam: String },
   Ref { nam: run::Val },
   Num { val: run::Val },
@@ -121,26 +121,32 @@ pub fn parse_tree(chars: &mut Peekable<Chars>) -> Result<Tree, String> {
     Some('(') => {
       chars.next();
       let lab = 0;
-      let lft = Box::new(parse_tree(chars)?);
-      let rgt = Box::new(parse_tree(chars)?);
+      let mut args = vec![];
+      while chars.peek().is_some_and(|&c| c != ')') {
+        args.push(parse_tree(chars)?);
+      }
       consume(chars, ")")?;
-      Ok(Tree::Ctr { lab, lft, rgt })
+      Ok(Tree::Ctr { lab, args })
     }
     Some('[') => {
       chars.next();
-      let lab = 1;
-      let lft = Box::new(parse_tree(chars)?);
-      let rgt = Box::new(parse_tree(chars)?);
+      let lab = 0;
+      let mut args = vec![];
+      while chars.peek().is_some_and(|&c| c != ']') {
+        args.push(parse_tree(chars)?);
+      }
       consume(chars, "]")?;
-      Ok(Tree::Ctr { lab, lft, rgt })
+      Ok(Tree::Ctr { lab, args })
     }
     Some('{') => {
       chars.next();
-      let lab = parse_decimal(chars)? as run::Lab;
-      let lft = Box::new(parse_tree(chars)?);
-      let rgt = Box::new(parse_tree(chars)?);
+      let lab = 0;
+      let mut args = vec![];
+      while chars.peek().is_some_and(|&c| c != '}') {
+        args.push(parse_tree(chars)?);
+      }
       consume(chars, "}")?;
-      Ok(Tree::Ctr { lab, lft, rgt })
+      Ok(Tree::Ctr { lab, args })
     }
     Some('@') => {
       chars.next();
@@ -229,17 +235,32 @@ pub fn do_parse_book(code: &str) -> Book {
 // Stringifier
 // -----------
 
+fn join(mut it: impl Iterator<Item = String>) -> String {
+  let mut out = String::new();
+  match it.next() {
+    Some(fst) => {
+      out += &fst;
+      for arg in it {
+        out = out + " " + &arg;
+      }
+    }
+    None => (),
+  }
+  out
+}
+
 pub fn show_tree(tree: &Tree) -> String {
   match tree {
     Tree::Era => {
       "*".to_string()
     }
-    Tree::Ctr { lab, lft, rgt } => {
+    Tree::Ctr { lab, args } => {
+      let args = args.iter().map(show_tree);
       match lab {
-        0 => { format!("({} {})", show_tree(&*lft), show_tree(&*rgt)) }
-        1 => { format!("[{} {}]", show_tree(&*lft), show_tree(&*rgt)) }
-        _ => { format!("{{{} {} {}}}", lab, show_tree(&*lft), show_tree(&*rgt)) }
-      } 
+        0 => format!("({})", join(args)),
+        1 => format!("[{}]", join(args)),
+        _ => format!("{{{}}}", join([lab.to_string()].into_iter().chain(args))),
+      }
     }
     Tree::Var { nam } => {
       nam.clone()
@@ -372,17 +393,17 @@ pub enum Parent {
 const PARENT_ROOT: Parent = Parent::Node { val: run::ROOT_PORT };
 
 pub fn tree_to_runtime_go(rt_net: &mut run::Net, tree: &Tree, vars: &mut HashMap<String, Parent>, parent: Parent) -> run::Ptr {
-  match tree {
+  let p = match tree {
     Tree::Era => {
       run::ERAS
     }
-    Tree::Ctr { lab, lft, rgt } => {
-      let val = rt_net.heap.alloc(2);
-      let p1 = tree_to_runtime_go(rt_net, &*lft, vars, Parent::Node { val: val + run::P1 });
-      rt_net.heap.set(val + run::P1, p1);
-      let p2 = tree_to_runtime_go(rt_net, &*rgt, vars, Parent::Node { val: val + run::P2 });
-      rt_net.heap.set(val + run::P2, p2);
-      run::Ptr::new(run::CTR, 2, *lab, val)
+    Tree::Ctr { lab, args } => {
+      let val = rt_net.heap.alloc(args.len());
+      for (i, arg) in args.iter().enumerate() {
+        let p = tree_to_runtime_go(rt_net, arg, vars, Parent::Node { val: val + i as run::Val });
+        rt_net.heap.set(val + i as run::Val, p);
+      }
+      run::Ptr::new(run::CTR, args.len() as u8, *lab, val)
     }
     Tree::Var { nam } => {
       if let Parent::Redex = parent {
@@ -408,10 +429,10 @@ pub fn tree_to_runtime_go(rt_net: &mut run::Net, tree: &Tree, vars: &mut HashMap
       }
     }
     Tree::Ref { nam } => {
-      run::Ptr::new(run::REF, 0, 0, *nam)
+      run::Ptr::new_val(run::REF, *nam)
     }
     Tree::Num { val } => {
-      run::Ptr::new(run::NUM, 0, 0, *val as run::Val)
+      run::Ptr::new_val(run::NUM, *val as run::Val)
     }
     Tree::Op2 { lft, rgt } => {
       let val = rt_net.heap.alloc(2);
@@ -429,7 +450,9 @@ pub fn tree_to_runtime_go(rt_net: &mut run::Net, tree: &Tree, vars: &mut HashMap
       rt_net.heap.set(val + run::P2, p2);
       run::Ptr::new(run::MAT, 2, 0, val)
     }
-  }
+  };
+  eprintln!("tag={}, ari={}, lab={}, val={}", p.tag(), p.ari(), p.lab(), p.val());
+  p
 }
 
 pub fn tree_to_runtime(rt_net: &mut run::Net, tree: &Tree) -> run::Ptr {
@@ -492,17 +515,19 @@ pub fn tree_from_runtime_go(rt_net: &run::Net, ptr: run::Ptr, parent: Parent, va
         Tree::Var { nam }
       }
     }
-    _ => {
-      let p1  = rt_net.heap.get(ptr.val() + run::P1);
-      let p2  = rt_net.heap.get(ptr.val() + run::P2);
-      let lft = tree_from_runtime_go(rt_net, p1, Parent::Node { val: ptr.val() + run::P1 }, vars, fresh);
-      let rgt = tree_from_runtime_go(rt_net, p2, Parent::Node { val: ptr.val() + run::P2 }, vars, fresh);
+    run::CTR => {
+      let mut args = vec![];
+      for i in 0..ptr.ari() as run::Val {
+        let ptr = rt_net.heap.get(ptr.val() + i);
+        let arg = tree_from_runtime_go(rt_net, ptr, Parent::Node { val: ptr.val() + i }, vars, fresh);
+        args.push(arg);
+      }
       Tree::Ctr {
         lab: ptr.lab(),
-        lft: Box::new(lft),
-        rgt: Box::new(rgt),
+        args
       }
     }
+    _ => unreachable!("{}", ptr.tag()),
   }
 }
 

@@ -208,8 +208,10 @@ impl Ptr {
   }
 
   #[inline(always)]
+  // Move pointers from a Def to pointer to the main net.
   pub fn adjust(&self, loc: Val) -> Ptr {
-    return Ptr::new(self.tag(), self.ari(), self.lab(), self.val() + if self.has_loc() { loc - FIRST_PORT } else { 0 });
+    let offset = if self.has_loc() { loc - FIRST_PORT } else { 0 };
+    return self.copy(self.val() + offset);
   }
 
   // Can this redex be skipped (as an optimization)?
@@ -289,10 +291,11 @@ impl Heap {
   }
 
   #[inline(always)]
-  pub fn free(&mut self, index: Val) {
-    self.used -= 2;
-    self.set(index + P1, NULL);
-    self.set(index + P2, NULL);
+  pub fn free(&mut self, index: Val, size: usize) {
+    self.used -= size as usize;
+    for i in 0..size {
+      self.set(index + i as Val, NULL);
+    }
   }
 
   #[inline(always)]
@@ -315,8 +318,7 @@ impl Heap {
   #[inline(always)]
   pub fn set(&mut self, index: Val, value: Ptr) {
     unsafe {
-      let node = self.data.get_unchecked_mut(index as usize);
-      *node = value;
+      *self.data.get_unchecked_mut(index as usize) = value;
     }
   }
 
@@ -332,13 +334,13 @@ impl Heap {
 
   #[inline(always)]
   pub fn compact(&self) -> Vec<Ptr> {
-    let mut node = vec![];
+    let mut node = vec![self.data[0], self.data[1]];
+    let mut i = 2;
     loop {
-      let p1 = self.data[node.len() + P1 as usize];
-      let p2 = self.data[node.len() + P2 as usize];
-      if p1 != NULL || p2 != NULL {
-        node.push(p1);
-        node.push(p2);
+      let p = self.data[i];
+      if p != NULL {
+        node.push(p);
+        i += 1;
       } else {
         break;
       }
@@ -475,76 +477,105 @@ impl Net {
     };
   }
 
-  pub fn conn(&mut self, a: Ptr, b: Ptr) {
-    self.anni += 1;
-    self.link(self.heap.get(a.val() + P2), self.heap.get(b.val() + P2));
-    self.heap.free(a.val());
-    self.heap.free(b.val());
-  }
-
   pub fn anni(&mut self, a: Ptr, b: Ptr) {
     self.anni += 1;
-    self.link(self.heap.get(a.val() + P1), self.heap.get(b.val() + P1));
-    self.link(self.heap.get(a.val() + P2), self.heap.get(b.val() + P2));
-    self.heap.free(a.val());
-    self.heap.free(b.val());
+    let (a, b) = if a.ari() >= b.ari() { (a, b) } else { (b, a) };
+    let max = a.ari() as Val;
+    let min = b.ari() as Val;
+
+    for port in 0..min {
+      self.link(self.heap.get(a.val() + port), self.heap.get(b.val() + port));
+    }
+    // If a is larger than b, insert an Era to the remaining ports
+    let loc = self.heap.alloc(max as usize - min as usize);
+    for port in min..max {
+      self.link(self.heap.get(a.val() + port), ERAS);
+    }
+    self.heap.free(a.val(), max as usize);
+    self.heap.free(b.val(), min as usize);
   }
 
   pub fn comm(&mut self, a: Ptr, b: Ptr) {
     self.comm += 1;
-    let loc = self.heap.alloc(8);
-    // Link 4 main ports of the new nodes
-    self.link(self.heap.get(a.val() + P1), b.copy(loc + 0));
-    self.link(self.heap.get(b.val() + P1), a.copy(loc + 4));
-    self.link(self.heap.get(a.val() + P2), b.copy(loc + 2));
-    self.link(self.heap.get(b.val() + P2), a.copy(loc + 6));
-    // List the 8 aux ports
-    self.heap.set(loc + 0, Ptr::new_val(VAR, loc + 4));
-    self.heap.set(loc + 1, Ptr::new_val(VAR, loc + 6));
-    self.heap.set(loc + 2, Ptr::new_val(VAR, loc + 5));
-    self.heap.set(loc + 3, Ptr::new_val(VAR, loc + 7));
-    self.heap.set(loc + 4, Ptr::new_val(VAR, loc + 0));
-    self.heap.set(loc + 5, Ptr::new_val(VAR, loc + 2));
-    self.heap.set(loc + 6, Ptr::new_val(VAR, loc + 1));
-    self.heap.set(loc + 7, Ptr::new_val(VAR, loc + 3));
-    self.heap.free(a.val());
-    self.heap.free(b.val());
+    let (a, b) = if a.ari() >= b.ari() { (a, b) } else { (b, a) };
+    let max = a.ari() as Val;
+    let min = b.ari() as Val;
+
+    // We create `min` nodes of arity `min` for tags `a` and `b`.
+    // If `a` had larger arity than `b` we erase the leftover ports.
+    let half = min*min;
+    let loc = self.heap.alloc(2*half as usize);
+
+    // Link the main ports of the new nodes
+    for i in 0..min {
+      self.link(self.heap.get(a.val() + i), Ptr::new(b.tag(), min as u8, b.lab(), loc + i*min));
+      self.link(self.heap.get(b.val() + i), Ptr::new(a.tag(), min as u8, a.lab(), loc + half + i*min));
+    }
+    // Link the aux ports
+    // Node `i` connects to port `i` of each `j` node on the other side of the commutation
+    for i in 0..min {
+      for j in 0..min {
+        let a = loc + min*j + i;
+        let b = loc + half + min*i + j;
+        self.heap.set(a, Ptr::new_val(VAR, b));
+        self.heap.set(b, Ptr::new_val(VAR, a));
+      }
+    }
+    // Erase the leftover ports of the larger node
+    for i in min..max {
+      self.link(self.heap.get(a.val() + i), ERAS);
+    }
+    self.heap.free(a.val(), a.ari() as usize);
+    self.heap.free(b.val(), b.ari() as usize);
   }
 
   pub fn pass(&mut self, a: Ptr, b: Ptr) {
+    // `a` goes through Ctr `b` and is copied once at each port.
+    // `a` owns a value at port 1 and returns at port 2.
     self.comm += 1;
-    let loc = self.heap.alloc(6);
+    let loc = self.heap.alloc(3 * b.ari() as usize);
+
+    // Link main ports
     self.link(self.heap.get(a.val() + P2), b.copy(loc+0));
-    self.link(self.heap.get(b.val() + P1), a.copy(loc+2));
-    self.link(self.heap.get(b.val() + P2), a.copy(loc+4));
-    self.heap.set(loc + 0, Ptr::new_val(VAR, loc+3));
-    self.heap.set(loc + 1, Ptr::new_val(VAR, loc+5));
-    self.heap.set(loc + 2, self.heap.get(a.val()+P1));
-    self.heap.set(loc + 3, Ptr::new_val(VAR, loc+0));
-    self.heap.set(loc + 4, self.heap.get(a.val()+P1));
-    self.heap.set(loc + 5, Ptr::new_val(VAR, loc+1));
-    self.heap.free(a.val());
-    self.heap.free(b.val());
+    for i in 0..b.ari() as Val {
+      self.link(self.heap.get(b.val() + i), a.copy(loc + b.ari() as Val + 2*i));
+    }
+    // Link aux ports of the Ctr `b`
+    for i in 0..b.ari() as Val {
+      self.heap.set(loc + i, Ptr::new_val(VAR, loc + b.ari() as Val + 2*i + P2));
+    }
+    // Link aux ports of the copies of `a`
+    let owned = self.heap.get(a.val()+P1);
+    for i in 0..b.ari() as Val {
+      self.heap.set(loc + b.ari() as Val + 2*i + P1, owned);
+    }
+    self.heap.free(a.val(), 2);
+    self.heap.free(b.val(), b.ari() as usize);
   }
 
   pub fn copy(&mut self, a: Ptr, b: Ptr) {
+    // `b` goes through Ctr `a` and is copied once at each port.
+    // `b` has arity 0.
     self.comm += 1;
     self.link(self.heap.get(a.val() + P1), b);
     self.link(self.heap.get(a.val() + P2), b);
-    self.heap.free(a.val());
+    self.heap.free(a.val(), a.ari() as usize);
   }
 
   pub fn era2(&mut self, a: Ptr) {
+    // Erases a normal node with a.ari() aux ports.
     self.eras += 1;
-    self.link(self.heap.get(a.val() + P1), ERAS);
-    self.link(self.heap.get(a.val() + P2), ERAS);
-    self.heap.free(a.val());
+    for i in 0..a.ari() {
+      self.link(self.heap.get(a.val() + i as Val), ERAS);
+    }
+    self.heap.free(a.val(), a.ari() as usize);
   }
 
   pub fn era1(&mut self, a: Ptr) {
+    // Erases a node with 2 aux ports where P1 holds an owned value.
     self.eras += 1;
     self.link(self.heap.get(a.val() + P2), ERAS);
-    self.heap.free(a.val());
+    self.heap.free(a.val(), 2);
   }
 
 
@@ -581,7 +612,7 @@ impl Net {
       return;
     }
     self.heap.set(a.val() + P1, b);
-    self.link(Ptr::new(OP1, 0, 0, a.val()), p1);
+    self.link(Ptr::new(OP1, 2, 0, a.val()), p1);
   }
 
   pub fn op1n(&mut self, a: Ptr, b: Ptr) {
@@ -592,7 +623,7 @@ impl Net {
     let v1 = b.val() as Val;
     let v2 = self.prim(v0, v1);
     self.link(Ptr::new_val(NUM, v2), p2);
-    self.heap.free(a.val());
+    self.heap.free(a.val(), 2);
   }
 
   pub fn prim(&mut self, a: Val, b: Val) -> Val {
@@ -631,7 +662,7 @@ impl Net {
       self.heap.set(loc+0+P2, ERAS);
       self.link(p1, Ptr::new(CTR, 2, 0, loc+0));
       self.link(p2, Ptr::new_val(VAR, loc+0));
-      self.heap.free(a.val());
+      self.heap.free(a.val(), 2);
     } else {
       let loc = self.heap.alloc(4);
       self.heap.set(loc+0+P1, ERAS);
@@ -639,7 +670,7 @@ impl Net {
       self.heap.set(loc+2+P1, Ptr::new_val(NUM, b.val() - 1));
       self.link(p1, Ptr::new(CTR, 2, 0, loc+0));
       self.link(p2, Ptr::new_val(VAR, loc+3));
-      self.heap.free(a.val());
+      self.heap.free(a.val(), 2);
     }
   }
 
@@ -691,11 +722,11 @@ impl Net {
     }
   }
 
-  pub fn reduce2(&mut self, book: &Book) {
+  pub fn reduce_debug(&mut self, book: &Book) {
     while !self.rdex.is_empty() {
       let (a, b) = self.rdex.remove(0);
       self.interact(book, a, b);
-      //eprintln!("{}\n", crate::ast::show_runtime_net(&self));
+      eprintln!("{}\n", crate::ast::show_runtime_net(&self));
     }
   }
 

@@ -62,8 +62,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn load(file: &str) -> (run::Book, run::Net) {
   let file = fs::read_to_string(file).unwrap();
   let book = &ast::do_parse_book(&file);
-  ast::show_book(book);
+  eprintln!("{}\n1\n", ast::show_book(book));
   let book = ast::book_to_runtime(book);
+  eprintln!("2");
+  eprintln!("{}\n2\n", ast::show_runtime_book(&book));
   let mut net = run::Net::new(1 << 28);
   net.boot(ast::name_to_val("main"));
   return (book, net);
