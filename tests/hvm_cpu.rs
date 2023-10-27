@@ -256,6 +256,13 @@ fn test_xor() {
 }
 
 #[test]
+fn test_not() {
+  let net = op_net(0, run::NOT, 256);
+  let (_, net) = net.normalize(16);
+  assert_snapshot!(show_net(&net), @"#16776959");
+}
+
+#[test]
 fn test_lsh() {
   let net = op_net(10, run::LSH, 2);
   let (_, net) = net.normalize(16);
