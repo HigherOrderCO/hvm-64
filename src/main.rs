@@ -5,6 +5,7 @@
 #![allow(non_upper_case_globals)]
 
 use hvmc::ast;
+#[cfg(feature = "cuda")]
 use hvmc::cuda::host::{gen_cuda_book_data, run_on_gpu};
 use hvmc::run;
 use std::env;
@@ -41,6 +42,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("RPS    : {:.3} m", (net.rewrites() as f64) / (start_time.elapsed().as_millis() as f64) / 1000.0);
       }
     }
+    #[cfg(feature = "cuda")]
     "run-gpu" => {
       let book = load(f_name).0;
       run_on_gpu(&book, "main")?;

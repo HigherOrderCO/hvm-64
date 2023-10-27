@@ -16,7 +16,7 @@ path = "src/lib.rs"
 bench = false
 
 [dependencies]
-cudarc = "0.9.14"
+cudarc = { version = "0.9.14", optional = true }
 
 # Benchmark dependencies
 
@@ -30,3 +30,6 @@ hvm-core = { path = "." }
 [[bench]]
 name = "hvm_cpu"
 harness = false
+
+[features]
+cuda = ["cudarc"]
