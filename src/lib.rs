@@ -5,5 +5,6 @@
 #![allow(non_upper_case_globals)]
 
 pub mod ast;
+#[cfg(feature = "cuda")]
 pub mod cuda;
 pub mod run;
