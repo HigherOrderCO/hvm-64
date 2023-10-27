@@ -1,7 +1,7 @@
 use cudarc::driver::DeviceRepr;
 
 //// Constants
-// NOTE: Keep in sync with `hvm2.cu`
+// NOTE: Keep in sync with CUDA code
 
 // Bags dimensions (128x128 redex bags)
 pub const BAGS_WIDTH_L2: u32 = 7;

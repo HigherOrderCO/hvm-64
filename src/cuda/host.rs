@@ -1,4 +1,4 @@
-use crate::cuda_device::*;
+use crate::cuda::device::*;
 use crate::run;
 use cudarc::driver::CudaFunction;
 use cudarc::driver::{DeviceRepr, ValidAsZeroBits, sys::CUdeviceptr};
@@ -211,7 +211,7 @@ pub fn run_on_gpu(book: &run::Book, entry_point_function: &str) -> Result<HostNe
   let dev = CudaDevice::new(gpu_index)?;
 
   // Load CUDA runtime
-  let ptx = match cudarc::nvrtc::compile_ptx(include_str!("cuda/runtime.cu")) {
+  let ptx = match cudarc::nvrtc::compile_ptx(include_str!("../../cuda/runtime.cu")) {
     Ok(ptx) => ptx,
     Err(CompileError::CompileError { nvrtc, options, log }) => {
       let log_str = log.to_str().unwrap();

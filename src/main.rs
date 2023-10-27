@@ -5,8 +5,7 @@
 #![allow(non_upper_case_globals)]
 
 use hvmc::ast;
-use hvmc::cuda_host::gen_cuda_book_data;
-use hvmc::cuda_host::run_on_gpu;
+use hvmc::cuda::host::{gen_cuda_book_data, run_on_gpu};
 use hvmc::run;
 use std::env;
 use std::fs;
@@ -44,7 +43,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     "run-gpu" => {
       let book = load(f_name).0;
-      // TODO: Receive function name as argument?
       run_on_gpu(&book, "main")?;
     }
     "gen-cuda-book" => {

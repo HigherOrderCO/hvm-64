@@ -8,9 +8,9 @@
 #include "runtime.cu"
 
 // Import program to run
-#include "book.default_program.cu"
-// #include "book.dec_bits.cu"
-// #include "book.dec_bits_tree.cu"
+#include "programs/default_benchmark.cu"
+// #include "programs/dec_bits.cu"
+// #include "programs/dec_bits_tree.cu"
 
 // This file contains the host functions for the standalone C++ version
 
