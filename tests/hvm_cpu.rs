@@ -1,6 +1,6 @@
 use hvm_lang::term::{parser, DefNames, DefinitionBook, Term};
 use hvmc::{ast::*, *};
-use insta::{assert_snapshot, assert_debug_snapshot};
+use insta::{assert_debug_snapshot, assert_snapshot};
 use std::fs;
 
 // Loads file and generate net from hvm-core syntax
@@ -23,12 +23,16 @@ fn load_from_lang(file: &str, size: usize) -> (Term, DefNames, hvm_lang::RunInfo
   hvm_lang::run_book(book, size).unwrap()
 }
 
+fn total_rewrites(net: &run::Net) -> usize {
+  net.anni + net.comm + net.eras + net.dref + net.oper
+}
+
 trait Normal {
-  fn normalize(self, size: usize) -> (run::Book, Net);
+  fn normalize(self, size: usize) -> (run::Net, Net);
 }
 
 impl Normal for Net {
-  fn normalize(self, size: usize) -> (run::Book, Net) {
+  fn normalize(self, size: usize) -> (run::Net, Net) {
     let mut rnet = run::Net::new(size);
     net_to_runtime(&mut rnet, &self);
 
@@ -36,26 +40,26 @@ impl Normal for Net {
     rnet.normal(&book);
 
     let net = net_from_runtime(&rnet);
-    (book, net)
+    (rnet, net)
   }
 }
 
 impl Normal for Book {
-  fn normalize(self, size: usize) -> (run::Book, Net) {
+  fn normalize(self, size: usize) -> (run::Net, Net) {
     let book = book_to_runtime(&self);
-    let mut net = run::Net::new(size);
-    net.boot(name_to_val("main"));
-    net.normal(&book);
+    let mut rnet = run::Net::new(size);
+    rnet.boot(name_to_val("main"));
+    rnet.normal(&book);
 
-    let net = net_from_runtime(&net);
-    (book, net)
+    let net = net_from_runtime(&rnet);
+    (rnet, net)
   }
 }
 
 impl Normal for DefinitionBook {
-  fn normalize(mut self, size: usize) -> (run::Book, Net) {
-    let (book, _) = hvm_lang::compile_book(&mut self).unwrap();
-    book.normalize(size)
+  fn normalize(mut self, size: usize) -> (run::Net, Net) {
+    let (rnet, _) = hvm_lang::compile_book(&mut self).unwrap();
+    rnet.normalize(size)
   }
 }
 
@@ -283,4 +287,36 @@ fn test_div_by_0() {
   let net = op_net(9, run::DIV, 0);
   let (_, net) = net.normalize(16);
   assert_snapshot!(show_net(&net), @"#16777215");
+}
+
+#[test]
+fn test_chained_ops() {
+  let net = do_parse_net(
+    "a
+      & (#70 (#50 a)) ~ ({2 b {3 c d}} ({4 e {5 f g}} h))
+      & <d <i j>> ~ #3
+      & <j <k l>> ~ #2
+      & <l <m h>> ~ #3
+      & <n <o m>> ~ #1
+      & <#80 <p o>> ~ #1
+      & <#70 <b p>> ~ #3
+      & <#10 <q n>> ~ #3
+      & <#80 <r q>> ~ #1
+      & <#70 <e r>> ~ #3
+      & <#10 <s k>> ~ #3
+      & <#80 <t s>> ~ #1
+      & <#70 <f t>> ~ #3
+      & <#178 <u i>> ~ #1
+      & <v <#20 u>> ~ #2
+      & <c <w v>> ~ #3
+      & <#178 <x w>> ~ #1
+      & <y <#20 x>> ~ #2
+      & <#10 <z y>> ~ #3
+      & <#80 <ab z>> ~ #1
+      & <#70 <g ab>> ~ #3",
+  );
+  let (rnet, net) = net.normalize(256);
+
+  assert_debug_snapshot!(total_rewrites(&rnet), @"86");
+  assert_snapshot!(show_net(&net), @"#2138224");
 }
