@@ -147,25 +147,30 @@ fn make_queue(len: u32) -> String {
   format!("{QUEUE}\nmain = let q = Qnew\n{body} Nil{}", ")".repeat(len as usize * 2))
 }
 
-fn run_queue(len: u32, mem_size: usize) -> (Term, DefNames, hvm_lang::RunInfo) {
+fn run_queue_of_size(len: u32, mem_size: usize) -> (Term, DefNames, hvm_lang::RunInfo) {
   let queue = make_queue(len);
   hvm_lang::run_book(parser::parse_definition_book(&queue).unwrap(), mem_size).unwrap()
 }
 
 #[test]
 fn test_queues() {
-  let (term, defs, info_3) = run_queue(3, 512);
-  assert_debug_snapshot!(info_3.stats.rewrites.total_rewrites(), @"62");
-  let (_, _, info) = run_queue(4, 512);
-  assert_debug_snapshot!(info.stats.rewrites.total_rewrites(), @"81");
-  let (_, _, info) = run_queue(5, 512);
-  assert_debug_snapshot!(info.stats.rewrites.total_rewrites(), @"100");
-  let (_, _, info) = run_queue(10, 512);
-  assert_debug_snapshot!(info.stats.rewrites.total_rewrites(), @"195");
-  let (_, _, info) = run_queue(20, 512);
-  assert_debug_snapshot!(info.stats.rewrites.total_rewrites(), @"385");
+  let info = [
+    run_queue_of_size(3, 512),
+    run_queue_of_size(4, 512),
+    run_queue_of_size(5, 512),
+    run_queue_of_size(10, 512),
+    run_queue_of_size(20, 512),
+  ]
+  .map(|(term, defs, info)| (term, defs, info.net, info.stats.rewrites.total_rewrites()));
 
-  assert_snapshot!(show_net(&info_3.net), @"((#1 (((#2 (((#3 ((* @7) b)) (* b)) c)) (* c)) d)) (* d))");
+  assert_debug_snapshot!(info[0].3, @"62");
+  assert_debug_snapshot!(info[1].3, @"81");
+  assert_debug_snapshot!(info[2].3, @"100");
+  assert_debug_snapshot!(info[3].3, @"195");
+  assert_debug_snapshot!(info[4].3, @"385");
+
+  let (term, defs, net, _) = &info[0];
+  assert_snapshot!(show_net(&net), @"((#1 (((#2 (((#3 ((* @7) b)) (* b)) c)) (* c)) d)) (* d))");
   assert_snapshot!(term.to_string(&defs), @"λa λ* ((a 1) λb λ* ((b 2) λc λ* ((c 3) λ* λd d)))");
 }
 
