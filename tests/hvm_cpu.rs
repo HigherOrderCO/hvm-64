@@ -183,7 +183,7 @@ fn run_list_fn(list_fun: &str, args: &str, mem_size: usize) -> (Term, DefNames, 
 
 #[test]
 fn test_list_got() {
-  let info = [
+  let rwts = [
     run_list_fn("got", "0", 2048),
     run_list_fn("got", "1", 2048),
     run_list_fn("got", "3", 2048),
@@ -193,24 +193,24 @@ fn test_list_got() {
   ]
   .map(|(_, _, info)| info.stats.rewrites.total_rewrites());
 
-  assert_debug_snapshot!(info[0], @"573");
-  assert_debug_snapshot!(info[1], @"595");
-  assert_debug_snapshot!(info[2], @"639");
-  assert_debug_snapshot!(info[3], @"727");
-  assert_debug_snapshot!(info[4], @"903");
-  assert_debug_snapshot!(info[5], @"1255");
+  assert_debug_snapshot!(rwts[0], @"573");
+  assert_debug_snapshot!(rwts[1], @"595");
+  assert_debug_snapshot!(rwts[2], @"639");
+  assert_debug_snapshot!(rwts[3], @"727");
+  assert_debug_snapshot!(rwts[4], @"903");
+  assert_debug_snapshot!(rwts[5], @"1255");
 
   //Tests the linearity of the function
-  let delta = info[1] - info[0];
-  assert_eq!(info[1] + delta * 2, info[2]);
-  assert_eq!(info[2] + delta * 4, info[3]);
-  assert_eq!(info[3] + delta * 8, info[4]);
-  assert_eq!(info[4] + delta * 16, info[5]);
+  let delta = rwts[1] - rwts[0];
+  assert_eq!(rwts[1] + delta * 2, rwts[2]);
+  assert_eq!(rwts[2] + delta * 4, rwts[3]);
+  assert_eq!(rwts[3] + delta * 8, rwts[4]);
+  assert_eq!(rwts[4] + delta * 16, rwts[5]);
 }
 
 #[test]
 fn test_list_put() {
-  let info = [
+  let rwts = [
     run_list_fn("put", "0 2", 2048),
     run_list_fn("put", "1 4", 2048),
     run_list_fn("put", "3 8", 2048),
@@ -220,19 +220,19 @@ fn test_list_put() {
   ]
   .map(|(_, _, info)| info.stats.rewrites.total_rewrites());
 
-  assert_debug_snapshot!(info[0], @"563");
-  assert_debug_snapshot!(info[1], @"586");
-  assert_debug_snapshot!(info[2], @"632");
-  assert_debug_snapshot!(info[3], @"724");
-  assert_debug_snapshot!(info[4], @"908");
-  assert_debug_snapshot!(info[5], @"1276");
+  assert_debug_snapshot!(rwts[0], @"563");
+  assert_debug_snapshot!(rwts[1], @"586");
+  assert_debug_snapshot!(rwts[2], @"632");
+  assert_debug_snapshot!(rwts[3], @"724");
+  assert_debug_snapshot!(rwts[4], @"908");
+  assert_debug_snapshot!(rwts[5], @"1276");
 
   //Tests the linearity of the function
-  let delta = info[1] - info[0];
-  assert_eq!(info[1] + delta * 2, info[2]);
-  assert_eq!(info[2] + delta * 4, info[3]);
-  assert_eq!(info[3] + delta * 8, info[4]);
-  assert_eq!(info[4] + delta * 16, info[5]);
+  let delta = rwts[1] - rwts[0];
+  assert_eq!(rwts[1] + delta * 2, rwts[2]);
+  assert_eq!(rwts[2] + delta * 4, rwts[3]);
+  assert_eq!(rwts[3] + delta * 8, rwts[4]);
+  assert_eq!(rwts[4] + delta * 16, rwts[5]);
 }
 
 // Numeric Operations test
