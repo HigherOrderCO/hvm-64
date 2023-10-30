@@ -1,8 +1,0 @@
-@rec = (a b)
-& <#1 <c b>> ~ #1
-& (a c) ~ @to_n
-
-@to_n = (? (#0 @rec) a a)
-
-@main = a
-& (#10 a) ~ @to_n
