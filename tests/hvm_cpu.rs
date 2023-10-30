@@ -169,6 +169,67 @@ fn test_queues() {
   assert_snapshot!(term.to_string(&defs), @"λa λ* ((a 1) λb λ* ((b 2) λc λ* ((c 3) λ* λd d)))");
 }
 
+const LIST: &'static str = include_str!("./programs/list_put_get.hvm");
+
+fn run_list_fn(list_fun: &str, args: &str, mem_size: usize) -> (Term, DefNames, hvm_lang::RunInfo) {
+  let list = format!("{LIST}\nlet (got, list) = (List.{list_fun} list {args}); got");
+  hvm_lang::run_book(parser::parse_definition_book(&list).unwrap(), mem_size).unwrap()
+}
+
+#[test]
+fn test_list_got() {
+  let info = [
+    run_list_fn("got", "0", 2048),
+    run_list_fn("got", "1", 2048),
+    run_list_fn("got", "3", 2048),
+    run_list_fn("got", "7", 2048),
+    run_list_fn("got", "15", 2048),
+    run_list_fn("got", "31", 2048),
+  ]
+  .map(|(_, _, info)| info.stats.rewrites.total_rewrites());
+
+  assert_debug_snapshot!(info[0], @"573");
+  assert_debug_snapshot!(info[1], @"595");
+  assert_debug_snapshot!(info[2], @"639");
+  assert_debug_snapshot!(info[3], @"727");
+  assert_debug_snapshot!(info[4], @"903");
+  assert_debug_snapshot!(info[5], @"1255");
+
+  //Tests the linearity of the function
+  let delta = info[1] - info[0];
+  assert_eq!(info[1] + delta * 2, info[2]);
+  assert_eq!(info[2] + delta * 4, info[3]);
+  assert_eq!(info[3] + delta * 8, info[4]);
+  assert_eq!(info[4] + delta * 16, info[5]);
+}
+
+#[test]
+fn test_list_put() {
+  let info = [
+    run_list_fn("put", "0 2", 2048),
+    run_list_fn("put", "1 4", 2048),
+    run_list_fn("put", "3 8", 2048),
+    run_list_fn("put", "7 16", 2048),
+    run_list_fn("put", "15 32", 2048),
+    run_list_fn("put", "31 64", 2048),
+  ]
+  .map(|(_, _, info)| info.stats.rewrites.total_rewrites());
+
+  assert_debug_snapshot!(info[0], @"563");
+  assert_debug_snapshot!(info[1], @"586");
+  assert_debug_snapshot!(info[2], @"632");
+  assert_debug_snapshot!(info[3], @"724");
+  assert_debug_snapshot!(info[4], @"908");
+  assert_debug_snapshot!(info[5], @"1276");
+
+  //Tests the linearity of the function
+  let delta = info[1] - info[0];
+  assert_eq!(info[1] + delta * 2, info[2]);
+  assert_eq!(info[2] + delta * 4, info[3]);
+  assert_eq!(info[3] + delta * 8, info[4]);
+  assert_eq!(info[4] + delta * 16, info[5]);
+}
+
 // Numeric Operations test
 
 fn op_net(lnum: u32, op: u8, rnum: u32) -> Net {
