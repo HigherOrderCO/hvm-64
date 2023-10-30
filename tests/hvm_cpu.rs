@@ -66,15 +66,17 @@ impl Normal for DefinitionBook {
 #[test]
 fn test_era_era() {
   let net = do_parse_net("* & * ~ *");
-  let (_, net) = net.normalize(16);
+  let (rnet, net) = net.normalize(16);
   assert_snapshot!(show_net(&net), @"*");
+  assert_debug_snapshot!(total_rewrites(&rnet), @"1");
 }
 
 #[test]
 fn test_con_dup() {
   let net = do_parse_net("root & (x x) ~ {2 * root}");
-  let (_, net) = net.normalize(16);
+  let (rnet, net) = net.normalize(16);
   assert_snapshot!(show_net(&net), @"(b b)");
+  assert_debug_snapshot!(total_rewrites(&rnet), @"4");
 }
 
 #[test]
@@ -107,8 +109,9 @@ fn test_bool_and() {
   ",
   );
 
-  let (_, net) = book.normalize(64);
+  let (rnet, net) = book.normalize(64);
   assert_snapshot!(show_net(&net), @"(b (c c))");
+  assert_debug_snapshot!(total_rewrites(&rnet), @"8");
 }
 
 #[test]
@@ -249,8 +252,9 @@ fn op_net(lnum: u32, op: u8, rnum: u32) -> Net {
 #[test]
 fn test_add() {
   let net = op_net(10, run::ADD, 2);
-  let (_, net) = net.normalize(16);
+  let (rnet, net) = net.normalize(16);
   assert_snapshot!(show_net(&net), @"#12");
+  assert_debug_snapshot!(total_rewrites(&rnet), @"4");
 }
 
 #[test]
@@ -333,8 +337,9 @@ fn test_xor() {
 #[test]
 fn test_not() {
   let net = op_net(0, run::NOT, 256);
-  let (_, net) = net.normalize(16);
+  let (rnet, net) = net.normalize(16);
   assert_snapshot!(show_net(&net), @"#16776959");
+  assert_debug_snapshot!(total_rewrites(&rnet), @"4");
 }
 
 #[test]
@@ -356,8 +361,9 @@ fn test_rsh() {
 /// that is read as the unsigned integer `16777215`
 fn test_div_by_0() {
   let net = op_net(9, run::DIV, 0);
-  let (_, net) = net.normalize(16);
+  let (rnet, net) = net.normalize(16);
   assert_snapshot!(show_net(&net), @"#16777215");
+  assert_debug_snapshot!(total_rewrites(&rnet), @"4");
 }
 
 #[test]
