@@ -176,20 +176,20 @@ fn test_queues() {
 
 const LIST: &'static str = include_str!("./programs/list_put_get.hvm");
 
-fn run_list_fn(list_fun: &str, args: &str, mem_size: usize) -> (Term, DefNames, hvm_lang::RunInfo) {
-  let list = format!("{LIST}\nlet (got, list) = (List.{list_fun} list {args}); got");
+fn run_list_got(index: u32, mem_size: usize) -> (Term, DefNames, hvm_lang::RunInfo) {
+  let list = format!("{LIST}\nlet (element, list) = (List.got list {index}); element");
   hvm_lang::run_book(parser::parse_definition_book(&list).unwrap(), mem_size).unwrap()
 }
 
 #[test]
 fn test_list_got() {
   let rwts = [
-    run_list_fn("got", "0", 2048),
-    run_list_fn("got", "1", 2048),
-    run_list_fn("got", "3", 2048),
-    run_list_fn("got", "7", 2048),
-    run_list_fn("got", "15", 2048),
-    run_list_fn("got", "31", 2048),
+    run_list_got(0, 2048),
+    run_list_got(1, 2048),
+    run_list_got(3, 2048),
+    run_list_got(7, 2048),
+    run_list_got(15, 2048),
+    run_list_got(31, 2048),
   ]
   .map(|(_, _, info)| info.stats.rewrites.total_rewrites());
 
@@ -208,15 +208,20 @@ fn test_list_got() {
   assert_eq!(rwts[4] + delta * 16, rwts[5]);
 }
 
+fn run_list_put(index: u32, value: u32, mem_size: usize) -> (Term, DefNames, hvm_lang::RunInfo) {
+  let list = format!("{LIST}\nlet (element, list) = (List.put list {index} {value}); element");
+  hvm_lang::run_book(parser::parse_definition_book(&list).unwrap(), mem_size).unwrap()
+}
+
 #[test]
 fn test_list_put() {
   let rwts = [
-    run_list_fn("put", "0 2", 2048),
-    run_list_fn("put", "1 4", 2048),
-    run_list_fn("put", "3 8", 2048),
-    run_list_fn("put", "7 16", 2048),
-    run_list_fn("put", "15 32", 2048),
-    run_list_fn("put", "31 64", 2048),
+    run_list_put(0, 2, 2048),
+    run_list_put(1, 4, 2048),
+    run_list_put(3, 8, 2048),
+    run_list_put(7, 16, 2048),
+    run_list_put(15, 32, 2048),
+    run_list_put(31, 64, 2048),
   ]
   .map(|(_, _, info)| info.stats.rewrites.total_rewrites());
 
