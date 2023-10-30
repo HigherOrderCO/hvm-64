@@ -8,6 +8,7 @@ use hvmc::ast;
 #[cfg(feature = "cuda")]
 use hvmc::cuda::host::{gen_cuda_book_data, run_on_gpu};
 use hvmc::run;
+use hvmc::run::Net;
 use std::env;
 use std::fs;
 
@@ -29,15 +30,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
       let start_time = std::time::Instant::now();
       net.expand(&book, run::ROOT);
       net.normal(&book);
+      let Net { stats, .. } = net;
       println!("{}", ast::show_runtime_net(&net));
       if args.len() >= 4 && args[3] == "-s" {
         println!("");
-        println!("RWTS   : {}", net.anni + net.comm + net.eras + net.dref + net.oper);
-        println!("- ANNI : {}", net.anni);
-        println!("- COMM : {}", net.comm);
-        println!("- ERAS : {}", net.eras);
-        println!("- DREF : {}", net.dref);
-        println!("- OPER : {}", net.oper);
+        println!("RWTS   : {}", stats.annihilations + stats.commutations + stats.erasures + stats.derefs + stats.numeric_ops);
+        println!("- ANNI : {}", stats.annihilations);
+        println!("- COMM : {}", stats.commutations);
+        println!("- ERAS : {}", stats.erasures);
+        println!("- DREF : {}", stats.derefs);
+        println!("- OPER : {}", stats.numeric_ops);
         println!("TIME   : {:.3} s", (start_time.elapsed().as_millis() as f64) / 1000.0);
         println!("RPS    : {:.3} m", (net.rewrites() as f64) / (start_time.elapsed().as_millis() as f64) / 1000.0);
       }
@@ -73,9 +75,9 @@ pub fn gen_cuda_book(book: &run::Book) -> String {
 
   // Sort the book.defs by key
   let mut defs = BTreeMap::new();
-  for i in 0 .. book.defs.len() {
-    if book.defs[i].node.len() > 0 {
-      defs.insert(i as u32, book.defs[i].clone());
+  for i in 0 .. book.len() {
+    if book[i].nodes.len() > 0 {
+      defs.insert(i as u32, book[i].clone());
     }
   }
 
@@ -93,8 +95,8 @@ pub fn gen_cuda_book(book: &run::Book) -> String {
 
   // Generate book data
   for (i, (id, net)) in defs.iter().enumerate() {
-    let node_len = net.node.len();
-    let rdex_len = net.rdex.len();
+    let node_len = net.nodes.len();
+    let rdex_len = net.redexes.len();
 
     code.push_str(&format!("  // @{}\n", crate::ast::val_to_name(*id)));
 
@@ -106,7 +108,7 @@ pub fn gen_cuda_book(book: &run::Book) -> String {
 
     // .node
     code.push_str("  // .node\n");
-    for (i, node) in net.node.iter().enumerate() {
+    for (i, node) in net.nodes.iter().enumerate() {
       code.push_str(&format!("  0x{:08X},", node.0.data()));
       code.push_str(&format!(" 0x{:08X},", node.1.data()));
       if (i + 1) % 4 == 0 {
@@ -119,7 +121,7 @@ pub fn gen_cuda_book(book: &run::Book) -> String {
 
     // .rdex
     code.push_str("  // .rdex\n");
-    for (i, (a, b)) in net.rdex.iter().enumerate() {
+    for (i, (a, b)) in net.redexes.iter().enumerate() {
       code.push_str(&format!("  0x{:08X},", a.data()));
       code.push_str(&format!(" 0x{:08X},", b.data()));
       if (i + 1) % 4 == 0 {
@@ -138,7 +140,7 @@ pub fn gen_cuda_book(book: &run::Book) -> String {
   let mut index = 0;
   for (i, id) in defs.keys().enumerate() {
     code.push_str(&format!("  0x{:08X}, 0x{:08X}, // @{}\n", id, index, crate::ast::val_to_name(*id)));
-    index += 2 + 2 * defs[id].node.len() as u32 + 2 * defs[id].rdex.len() as u32;
+    index += 2 + 2 * defs[id].nodes.len() as u32 + 2 * defs[id].redexes.len() as u32;
   }
 
   code.push_str("};");
