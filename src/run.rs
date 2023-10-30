@@ -536,7 +536,7 @@ impl Net {
     let loc = self.heap.alloc(3 * b.ari() as usize);
 
     // Link main ports
-    self.link(self.heap.get(a.val() + P2), b.copy(loc+0));
+    self.link(self.heap.get(a.val() + P2), b.copy(loc));
     for i in 0..b.ari() as Val {
       self.link(self.heap.get(b.val() + i), a.copy(loc + b.ari() as Val + 2*i));
     }
@@ -557,16 +557,17 @@ impl Net {
     // `b` goes through Ctr `a` and is copied once at each port.
     // `b` has arity 0.
     self.comm += 1;
-    self.link(self.heap.get(a.val() + P1), b);
-    self.link(self.heap.get(a.val() + P2), b);
+    for i in 0..a.ari() as Val {
+      self.link(self.heap.get(a.val() + i), b);
+    }
     self.heap.free(a.val(), a.ari() as usize);
   }
 
   pub fn era2(&mut self, a: Ptr) {
     // Erases a normal node with a.ari() aux ports.
     self.eras += 1;
-    for i in 0..a.ari() {
-      self.link(self.heap.get(a.val() + i as Val), ERAS);
+    for i in 0..a.ari() as Val {
+      self.link(self.heap.get(a.val() + i), ERAS);
     }
     self.heap.free(a.val(), a.ari() as usize);
   }
@@ -743,8 +744,9 @@ impl Net {
   pub fn expand(&mut self, book: &Book, dir: Ptr) {
     let ptr = self.get_target(dir);
     if ptr.is_ctr() {
-      self.expand(book, Ptr::new_val(VAR, ptr.val()+P1));
-      self.expand(book, Ptr::new_val(VAR, ptr.val()+P2));
+      for i in 0..ptr.ari() {
+        self.expand(book, Ptr::new_val(VAR, ptr.val() + i as Val));
+      }
     } else if ptr.is_ref() {
       let exp = self.deref(book, ptr, dir);
       self.set_target(dir, exp);
