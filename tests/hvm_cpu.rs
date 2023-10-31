@@ -55,8 +55,8 @@ fn test_era_era() {
 }
 
 #[test]
-fn test_con_dup() {
-  let net = parse_core("@main = root & (x x) ~ {2 * root}");
+fn test_commutation() {
+  let net = parse_core("@main = root & (x x) ~ [* root]");
   let (rnet, net) = normal(net, 16);
   assert_snapshot!(show_net(&net), @"(b b)");
   assert_debug_snapshot!(rnet.rewrites(), @"5");
