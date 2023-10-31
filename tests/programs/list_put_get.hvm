@@ -66,3 +66,5 @@ main =
   )))))
   )))))
   ))
+  let (element, list) = (List.{fun} list {args})
+  element

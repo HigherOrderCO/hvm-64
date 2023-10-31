@@ -47,24 +47,25 @@ pub enum Tag {
   CT5,
 }
 
+pub type NumericOp = u8;
 
 // Numeric operations.
-pub const USE: u8 = 0x0; // set-next-op
-pub const ADD: u8 = 0x1; // addition
-pub const SUB: u8 = 0x2; // subtraction
-pub const MUL: u8 = 0x3; // multiplication
-pub const DIV: u8 = 0x4; // division
-pub const MOD: u8 = 0x5; // modulus
-pub const EQ : u8 = 0x6; // equal-to
-pub const NE : u8 = 0x7; // not-equal-to
-pub const LT : u8 = 0x8; // less-than
-pub const GT : u8 = 0x9; // greater-than
-pub const AND: u8 = 0xA; // logical-and
-pub const OR : u8 = 0xB; // logical-or
-pub const XOR: u8 = 0xC; // logical-xor
-pub const NOT: u8 = 0xD; // logical-not
-pub const LSH: u8 = 0xE; // left-shift
-pub const RSH: u8 = 0xF; // right-shift
+pub const USE: NumericOp = 0x0; // set-next-op
+pub const ADD: NumericOp = 0x1; // addition
+pub const SUB: NumericOp = 0x2; // subtraction
+pub const MUL: NumericOp = 0x3; // multiplication
+pub const DIV: NumericOp = 0x4; // division
+pub const MOD: NumericOp = 0x5; // modulus
+pub const EQ : NumericOp = 0x6; // equal-to
+pub const NE : NumericOp = 0x7; // not-equal-to
+pub const LT : NumericOp = 0x8; // less-than
+pub const GT : NumericOp = 0x9; // greater-than
+pub const AND: NumericOp = 0xA; // bitwise-and
+pub const OR : NumericOp = 0xB; // bitwise-or
+pub const XOR: NumericOp = 0xC; // bitwise-xor
+pub const NOT: NumericOp = 0xD; // bitwise-not
+pub const LSH: NumericOp = 0xE; // left-shift
+pub const RSH: NumericOp = 0xF; // right-shift
 
 // Root pointer.
 pub const ERAS: Ptr = Ptr(0x0000_0000 | ERA as Val);
