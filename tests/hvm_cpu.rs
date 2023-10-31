@@ -23,10 +23,6 @@ fn load_from_lang(file: &str, size: usize) -> (Term, DefNames, hvm_lang::RunInfo
   hvm_lang::run_book(book, size).unwrap()
 }
 
-fn total_rewrites(net: &run::Net) -> usize {
-  net.anni + net.comm + net.eras + net.dref + net.oper
-}
-
 trait Normal {
   fn normalize(self, size: usize) -> (run::Net, Net);
 }
@@ -68,7 +64,7 @@ fn test_era_era() {
   let net = do_parse_net("* & * ~ *");
   let (rnet, net) = net.normalize(16);
   assert_snapshot!(show_net(&net), @"*");
-  assert_debug_snapshot!(total_rewrites(&rnet), @"1");
+  assert_debug_snapshot!(rnet.rewrites(), @"1");
 }
 
 #[test]
@@ -76,7 +72,7 @@ fn test_con_dup() {
   let net = do_parse_net("root & (x x) ~ {2 * root}");
   let (rnet, net) = net.normalize(16);
   assert_snapshot!(show_net(&net), @"(b b)");
-  assert_debug_snapshot!(total_rewrites(&rnet), @"4");
+  assert_debug_snapshot!(rnet.rewrites(), @"4");
 }
 
 #[test]
@@ -111,7 +107,7 @@ fn test_bool_and() {
 
   let (rnet, net) = book.normalize(64);
   assert_snapshot!(show_net(&net), @"(b (c c))");
-  assert_debug_snapshot!(total_rewrites(&rnet), @"8");
+  assert_debug_snapshot!(rnet.rewrites(), @"8");
 }
 
 #[test]
@@ -254,7 +250,7 @@ fn test_add() {
   let net = op_net(10, run::ADD, 2);
   let (rnet, net) = net.normalize(16);
   assert_snapshot!(show_net(&net), @"#12");
-  assert_debug_snapshot!(total_rewrites(&rnet), @"4");
+  assert_debug_snapshot!(rnet.rewrites(), @"4");
 }
 
 #[test]
@@ -339,7 +335,7 @@ fn test_not() {
   let net = op_net(0, run::NOT, 256);
   let (rnet, net) = net.normalize(16);
   assert_snapshot!(show_net(&net), @"#16776959");
-  assert_debug_snapshot!(total_rewrites(&rnet), @"4");
+  assert_debug_snapshot!(rnet.rewrites(), @"4");
 }
 
 #[test]
@@ -363,7 +359,7 @@ fn test_div_by_0() {
   let net = op_net(9, run::DIV, 0);
   let (rnet, net) = net.normalize(16);
   assert_snapshot!(show_net(&net), @"#16777215");
-  assert_debug_snapshot!(total_rewrites(&rnet), @"4");
+  assert_debug_snapshot!(rnet.rewrites(), @"4");
 }
 
 #[test]
@@ -394,6 +390,6 @@ fn test_chained_ops() {
   );
   let (rnet, net) = net.normalize(256);
 
-  assert_debug_snapshot!(total_rewrites(&rnet), @"86");
+  assert_debug_snapshot!(rnet.rewrites(), @"86");
   assert_snapshot!(show_net(&net), @"#2138224");
 }
