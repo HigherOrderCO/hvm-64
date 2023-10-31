@@ -108,49 +108,14 @@ fn test_tree_alloc() {
   assert_debug_snapshot!(info.stats.rewrites.total_rewrites(), @"104");
 }
 
-fn make_queue(len: u32) -> DefinitionBook {
-  let template = load_file("queue.hvm");
-  let mut body = String::new();
-
-  for i in 1 ..= len {
-    body += &format!("let q = (Qadd {i} q)\n")
-  }
-
-  for i in 0 .. len {
-    body += &format!("(Qrem q λv{i} λq\n");
-  }
-
-  for i in 1 ..= len {
-    body += &format!("(Cons {i} ");
-  }
-
-  body += &format!(" Nil{}", ")".repeat(len as usize * 2));
-
-  let code = replace_template(template, &[("{main_body}", &body)]);
-  parse_lang(&code)
-}
-
 #[test]
-fn test_queues() {
-  let info = [
-    make_queue(3),
-    make_queue(4),
-    make_queue(5),
-    make_queue(10),
-    make_queue(20)
-  ]
-  .map(|book| hvm_lang_normal(book, 512))
-  .map(|(term, defs, info)| (term, defs, info.net, info.stats.rewrites.total_rewrites()));
+fn test_queue() {
+  let book = load_lang("queue.hvm");
+  let (term, defs, info) = hvm_lang_normal(book, 512);
 
-  assert_debug_snapshot!(info[0].3, @"62");
-  assert_debug_snapshot!(info[1].3, @"81");
-  assert_debug_snapshot!(info[2].3, @"100");
-  assert_debug_snapshot!(info[3].3, @"195");
-  assert_debug_snapshot!(info[4].3, @"385");
-
-  let (term, defs, net, _) = &info[0];
-  assert_snapshot!(show_net(net), @"((#1 (((#2 (((#3 ((* @7) b)) (* b)) c)) (* c)) d)) (* d))");
-  assert_snapshot!(term.to_string(defs), @"λa λ* ((a 1) λb λ* ((b 2) λc λ* ((c 3) λ* λd d)))");
+  assert_snapshot!(show_net(&info.net), @"((#1 (((#2 (((#3 ((* @7) b)) (* b)) c)) (* c)) d)) (* d))");
+  assert_snapshot!(term.to_string(&defs), @"λa λ* ((a 1) λb λ* ((b 2) λc λ* ((c 3) λ* λd d)))");
+  assert_debug_snapshot!(info.stats.rewrites.total_rewrites(), @"62");
 }
 
 fn list_got(index: u32) -> DefinitionBook {

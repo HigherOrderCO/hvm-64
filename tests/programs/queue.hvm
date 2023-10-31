@@ -1,17 +1,24 @@
-// A cool trick involving HVM's scopeless lambdas is linear qs:
+// A cool trick involving HVM's scopeless lambdas is linear queues:
 
-// Qnew : Queue a
-Qnew = λx x
+// Queue.new : Queue a
+Queue.new = λx x
 
-// Qadd : a -> Queue a -> Queue a
-Qadd = λx λq λk (q λc (c x k))
+// Queue.add : a -> Queue a -> Queue a
+Queue.add = λx λq λk (q λc (c x k))
 
-// Qrem : Queue a -> Pair a (Queue a)
-Qrem = λq (q $k λx λxs λp(p x λ$k xs))
+// Queue.rem : Queue a -> Pair a (Queue a)
+Queue.rem = λq (q $k λx λxs λp(p x λ$k xs))
 
 Nil  = λc λn n
 Cons = λh λt λc λn (c h t)
 
-main = 
-    let q = Qnew
-    {main_body}
+// Output: [1, 2, 3]
+main =
+  let q = Queue.new
+  let q = (Queue.add 1 q)
+  let q = (Queue.add 2 q)
+  let q = (Queue.add 3 q)
+  (Queue.rem q λv0 λq
+  (Queue.rem q λv1 λq
+  (Queue.rem q λv2 λq
+  (Cons 1 (Cons 2 (Cons 3 Nil))))))
