@@ -66,15 +66,15 @@ fn test_con_dup() {
 fn test_bool_and() {
   let book = parse_core(
     "
-    @true = (b (c b))
-    @fals = (b (c c))
+    @true = (b (* b))
+    @fals = (* (b b))
     @and  = ((b (@fals c)) (b c))
     @main = root & @and ~ (@true (@fals root))
   ",
   );
   let (rnet, net) = normal(book, 64);
 
-  assert_snapshot!(show_net(&net), @"(b (c c))");
+  assert_snapshot!(show_net(&net), @"(* (b b))");
   assert_debug_snapshot!(rnet.rewrites(), @"8");
 }
 
