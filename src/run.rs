@@ -611,7 +611,7 @@ impl Net {
     let b_opr = (b >> 24) & 0xF; // not used yet
     let a_val = a & 0xFFFFFF;
     let b_val = b & 0xFFFFFF;
-    match a_opr as u8 {
+    match a_opr as NumericOp {
       USE => { ((a_val & 0xF) << 24) | b_val }
       ADD => { (a_val.wrapping_add(b_val)) & 0xFFFFFF }
       SUB => { (a_val.wrapping_sub(b_val)) & 0xFFFFFF }

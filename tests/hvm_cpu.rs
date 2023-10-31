@@ -98,23 +98,26 @@ fn test_church_mul() {
 
   assert_snapshot!(show_net(&info.net), @"({2 ({2 b c} d) {3 (d e) (e {2 c f})}} (b f))");
   assert_snapshot!(term.to_string(&defs), @"λa λb (a (a (a (a (a (a b))))))");
+  assert_debug_snapshot!(info.stats.rewrites.total_rewrites(), @"12");
 }
 
 #[test]
 fn test_neg_fusion() {
   let book = load_lang("neg_fusion.hvm");
-  let (_, _, info) = book.normal(512);
+  let (term, defs, info) = book.normal(512);
 
   assert_snapshot!(show_net(&info.net), @"(b (* b))");
+  assert_snapshot!(term.to_string(&defs), @"λa λ* a");
   assert_debug_snapshot!(info.stats.rewrites.total_rewrites(), @"153");
 }
 
 #[test]
 fn test_tree_alloc() {
   let book = load_lang("tree_alloc.hvm");
-  let (_, _, info) = book.normal(512);
+  let (term, defs, info) = book.normal(512);
 
   assert_snapshot!(show_net(&info.net), @"(b (* b))");
+  assert_snapshot!(term.to_string(&defs), @"λa λ* a");
   assert_debug_snapshot!(info.stats.rewrites.total_rewrites(), @"104");
 }
 
