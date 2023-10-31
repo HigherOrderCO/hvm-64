@@ -204,7 +204,7 @@ impl Ptr {
 
   #[inline(always)]
   pub fn has_loc(&self) -> bool {
-    return matches!(self.tag(), VAR | OP2..);
+    self.is_var() || (matches!(self.tag(), OP2 | OP1 | MAT | CTR) && self.ari() > 0)
   }
 
   #[inline(always)]
@@ -506,14 +506,13 @@ impl Net {
     let half = min*min;
     let loc = self.heap.alloc(2*half as usize);
 
-    // Link the main ports of the new nodes
     for i in 0..min {
+      // Link the main ports
       self.link(self.heap.get(a.val() + i), Ptr::new(b.tag(), min as u8, b.lab(), loc + i*min));
       self.link(self.heap.get(b.val() + i), Ptr::new(a.tag(), min as u8, a.lab(), loc + half + i*min));
-    }
-    // Link the aux ports
-    // Node `i` connects to port `i` of each `j` node on the other side of the commutation
-    for i in 0..min {
+  
+      // Link the aux ports
+      // Node `i` connects to port `i` of each `j` node on the other side of the commutation
       for j in 0..min {
         let a = loc + min*j + i;
         let b = loc + half + min*i + j;
@@ -533,21 +532,22 @@ impl Net {
     // `a` goes through Ctr `b` and is copied once at each port.
     // `a` owns a value at port 1 and returns at port 2.
     self.comm += 1;
-    let loc = self.heap.alloc(3 * b.ari() as usize);
+    let loc = self.heap.alloc(b.ari() as usize + 2*b.ari() as usize);
 
-    // Link main ports
+    // Link main port of b
     self.link(self.heap.get(a.val() + P2), b.copy(loc));
-    for i in 0..b.ari() as Val {
-      self.link(self.heap.get(b.val() + i), a.copy(loc + b.ari() as Val + 2*i));
-    }
-    // Link aux ports of the Ctr `b`
-    for i in 0..b.ari() as Val {
-      self.heap.set(loc + i, Ptr::new_val(VAR, loc + b.ari() as Val + 2*i + P2));
-    }
-    // Link aux ports of the copies of `a`
+
     let owned = self.heap.get(a.val()+P1);
     for i in 0..b.ari() as Val {
-      self.heap.set(loc + b.ari() as Val + 2*i + P1, owned);
+      // Link main port of copy of a
+      self.link(self.heap.get(b.val() + i), a.copy(loc + b.ari() as Val + 2*i));
+      // Link aux ports
+      let a_p1 = loc + b.ari() as Val + 2*i + P1;
+      let a_p2 = loc + b.ari() as Val + 2*i + P2;
+      let b_p = loc + i;
+      self.heap.set(a_p1, owned);
+      self.heap.set(a_p2, Ptr::new_val(VAR, b_p));
+      self.heap.set(b_p, Ptr::new_val(VAR, a_p2));
     }
     self.heap.free(a.val(), 2);
     self.heap.free(b.val(), b.ari() as usize);
@@ -578,7 +578,6 @@ impl Net {
     self.link(self.heap.get(a.val() + P2), ERAS);
     self.heap.free(a.val(), 2);
   }
-
 
   pub fn op2n(&mut self, a: Ptr, b: Ptr) {
     self.oper += 1;
@@ -744,8 +743,8 @@ impl Net {
   pub fn expand(&mut self, book: &Book, dir: Ptr) {
     let ptr = self.get_target(dir);
     if ptr.is_ctr() {
-      for i in 0..ptr.ari() {
-        self.expand(book, Ptr::new_val(VAR, ptr.val() + i as Val));
+      for i in 0..ptr.ari() as Val {
+        self.expand(book, Ptr::new_val(VAR, ptr.val() + i));
       }
     } else if ptr.is_ref() {
       let exp = self.deref(book, ptr, dir);
