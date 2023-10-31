@@ -32,37 +32,24 @@ fn replace_template(mut code: String, map: &[(&str, &str)]) -> String {
   code
 }
 
-trait Normal {
-  type Result;
-  fn normal(self, size: usize) -> Self::Result;
+fn normal(book: Book, size: usize) -> (run::Net, Net) {
+  let book = book_to_runtime(&book);
+  let mut rnet = run::Net::new(size);
+  rnet.boot(name_to_val("main"));
+  rnet.normal(&book);
+
+  let net = net_from_runtime(&rnet);
+  (rnet, net)
 }
 
-impl Normal for Book {
-  type Result = (run::Net, Net);
-
-  fn normal(self, size: usize) -> Self::Result {
-    let book = book_to_runtime(&self);
-    let mut rnet = run::Net::new(size);
-    rnet.boot(name_to_val("main"));
-    rnet.normal(&book);
-
-    let net = net_from_runtime(&rnet);
-    (rnet, net)
-  }
-}
-
-impl Normal for DefinitionBook {
-  type Result = (Term, DefNames, hvm_lang::RunInfo);
-
-  fn normal(self, size: usize) -> Self::Result {
-    hvm_lang::run_book(self, size).unwrap()
-  }
+fn hvm_lang_normal(book: DefinitionBook, size: usize) -> (Term, DefNames, hvm_lang::RunInfo) {
+  hvm_lang::run_book(book, size).unwrap()
 }
 
 #[test]
 fn test_era_era() {
   let net = parse_core("@main = * & * ~ *");
-  let (rnet, net) = net.normal(16);
+  let (rnet, net) = normal(net, 16);
   assert_snapshot!(show_net(&net), @"*");
   assert_debug_snapshot!(rnet.rewrites(), @"2");
 }
@@ -70,7 +57,7 @@ fn test_era_era() {
 #[test]
 fn test_con_dup() {
   let net = parse_core("@main = root & (x x) ~ {2 * root}");
-  let (rnet, net) = net.normal(16);
+  let (rnet, net) = normal(net, 16);
   assert_snapshot!(show_net(&net), @"(b b)");
   assert_debug_snapshot!(rnet.rewrites(), @"5");
 }
@@ -85,7 +72,7 @@ fn test_bool_and() {
     @main = root & @and ~ (@true (@fals root))
   ",
   );
-  let (rnet, net) = book.normal(64);
+  let (rnet, net) = normal(book, 64);
 
   assert_snapshot!(show_net(&net), @"(b (c c))");
   assert_debug_snapshot!(rnet.rewrites(), @"8");
@@ -94,7 +81,7 @@ fn test_bool_and() {
 #[test]
 fn test_church_mul() {
   let book = load_lang("church_mul.hvm");
-  let (term, defs, info) = book.normal(64);
+  let (term, defs, info) = hvm_lang_normal(book, 64);
 
   assert_snapshot!(show_net(&info.net), @"({2 ({2 b c} d) {3 (d e) (e {2 c f})}} (b f))");
   assert_snapshot!(term.to_string(&defs), @"λa λb (a (a (a (a (a (a b))))))");
@@ -104,7 +91,7 @@ fn test_church_mul() {
 #[test]
 fn test_neg_fusion() {
   let book = load_lang("neg_fusion.hvm");
-  let (term, defs, info) = book.normal(512);
+  let (term, defs, info) = hvm_lang_normal(book, 512);
 
   assert_snapshot!(show_net(&info.net), @"(b (* b))");
   assert_snapshot!(term.to_string(&defs), @"λa λ* a");
@@ -114,7 +101,7 @@ fn test_neg_fusion() {
 #[test]
 fn test_tree_alloc() {
   let book = load_lang("tree_alloc.hvm");
-  let (term, defs, info) = book.normal(512);
+  let (term, defs, info) = hvm_lang_normal(book, 512);
 
   assert_snapshot!(show_net(&info.net), @"(b (* b))");
   assert_snapshot!(term.to_string(&defs), @"λa λ* a");
@@ -146,12 +133,13 @@ fn make_queue(len: u32) -> DefinitionBook {
 #[test]
 fn test_queues() {
   let info = [
-    make_queue(3).normal(512),
-    make_queue(4).normal(512),
-    make_queue(5).normal(512),
-    make_queue(10).normal(512),
-    make_queue(20).normal(512),
+    make_queue(3),
+    make_queue(4),
+    make_queue(5),
+    make_queue(10),
+    make_queue(20)
   ]
+  .map(|book| hvm_lang_normal(book, 512))
   .map(|(term, defs, info)| (term, defs, info.net, info.stats.rewrites.total_rewrites()));
 
   assert_debug_snapshot!(info[0].3, @"62");
@@ -174,13 +162,14 @@ fn list_got(index: u32) -> DefinitionBook {
 #[test]
 fn test_list_got() {
   let rwts = [
-    list_got(0).normal(2048),
-    list_got(1).normal(2048),
-    list_got(3).normal(2048),
-    list_got(7).normal(2048),
-    list_got(15).normal(2048),
-    list_got(31).normal(2048),
+    list_got(0),
+    list_got(1),
+    list_got(3),
+    list_got(7),
+    list_got(15),
+    list_got(31)
   ]
+  .map(|book| hvm_lang_normal(book, 2048))
   .map(|(_, _, info)| info.stats.rewrites.total_rewrites());
 
   assert_debug_snapshot!(rwts[0], @"573");
@@ -207,13 +196,14 @@ fn list_put(index: u32, value: u32) -> DefinitionBook {
 #[test]
 fn test_list_put() {
   let rwts = [
-    list_put(0, 2).normal(2048),
-    list_put(1, 4).normal(2048),
-    list_put(3, 8).normal(2048),
-    list_put(7, 16).normal(2048),
-    list_put(15, 32).normal(2048),
-    list_put(31, 64).normal(2048),
+    list_put(0, 2),
+    list_put(1, 4),
+    list_put(3, 8),
+    list_put(7, 16),
+    list_put(15, 32),
+    list_put(31, 64)
   ]
+  .map(|book| hvm_lang_normal(book, 2048))
   .map(|(_, _, info)| info.stats.rewrites.total_rewrites());
 
   assert_debug_snapshot!(rwts[0], @"563");
@@ -240,7 +230,7 @@ fn op_net(lnum: u32, op: NumericOp, rnum: u32) -> Book {
 #[test]
 fn test_add() {
   let net = op_net(10, run::ADD, 2);
-  let (rnet, net) = net.normal(16);
+  let (rnet, net) = normal(net, 16);
   assert_snapshot!(show_net(&net), @"#12");
   assert_debug_snapshot!(rnet.rewrites(), @"5");
 }
@@ -248,84 +238,84 @@ fn test_add() {
 #[test]
 fn test_sub() {
   let net = op_net(10, run::SUB, 2);
-  let (_, net) = net.normal(16);
+  let (_, net) = normal(net, 16);
   assert_snapshot!(show_net(&net), @"#8");
 }
 
 #[test]
 fn test_mul() {
   let net = op_net(10, run::MUL, 2);
-  let (_, net) = net.normal(16);
+  let (_, net) = normal(net, 16);
   assert_snapshot!(show_net(&net), @"#20");
 }
 
 #[test]
 fn test_div() {
   let net = op_net(10, run::DIV, 2);
-  let (_, net) = net.normal(16);
+  let (_, net) = normal(net, 16);
   assert_snapshot!(show_net(&net), @"#5");
 }
 
 #[test]
 fn test_mod() {
   let net = op_net(10, run::MOD, 2);
-  let (_, net) = net.normal(16);
+  let (_, net) = normal(net, 16);
   assert_snapshot!(show_net(&net), @"#0");
 }
 
 #[test]
 fn test_eq() {
   let net = op_net(10, run::EQ, 2);
-  let (_, net) = net.normal(16);
+  let (_, net) = normal(net, 16);
   assert_snapshot!(show_net(&net), @"#0");
 }
 
 #[test]
 fn test_ne() {
   let net = op_net(10, run::NE, 2);
-  let (_, net) = net.normal(16);
+  let (_, net) = normal(net, 16);
   assert_snapshot!(show_net(&net), @"#1");
 }
 
 #[test]
 fn test_lt() {
   let net = op_net(10, run::LT, 2);
-  let (_, net) = net.normal(16);
+  let (_, net) = normal(net, 16);
   assert_snapshot!(show_net(&net), @"#0");
 }
 
 #[test]
 fn test_gt() {
   let net = op_net(10, run::GT, 2);
-  let (_, net) = net.normal(16);
+  let (_, net) = normal(net, 16);
   assert_snapshot!(show_net(&net), @"#1");
 }
 
 #[test]
 fn test_and() {
   let net = op_net(10, run::AND, 2);
-  let (_, net) = net.normal(16);
+  let (_, net) = normal(net, 16);
   assert_snapshot!(show_net(&net), @"#2");
 }
 
 #[test]
 fn test_or() {
   let net = op_net(10, run::OR, 2);
-  let (_, net) = net.normal(16);
+  let (_, net) = normal(net, 16);
   assert_snapshot!(show_net(&net), @"#10");
 }
 
 #[test]
 fn test_xor() {
   let net = op_net(10, run::XOR, 2);
-  let (_, net) = net.normal(16);
+  let (_, net) = normal(net, 16);
   assert_snapshot!(show_net(&net), @"#8");
 }
 
 #[test]
 fn test_not() {
   let net = op_net(0, run::NOT, 256);
-  let (rnet, net) = net.normal(16);
+  let (rnet, net) = normal(net, 16);
   assert_snapshot!(show_net(&net), @"#16776959");
   assert_debug_snapshot!(rnet.rewrites(), @"4");
 }
@@ -333,14 +323,14 @@ fn test_not() {
 #[test]
 fn test_lsh() {
   let net = op_net(10, run::LSH, 2);
-  let (_, net) = net.normal(16);
+  let (_, net) = normal(net, 16);
   assert_snapshot!(show_net(&net), @"#40");
 }
 
 #[test]
 fn test_rsh() {
   let net = op_net(10, run::RSH, 2);
-  let (_, net) = net.normal(16);
+  let (_, net) = normal(net, 16);
   assert_snapshot!(show_net(&net), @"#2");
 }
 
@@ -349,7 +339,7 @@ fn test_rsh() {
 /// that is read as the unsigned integer `16777215`
 fn test_div_by_0() {
   let net = op_net(9, run::DIV, 0);
-  let (rnet, net) = net.normal(16);
+  let (rnet, net) = normal(net, 16);
   assert_snapshot!(show_net(&net), @"#16777215");
   assert_debug_snapshot!(rnet.rewrites(), @"5");
 }
@@ -380,7 +370,7 @@ fn test_chained_ops() {
       & <#80 <ab z>> ~ #1
       & <#70 <g ab>> ~ #3",
   );
-  let (rnet, net) = net.normal(256);
+  let (rnet, net) = normal(net, 256);
 
   assert_debug_snapshot!(rnet.rewrites(), @"87");
   assert_snapshot!(show_net(&net), @"#2138224");
