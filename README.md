@@ -480,4 +480,4 @@ git checkout <your-branch>
 cargo bench -- --baseline main      # compare your changes with the "main" branch
 ```
 
-Inside the `target/criterion/report/index.html` file, you can see graphics of each benchmark.
+To verify if there's no correctness regression, run `cargo test`. You can add `cargo-insta` with `cargo install cargo-insta` and run `cargo insta test` to see if all test cases pass, if some don't and they need to be changed, you can run `cargo insta review` to review the snapshots and correct them if necessary.

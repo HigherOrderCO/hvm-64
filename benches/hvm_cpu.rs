@@ -21,12 +21,11 @@ fn load_from_lang(file: &str, size: usize, replace: Option<(&str, &str)>) -> (ru
   let code = if let Some((from, to)) = replace { code.replace(from, to) } else { code };
 
   let mut book = hvm_lang::term::parser::parse_definition_book(&code).unwrap();
-  let main = book.check_has_main().unwrap();
-  let book = hvm_lang::compile_book(&mut book).unwrap();
+  let (book, _) = hvm_lang::compile_book(&mut book).unwrap();
   let book = ast::book_to_runtime(&book);
 
   let mut net = run::Net::new(size);
-  net.boot(main.to_internal());
+  net.boot(name_to_val("main"));
   (book, net)
 }
 
