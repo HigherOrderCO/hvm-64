@@ -131,32 +131,9 @@ fn test_div_by_0() {
 
 #[test]
 fn test_chained_ops() {
-  let net = parse_core(
-    "@main = a
-      & (#70 (#50 a)) ~ ({2 b {3 c d}} ({4 e {5 f g}} h))
-      & <d <i j>> ~ #3
-      & <j <k l>> ~ #2
-      & <l <m h>> ~ #3
-      & <n <o m>> ~ #1
-      & <#80 <p o>> ~ #1
-      & <#70 <b p>> ~ #3
-      & <#10 <q n>> ~ #3
-      & <#80 <r q>> ~ #1
-      & <#70 <e r>> ~ #3
-      & <#10 <s k>> ~ #3
-      & <#80 <t s>> ~ #1
-      & <#70 <f t>> ~ #3
-      & <#178 <u i>> ~ #1
-      & <v <#20 u>> ~ #2
-      & <c <w v>> ~ #3
-      & <#178 <x w>> ~ #1
-      & <y <#20 x>> ~ #2
-      & <#10 <z y>> ~ #3
-      & <#80 <ab z>> ~ #1
-      & <#70 <g ab>> ~ #3",
-  );
-  let (rnet, net) = normal(net, 256);
+  let net = load_lang("chained_ops.hvm");
+  let (_, _, info) = hvm_lang_normal(net, 256);
 
-  assert_debug_snapshot!(rnet.rewrites(), @"87");
-  assert_snapshot!(show_net(&net), @"#2138224");
+  assert_snapshot!(show_net(&info.net), @"#2138224");
+  assert_debug_snapshot!(info.stats.rewrites.total_rewrites(), @"88");
 }
