@@ -130,6 +130,7 @@ fn test_div_by_0() {
 }
 
 #[test]
+// TODO: we lack a way to check if it's actually doing the chained ops optimization, or if it's doing one op per interaction
 fn test_chained_ops() {
   let net = load_lang("chained_ops.hvm");
   let (_, _, info) = hvm_lang_normal(net, 256);
