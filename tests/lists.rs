@@ -5,7 +5,7 @@ use insta::assert_debug_snapshot;
 mod loaders;
 
 fn list_got(index: u32) -> DefinitionBook {
-  let template = load_file("list_put_get.hvm");
+  let template = load_file("list_put_got.hvm");
   let code = replace_template(template, &[("{fun}", "got"), ("{args}", &index.to_string())]);
   parse_lang(&code)
 }
