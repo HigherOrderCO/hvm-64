@@ -39,7 +39,7 @@ fn test_list_got() {
 }
 
 fn list_put(index: u32, value: u32) -> DefinitionBook {
-  let template = load_file("list_put_get.hvm");
+  let template = load_file("list_put_got.hvm");
   let code = replace_template(template, &[("{fun}", "put"), ("{args}", &format!("{index} {value}"))]);
   parse_lang(&code)
 }

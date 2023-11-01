@@ -102,7 +102,7 @@ fn test_not() {
   let net = op_net(0, run::NOT, 256);
   let (rnet, net) = normal(net, 16);
   assert_snapshot!(show_net(&net), @"#16776959");
-  assert_debug_snapshot!(rnet.rewrites(), @"4");
+  assert_debug_snapshot!(rnet.rewrites(), @"5");
 }
 
 #[test]
