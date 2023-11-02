@@ -125,7 +125,7 @@ fn interact_benchmark(c: &mut Criterion) {
     group.bench_function(name, |b| {
       b.iter_batched(
         || net.clone(),
-        |net| black_box(net).interact(black_box(&book), black_box(rdx_a), black_box(rdx_b)),
+        |net| black_box(black_box(net).interact(black_box(&book), black_box(rdx_a), black_box(rdx_b))),
         criterion::BatchSize::SmallInput,
       );
     });
