@@ -1,4 +1,4 @@
-// size = 16 << 12
+// size = 1 << 16
 
 // Decreases a binary counter until it is 0
 

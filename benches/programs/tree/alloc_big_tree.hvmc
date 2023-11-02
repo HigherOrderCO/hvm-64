@@ -1,4 +1,4 @@
-// size = 16 << 12
+// size = 1 << 16
 
 // Church Nats
 @c0 = (* (a a))

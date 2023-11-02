@@ -1,4 +1,4 @@
-// size = 128 << 6
+// size = 1 << 13
 
 // Decreases a tree of binary counters until they're all 0 (parallel)
 
