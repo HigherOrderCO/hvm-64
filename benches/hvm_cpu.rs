@@ -1,6 +1,7 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use hvmc::{ast::*, *};
 use std::{
+  ffi::OsStr,
   fs,
   path::{Path, PathBuf},
   time::Duration,
@@ -55,33 +56,38 @@ fn run_programs_dir(c: &mut Criterion) {
   run_dir(&root, None, c);
 }
 
-fn run_dir(dir: &PathBuf, group: Option<&str>, c: &mut Criterion) {
-  let files = std::fs::read_dir(dir).unwrap();
+fn run_dir(path: &PathBuf, group: Option<&str>, c: &mut Criterion) {
+  let dir_entries = std::fs::read_dir(path).unwrap().flatten();
 
-  for file in files.flatten() {
-    let file_path = &file.path();
-    let file_name = file_path.file_stem().unwrap().to_string_lossy();
+  for entry in dir_entries {
+    let entry = &entry.path();
 
-    let Some(ext) = file_path.extension() else {
-      if file_path.is_dir() {
-        match group {
-          Some(group) => run_dir(file_path, Some(&format!("{group}/{file_name}")), c),
-          None => run_dir(file_path, Some(file_name.as_ref()), c),
-        };
-      }
-      continue;
-    };
+    if entry.is_dir() {
+      let dir_name = entry.file_stem().unwrap().to_string_lossy();
+      let group = match group {
+        Some(group) => format!("{group}/{dir_name}"),
+        None => dir_name.to_string(),
+      };
 
-    let (book, net) = match ext.to_str() {
-      Some("hvmc") => load_from_core(file_path),
-      Some("hvm") => load_from_lang(file_path),
-      _ => panic!("invalid file found: {}", file_path.to_string_lossy()),
-    };
-
-    match group {
-      Some(group) => benchmark_group(&file_name, group, book, net, c),
-      None => benchmark(&file_name, book, net, c),
+      run_dir(entry, Some(&group), c)
+    } else {
+      run_file(entry, group, c);
     }
+  }
+}
+
+fn run_file(path: &PathBuf, group: Option<&str>, c: &mut Criterion) {
+  let (book, net) = match path.extension().and_then(OsStr::to_str) {
+    Some("hvmc") => load_from_core(path),
+    Some("hvm") => load_from_lang(path),
+    _ => panic!("invalid file found: {}", path.to_string_lossy()),
+  };
+
+  let file_name = path.file_stem().unwrap().to_string_lossy();
+
+  match group {
+    Some(group) => benchmark_group(&file_name, group, book, net, c),
+    None => benchmark(&file_name, book, net, c),
   }
 }
 
@@ -135,8 +141,8 @@ fn interact_benchmark(c: &mut Criterion) {
 criterion_group! {
   name = benches;
   config = Criterion::default()
-    .measurement_time(Duration::from_millis(1000))
-    .warm_up_time(Duration::from_millis(500));
+    .measurement_time(Duration::from_millis(5000))
+    .warm_up_time(Duration::from_millis(100));
   targets =
     run_programs_dir,
     interact_benchmark,
