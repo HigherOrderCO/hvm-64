@@ -1,4 +1,6 @@
-// Decreases a tree of binary counters until they're all 0 (parallel)
+// size = 16 << 12
+
+// Decreases a binary counter until it is 0
 
 // Church Nats
 @c0 = (* (a a))
@@ -29,9 +31,6 @@
 @c25 = ([[[[[[[[[[[[[[[[[[[[[[[[(y x) (x w)] (w v)] (v u)] (u t)] (t s)] (s r)] (r q)] (q p)] (p o)] (o n)] (n m)] (m l)] (l k)] (k j)] (j i)] (i h)] (h g)] (g f)] (f e)] (e d)] (d c)] (c b)] (b a)] (a R)] (x R))
 @c26 = ([[[[[[[[[[[[[[[[[[[[[[[[[(z y) (y x)] (x w)] (w v)] (v u)] (u t)] (t s)] (s r)] (r q)] (q p)] (p o)] (o n)] (n m)] (m l)] (l k)] (k j)] (j i)] (i h)] (h g)] (g f)] (f e)] (e d)] (d c)] (c b)] (b a)] (a R)] (x R))
 
-@S = (a ((a b) (* b)))
-@Z = (* (a a))
-
 @O = (xs ((xs r) (* (* r))))
 @I = (xs (* ((xs r) (* r))))
 @E = (* (* (e e)))
@@ -48,11 +47,7 @@
 @runI = (p R) & @run ~ (decip R) & @dec ~ (ip decip) & @I ~ (p ip)
 @run  = ((@runO (@runI (@E R))) R)
 
-@brnZ = R & @run ~ (val R) & @c10 ~ (@I (@E val))
-@brnS = ([p0 p1] (r0 r1)) & @brn ~ (p0 r0) & @brn ~ (p1 r1)
-@brn  = ((@brnS (@brnZ r)) r)
-
 @main
   = R
-  & @c{n} ~ (@S (@Z dep))
-  & @brn ~ (dep R)
+  & @c12 ~ (@I (@E nie))
+  & @run ~ (nie R)

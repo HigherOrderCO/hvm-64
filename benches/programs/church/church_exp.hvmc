@@ -1,3 +1,5 @@
+// size = 1 << 12
+
 @c0a = (* (a a))
 @c1a = ((a R) (a R))
 @c2a = ([(b a) (a R)] (b R))
@@ -57,4 +59,4 @@
 
 @main
   = ret
-  & @c{n}a ~ (@c{n}b ret)
+  & @c20a ~ (@c20b ret)

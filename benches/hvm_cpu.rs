@@ -1,25 +1,31 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use hvmc::ast::*;
-use hvmc::*;
-use std::fs;
-use std::time::Duration;
+use hvmc::{ast::*, *};
+use std::{
+  fs,
+  path::{Path, PathBuf},
+  time::Duration,
+};
 
 // Loads file and generate net from hvm-core syntax
-fn load_from_core(file: &str, size: usize, replace: Option<(&str, &str)>) -> (run::Book, run::Net) {
+fn load_from_core<P: AsRef<Path>>(file: P) -> (run::Book, run::Net) {
   let code = fs::read_to_string(file).unwrap();
-  let code = if let Some((from, to)) = replace { code.replace(from, to) } else { code };
-  let book = ast::book_to_runtime(&ast::do_parse_book(&code));
+  let (size, code) = extract_size(&code);
+
+  let book = ast::do_parse_book(code);
+  let rbook = ast::book_to_runtime(&book);
+
   let mut net = run::Net::new(size);
   net.boot(name_to_val("main"));
-  (book, net)
+  (rbook, net)
 }
 
 // Loads file and generate net from hvm-lang syntax
-fn load_from_lang(file: &str, size: usize, replace: Option<(&str, &str)>) -> (run::Book, run::Net) {
-  let prelude = fs::read_to_string("./benches/programs/prelude.hvm").unwrap();
-  let code = prelude + "\n" + &fs::read_to_string(file).unwrap();
-  let code = if let Some((from, to)) = replace { code.replace(from, to) } else { code };
+fn load_from_lang<P: AsRef<Path>>(file: P) -> (run::Book, run::Net) {
+  let prelude = fs::read_to_string(format!("{}/benches/prelude.hvm", env!("CARGO_MANIFEST_DIR"))).unwrap();
+  let code = fs::read_to_string(file).unwrap();
+  let (size, code) = extract_size(&code);
 
+  let code = prelude + "\n" + code;
   let mut book = hvm_lang::term::parser::parse_definition_book(&code).unwrap();
   let (book, _) = hvm_lang::compile_book(&mut book).unwrap();
   let book = ast::book_to_runtime(&book);
@@ -29,57 +35,75 @@ fn load_from_lang(file: &str, size: usize, replace: Option<(&str, &str)>) -> (ru
   (book, net)
 }
 
-fn church_benchmark(c: &mut Criterion) {
-  let mut group = c.benchmark_group("church");
-  for n in [20] {
-    group.throughput(criterion::Throughput::Elements(n));
-    let (book, net) = load_from_lang("./benches/programs/church_mul.hvm", 1 << 12, Some(("{n}", &n.to_string())));
-    group.bench_with_input(criterion::BenchmarkId::new("multiplication", n), &n, |b, &_n| {
-      b.iter_batched(|| net.clone(), |mut net| black_box(net.normal(&book)), criterion::BatchSize::SmallInput);
-    });
-    // Church exponentiation
-    // n=24 uses at most 1107 elements in heap(1 << 12 = 4096)
-    let (book, net) = load_from_core("./benches/programs/church_exp.hvmc", 1 << 12, Some(("{n}", &n.to_string())));
-    group.bench_with_input(criterion::BenchmarkId::new("exponentiation", n), &n, |b, &_n| {
-      b.iter_batched(|| net.clone(), |mut net| black_box(net.normal(&book)), criterion::BatchSize::SmallInput);
-    });
+fn extract_size(code: &str) -> (usize, &str) {
+  code
+    .strip_prefix("// size = ")
+    .and_then(|code| code.split_once('\n'))
+    .and_then(|(size, rest)| {
+      match size.split_ascii_whitespace().collect::<Vec<_>>().as_slice() {
+        [a, "<<", b] => a.parse::<usize>().ok().zip(b.parse::<usize>().ok()).map(|(a, b)| a << b),
+        [a] => a.parse().ok(),
+        _ => None,
+      }
+      .map(|size| (size, rest))
+    })
+    .expect("failed to extract bench size")
+}
+
+fn run_programs_dir(c: &mut Criterion) {
+  let root = PathBuf::from(format!("{}/benches/programs", env!("CARGO_MANIFEST_DIR")));
+  run_dir(&root, None, c);
+}
+
+fn run_dir(dir: &PathBuf, group: Option<&str>, c: &mut Criterion) {
+  let files = std::fs::read_dir(dir).unwrap();
+
+  for file in files.flatten() {
+    let file_path = &file.path();
+    let file_name = file_path.file_stem().unwrap().to_string_lossy();
+
+    let Some(ext) = file_path.extension() else {
+      if file_path.is_dir() {
+        match group {
+          Some(group) => run_dir(file_path, Some(&format!("{group}/{file_name}")), c),
+          None => run_dir(file_path, Some(file_name.as_ref()), c),
+        };
+      }
+      continue;
+    };
+
+    let (book, net) = if ext == "hvmc" {
+      load_from_core(file_path)
+    } else if ext == "hvm" {
+      load_from_lang(file_path)
+    } else {
+      panic!("invalid file found: {}", file_path.to_string_lossy())
+    };
+
+    match group {
+      Some(group) => benchmark_group(&file_name, group, book, net, c),
+      None => benchmark(&file_name, book, net, c),
+    }
   }
 }
 
-fn tree_benchmark(c: &mut Criterion) {
-  let mut group = c.benchmark_group("tree");
-  // Allocates a big tree
-  for n in [12] {
-    let (book, net) = load_from_core("./benches/programs/alloc_big_tree.hvmc", 16 << n, Some(("{n}", &n.to_string())));
-    group.bench_with_input(criterion::BenchmarkId::new("allocation", n), &n, |b, &_n| {
-      b.iter_batched(|| net.clone(), |mut net| black_box(net.normal(&book)), criterion::BatchSize::SmallInput);
-    });
-  }
+fn benchmark(file_name: &str, book: run::Book, net: run::Net, c: &mut Criterion) {
+  c.bench_function(file_name, |b| {
+    b.iter_batched(
+      || net.clone(),
+      |net| black_box(black_box(net).normal(black_box(&book))),
+      criterion::BatchSize::SmallInput,
+    );
+  });
 }
 
-fn binary_counter_benchmark(c: &mut Criterion) {
-  let mut group = c.benchmark_group("binary-counter");
-  // Decrements a BitString until it is zero
-  for n in [12] {
-    let (book, net) = load_from_core("./benches/programs/dec_bits.hvmc", 16 << n, Some(("{n}", &n.to_string())));
-    group.bench_with_input(criterion::BenchmarkId::new("single", n), &n, |b, &_n| {
-      b.iter_batched(|| net.clone(), |mut net| black_box(net.normal(&book)), criterion::BatchSize::SmallInput);
-    });
-  }
-  // Decrements 2^N BitStrings until they reach zero (ex3)
-  for n in [6] {
-    let (book, net) = load_from_core("./benches/programs/dec_bits_tree.hvmc", 128 << n, Some(("{n}", &n.to_string())));
-    group.bench_with_input(criterion::BenchmarkId::new("many", n), &n, |b, &_n| {
-      b.iter_batched(|| net.clone(), |mut net| black_box(net.normal(&book)), criterion::BatchSize::SmallInput);
-    });
-  }
-}
-
-fn fusion_benchmark(c: &mut Criterion) {
-  let mut group = c.benchmark_group("fusion");
-  let (book, net) = load_from_lang("./benches/programs/neg_fusion.hvm", 1 << 8, None);
-  group.bench_function(criterion::BenchmarkId::new("neg", "256"), |b| {
-    b.iter_batched(|| net.clone(), |mut net| black_box(net.normal(&book)), criterion::BatchSize::SmallInput);
+fn benchmark_group(file_name: &str, group: &str, book: run::Book, net: run::Net, c: &mut Criterion) {
+  c.benchmark_group(group).bench_function(file_name, |b| {
+    b.iter_batched(
+      || net.clone(),
+      |net| black_box(black_box(net).normal(black_box(&book))),
+      criterion::BatchSize::SmallInput,
+    );
   });
 }
 
@@ -94,7 +118,7 @@ fn interact_benchmark(c: &mut Criterion) {
     ("con-con", ((Ctr { lab: 0, lft: Era.into(), rgt: Era.into() }), Ctr { lab: 0, lft: Era.into(), rgt: Era.into() })),
     ("con-dup", ((Ctr { lab: 0, lft: Era.into(), rgt: Era.into() }), Ctr { lab: 2, lft: Era.into(), rgt: Era.into() })),
   ];
-  
+
   for (name, redex) in cases {
     let mut net = run::Net::new(10);
     let book = run::Book::new();
@@ -103,8 +127,8 @@ fn interact_benchmark(c: &mut Criterion) {
     group.bench_function(name, |b| {
       b.iter_batched(
         || net.clone(),
-        |mut net| black_box(net.interact(&book, rdx_a, rdx_b)),
-        criterion::BatchSize::SmallInput
+        |net| black_box(net).interact(black_box(&book), black_box(rdx_a), black_box(rdx_b)),
+        criterion::BatchSize::SmallInput,
       );
     });
   }
@@ -116,10 +140,7 @@ criterion_group! {
     .measurement_time(Duration::from_millis(1000))
     .warm_up_time(Duration::from_millis(500));
   targets =
-    church_benchmark,
-    tree_benchmark,
-    binary_counter_benchmark,
-    fusion_benchmark,
+    run_programs_dir,
     interact_benchmark,
 }
 criterion_main!(benches);

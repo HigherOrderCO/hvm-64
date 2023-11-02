@@ -1,3 +1,5 @@
+// size = 1 << 8
+
 mul = λm λn λs λz (m (n s) z)
 
 // Church powers of two
