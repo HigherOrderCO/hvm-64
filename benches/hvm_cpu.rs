@@ -72,12 +72,10 @@ fn run_dir(dir: &PathBuf, group: Option<&str>, c: &mut Criterion) {
       continue;
     };
 
-    let (book, net) = if ext == "hvmc" {
-      load_from_core(file_path)
-    } else if ext == "hvm" {
-      load_from_lang(file_path)
-    } else {
-      panic!("invalid file found: {}", file_path.to_string_lossy())
+    let (book, net) = match ext.to_str() {
+      Some("hvmc") => load_from_core(file_path),
+      Some("hvm") => load_from_lang(file_path),
+      _ => panic!("invalid file found: {}", file_path.to_string_lossy()),
     };
 
     match group {
