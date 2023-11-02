@@ -33,7 +33,7 @@ fn test_bool_and() {
   let (rnet, net) = normal(book, 64);
 
   assert_snapshot!(show_net(&net), @"(* (b b))");
-  assert_debug_snapshot!(rnet.rewrites(), @"8");
+  assert_debug_snapshot!(rnet.rewrites(), @"9");
 }
 
 #[test]
