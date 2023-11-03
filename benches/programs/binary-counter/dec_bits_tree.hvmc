@@ -1,3 +1,5 @@
+// size = 1 << 13
+
 // Decreases a tree of binary counters until they're all 0 (parallel)
 
 // Church Nats
@@ -54,5 +56,5 @@
 
 @main
   = R
-  & @c{n} ~ (@S (@Z dep))
+  & @c6 ~ (@S (@Z dep))
   & @brn ~ (dep R)

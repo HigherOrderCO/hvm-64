@@ -1,0 +1,5 @@
+// size = 1 << 12
+
+Mult = λm λn λs λz (m (n s) z)
+
+Main = (Mult C_20 C_20)
