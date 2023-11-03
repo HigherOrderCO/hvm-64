@@ -141,8 +141,8 @@ fn interact_benchmark(c: &mut Criterion) {
 criterion_group! {
   name = benches;
   config = Criterion::default()
-    .measurement_time(Duration::from_millis(5000))
-    .warm_up_time(Duration::from_millis(100));
+    .measurement_time(Duration::from_millis(1000))
+    .warm_up_time(Duration::from_millis(500));
   targets =
     run_programs_dir,
     interact_benchmark,
