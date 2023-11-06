@@ -497,32 +497,25 @@ impl Net {
 
   pub fn comm(&mut self, a: Ptr, b: Ptr) {
     self.comm += 1;
-    let (a, b) = if a.ari() >= b.ari() { (a, b) } else { (b, a) };
-    let max = a.ari() as Val;
-    let min = b.ari() as Val;
-
-    // We create `min` nodes of arity `min` for tags `a` and `b`.
-    // If `a` had larger arity than `b` we erase the leftover ports.
-    let half = min*min;
+    let a_ari = a.ari() as Val;
+    let b_ari = b.ari() as Val;
+    let half = a_ari * b_ari;
     let loc = self.heap.alloc(2*half as usize);
-
-    for i in 0..min {
-      // Link the main ports
-      self.link(self.heap.get(a.val() + i), Ptr::new(b.tag(), min as u8, b.lab(), loc + i*min));
-      self.link(self.heap.get(b.val() + i), Ptr::new(a.tag(), min as u8, a.lab(), loc + half + i*min));
-  
-      // Link the aux ports
-      // Node `i` connects to port `i` of each `j` node on the other side of the commutation
-      for j in 0..min {
-        let a = loc + min*j + i;
-        let b = loc + half + min*i + j;
+    // Link main ports
+    for i in 0..a_ari {
+      self.link(self.heap.get(a.val() + i), b.copy(loc + i * b_ari));
+    }
+    for i in 0..b_ari {
+      self.link(self.heap.get(b.val() + i), a.copy(loc + half + i * a_ari));
+    }
+    // Link aux ports
+    for i in 0..a_ari {
+      for j in 0..b_ari {
+        let a = loc + i * b_ari + j;
+        let b = loc + half + j * a_ari + i;
         self.heap.set(a, Ptr::new_val(VAR, b));
         self.heap.set(b, Ptr::new_val(VAR, a));
       }
-    }
-    // Erase the leftover ports of the larger node
-    for i in min..max {
-      self.link(self.heap.get(a.val() + i), ERAS);
     }
     self.heap.free(a.val(), a.ari() as usize);
     self.heap.free(b.val(), b.ari() as usize);
@@ -537,7 +530,7 @@ impl Net {
     // Link main port of b
     self.link(self.heap.get(a.val() + P2), b.copy(loc));
 
-    let owned = self.heap.get(a.val()+P1);
+    let owned = self.heap.get(a.val() + P1);
     for i in 0..b.ari() as Val {
       // Link main port of copy of a
       self.link(self.heap.get(b.val() + i), a.copy(loc + b.ari() as Val + 2*i));
