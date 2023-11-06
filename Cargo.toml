@@ -18,6 +18,12 @@ bench = false
 [dependencies]
 cudarc = { version = "0.9.14", optional = true }
 
+[profile.release]
+codegen-units = 1
+lto = "fat"
+opt-level = 3
+panic = "abort"
+
 # Benchmark dependencies
 
 [dev-dependencies]
