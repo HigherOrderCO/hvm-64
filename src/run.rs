@@ -241,6 +241,15 @@ impl Heap {
     };
   }
 
+  pub fn from_data(data: Vec<(Ptr, Ptr)>) -> Heap {
+    return Heap {
+      data,
+      next: 1,
+      used: 0,
+      full: false,
+    };
+  }
+
   #[inline(always)]
   pub fn alloc(&mut self, size: usize) -> Val {
     if size == 0 {

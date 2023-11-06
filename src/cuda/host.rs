@@ -62,6 +62,31 @@ pub struct HostNet {
   jump: Box<[u32]>,
   rwts: u64,
 }
+impl HostNet {
+  pub fn to_runtime_net(self) -> run::Net {
+    fn wire_to_rdex(wire: Wire) -> (run::Ptr, run::Ptr) {
+      (run::Ptr((wire & 0xFFFFFFFF) as Val), run::Ptr((wire >> 32) as Val))
+    }
+    
+    fn node_to_pair(node: Node) -> (run::Ptr, run::Ptr) {
+      let Node { ports: [a, b] } = node;
+      (run::Ptr(a), run::Ptr(b))
+    }
+
+    let rdex = self.bags.into_iter().map(|wire| wire_to_rdex(*wire)).collect();
+    let data = self.heap.into_iter().map(|node| node_to_pair(*node)).collect();
+
+    run::Net {
+        rdex,
+        heap: run::Heap::from_data(data),
+        anni: 0,
+        comm: 0,
+        eras: 0,
+        dref: 0,
+        oper: self.rwts.try_into().unwrap(),
+    }
+  }
+}
 
 // Gets the target ref of a var or redirection pointer
 #[inline(always)]
