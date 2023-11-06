@@ -23,77 +23,77 @@ fn test_add() {
 #[test]
 fn test_sub() {
   let net = op_net(10, run::SUB, 2);
-  let (_, net) = normal(net, 16);
+  let (_rnet, net) = normal(net, 16);
   assert_snapshot!(show_net(&net), @"#8");
 }
 
 #[test]
 fn test_mul() {
   let net = op_net(10, run::MUL, 2);
-  let (_, net) = normal(net, 16);
+  let (_rnet, net) = normal(net, 16);
   assert_snapshot!(show_net(&net), @"#20");
 }
 
 #[test]
 fn test_div() {
   let net = op_net(10, run::DIV, 2);
-  let (_, net) = normal(net, 16);
+  let (_rnet, net) = normal(net, 16);
   assert_snapshot!(show_net(&net), @"#5");
 }
 
 #[test]
 fn test_mod() {
   let net = op_net(10, run::MOD, 2);
-  let (_, net) = normal(net, 16);
+  let (_rnet, net) = normal(net, 16);
   assert_snapshot!(show_net(&net), @"#0");
 }
 
 #[test]
 fn test_eq() {
   let net = op_net(10, run::EQ, 2);
-  let (_, net) = normal(net, 16);
+  let (_rnet, net) = normal(net, 16);
   assert_snapshot!(show_net(&net), @"#0");
 }
 
 #[test]
 fn test_ne() {
   let net = op_net(10, run::NE, 2);
-  let (_, net) = normal(net, 16);
+  let (_rnet, net) = normal(net, 16);
   assert_snapshot!(show_net(&net), @"#1");
 }
 
 #[test]
 fn test_lt() {
   let net = op_net(10, run::LT, 2);
-  let (_, net) = normal(net, 16);
+  let (_rnet, net) = normal(net, 16);
   assert_snapshot!(show_net(&net), @"#0");
 }
 
 #[test]
 fn test_gt() {
   let net = op_net(10, run::GT, 2);
-  let (_, net) = normal(net, 16);
+  let (_rnet, net) = normal(net, 16);
   assert_snapshot!(show_net(&net), @"#1");
 }
 
 #[test]
 fn test_and() {
   let net = op_net(10, run::AND, 2);
-  let (_, net) = normal(net, 16);
+  let (_rnet, net) = normal(net, 16);
   assert_snapshot!(show_net(&net), @"#2");
 }
 
 #[test]
 fn test_or() {
   let net = op_net(10, run::OR, 2);
-  let (_, net) = normal(net, 16);
+  let (_rnet, net) = normal(net, 16);
   assert_snapshot!(show_net(&net), @"#10");
 }
 
 #[test]
 fn test_xor() {
   let net = op_net(10, run::XOR, 2);
-  let (_, net) = normal(net, 16);
+  let (_rnet, net) = normal(net, 16);
   assert_snapshot!(show_net(&net), @"#8");
 }
 
@@ -108,14 +108,14 @@ fn test_not() {
 #[test]
 fn test_lsh() {
   let net = op_net(10, run::LSH, 2);
-  let (_, net) = normal(net, 16);
+  let (_rnet, net) = normal(net, 16);
   assert_snapshot!(show_net(&net), @"#40");
 }
 
 #[test]
 fn test_rsh() {
   let net = op_net(10, run::RSH, 2);
-  let (_, net) = normal(net, 16);
+  let (_rnet, net) = normal(net, 16);
   assert_snapshot!(show_net(&net), @"#2");
 }
 
@@ -132,9 +132,9 @@ fn test_div_by_0() {
 #[test]
 // TODO: we lack a way to check if it's actually doing the chained ops optimization, or if it's doing one op per interaction
 fn test_chained_ops() {
-  let net = load_lang("chained_ops.hvm");
-  let (_, _, info) = hvm_lang_normal(net, 256);
+  let mut net = load_lang("chained_ops.hvm");
+  let (rnet, net, _id_map) = hvm_lang_normal(&mut net, 256);
 
-  assert_snapshot!(show_net(&info.net), @"#2138224");
-  assert_debug_snapshot!(info.stats.rewrites.total_rewrites(), @"88");
+  assert_snapshot!(show_net(&net), @"#2138224");
+  assert_debug_snapshot!(rnet.rewrites(), @"88");
 }

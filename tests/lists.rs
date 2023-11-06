@@ -20,8 +20,8 @@ fn test_list_got() {
   list_got(15),
   list_got(31)
   ]
-  .map(|book| hvm_lang_normal(book, 2048))
-  .map(|(_, _, info)| info.stats.rewrites.total_rewrites());
+  .map(|mut book| hvm_lang_normal(&mut book, 2048))
+  .map(|(rnet, _, _)| rnet.rewrites());
 
   assert_debug_snapshot!(rwts[0], @"573");
   assert_debug_snapshot!(rwts[1], @"595");
@@ -54,8 +54,8 @@ fn test_list_put() {
   list_put(15, 32),
   list_put(31, 64)
   ]
-  .map(|book| hvm_lang_normal(book, 2048))
-  .map(|(_, _, info)| info.stats.rewrites.total_rewrites());
+  .map(|mut book| hvm_lang_normal(&mut book, 2048))
+  .map(|(rnet, _, _)| rnet.rewrites());
 
   assert_debug_snapshot!(rwts[0], @"563");
   assert_debug_snapshot!(rwts[1], @"586");
