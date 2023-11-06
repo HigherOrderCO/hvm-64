@@ -9,7 +9,7 @@ use loaders::*;
 mod loaders;
 
 fn op_net(lnum: u32, op: NumericOp, rnum: u32) -> Book {
-  parse_core(&format!("@main = root & <#{lnum} <#{rnum} root>> ~ #{op}"))
+  parse_core(&format!("@main = root & #{lnum} ~ <#{rnum} b> & #{op} ~ <b root>"))
 }
 
 #[test]

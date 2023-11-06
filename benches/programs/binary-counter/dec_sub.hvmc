@@ -1,0 +1,14 @@
+// size = 1 << 12
+
+@dec = (? #0 @decS a a)
+
+@decS = (a b)
+& @dec ~ (c b)
+& #1 ~ <a d>
+& #1 ~ <d <#1 e>>
+& #2 ~ <e c>
+
+@main = a
+& @dec ~ (b a)
+& #14 ~ <c b>
+& #1 ~ <#12 c>

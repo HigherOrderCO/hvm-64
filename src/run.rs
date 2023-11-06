@@ -638,6 +638,7 @@ impl Net {
       ADD => { Ptr::new(NUM, (a.wrapping_add(b)) & 0xFFFFFF) }
       SUB => { Ptr::new(NUM, (a.wrapping_sub(b)) & 0xFFFFFF) }
       MUL => { Ptr::new(NUM, (a.wrapping_mul(b)) & 0xFFFFFF) }
+      DIV if b == 0 => { Ptr::new(NUM, 0xFFFFFF) }
       DIV => { Ptr::new(NUM, (a.wrapping_div(b)) & 0xFFFFFF) }
       MOD => { Ptr::new(NUM, (a.wrapping_rem(b)) & 0xFFFFFF) }
       EQ  => { Ptr::new(NUM, ((a == b) as Val) & 0xFFFFFF) }
