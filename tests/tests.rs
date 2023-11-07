@@ -5,7 +5,16 @@ use loaders::*;
 mod loaders;
 
 #[test]
+#[cfg(not(feature = "cuda"))] // FIXME: gpu runtime errors on nets with `*` on the root
 fn test_era_era() {
+  let net = parse_core("@main = * & * ~ *");
+  let (rnet, net) = normal(net, 16);
+  assert_snapshot!(show_net(&net), @"*");
+  assert_debug_snapshot!(rnet.rewrites(), @"2");
+}
+
+#[test]
+fn test_era_era2() {
   let net = parse_core("@main = (* *) & * ~ *");
   let (rnet, net) = normal(net, 16);
   assert_snapshot!(show_net(&net), @"(* *)");
@@ -56,7 +65,7 @@ fn test_neg_fusion() {
   assert_snapshot!(show_net(&net), @"(b (* b))");
   assert_snapshot!(readback, @"λa λ* a");
 
-  // Todo: investigate why this difference exists
+  // TODO: investigate why this difference exists
   if cfg!(feature = "cuda") {
     assert_debug_snapshot!(rnet.rewrites(), @"160");
   } else {
@@ -76,7 +85,7 @@ fn test_tree_alloc() {
 }
 
 #[test]
-#[cfg(not(feature = "cuda"))] //Cuda does not support native numbers
+#[cfg(not(feature = "cuda"))] // FIXME: Cuda does not support native numbers
 fn test_queue() {
   let mut book = load_lang("queue.hvm");
   let (rnet, net, id_map) = hvm_lang_normal(&mut book, 512);

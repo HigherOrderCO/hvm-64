@@ -1,6 +1,6 @@
 mod loaders;
 
-#[cfg(not(feature = "cuda"))] //Cuda does not support native numbers
+#[cfg(not(feature = "cuda"))] // FIXME: Cuda does not support native numbers
 mod list_tests {
   use crate::loaders::*;
   use hvm_lang::term::DefinitionBook;
