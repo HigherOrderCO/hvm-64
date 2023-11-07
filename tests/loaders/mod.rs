@@ -50,6 +50,19 @@ pub fn hvm_lang_normal(book: &mut DefinitionBook, size: usize) -> (run::Net, Net
 
 #[allow(unused_variables)]
 pub fn normal(book: Book, size: usize) -> (run::Net, Net) {
+  fn normal_cpu(book: run::Book, size: usize) -> run::Net {
+    let mut rnet = run::Net::new(size);
+    rnet.boot(name_to_val("main"));
+    rnet.normal(&book);
+    rnet
+  }
+  
+  #[cfg(feature = "cuda")]
+  fn normal_gpu(book: run::Book) -> run::Net {
+    let host_net = hvmc::cuda::host::run_on_gpu(&book, "main").unwrap();
+    host_net.to_runtime_net()
+  }
+
   let book = book_to_runtime(&book);
 
   let rnet = {
@@ -65,17 +78,4 @@ pub fn normal(book: Book, size: usize) -> (run::Net, Net) {
 
   let net = net_from_runtime(&rnet);
   (rnet, net)
-}
-
-pub fn normal_cpu(book: run::Book, size: usize) -> run::Net {
-  let mut rnet = run::Net::new(size);
-  rnet.boot(name_to_val("main"));
-  rnet.normal(&book);
-  rnet
-}
-
-#[cfg(feature = "cuda")]
-pub fn normal_gpu(book: run::Book) -> run::Net {
-  let host_net = hvmc::cuda::host::run_on_gpu(&book, "main").unwrap();
-  host_net.to_runtime_net()
 }
