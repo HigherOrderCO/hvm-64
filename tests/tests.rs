@@ -6,9 +6,9 @@ mod loaders;
 
 #[test]
 fn test_era_era() {
-  let net = parse_core("@main = * & * ~ *");
+  let net = parse_core("@main = (* *) & * ~ *");
   let (rnet, net) = normal(net, 16);
-  assert_snapshot!(show_net(&net), @"*");
+  assert_snapshot!(show_net(&net), @"(* *)");
   assert_debug_snapshot!(rnet.rewrites(), @"2");
 }
 
