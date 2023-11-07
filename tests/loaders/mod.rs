@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use hvm_lang::term::{parser, DefId, DefNames, DefinitionBook};
+use hvm_lang::term::{parser, DefId, DefinitionBook};
 use hvmc::{ast::*, run};
 use std::{collections::HashMap, fs};
 
@@ -44,14 +44,7 @@ pub fn hvm_lang_readback(net: &Net, book: &DefinitionBook, id_map: HashMap<run::
 
 pub fn hvm_lang_normal(book: &mut DefinitionBook, size: usize) -> (run::Net, Net, HashMap<run::Val, DefId>) {
   let (compiled, id_map) = hvm_lang::compile_book(book).unwrap();
-
-  let runtime_book = book_to_runtime(&compiled);
-  let mut root = hvmc::run::Net::new(size);
-  root.boot(name_to_val(DefNames::ENTRY_POINT));
-
-  root.normal(&runtime_book);
-
-  let res_lnet = net_from_runtime(&root);
+  let (root, res_lnet) = normal(compiled, size);
   (root, res_lnet, id_map)
 }
 

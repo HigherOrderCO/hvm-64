@@ -239,20 +239,20 @@ fn print_net(net: &HostNet) {
     if i % RBAG_SIZE == 0 && wire > 0 {
       println!("- [{:07X}] LEN={}", i, wire);
     } else if i % RBAG_SIZE >= 1 {
-      let a = (wire & 0xFFFFFFFF) as Val;
-      let b = (wire >> 32) as Val;
-      if a != 0 || b != 0 {
-        println!("- [{:07X}] {} {}", i, show_ptr(a), show_ptr(b));
-      }
+      // let a = (wire & 0xFFFFFFFF) as Val;
+      // let b = (wire >> 32) as Val;
+      // if a != 0 || b != 0 {
+      //   println!("- [{:07X}] {} {}", i, show_ptr(a), show_ptr(b));
+      // }
     }
   }
-  println!("Heap:");
-  for i in 0..HEAP_SIZE {
-    let Node { ports: [a, b] } = net.heap[i as usize];
-    if a != 0 || b != 0 {
-      println!("- [{:07X}] {} {}", i, show_ptr(a), show_ptr(b));
-    }
-  }
+  // println!("Heap:");
+  // for i in 0..HEAP_SIZE {
+  //   let Node { ports: [a, b] } = net.heap[i as usize];
+  //   if a != 0 || b != 0 {
+  //     println!("- [{:07X}] {} {}", i, show_ptr(a), show_ptr(b));
+  //   }
+  // }
   println!("Rwts: {}", net.rwts);
 }
 
