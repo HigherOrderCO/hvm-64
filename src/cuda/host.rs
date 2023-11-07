@@ -74,7 +74,20 @@ impl HostNet {
       (run::Ptr(a), run::Ptr(b))
     }
 
-    let rdex = Vec::new();
+    let mut rdex = Vec::new();
+
+    for i in 0..BAGS_SIZE {
+      let wire: u64 = self.bags[i as usize];
+      if i % RBAG_SIZE == 0 && wire > 0 {
+        rdex.push(wire_to_rdex(wire));
+      } else if i % RBAG_SIZE >= 1 {
+        let (a, b) = wire_to_rdex(wire);
+        if a.0 != 0 || b.0 != 0 {
+          rdex.push((a, b));
+        }
+      }
+    }
+
     let data = self.heap.into_iter().map(|node| node_to_pair(*node)).collect();
 
     run::Net {
