@@ -20,7 +20,7 @@ pub enum Tree {
   Ctr { lab: u8, lft: Box<Tree>, rgt: Box<Tree> },
   Var { nam: String },
   Ref { nam: run::Val },
-  Num { val: u32 },
+  Num { val: run::Val },
   Op2 { lft: Box<Tree>, rgt: Box<Tree> },
   Mat { sel: Box<Tree>, ret: Box<Tree> },
 }
@@ -150,7 +150,7 @@ pub fn parse_tree(chars: &mut Peekable<Chars>) -> Result<Tree, String> {
     }
     Some('#') => {
       chars.next();
-      Ok(Tree::Num { val: parse_decimal(chars)? as u32 })
+      Ok(Tree::Num { val: parse_decimal(chars)? as run::Val })
     }
     Some('<') => {
       chars.next();
@@ -485,7 +485,7 @@ pub fn tree_from_runtime_go(rt_net: &run::Net, ptr: run::Ptr, parent: Parent, va
       Tree::Ref { nam: ptr.val() }
     }
     run::NUM => {
-      Tree::Num { val: ptr.val() as u32 }
+      Tree::Num { val: ptr.val() as run::Val }
     }
     run::OP1 | run::OP2 => {
       let lft = tree_from_runtime_go(rt_net, rt_net.heap.get(ptr.val(), run::P1), Parent::Node { val: ptr.val(), port: run::P1 }, vars, fresh);
@@ -550,7 +550,7 @@ pub fn book_from_runtime(rt_book: &run::Book) -> Book {
   for id in 0 .. rt_book.defs.len() {
     let def = &rt_book.defs[id];
     if def.node.len() > 0 {
-      let name = val_to_name(id as u32);
+      let name = val_to_name(id as run::Val);
       let net = net_from_runtime(&run::Net::from_def(def.clone()));
       book.insert(name, net);
     }

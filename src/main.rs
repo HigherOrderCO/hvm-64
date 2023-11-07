@@ -75,7 +75,7 @@ pub fn gen_cuda_book(book: &run::Book) -> String {
   let mut defs = BTreeMap::new();
   for i in 0 .. book.defs.len() {
     if book.defs[i].node.len() > 0 {
-      defs.insert(i as u32, book.defs[i].clone());
+      defs.insert(i as run::Val, book.defs[i].clone());
     }
   }
 

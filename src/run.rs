@@ -12,57 +12,40 @@ pub type Val = u32;
 
 // Core terms.
 
-/// Variable to aux port 1
-pub const VR1: Tag = 0x0;
-/// Variable to aux port 2
-pub const VR2: Tag = 0x1;
-/// Redirect to aux port 1
-pub const RD1: Tag = 0x2;
-/// Redirect to aux port 2
-pub const RD2: Tag = 0x3;
-/// Lazy closed net
-pub const REF: Tag = 0x4;
-/// Unboxed eraser
-pub const ERA: Tag = 0x5;
-/// Unboxed number
-pub const NUM: Tag = 0x6;
-/// Binary numeric operation
-pub const OP2: Tag = 0x7;
-/// Unary numeric operation
-pub const OP1: Tag = 0x8;
-/// Numeric if-then-else(MATCH)
-pub const MAT: Tag = 0x9;
-/// Main port of con node(label 0)
-pub const CT0: Tag = 0xA;
-/// Main port of con node(label 1)
-pub const CT1: Tag = 0xB;
-/// Main port of con node(label 2)
-pub const CT2: Tag = 0xC;
-/// Main port of con node(label 3)
-pub const CT3: Tag = 0xD;
-/// Main port of con node(label 4)
-pub const CT4: Tag = 0xE;
-/// Main port of con node(label 5)
-pub const CT5: Tag = 0xF;
+pub const VR1: Tag = 0x0; // Variable to aux port 1
+pub const VR2: Tag = 0x1; // Variable to aux port 2
+pub const RD1: Tag = 0x2; // Redirect to aux port 1
+pub const RD2: Tag = 0x3; // Redirect to aux port 2
+pub const REF: Tag = 0x4; // Lazy closed net
+pub const ERA: Tag = 0x5; // Unboxed eraser
+pub const NUM: Tag = 0x6; // Unboxed number
+pub const OP2: Tag = 0x7; // Binary numeric operation
+pub const OP1: Tag = 0x8; // Unary numeric operation
+pub const MAT: Tag = 0x9; // Numeric pattern-matching
+pub const CT0: Tag = 0xA; // Main port of con node, label 0
+pub const CT1: Tag = 0xB; // Main port of con node, label 1
+pub const CT2: Tag = 0xC; // Main port of con node, label 2
+pub const CT3: Tag = 0xD; // Main port of con node, label 3
+pub const CT4: Tag = 0xE; // Main port of con node, label 4
+pub const CT5: Tag = 0xF; // Main port of con node, label 5
 
 // Numeric operations.
-pub type NumericOp = u8;
-pub const USE: NumericOp = 0x0; // set-next-op
-pub const ADD: NumericOp = 0x1; // addition
-pub const SUB: NumericOp = 0x2; // subtraction
-pub const MUL: NumericOp = 0x3; // multiplication
-pub const DIV: NumericOp = 0x4; // division
-pub const MOD: NumericOp = 0x5; // modulus
-pub const EQ : NumericOp = 0x6; // equal-to
-pub const NE : NumericOp = 0x7; // not-equal-to
-pub const LT : NumericOp = 0x8; // less-than
-pub const GT : NumericOp = 0x9; // greater-than
-pub const AND: NumericOp = 0xA; // logical-and
-pub const OR : NumericOp = 0xB; // logical-or
-pub const XOR: NumericOp = 0xC; // logical-xor
-pub const NOT: NumericOp = 0xD; // logical-not
-pub const LSH: NumericOp = 0xE; // left-shift
-pub const RSH: NumericOp = 0xF; // right-shift
+pub const USE: Tag = 0x0; // set-next-op
+pub const ADD: Tag = 0x1; // addition
+pub const SUB: Tag = 0x2; // subtraction
+pub const MUL: Tag = 0x3; // multiplication
+pub const DIV: Tag = 0x4; // division
+pub const MOD: Tag = 0x5; // modulus
+pub const EQ : Tag = 0x6; // equal-to
+pub const NE : Tag = 0x7; // not-equal-to
+pub const LT : Tag = 0x8; // less-than
+pub const GT : Tag = 0x9; // greater-than
+pub const AND: Tag = 0xA; // logical-and
+pub const OR : Tag = 0xB; // logical-or
+pub const XOR: Tag = 0xC; // logical-xor
+pub const NOT: Tag = 0xD; // logical-not
+pub const LSH: Tag = 0xE; // left-shift
+pub const RSH: Tag = 0xF; // right-shift
 
 // Root pointer.
 pub const ERAS: Ptr = Ptr(0x0000_0000 | ERA as Val);
@@ -417,50 +400,41 @@ impl Net {
       b = self.deref(book, b, a);
     }
     match (a.tag(), b.tag()) {
-      (CT0.., CT0..) if a.tag() == b.tag() => self.anni(a, b),
-      (CT0.., CT0..) => self.comm(a, b),
-      (CT0.., ERA)   => self.era2(a),
-      (ERA, CT0..)   => self.era2(b),
-      (REF, ERA)     => self.eras += 1,
-      (ERA, REF)     => self.eras += 1,
-      (ERA, ERA)     => self.eras += 1,
-      (VR1..=VR2, _) => self.link(a, b),
-      (_, VR1..=VR2) => self.link(b, a),
-      (CT0.., NUM)   => self.copy(a, b),
-      (NUM, CT0..)   => self.copy(b, a),
-      (NUM, ERA)     => self.eras += 1,
-      (ERA, NUM)     => self.eras += 1,
-      (NUM, NUM)     => self.eras += 1,
-      (OP2, NUM)     => self.op2n(a, b),
-      (NUM, OP2)     => self.op2n(b, a),
-      (OP1, NUM)     => self.op1n(a, b),
-      (NUM, OP1)     => self.op1n(b, a),
-      (OP2, CT0..)   => self.comm(a, b),
-      (CT0.., OP2)   => self.comm(b, a),
-      (OP1, CT0..)   => self.pass(a, b),
-      (CT0.., OP1)   => self.pass(b, a),
-      (OP2, ERA)     => self.era2(a),
-      (ERA, OP2)     => self.era2(b),
-      (OP1, ERA)     => self.era1(a),
-      (ERA, OP1)     => self.era1(b),
-      (MAT, NUM)     => self.mtch(a, b),
-      (NUM, MAT)     => self.mtch(b, a),
-      (MAT, CT0..)   => self.comm(a, b),
-      (CT0.., MAT)   => self.comm(b, a),
-      (MAT, ERA)     => self.era2(a),
-      (ERA, MAT)     => self.era2(b),
-
-      // because of the deref above this match
-      // we know that A and B are not REFs
-      (REF, _)       => unreachable!(),
-      (_, REF)       => unreachable!(),
-
-      // undefined numerical interactions resulting from a sort of "type error"
-      (OP2..=MAT, OP2..=MAT) => unreachable!(),
-
-      // TODO: this will change when we implement the multi-threaded version
-      (RD1..=RD2, _) => unreachable!(),
-      (_, RD1..=RD2) => unreachable!(),
+      (CT0.. , CT0..) if a.tag() == b.tag() => self.anni(a, b),
+      (CT0.. , CT0..) => self.comm(a, b),
+      (CT0.. , ERA  ) => self.era2(a),
+      (ERA   , CT0..) => self.era2(b),
+      (REF   , ERA  ) => self.eras += 1,
+      (ERA   , REF  ) => self.eras += 1,
+      (ERA   , ERA  ) => self.eras += 1,
+      (VR1   , _    ) => self.link(a, b),
+      (VR2   , _    ) => self.link(a, b),
+      (_     , VR1  ) => self.link(b, a),
+      (_     , VR2  ) => self.link(b, a),
+      (CT0.. , NUM  ) => self.copy(a, b),
+      (NUM   , CT0..) => self.copy(b, a),
+      (NUM   , ERA  ) => self.eras += 1,
+      (ERA   , NUM  ) => self.eras += 1,
+      (NUM   , NUM  ) => self.eras += 1,
+      (OP2   , NUM  ) => self.op2n(a, b),
+      (NUM   , OP2  ) => self.op2n(b, a),
+      (OP1   , NUM  ) => self.op1n(a, b),
+      (NUM   , OP1  ) => self.op1n(b, a),
+      (OP2   , CT0..) => self.comm(a, b),
+      (CT0.. , OP2  ) => self.comm(b, a),
+      (OP1   , CT0..) => self.pass(a, b),
+      (CT0.. , OP1  ) => self.pass(b, a),
+      (OP2   , ERA  ) => self.era2(a),
+      (ERA   , OP2  ) => self.era2(b),
+      (OP1   , ERA  ) => self.era1(a),
+      (ERA   , OP1  ) => self.era1(b),
+      (MAT   , NUM  ) => self.mtch(a, b),
+      (NUM   , MAT  ) => self.mtch(b, a),
+      (MAT   , CT0..) => self.comm(a, b),
+      (CT0.. , MAT  ) => self.comm(b, a),
+      (MAT   , ERA  ) => self.era2(a),
+      (ERA   , MAT  ) => self.era2(b),
+      _               => unreachable!(),
     };
   }
 
@@ -575,25 +549,24 @@ impl Net {
     self.oper += 1;
     let p1 = self.heap.get(a.val(), P1);
     let p2 = self.heap.get(a.val(), P2);
-    let v0 = p1.val() as u32;
-    let v1 = b.val() as u32;
+    let v0 = p1.val() as Val;
+    let v1 = b.val() as Val;
     let v2 = self.prim(v0, v1);
     self.link(Ptr::new(NUM, v2), p2);
     self.heap.free(a.val());
   }
 
-  pub fn prim(&mut self, a: u32, b: u32) -> u32 {
+  pub fn prim(&mut self, a: Val, b: Val) -> Val {
     let a_opr = (a >> 24) & 0xF;
     let b_opr = (b >> 24) & 0xF; // not used yet
     let a_val = a & 0xFFFFFF;
     let b_val = b & 0xFFFFFF;
-    match a_opr as NumericOp {
+    match a_opr as Tag {
       USE => { ((a_val & 0xF) << 24) | b_val }
       ADD => { (a_val.wrapping_add(b_val)) & 0xFFFFFF }
       SUB => { (a_val.wrapping_sub(b_val)) & 0xFFFFFF }
       MUL => { (a_val.wrapping_mul(b_val)) & 0xFFFFFF }
-      DIV if b_val == 0 => { 0xFFFFFF }
-      DIV => { (a_val.wrapping_div(b_val)) & 0xFFFFFF }
+      DIV => { if b_val == 0 { 0xFFFFFF } else { (a_val.wrapping_div(b_val)) & 0xFFFFFF } }
       MOD => { (a_val.wrapping_rem(b_val)) & 0xFFFFFF }
       EQ  => { ((a_val == b_val) as Val) & 0xFFFFFF }
       NE  => { ((a_val != b_val) as Val) & 0xFFFFFF }
