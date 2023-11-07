@@ -88,7 +88,8 @@ impl HostNet {
       }
     }
 
-    let data = self.heap.into_iter().map(|node| node_to_pair(*node)).collect();
+    let mut heap = run::Heap::new(0);
+    heap.data  = self.heap.into_iter().map(|node| node_to_pair(*node)).collect();
 
     // We don't have detailed rewrite statistics,
     // so we put the total rewrite count on an arbitrary rewrite field on the net 
@@ -96,7 +97,7 @@ impl HostNet {
 
     run::Net {
       rdex,
-      heap: run::Heap::from_data(data),
+      heap,
       anni: 0,
       comm: 0,
       eras: 0,
