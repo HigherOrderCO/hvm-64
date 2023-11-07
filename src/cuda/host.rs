@@ -90,14 +90,18 @@ impl HostNet {
 
     let data = self.heap.into_iter().map(|node| node_to_pair(*node)).collect();
 
+    // We don't have detailed rewrite statistics,
+    // so we put the total rewrite count on an arbitrary rewrite field on the net 
+    let oper = self.rwts.try_into().unwrap();
+
     run::Net {
-        rdex,
-        heap: run::Heap::from_data(data),
-        anni: 0,
-        comm: 0,
-        eras: 0,
-        dref: 0,
-        oper: self.rwts.try_into().unwrap(),
+      rdex,
+      heap: run::Heap::from_data(data),
+      anni: 0,
+      comm: 0,
+      eras: 0,
+      dref: 0,
+      oper,
     }
   }
 }
