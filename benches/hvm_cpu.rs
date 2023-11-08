@@ -91,23 +91,39 @@ fn run_file(path: &PathBuf, group: Option<&str>, c: &mut Criterion) {
   }
 }
 
+#[allow(unused_variables)]
 fn benchmark(file_name: &str, book: run::Book, net: run::Net, c: &mut Criterion) {
   c.bench_function(file_name, |b| {
-    b.iter_batched(
-      || net.clone(),
-      |net| black_box(black_box(net).normal(black_box(&book))),
-      criterion::BatchSize::SmallInput,
-    );
+    #[cfg(not(feature = "cuda"))]
+    {
+      b.iter_batched(
+        || net.clone(),
+        |net| black_box(black_box(net).normal(black_box(&book))),
+        criterion::BatchSize::SmallInput,
+      );
+    }
+    #[cfg(feature = "cuda")]
+    {
+      b.iter(|| black_box(hvmc::cuda::host::run_on_gpu(black_box(&book), "main").unwrap()));
+    }
   });
 }
 
+#[allow(unused_variables)]
 fn benchmark_group(file_name: &str, group: &str, book: run::Book, net: run::Net, c: &mut Criterion) {
   c.benchmark_group(group).bench_function(file_name, |b| {
-    b.iter_batched(
-      || net.clone(),
-      |net| black_box(black_box(net).normal(black_box(&book))),
-      criterion::BatchSize::SmallInput,
-    );
+    #[cfg(not(feature = "cuda"))]
+    {
+      b.iter_batched(
+        || net.clone(),
+        |net| black_box(black_box(net).normal(black_box(&book))),
+        criterion::BatchSize::SmallInput,
+      );
+    }
+    #[cfg(feature = "cuda")]
+    {
+      b.iter(|| black_box(hvmc::cuda::host::run_on_gpu(black_box(&book), "main").unwrap()));
+    }
   });
 }
 
