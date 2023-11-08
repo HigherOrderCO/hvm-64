@@ -302,7 +302,7 @@ pub fn num_to_str(num: usize) -> String {
   return str.chars().rev().collect();
 }
 
-pub fn tag_to_port(tag: run::Tag) -> run::Port {
+pub const fn tag_to_port(tag: run::Tag) -> run::Port {
   match tag {
     run::VR1 => run::P1,
     run::VR2 => run::P2,
@@ -385,7 +385,7 @@ pub enum Parent {
   Redex,
   Node { val: run::Val, port: run::Port },
 }
-const PARENT_ROOT: Parent = Parent::Node { val: 0, port: run::P2 };
+const PARENT_ROOT: Parent = Parent::Node { val: run::ROOT.val(), port: tag_to_port(run::ROOT.tag()) };
 
 pub fn tree_to_runtime_go(rt_net: &mut run::Net, tree: &Tree, vars: &mut HashMap<String, Parent>, parent: Parent) -> run::Ptr {
   match tree {
@@ -409,7 +409,6 @@ pub fn tree_to_runtime_go(rt_net: &mut run::Net, tree: &Tree, vars: &mut HashMap
           unreachable!();
         }
         Some(Parent::Node { val: other_val, port: other_port }) => {
-          //println!("linked {} | set {} {:?} as {} {:?}", nam, other_val, other_port, val, port);
           match parent {
             Parent::Redex => { unreachable!(); }
             Parent::Node { val, port } => rt_net.heap.set(*other_val, *other_port, run::Ptr::new(port_to_tag(port), val)),
@@ -417,7 +416,6 @@ pub fn tree_to_runtime_go(rt_net: &mut run::Net, tree: &Tree, vars: &mut HashMap
           return run::Ptr::new(port_to_tag(*other_port), *other_val);
         }
         None => {
-          //println!("linkin {} | iam {} {:?}", nam, val, port);
           vars.insert(nam.clone(), parent);
           run::NULL
         }
@@ -467,7 +465,7 @@ pub fn book_to_runtime(book: &Book) -> run::Book {
   let mut rt_book = run::Book::new();
   for (name, net) in book {
     let id = name_to_val(name);
-    let mut rt = run::Net::new(1 << 16);
+    let mut rt = run::Net::new(1 << 18);
     net_to_runtime(&mut rt, net);
     rt_book.def(id, rt.to_def());
   }
@@ -501,7 +499,7 @@ pub fn tree_from_runtime_go(rt_net: &run::Net, ptr: run::Ptr, parent: Parent, va
       let key = match ptr.tag() {
         run::VR1 => Parent::Node { val: ptr.val(), port: run::P1 },
         run::VR2 => Parent::Node { val: ptr.val(), port: run::P2 },
-        _         => unreachable!(),
+        _        => unreachable!(),
       };
       if let Some(nam) = vars.get(&key) {
         Tree::Var { nam: nam.clone() }

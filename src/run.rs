@@ -11,7 +11,6 @@ pub type Tag = u8;
 pub type Val = u32;
 
 // Core terms.
-
 pub const VR1: Tag = 0x0; // Variable to aux port 1
 pub const VR2: Tag = 0x1; // Variable to aux port 2
 pub const RD1: Tag = 0x2; // Redirect to aux port 1
@@ -47,10 +46,10 @@ pub const NOT: Tag = 0xD; // logical-not
 pub const LSH: Tag = 0xE; // left-shift
 pub const RSH: Tag = 0xF; // right-shift
 
-// Root pointer.
-pub const ERAS: Ptr = Ptr(0x0000_0000 | ERA as Val);
-pub const ROOT: Ptr = Ptr(0x0000_0000 | VR2 as Val);
-pub const NULL: Ptr = Ptr(0x0000_0000);
+pub const INIT: usize = 1 << 16;
+pub const ERAS: Ptr   = Ptr::new(ERA, 0);
+pub const ROOT: Ptr   = Ptr::new(VR2, INIT as Val);
+pub const NULL: Ptr   = Ptr(0x0000_0000);
 
 // An auxiliary port.
 pub type Port = Val;
@@ -95,22 +94,22 @@ pub struct Book {
 
 impl Ptr {
   #[inline(always)]
-  pub fn new(tag: Tag, val: Val) -> Self {
+  pub const fn new(tag: Tag, val: Val) -> Self {
     Ptr((val << 4) | (tag as Val))
   }
 
   #[inline(always)]
-  pub fn data(&self) -> Val {
+  pub const fn data(&self) -> Val {
     return self.0;
   }
 
   #[inline(always)]
-  pub fn tag(&self) -> Tag {
+  pub const fn tag(&self) -> Tag {
     (self.data() & 0xF) as Tag
   }
 
   #[inline(always)]
-  pub fn val(&self) -> Val {
+  pub const fn val(&self) -> Val {
     (self.data() >> 4) as Val
   }
 
@@ -179,6 +178,11 @@ impl Ptr {
     return Ptr::new(self.tag(), self.val() + if self.has_loc() { loc - 1 } else { 0 });
   }
 
+  #[inline(always)]
+  pub fn subtract(&self, dif: Val) -> Ptr {
+    return Ptr::new(self.tag(), self.val() - if *self != NULL && self.has_loc() { dif } else { 0 });
+  }
+
   // Can this redex be skipped (as an optimization)?
   #[inline(always)]
   pub fn can_skip(a: Ptr, b: Ptr) -> bool {
@@ -218,7 +222,7 @@ impl Heap {
   pub fn new(size: usize) -> Heap {
     return Heap {
       data: vec![(NULL, NULL); size],
-      next: 1,
+      next: INIT + 1,
       used: 0,
       full: false,
     };
@@ -238,7 +242,7 @@ impl Heap {
       loop {
         if self.next >= self.data.len() {
           space = 0;
-          self.next = 1;
+          self.next = INIT + 1;
         }
         if self.get(self.next as Val, P1).is_nil() {
           space += 1;
@@ -297,27 +301,12 @@ impl Heap {
 
   #[inline(always)]
   pub fn get_root(&self) -> Ptr {
-    return self.get(0, P2);
+    return self.get(ROOT.val(), P2);
   }
 
   #[inline(always)]
   pub fn set_root(&mut self, value: Ptr) {
-    self.set(0, P2, value);
-  }
-
-  #[inline(always)]
-  pub fn compact(&self) -> Vec<(Ptr, Ptr)> {
-    let mut node = vec![];
-    loop {
-      let p1 = self.data[node.len()].0;
-      let p2 = self.data[node.len()].1;
-      if p1 != NULL || p2 != NULL {
-        node.push((p1, p2));
-      } else {
-        break;
-      }
-    }
-    return node;
+    self.set(ROOT.val(), P2, value);
   }
 }
 
@@ -342,7 +331,23 @@ impl Net {
 
   // Converts to a def.
   pub fn to_def(self) -> Def {
-    Def { rdex: self.rdex, node: self.heap.compact() }
+    let mut node = vec![];
+    let mut rdex = vec![];
+    for i in 0 .. self.heap.data.len() {
+      let p1 = self.heap.data[INIT + node.len()].0;
+      let p2 = self.heap.data[INIT + node.len()].1;
+      if p1 != NULL || p2 != NULL {
+        node.push((p1.subtract(INIT as u32), p2.subtract(INIT as u32)));
+      } else {
+        break;
+      }
+    }
+    for i in 0 .. self.rdex.len() {
+      let p1 = self.rdex[i].0;
+      let p2 = self.rdex[i].1;
+      rdex.push((p1.subtract(INIT as u32), p2.subtract(INIT as u32)));
+    }
+    return Def { rdex, node };
   }
 
   // Reads back from a def.
@@ -609,36 +614,45 @@ impl Net {
     self.dref += 1;
     let mut ptr = ptr;
     // FIXME: change "while" to "if" once lang prevents refs from returning refs
-    while ptr.is_ref() {
+    if ptr.is_ref() {
       // Load the closed net.
       let got = unsafe { book.defs.get_unchecked((ptr.val() as usize) & 0xFFFFFF) };
-      if got.node.len() > 0 {
-        let len = got.node.len() - 1;
-        let loc = self.heap.alloc(len);
-        // Load nodes, adjusted.
-        for i in 0..len as Val {
-          unsafe {
-            let p1 = got.node.get_unchecked(1 + i as usize).0.adjust(loc);
-            let p2 = got.node.get_unchecked(1 + i as usize).1.adjust(loc);
-            self.heap.set(loc + i, P1, p1);
-            self.heap.set(loc + i, P2, p2);
+      if let Some(ret) = self.burn(&got, parent) {
+        return ret;
+      } else {
+        if got.node.len() > 0 {
+          let len = got.node.len() - 1;
+          let loc = self.heap.alloc(len);
+          // Load nodes, adjusted.
+          for i in 0..len as Val {
+            unsafe {
+              let p1 = got.node.get_unchecked(1 + i as usize).0.adjust(loc);
+              let p2 = got.node.get_unchecked(1 + i as usize).1.adjust(loc);
+              self.heap.set(loc + i, P1, p1);
+              self.heap.set(loc + i, P2, p2);
+            }
           }
-        }
-        // Load redexes, adjusted.
-        for r in &got.rdex {
-          let p1 = r.0.adjust(loc);
-          let p2 = r.1.adjust(loc);
-          self.rdex.push((p1, p2));
-        }
-        // Load root, adjusted.
-        ptr = got.node[0].1.adjust(loc);
-        // Link root.
-        if ptr.is_var() {
-          self.set_target(ptr, parent);
+          // Load redexes, adjusted.
+          for r in &got.rdex {
+            let p1 = r.0.adjust(loc);
+            let p2 = r.1.adjust(loc);
+            self.rdex.push((p1, p2));
+          }
+          // Load root, adjusted.
+          ptr = got.node[0].1.adjust(loc);
+          // Link root.
+          if ptr.is_var() {
+            self.set_target(ptr, parent);
+          }
         }
       }
     }
     return ptr;
+  }
+
+  // Optimizations
+  pub fn burn(&mut self, def: &Def, x: Ptr) -> Option<Ptr> {
+    return None;
   }
 
   // Reduces all redexes.
@@ -679,4 +693,5 @@ impl Net {
   pub fn rewrites(&self) -> usize {
     return self.anni + self.comm + self.eras + self.dref + self.oper;
   }
+
 }
