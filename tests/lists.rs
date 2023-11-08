@@ -12,25 +12,22 @@ fn list_got(index: u32) -> DefinitionBook {
 
 #[test]
 fn test_list_got() {
-  let rwts = [
-    list_got(0),
-    list_got(1),
-    list_got(3),
-    list_got(7),
-    list_got(15),
-    list_got(31),
-  ]
-  .map(|mut book| hvm_lang_normal(&mut book, 2048))
-  .map(|(rnet, _, _)| rnet.rewrites());
+  let mut rwts = Vec::new();
+
+  for i in [0, 1, 3, 7, 15, 31] {
+    let mut book = list_got(i);
+    let (rnet, _, _) = hvm_lang_normal(&mut book, 2048);
+    rwts.push(rnet.rewrites())
+  }
 
   assert_debug_snapshot!(rwts[0], @"583");
-  assert_debug_snapshot!(rwts[1], @"619");
-  assert_debug_snapshot!(rwts[2], @"691");
-  assert_debug_snapshot!(rwts[3], @"835");
-  assert_debug_snapshot!(rwts[4], @"1123");
-  assert_debug_snapshot!(rwts[5], @"1699");
+  assert_debug_snapshot!(rwts[1], @"615");
+  assert_debug_snapshot!(rwts[2], @"679");
+  assert_debug_snapshot!(rwts[3], @"807");
+  assert_debug_snapshot!(rwts[4], @"1063");
+  assert_debug_snapshot!(rwts[5], @"1575");
 
-  //Tests the linearity of the function
+  // Tests the linearity of the function
   let delta = rwts[1] - rwts[0];
   assert_eq!(rwts[1] + delta * 2, rwts[2]);
   assert_eq!(rwts[2] + delta * 4, rwts[3]);
@@ -46,23 +43,20 @@ fn list_put(index: u32, value: u32) -> DefinitionBook {
 
 #[test]
 fn test_list_put() {
-  let rwts = [
-    list_put(0, 2),
-    list_put(1, 4),
-    list_put(3, 8),
-    list_put(7, 16),
-    list_put(15, 32),
-    list_put(31, 0),
-  ]
-  .map(|mut book| hvm_lang_normal(&mut book, 2048))
-  .map(|(rnet, _, _)| rnet.rewrites());
+  let mut rwts = Vec::new();
+
+  for (i, value) in [(0, 2), (1, 4), (3, 8), (7, 16), (15, 32), (31, 0)] {
+    let mut book = list_put(i, value);
+    let (rnet, _, _) = hvm_lang_normal(&mut book, 2048);
+    rwts.push(rnet.rewrites())
+  }
 
   assert_debug_snapshot!(rwts[0], @"566");
-  assert_debug_snapshot!(rwts[1], @"593");
-  assert_debug_snapshot!(rwts[2], @"647");
-  assert_debug_snapshot!(rwts[3], @"755");
-  assert_debug_snapshot!(rwts[4], @"971");
-  assert_debug_snapshot!(rwts[5], @"1403");
+  assert_debug_snapshot!(rwts[1], @"588");
+  assert_debug_snapshot!(rwts[2], @"632");
+  assert_debug_snapshot!(rwts[3], @"720");
+  assert_debug_snapshot!(rwts[4], @"896");
+  assert_debug_snapshot!(rwts[5], @"1248");
 
   //Tests the linearity of the function
   let delta = rwts[1] - rwts[0];
