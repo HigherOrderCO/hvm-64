@@ -85,13 +85,12 @@ fn test_tree_alloc() {
 }
 
 #[test]
-#[cfg(not(feature = "cuda"))] // FIXME: Cuda does not support native numbers
 fn test_queue() {
   let mut book = load_lang("queue.hvm");
   let (rnet, net, id_map) = hvm_lang_normal(&mut book, 512);
   let readback = hvm_lang_readback(&net, &book, id_map);
 
-  assert_snapshot!(show_net(&net), @"((#1 (((#2 (((#3 ((* @7) b)) (* b)) c)) (* c)) d)) (* d))");
-  assert_snapshot!(readback, @"λa λ* ((a 1) λb λ* ((b 2) λc λ* ((c 3) λ* λd d)))");
-  assert_debug_snapshot!(rnet.rewrites(), @"62");
+  assert_snapshot!(show_net(&net), @"(((* @B) (((((b c) (b c)) (((({2 (d e) (e f)} (d f)) ((* @A) g)) (* g)) h)) (* h)) i)) (* i))");
+  assert_snapshot!(readback, @"λa λ* ((a λ* λb b) λc λ* ((c λd λe (d e)) λf λ* ((f λg λh (g (g h))) λ* λi i)))");
+  assert_debug_snapshot!(rnet.rewrites(), @"65");
 }
