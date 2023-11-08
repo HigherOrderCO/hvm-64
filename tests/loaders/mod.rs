@@ -56,7 +56,7 @@ pub fn normal(book: Book, size: usize) -> (run::Net, Net) {
     rnet.normal(&book);
     rnet
   }
-  
+
   #[cfg(feature = "cuda")]
   fn normal_gpu(book: run::Book) -> run::Net {
     let host_net = hvmc::cuda::host::run_on_gpu(&book, "main").unwrap();
