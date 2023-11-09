@@ -5,12 +5,11 @@ mod numeric_tests {
   use crate::loaders::*;
   use hvmc::{
     ast::{show_net, Book},
-    run,
-    run::NumericOp,
+    run::{self, Tag},
   };
   use insta::{assert_debug_snapshot, assert_snapshot};
 
-  fn op_net(lnum: u32, op: NumericOp, rnum: u32) -> Book {
+  fn op_net(lnum: u32, op: Tag, rnum: u32) -> Book {
     parse_core(&format!("@main = root & <#{lnum} <#{rnum} root>> ~ #{op}"))
   }
 
