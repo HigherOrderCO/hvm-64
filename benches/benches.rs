@@ -1,4 +1,4 @@
-use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion};
+use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use hvmc::{ast::*, *};
 use std::{
   ffi::OsStr,
@@ -136,7 +136,7 @@ fn benchmark_group(file_name: &str, group: String, book: run::Book, net: run::Ne
 
         black_box(dev.synchronize().unwrap());
       },
-      BatchSize::PerIteration,
+      criterion::BatchSize::PerIteration,
     )
   });
 }
