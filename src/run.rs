@@ -63,7 +63,7 @@ pub struct Ptr(pub Val);
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Heap {
-  data: Vec<(Ptr, Ptr)>,
+  pub(crate) data: Vec<(Ptr, Ptr)>,
   next: usize,
   used: usize,
   full: bool,

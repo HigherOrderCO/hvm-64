@@ -63,6 +63,50 @@ pub struct HostNet {
   rwts: u64,
 }
 
+impl HostNet {
+  pub fn to_runtime_net(self) -> run::Net {
+    fn wire_to_rdex(wire: Wire) -> (run::Ptr, run::Ptr) {
+      (run::Ptr((wire & 0xFFFFFFFF) as Val), run::Ptr((wire >> 32) as Val))
+    }
+
+    fn node_to_pair(node: Node) -> (run::Ptr, run::Ptr) {
+      let Node { ports: [a, b] } = node;
+      (run::Ptr(a), run::Ptr(b))
+    }
+
+    let mut rdex = Vec::new();
+
+    for i in 0..BAGS_SIZE {
+      let wire: u64 = self.bags[i as usize];
+      if i % RBAG_SIZE == 0 && wire > 0 {
+        rdex.push(wire_to_rdex(wire));
+      } else if i % RBAG_SIZE >= 1 {
+        let (a, b) = wire_to_rdex(wire);
+        if a.0 != 0 || b.0 != 0 {
+          rdex.push((a, b));
+        }
+      }
+    }
+
+    let mut heap = run::Heap::new(0);
+    heap.data  = self.heap.into_iter().map(|node| node_to_pair(*node)).collect();
+
+    // We don't have detailed rewrite statistics,
+    // so we put the total rewrite count on an arbitrary rewrite field on the net 
+    let oper = self.rwts.try_into().unwrap();
+
+    run::Net {
+      rdex,
+      heap,
+      anni: 0,
+      comm: 0,
+      eras: 0,
+      dref: 0,
+      oper,
+    }
+  }
+}
+
 // Gets the target ref of a var or redirection pointer
 #[inline(always)]
 fn target(net: &mut HostNet, ptr: Ptr) -> &mut Ptr {
@@ -174,28 +218,59 @@ pub fn net_to_cpu(dev: &Arc<CudaDevice>, device_net: CudaSlice<CudaNet>) -> Resu
   Ok(net)
 }
 
+fn show_ptr(ptr: Ptr) -> String {
+  match ptr {
+    0x00000000 => "           ".to_string(),
+    0xFFFFFFFF => "[LOCK.....]".to_string(),
+    _ => {
+      let tag_str = match (ptr & 0xF) as Tag {
+        run::VR1 => "VR1",
+        run::VR2 => "VR2",
+        run::RD1 => "RD1",
+        run::RD2 => "RD2",
+        run::REF => "REF",
+        run::ERA => "ERA",
+        run::NUM => "NUM",
+        run::OP2 => "OP2",
+        run::OP1 => "OP1",
+        run::MAT => "MAT",
+        run::CT0 => "CT0",
+        run::CT1 => "CT1",
+        run::CT2 => "CT2",
+        run::CT3 => "CT3",
+        run::CT4 => "CT4",
+        run::CT5 => "CT5",
+        _ => "???"
+      };
+  
+      let val = (ptr >> 4) as Val;
+      format!("{}:{:07X}", tag_str, val)
+    }
+  }
+}
+
 // Prints a net in hexadecimal, limited to a given size
 fn print_net(net: &HostNet) {
   println!("Bags:");
   for i in 0..BAGS_SIZE {
-    if i % RBAG_SIZE == 0 && net.bags[i as usize] > 0 {
-      println!("- [{:07X}] LEN={}", i, net.bags[i as usize]);
+    let wire = net.bags[i as usize];
+    if i % RBAG_SIZE == 0 && wire > 0 {
+      println!("- [{:07X}] LEN={}", i, wire);
     } else if i % RBAG_SIZE >= 1 {
-      //let a = wire_lft(net.bags[i as usize]);
-      //let b = wire_rgt(net.bags[i as usize]);
-      //if a != 0 || b != 0 {
-        //println!("- [{:07X}] {} {}", i, show_ptr(a,0), show_ptr(b,1));
-      //}
+      // let a = (wire & 0xFFFFFFFF) as Val;
+      // let b = (wire >> 32) as Val;
+      // if a != 0 || b != 0 {
+      //   println!("- [{:07X}] {} {}", i, show_ptr(a), show_ptr(b));
+      // }
     }
   }
-  //println!("Heap:");
-  //for i in 0..HEAP_SIZE {
-    //let a = net.heap[i as usize].ports[P1];
-    //let b = net.heap[i as usize].ports[P2];
-    //if a != 0 || b != 0 {
-      //println!("- [{:07X}] {} {}", i, show_ptr(a,0), show_ptr(b,1));
-    //}
-  //}
+  // println!("Heap:");
+  // for i in 0..HEAP_SIZE {
+  //   let Node { ports: [a, b] } = net.heap[i as usize];
+  //   if a != 0 || b != 0 {
+  //     println!("- [{:07X}] {} {}", i, show_ptr(a), show_ptr(b));
+  //   }
+  // }
   println!("Rwts: {}", net.rwts);
 }
 
