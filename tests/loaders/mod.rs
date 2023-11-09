@@ -14,6 +14,12 @@ pub fn parse_core(code: &str) -> Book {
   do_parse_book(code)
 }
 
+// Loads file and generate Book from hvm-core syntax
+pub fn load_core(file: &str) -> Book {
+  let code = load_file(file);
+  parse_core(&code)
+}
+
 // Parses code and generate DefinitionBook from hvm-lang syntax
 pub fn parse_lang(code: &str) -> DefinitionBook {
   parser::parse_definition_book(code).unwrap()
@@ -59,7 +65,7 @@ pub fn normal(book: Book, size: usize) -> (run::Net, Net) {
 
   #[cfg(feature = "cuda")]
   fn normal_gpu(book: run::Book) -> run::Net {
-    let host_net = hvmc::cuda::host::run_on_gpu(&book, "main").unwrap();
+    let (_, host_net) = hvmc::cuda::host::run_on_gpu(&book, "main").unwrap();
     host_net.to_runtime_net()
   }
 
