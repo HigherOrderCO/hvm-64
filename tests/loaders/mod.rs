@@ -14,12 +14,6 @@ pub fn parse_core(code: &str) -> Book {
   do_parse_book(code)
 }
 
-// Loads file and generate Book from hvm-core syntax
-pub fn load_core(file: &str) -> Book {
-  let code = load_file(file);
-  parse_core(&code)
-}
-
 // Parses code and generate DefinitionBook from hvm-lang syntax
 pub fn parse_lang(code: &str) -> DefinitionBook {
   parser::parse_definition_book(code).unwrap()
@@ -39,13 +33,11 @@ pub fn replace_template(mut code: String, map: &[(&str, &str)]) -> String {
   code
 }
 
-#[track_caller]
-pub fn hvm_lang_readback(net: &Net, book: &DefinitionBook, id_map: HashMap<run::Val, DefId>) -> String {
+pub fn hvm_lang_readback(net: &Net, book: &DefinitionBook, id_map: HashMap<run::Val, DefId>) -> (String, bool) {
   let net = hvm_lang::net::hvmc_to_net(net, &|val| id_map[&val]).unwrap();
   let (res_term, valid_readback) = hvm_lang::term::net_to_term::net_to_term_non_linear(&net, book);
-  assert!(valid_readback);
 
-  res_term.to_string(&book.def_names)
+  (res_term.to_string(&book.def_names), valid_readback)
 }
 
 pub fn hvm_lang_normal(book: &mut DefinitionBook, size: usize) -> (run::Net, Net, HashMap<run::Val, DefId>) {
