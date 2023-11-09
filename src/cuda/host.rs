@@ -280,7 +280,7 @@ impl std::fmt::Display for HostNet {
   }
 }
 
-pub fn book_to_hostnet(book: &run::Book, entry_point_function: &str) -> Result<(HostNet, Vec<u32>), Box<dyn std::error::Error>> {
+pub fn setup_gpu(book: &run::Book, entry_point_function: &str) -> Result<(Arc<CudaDevice>, CudaFunction, CudaFunction, CudaFunction, CudaNetHandle, CudaSlice<u32>), Box<dyn std::error::Error>> {
   let (book_data, jump_data, function_ids) = gen_cuda_book_data(book);
 
   let root_fn_id = *function_ids.get(entry_point_function).unwrap_or_else(|| {
@@ -288,19 +288,6 @@ pub fn book_to_hostnet(book: &run::Book, entry_point_function: &str) -> Result<(
     panic!("Entry point function not found: {}", entry_point_function);
   });
 
-  // Allocates net on CPU
-  let cpu_net = mknet(root_fn_id, &jump_data);
-
-  Ok((cpu_net, book_data))
-}
-
-pub fn run_on_gpu(book: &run::Book, entry_point_function: &str) -> Result<HostNet, Box<dyn std::error::Error>> {
-  let (cpu_net, book_data) = book_to_hostnet(&book, entry_point_function)?;
-  let (_time_elapsed_secs, norm) = run_hostnet(cpu_net, book_data)?;
-  Ok(norm)
-}
-
-pub fn setup_gpu(cpu_net: HostNet, book_data: Vec<u32>) -> Result<(Arc<CudaDevice>, CudaFunction, CudaFunction, CudaFunction, CudaNetHandle, CudaSlice<u32>), Box<dyn std::error::Error>> {
   let gpu_index = 0; // TODO: Receive GPU index as argument to let user choose which GPU to use
   let dev = CudaDevice::new(gpu_index)?;
 
@@ -327,6 +314,9 @@ pub fn setup_gpu(cpu_net: HostNet, book_data: Vec<u32>) -> Result<(Arc<CudaDevic
   let global_expand = dev.get_func(MODULE_NAME, "global_expand").expect("Function `global_expand` not found");
   let global_rewrite = dev.get_func(MODULE_NAME, "global_rewrite").expect("Function `global_rewrite` not found");
 
+  // Allocates net on CPU
+  let cpu_net = mknet(root_fn_id, &jump_data);
+
   // Uploads net and book to GPU
   let gpu_net = net_to_gpu(&dev, &cpu_net)?;
 
@@ -336,8 +326,8 @@ pub fn setup_gpu(cpu_net: HostNet, book_data: Vec<u32>) -> Result<(Arc<CudaDevic
   Ok((dev, global_expand_prepare, global_expand, global_rewrite, gpu_net, gpu_book))
 }
 
-pub fn run_hostnet(cpu_net: HostNet, book_data: Vec<u32>) -> Result<(f64, HostNet), Box<dyn std::error::Error>> {
-  let (dev, global_expand_prepare, global_expand, global_rewrite, gpu_net, gpu_book) = setup_gpu(cpu_net, book_data)?;
+pub fn run_on_gpu(book: &run::Book, entry_point_function: &str) -> Result<(f64, HostNet), Box<dyn std::error::Error>> {
+  let (dev, global_expand_prepare, global_expand, global_rewrite, gpu_net, gpu_book) = setup_gpu(book, entry_point_function)?;
 
   let time_before = std::time::Instant::now();
 

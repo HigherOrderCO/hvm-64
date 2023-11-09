@@ -22,11 +22,9 @@ fn load_from_core<P: AsRef<Path>>(file: P) -> (run::Book, run::Net) {
 
 // Loads file and generate net from hvm-lang syntax
 fn load_from_lang<P: AsRef<Path>>(file: P) -> (run::Book, run::Net) {
-  let prelude = fs::read_to_string(format!("{}/benches/prelude.hvm", env!("CARGO_MANIFEST_DIR"))).unwrap();
   let code = fs::read_to_string(file).unwrap();
   let (size, code) = extract_size(&code);
 
-  let code = prelude + "\n" + code;
   let mut book = hvm_lang::term::parser::parse_definition_book(&code).unwrap();
   let (book, _) = hvm_lang::compile_book(&mut book).unwrap();
   let book = ast::book_to_runtime(&book);
@@ -123,12 +121,8 @@ fn benchmark_group(file_name: &str, group: String, book: run::Book, net: run::Ne
   #[cfg(feature = "cuda")]
   c.benchmark_group(group).sample_size(10).bench_function(file_name, |b| {
     b.iter_batched(
-      || {
-        let (cpu_net, book_data) = cuda::host::book_to_hostnet(&book, "main").unwrap();
-        cuda::host::setup_gpu(cpu_net, book_data).unwrap()
-      },
+      || cuda::host::setup_gpu(&book, "main").unwrap(),
       |(dev, global_expand_prepare, global_expand, global_rewrite, gpu_net, gpu_book)| {
-
         black_box(
           cuda::host::cuda_normalize_net(
             global_expand_prepare,

@@ -6,7 +6,7 @@
 
 use hvmc::ast;
 #[cfg(feature = "cuda")]
-use hvmc::cuda::host::{run_hostnet, book_to_hostnet, gen_cuda_book_data};
+use hvmc::cuda::host::{run_on_gpu, gen_cuda_book_data};
 use hvmc::run;
 use std::env;
 use std::fs;
@@ -45,12 +45,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(feature = "cuda")]
     "run-gpu" => {
       let book = load(f_name).0;
-      let (hostnet, book_data) = book_to_hostnet(&book, "main")?;
-
-      println!("\nINPUT\n=====\n");
-      println!("{hostnet}");
-
-      let (time_elapsed_secs, norm) = run_hostnet(hostnet, book_data)?;
+      let (time_elapsed_secs, norm) = run_on_gpu(&book, "main")?;
 
       println!("\nNORMAL ~ rewrites={}\n======\n", norm.rewrites());
       println!("{norm}");
