@@ -1,4 +1,4 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion};
 use hvmc::{ast::*, *};
 use std::{
   ffi::OsStr,
@@ -56,7 +56,7 @@ fn run_programs_dir(c: &mut Criterion) {
   run_dir(&root, None, c);
 }
 
-fn run_dir(path: &PathBuf, group: Option<&str>, c: &mut Criterion) {
+fn run_dir(path: &PathBuf, group: Option<String>, c: &mut Criterion) {
   let dir_entries = std::fs::read_dir(path).unwrap().flatten();
 
   for entry in dir_entries {
@@ -64,19 +64,20 @@ fn run_dir(path: &PathBuf, group: Option<&str>, c: &mut Criterion) {
 
     if entry.is_dir() {
       let dir_name = entry.file_stem().unwrap().to_string_lossy();
+
       let group = match group {
-        Some(group) => format!("{group}/{dir_name}"),
+        Some(ref group) => format!("{group}/{dir_name}"),
         None => dir_name.to_string(),
       };
 
-      run_dir(entry, Some(&group), c)
+      run_dir(entry, Some(group), c)
     } else {
-      run_file(entry, group, c);
+      run_file(entry, group.clone(), c);
     }
   }
 }
 
-fn run_file(path: &PathBuf, group: Option<&str>, c: &mut Criterion) {
+fn run_file(path: &PathBuf, mut group: Option<String>, c: &mut Criterion) {
   let (book, net) = match path.extension().and_then(OsStr::to_str) {
     Some("hvmc") => load_from_core(path),
     Some("hvm") => load_from_lang(path),
@@ -85,45 +86,64 @@ fn run_file(path: &PathBuf, group: Option<&str>, c: &mut Criterion) {
 
   let file_name = path.file_stem().unwrap().to_string_lossy();
 
+  if cfg!(feature = "cuda") {
+    group = Some(match group {
+      Some(group) => format!("cuda/{group}"),
+      None => "cuda".to_string(),
+    });
+  };
+
   match group {
     Some(group) => benchmark_group(&file_name, group, book, net, c),
     None => benchmark(&file_name, book, net, c),
   }
 }
 
-#[allow(unused_variables)]
 fn benchmark(file_name: &str, book: run::Book, net: run::Net, c: &mut Criterion) {
   c.bench_function(file_name, |b| {
-    #[cfg(not(feature = "cuda"))]
-    {
-      b.iter_batched(
-        || net.clone(),
-        |net| black_box(black_box(net).normal(black_box(&book))),
-        criterion::BatchSize::SmallInput,
-      );
-    }
-    #[cfg(feature = "cuda")]
-    {
-      b.iter(|| black_box(hvmc::cuda::host::run_on_gpu(black_box(&book), "main").unwrap()));
-    }
+    b.iter_batched(
+      || net.clone(),
+      |net| black_box(black_box(net).normal(black_box(&book))),
+      criterion::BatchSize::SmallInput,
+    );
   });
 }
 
 #[allow(unused_variables)]
-fn benchmark_group(file_name: &str, group: &str, book: run::Book, net: run::Net, c: &mut Criterion) {
+fn benchmark_group(file_name: &str, group: String, book: run::Book, net: run::Net, c: &mut Criterion) {
+  #[cfg(not(feature = "cuda"))]
   c.benchmark_group(group).bench_function(file_name, |b| {
-    #[cfg(not(feature = "cuda"))]
-    {
-      b.iter_batched(
-        || net.clone(),
-        |net| black_box(black_box(net).normal(black_box(&book))),
-        criterion::BatchSize::SmallInput,
-      );
-    }
-    #[cfg(feature = "cuda")]
-    {
-      b.iter(|| black_box(hvmc::cuda::host::run_on_gpu(black_box(&book), "main").unwrap()));
-    }
+    b.iter_batched(
+      || net.clone(),
+      |net| black_box(black_box(net).normal(black_box(&book))),
+      criterion::BatchSize::SmallInput,
+    );
+  });
+
+  #[cfg(feature = "cuda")]
+  c.benchmark_group(group).sample_size(10).bench_function(file_name, |b| {
+    b.iter_batched(
+      || {
+        let (cpu_net, book_data) = cuda::host::book_to_hostnet(&book, "main").unwrap();
+        cuda::host::setup_gpu(cpu_net, book_data).unwrap()
+      },
+      |(dev, global_expand_prepare, global_expand, global_rewrite, gpu_net, gpu_book)| {
+
+        black_box(
+          cuda::host::cuda_normalize_net(
+            global_expand_prepare,
+            global_expand,
+            global_rewrite,
+            &gpu_net.device_net,
+            &gpu_book,
+          )
+          .unwrap(),
+        );
+
+        black_box(dev.synchronize().unwrap());
+      },
+      BatchSize::PerIteration,
+    )
   });
 }
 
