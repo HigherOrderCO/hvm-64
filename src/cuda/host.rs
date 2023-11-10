@@ -105,6 +105,10 @@ impl HostNet {
       oper,
     }
   }
+
+  pub fn rewrites(&self) -> u64 {
+    self.rwts
+  }
 }
 
 // Gets the target ref of a var or redirection pointer
@@ -135,7 +139,7 @@ pub fn mknet(root_fn: u32, jump_data: &[u32]) -> HostNet {
 }
 
 pub struct CudaNetHandle {
-  device_net: CudaSlice<CudaNet>,
+  pub device_net: CudaSlice<CudaNet>,
   device_bags: CudaSlice<Wire>,
   device_heap: CudaSlice<Node>,
   device_head: CudaSlice<Wire>,
@@ -250,31 +254,33 @@ fn show_ptr(ptr: Ptr) -> String {
 }
 
 // Prints a net in hexadecimal, limited to a given size
-fn print_net(net: &HostNet) {
-  println!("Bags:");
-  for i in 0..BAGS_SIZE {
-    let wire = net.bags[i as usize];
-    if i % RBAG_SIZE == 0 && wire > 0 {
-      println!("- [{:07X}] LEN={}", i, wire);
-    } else if i % RBAG_SIZE >= 1 {
-      // let a = (wire & 0xFFFFFFFF) as Val;
-      // let b = (wire >> 32) as Val;
-      // if a != 0 || b != 0 {
-      //   println!("- [{:07X}] {} {}", i, show_ptr(a), show_ptr(b));
-      // }
+impl std::fmt::Display for HostNet {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    writeln!(f, "Bags:")?;
+    for i in 0..BAGS_SIZE {
+      let wire = self.bags[i as usize];
+      if i % RBAG_SIZE == 0 && wire > 0 {
+        writeln!(f, "- [{:07X}] LEN={}", i, wire)?;
+      } else if i % RBAG_SIZE >= 1 {
+        // let a = (wire & 0xFFFFFFFF) as Val;
+        // let b = (wire >> 32) as Val;
+        // if a != 0 || b != 0 {
+        //   writeln!(f, "- [{:07X}] {} {}", i, show_ptr(a), show_ptr(b))?;
+        // }
+      }
     }
+    // writeln!(f, "Heap:")?;
+    // for i in 0..HEAP_SIZE {
+    //   let Node { ports: [a, b] } = self.heap[i as usize];
+    //   if a != 0 || b != 0 {
+    //     writeln!(f, "- [{:07X}] {} {}", i, show_ptr(a), show_ptr(b))?;
+    //   }
+    // }
+    writeln!(f, "Rwts: {}", self.rwts)
   }
-  // println!("Heap:");
-  // for i in 0..HEAP_SIZE {
-  //   let Node { ports: [a, b] } = net.heap[i as usize];
-  //   if a != 0 || b != 0 {
-  //     println!("- [{:07X}] {} {}", i, show_ptr(a), show_ptr(b));
-  //   }
-  // }
-  println!("Rwts: {}", net.rwts);
 }
 
-pub fn run_on_gpu(book: &run::Book, entry_point_function: &str) -> Result<HostNet, Box<dyn std::error::Error>> {
+pub fn setup_gpu(book: &run::Book, entry_point_function: &str) -> Result<(Arc<CudaDevice>, CudaFunction, CudaFunction, CudaFunction, CudaNetHandle, CudaSlice<u32>), Box<dyn std::error::Error>> {
   let (book_data, jump_data, function_ids) = gen_cuda_book_data(book);
 
   let root_fn_id = *function_ids.get(entry_point_function).unwrap_or_else(|| {
@@ -301,20 +307,15 @@ pub fn run_on_gpu(book: &run::Book, entry_point_function: &str) -> Result<HostNe
     Err(e) => return Err(e.into()),
   };
   const MODULE_NAME: &str = "runtime";
-  println!("Loading module `{}`...", MODULE_NAME);
+  // println!("Loading module `{}`...", MODULE_NAME);
   dev.load_ptx(ptx, MODULE_NAME, &["global_expand_prepare", "global_expand", "global_rewrite"])?;
-  println!("Module `{}` loaded.", MODULE_NAME);
+  // println!("Module `{}` loaded.", MODULE_NAME);
   let global_expand_prepare = dev.get_func(MODULE_NAME, "global_expand_prepare").expect("Function `global_expand_prepare` not found");
   let global_expand = dev.get_func(MODULE_NAME, "global_expand").expect("Function `global_expand` not found");
   let global_rewrite = dev.get_func(MODULE_NAME, "global_rewrite").expect("Function `global_rewrite` not found");
 
-
   // Allocates net on CPU
   let cpu_net = mknet(root_fn_id, &jump_data);
-
-  // Prints the input net
-  println!("\nINPUT\n=====\n");
-  print_net(&cpu_net);
 
   // Uploads net and book to GPU
   let gpu_net = net_to_gpu(&dev, &cpu_net)?;
@@ -322,6 +323,11 @@ pub fn run_on_gpu(book: &run::Book, entry_point_function: &str) -> Result<HostNe
   // Equivalent to: Book* gpu_book = init_book_on_gpu(BOOK_DATA, BOOK_DATA_SIZE);
   let gpu_book = book_to_gpu(&dev, &book_data)?;
 
+  Ok((dev, global_expand_prepare, global_expand, global_rewrite, gpu_net, gpu_book))
+}
+
+pub fn run_on_gpu(book: &run::Book, entry_point_function: &str) -> Result<(f64, HostNet), Box<dyn std::error::Error>> {
+  let (dev, global_expand_prepare, global_expand, global_rewrite, gpu_net, gpu_book) = setup_gpu(book, entry_point_function)?;
 
   let time_before = std::time::Instant::now();
 
@@ -334,17 +340,11 @@ pub fn run_on_gpu(book: &run::Book, entry_point_function: &str) -> Result<HostNe
   // Reads result back to cpu
   let norm = net_to_cpu(&dev, gpu_net.device_net)?;
 
-  // Prints the output
-  println!("\nNORMAL ~ rewrites={}\n======\n", norm.rwts);
-  print_net(&norm);
-  println!("Time: {:.3} s", time_elapsed_secs);
-  println!("RPS : {:.3} million", norm.rwts as f64 / time_elapsed_secs / 1_000_000.);
-
-  Ok(norm)
+  Ok((time_elapsed_secs, norm))
 }
 
 #[inline(always)]
-fn cuda_normalize_net(
+pub fn cuda_normalize_net(
   global_expand_prepare: CudaFunction,
   global_expand: CudaFunction,
   global_rewrite: CudaFunction,

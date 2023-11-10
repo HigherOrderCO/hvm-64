@@ -33,13 +33,11 @@ pub fn replace_template(mut code: String, map: &[(&str, &str)]) -> String {
   code
 }
 
-#[track_caller]
-pub fn hvm_lang_readback(net: &Net, book: &DefinitionBook, id_map: HashMap<run::Val, DefId>) -> String {
+pub fn hvm_lang_readback(net: &Net, book: &DefinitionBook, id_map: HashMap<run::Val, DefId>) -> (String, bool) {
   let net = hvm_lang::net::hvmc_to_net(net, &|val| id_map[&val]).unwrap();
   let (res_term, valid_readback) = hvm_lang::term::net_to_term::net_to_term_non_linear(&net, book);
-  assert!(valid_readback);
 
-  res_term.to_string(&book.def_names)
+  (res_term.to_string(&book.def_names), valid_readback)
 }
 
 pub fn hvm_lang_normal(book: &mut DefinitionBook, size: usize) -> (run::Net, Net, HashMap<run::Val, DefId>) {
@@ -59,7 +57,7 @@ pub fn normal(book: Book, size: usize) -> (run::Net, Net) {
 
   #[cfg(feature = "cuda")]
   fn normal_gpu(book: run::Book) -> run::Net {
-    let host_net = hvmc::cuda::host::run_on_gpu(&book, "main").unwrap();
+    let (_, host_net) = hvmc::cuda::host::run_on_gpu(&book, "main").unwrap();
     host_net.to_runtime_net()
   }
 

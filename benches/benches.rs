@@ -22,11 +22,9 @@ fn load_from_core<P: AsRef<Path>>(file: P) -> (run::Book, run::Net) {
 
 // Loads file and generate net from hvm-lang syntax
 fn load_from_lang<P: AsRef<Path>>(file: P) -> (run::Book, run::Net) {
-  let prelude = fs::read_to_string(format!("{}/benches/prelude.hvm", env!("CARGO_MANIFEST_DIR"))).unwrap();
   let code = fs::read_to_string(file).unwrap();
   let (size, code) = extract_size(&code);
 
-  let code = prelude + "\n" + code;
   let mut book = hvm_lang::term::parser::parse_definition_book(&code).unwrap();
   let (book, _) = hvm_lang::compile_book(&mut book).unwrap();
   let book = ast::book_to_runtime(&book);
@@ -56,7 +54,7 @@ fn run_programs_dir(c: &mut Criterion) {
   run_dir(&root, None, c);
 }
 
-fn run_dir(path: &PathBuf, group: Option<&str>, c: &mut Criterion) {
+fn run_dir(path: &PathBuf, group: Option<String>, c: &mut Criterion) {
   let dir_entries = std::fs::read_dir(path).unwrap().flatten();
 
   for entry in dir_entries {
@@ -64,19 +62,20 @@ fn run_dir(path: &PathBuf, group: Option<&str>, c: &mut Criterion) {
 
     if entry.is_dir() {
       let dir_name = entry.file_stem().unwrap().to_string_lossy();
+
       let group = match group {
-        Some(group) => format!("{group}/{dir_name}"),
+        Some(ref group) => format!("{group}/{dir_name}"),
         None => dir_name.to_string(),
       };
 
-      run_dir(entry, Some(&group), c)
+      run_dir(entry, Some(group), c)
     } else {
-      run_file(entry, group, c);
+      run_file(entry, group.clone(), c);
     }
   }
 }
 
-fn run_file(path: &PathBuf, group: Option<&str>, c: &mut Criterion) {
+fn run_file(path: &PathBuf, mut group: Option<String>, c: &mut Criterion) {
   let (book, net) = match path.extension().and_then(OsStr::to_str) {
     Some("hvmc") => load_from_core(path),
     Some("hvm") => load_from_lang(path),
@@ -84,6 +83,13 @@ fn run_file(path: &PathBuf, group: Option<&str>, c: &mut Criterion) {
   };
 
   let file_name = path.file_stem().unwrap().to_string_lossy();
+
+  if cfg!(feature = "cuda") {
+    group = Some(match group {
+      Some(group) => format!("cuda/{group}"),
+      None => "cuda".to_string(),
+    });
+  };
 
   match group {
     Some(group) => benchmark_group(&file_name, group, book, net, c),
@@ -101,7 +107,9 @@ fn benchmark(file_name: &str, book: run::Book, net: run::Net, c: &mut Criterion)
   });
 }
 
-fn benchmark_group(file_name: &str, group: &str, book: run::Book, net: run::Net, c: &mut Criterion) {
+#[allow(unused_variables)]
+fn benchmark_group(file_name: &str, group: String, book: run::Book, net: run::Net, c: &mut Criterion) {
+  #[cfg(not(feature = "cuda"))]
   c.benchmark_group(group).bench_function(file_name, |b| {
     b.iter_batched(
       || net.clone(),
@@ -109,9 +117,35 @@ fn benchmark_group(file_name: &str, group: &str, book: run::Book, net: run::Net,
       criterion::BatchSize::SmallInput,
     );
   });
+
+  #[cfg(feature = "cuda")]
+  c.benchmark_group(group).bench_function(file_name, |b| {
+    b.iter_batched(
+      || cuda::host::setup_gpu(&book, "main").unwrap(),
+      |(dev, global_expand_prepare, global_expand, global_rewrite, gpu_net, gpu_book)| {
+        black_box(
+          cuda::host::cuda_normalize_net(
+            black_box(global_expand_prepare),
+            black_box(global_expand),
+            black_box(global_rewrite),
+            black_box(&gpu_net.device_net),
+            black_box(&gpu_book),
+          )
+          .unwrap(),
+        );
+
+        black_box(dev.synchronize().unwrap());
+      },
+      criterion::BatchSize::PerIteration,
+    )
+  });
 }
 
 fn interact_benchmark(c: &mut Criterion) {
+  if cfg!(feature = "cuda") {
+    return;
+  }
+
   use ast::Tree::*;
   let mut group = c.benchmark_group("interact");
   group.sample_size(1000);
