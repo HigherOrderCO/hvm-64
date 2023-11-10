@@ -119,17 +119,17 @@ fn benchmark_group(file_name: &str, group: String, book: run::Book, net: run::Ne
   });
 
   #[cfg(feature = "cuda")]
-  c.benchmark_group(group).sample_size(10).bench_function(file_name, |b| {
+  c.benchmark_group(group).bench_function(file_name, |b| {
     b.iter_batched(
       || cuda::host::setup_gpu(&book, "main").unwrap(),
       |(dev, global_expand_prepare, global_expand, global_rewrite, gpu_net, gpu_book)| {
         black_box(
           cuda::host::cuda_normalize_net(
-            global_expand_prepare,
-            global_expand,
-            global_rewrite,
-            &gpu_net.device_net,
-            &gpu_book,
+            black_box(global_expand_prepare),
+            black_box(global_expand),
+            black_box(global_rewrite),
+            black_box(&gpu_net.device_net),
+            black_box(&gpu_book),
           )
           .unwrap(),
         );
@@ -142,6 +142,10 @@ fn benchmark_group(file_name: &str, group: String, book: run::Book, net: run::Ne
 }
 
 fn interact_benchmark(c: &mut Criterion) {
+  if cfg!(feature = "cuda") {
+    return;
+  }
+
   use ast::Tree::*;
   let mut group = c.benchmark_group("interact");
   group.sample_size(1000);
