@@ -1,22 +1,24 @@
 // size = 1 << 8
 
-mul = λm λn λs λz (m (n s) z)
+Mul = λn λm λs (n (m s))
+
+// Church nat
+C2 = λf λx (f (f x))
 
 // Church powers of two
-p1 = (mul C_2 C_1) // 2
-p2 = (mul C_2 p1)  // 4
-p3 = (mul C_2 p2)  // 8
-p4 = (mul C_2 p3)  // 16
-p5 = (mul C_2 p4)  // 32
-p6 = (mul C_2 p5)  // 64
-p7 = (mul C_2 p6)  // 128
-p8 = (mul C_2 p7)  // 256
+P2 = (Mul C2 C2) // 4
+P3 = (Mul C2 P2) // 8
+P4 = (Mul C2 P3) // 16
+P5 = (Mul C2 P4) // 32
+P6 = (Mul C2 P5) // 64
+P7 = (Mul C2 P6) // 128
+P8 = (Mul C2 P7) // 256
 
 // Booleans
-true = λt λf t
-false = λt λf f
-not = λb ((b false) true)
-neg = λb λt λf (b f t)
+True = λt λf t
+False = λt λf f
+Not = λb ((b False) True)
+Neg = λb λt λf (b f t)
 
 // Negates 'true' 256 times: 'neg' is faster than 'not' because it fuses
-Main = (p8 neg true)
+Main = (P8 Neg True)
