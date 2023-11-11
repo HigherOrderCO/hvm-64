@@ -29,6 +29,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
       let start_time = std::time::Instant::now();
       net.expand(&book, run::ROOT);
       net.normal(&book);
+      let elapsed = start_time.elapsed().as_millis() as f64 / 1000.0;
+      let rps = net.rewrites() as f64 / elapsed;
 
       println!("{}", ast::show_runtime_net(&net));
 
@@ -40,8 +42,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("- ERAS : {}", net.eras);
         println!("- DREF : {}", net.dref);
         println!("- OPER : {}", net.oper);
-        println!("TIME   : {:.3} s", (start_time.elapsed().as_millis() as f64) / 1000.0);
-        println!("RPS    : {:.3} m", (net.rewrites() as f64) / (start_time.elapsed().as_millis() as f64) / 1000.0);
+        println!("TIME   : {:.3} s", elapsed);
+        println!("RPS    : {:.3} m", rps / 1_000_000.0);
       }
     }
     #[cfg(feature = "cuda")]
