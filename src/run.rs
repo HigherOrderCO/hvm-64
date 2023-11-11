@@ -51,6 +51,9 @@ pub const ERAS: Ptr   = Ptr::new(ERA, 0);
 pub const ROOT: Ptr   = Ptr::new(VR2, INIT as Val);
 pub const NULL: Ptr   = Ptr(0x0000_0000);
 
+// Manually compiled example
+pub const FOO : Val = 0xf618;
+
 // An auxiliary port.
 pub type Port = Val;
 pub const P1: Port = 0;
@@ -396,15 +399,9 @@ impl Net {
 
   // Performs an interaction over a redex.
   pub fn interact(&mut self, book: &Book, a: Ptr, b: Ptr) {
-    let mut a = a;
-    let mut b = b;
-    // Dereference A
-    if a.is_ref() && b.is_pri() && !b.is_skp() {
-      a = self.deref(book, a, b);
-    } else if b.is_ref() && a.is_pri() && !a.is_skp() {
-      b = self.deref(book, b, a);
-    }
     match (a.tag(), b.tag()) {
+      (REF   , OP2..) => self.call(book, a, b),
+      (OP2.. , REF  ) => self.call(book, b, a),
       (CT0.. , CT0..) if a.tag() == b.tag() => self.anni(a, b),
       (CT0.. , CT0..) => self.comm(a, b),
       (CT0.. , ERA  ) => self.era2(a),
@@ -513,7 +510,6 @@ impl Net {
     self.heap.free(a.val());
   }
 
-
   pub fn op2n(&mut self, a: Ptr, b: Ptr) {
     self.oper += 1;
     let mut p1 = self.heap.get(a.val(), P1);
@@ -610,49 +606,44 @@ impl Net {
 
   // Expands a closed net.
   #[inline(always)]
-  pub fn deref(&mut self, book: &Book, ptr: Ptr, parent: Ptr) -> Ptr {
+  pub fn call(&mut self, book: &Book, ptr: Ptr, par: Ptr) {
     self.dref += 1;
     let mut ptr = ptr;
     // FIXME: change "while" to "if" once lang prevents refs from returning refs
     if ptr.is_ref() {
-      // Load the closed net.
-      let got = unsafe { book.defs.get_unchecked((ptr.val() as usize) & 0xFFFFFF) };
-      if let Some(ret) = self.burn(&got, parent) {
-        return ret;
-      } else {
-        if got.node.len() > 0 {
-          let len = got.node.len() - 1;
-          let loc = self.heap.alloc(len);
-          // Load nodes, adjusted.
-          for i in 0..len as Val {
-            unsafe {
-              let p1 = got.node.get_unchecked(1 + i as usize).0.adjust(loc);
-              let p2 = got.node.get_unchecked(1 + i as usize).1.adjust(loc);
-              self.heap.set(loc + i, P1, p1);
-              self.heap.set(loc + i, P2, p2);
-            }
-          }
-          // Load redexes, adjusted.
-          for r in &got.rdex {
-            let p1 = r.0.adjust(loc);
-            let p2 = r.1.adjust(loc);
-            self.rdex.push((p1, p2));
-          }
-          // Load root, adjusted.
-          ptr = got.node[0].1.adjust(loc);
-          // Link root.
-          if ptr.is_var() {
-            self.set_target(ptr, parent);
-          }
+
+      // MANUALLY COMPILED:
+      if ptr.val() == FOO {
+        if self.foo(ptr, par) {
+          return;
         }
       }
-    }
-    return ptr;
-  }
 
-  // Optimizations
-  pub fn burn(&mut self, def: &Def, x: Ptr) -> Option<Ptr> {
-    return None;
+      // Load the closed net.
+      let got = unsafe { book.defs.get_unchecked((ptr.val() as usize) & 0xFFFFFF) };
+      if got.node.len() > 0 {
+        let len = got.node.len() - 1;
+        let loc = self.heap.alloc(len);
+        // Load nodes, adjusted.
+        for i in 0..len as Val {
+          unsafe {
+            let p1 = got.node.get_unchecked(1 + i as usize).0.adjust(loc);
+            let p2 = got.node.get_unchecked(1 + i as usize).1.adjust(loc);
+            self.heap.set(loc + i, P1, p1);
+            self.heap.set(loc + i, P2, p2);
+          }
+        }
+        // Load redexes, adjusted.
+        for r in &got.rdex {
+          let p1 = r.0.adjust(loc);
+          let p2 = r.1.adjust(loc);
+          self.rdex.push((p1, p2));
+        }
+        // Load root, adjusted.
+        ptr = got.node[0].1.adjust(loc);
+      }
+    }
+    self.link(ptr, par);
   }
 
   // Reduces all redexes.
@@ -684,8 +675,8 @@ impl Net {
       self.expand(book, Ptr::new(VR1, ptr.val()));
       self.expand(book, Ptr::new(VR2, ptr.val()));
     } else if ptr.is_ref() {
-      let exp = self.deref(book, ptr, dir);
-      self.set_target(dir, exp);
+      self.call(book, ptr, dir);
+      //self.set_target(dir, exp);
     }
   }
 
@@ -694,4 +685,92 @@ impl Net {
     return self.anni + self.comm + self.eras + self.dref + self.oper;
   }
 
+  // The FOO function has been manually compiled from:
+  //
+  // @FOO = (? (#0 (x y)) a a) & @FOO ~ (x y)
+  //
+  // Deref @FOO ~ (#N R):
+  //
+  // If #N > 0:
+  //
+  //   (?<(#0 (x y)) a> a) ~ (#N R)
+  //   @FOO ~ (x y)
+  //   --------------------------- anni
+  //   ?<(#0 (x y)) a> ~ #N
+  //   a ~ R
+  //   @FOO ~ (x y)
+  //   --------------------------- oper
+  //   (#0 (x y)) ~ (* (#(X-1) a))
+  //   a ~ R
+  //   @FOO ~ (x y)
+  //   --------------------------- anni
+  //   #0 ~ *
+  //   (x y) ~ (#(X-1) a)
+  //   a ~ R
+  //   @FOO ~ (x y)
+  //   --------------------------- anni
+  //   #0 ~ *
+  //   x ~ #(X-1)
+  //   y ~ a
+  //   a ~ R
+  //   @FOO ~ (x y)
+  //   --------------------------- eras
+  //   @FOO ~ (#(X-1) R)
+  //   
+  // If N == 0:
+  //
+  //   (?<(#0 (x y)) a> a) ~ par=(#0 R)
+  //   @FOO ~ (x y)
+  //   --------------------------- anni
+  //   ?<(#0 (x y)) a> ~ #0
+  //   a ~ R
+  //   @FOO ~ (x y)
+  //   --------------------------- oper
+  //   (#0 (x y)) ~ (a *)
+  //   a ~ R
+  //   @FOO ~ (x y)
+  //   --------------------------- anni
+  //   #0 ~ a
+  //   (x y) ~ *
+  //   a ~ R
+  //   @FOO ~ (x y)
+  //   --------------------------- eras
+  //   #0 ~ a
+  //   x ~ *
+  //   y ~ *
+  //   a ~ R
+  //   @FOO ~ (x y)
+  //   -----------
+  //   #0 ~ R
+  //   @FOO ~ (* *)
+  //
+  // TODO: build a general compiler based on that.
+  fn foo(&mut self, ptr: Ptr, par: Ptr) -> bool {
+    loop {
+      if par.tag() == CT0 {
+        let p1 = self.heap.get(par.val(), P1);
+        let p2 = self.heap.get(par.val(), P2);
+        if p1.is_num() {
+          self.anni += 3;
+          self.oper += 1;
+          self.eras += 1;
+          if p1.val() == 0 {
+            self.link(p2, Ptr::new(NUM, 0));
+            return true;
+          } else {
+            self.link(Ptr::new(VR1, par.val()), Ptr::new(NUM, p1.val() - 1));
+            self.link(Ptr::new(VR2, par.val()), p2);
+            //self.link(Ptr::new(REF, 0xbf3), Ptr::new(CT0, par.val()));
+            continue;
+          }
+        }
+      }
+      break;
+    }
+    return false;
+  }
+
 }
+
+
+

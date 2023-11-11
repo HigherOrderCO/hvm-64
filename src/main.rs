@@ -15,8 +15,6 @@ use std::fs;
 fn main() -> Result<(), Box<dyn std::error::Error>> {
   let args: Vec<String> = env::args().collect();
 
-  //println!("{:x}", ast::name_to_val("add"));
-
   if args.len() < 3 {
     println!("Usage: hvmc <cmd> <file.hvmc> [-s]");
     std::process::exit(1);
@@ -31,6 +29,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
       let start_time = std::time::Instant::now();
       net.expand(&book, run::ROOT);
       net.normal(&book);
+
+      println!("{}", ast::show_runtime_net(&net));
 
       if args.len() >= 4 && args[3] == "-s" {
         println!("");
