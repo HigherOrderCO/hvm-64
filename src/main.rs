@@ -29,7 +29,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
       let start_time = std::time::Instant::now();
       net.expand(&book, run::ROOT);
       net.normal(&book);
-      let elapsed = start_time.elapsed().as_millis() as f64 / 1000.0;
+      let elapsed = start_time.elapsed().as_nanos() as f64 / 1_000_000_000.0;
       let rps = net.rewrites() as f64 / elapsed;
 
       println!("{}", ast::show_runtime_net(&net));
