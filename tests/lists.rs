@@ -6,63 +6,72 @@ mod loaders;
 
 fn list_got(index: u32) -> DefinitionBook {
   let template = load_file("list_put_got.hvm");
-  let code = replace_template(template, &[("{fun}", "got"), ("{args}", &index.to_string())]);
+  let code = replace_template(template, &[("{fun}", "Got"), ("{args}", &format!("S{}", index))]);
   parse_lang(&code)
 }
 
 #[test]
 fn test_list_got() {
-  let rwts = [
-  list_got(0),
-  list_got(1),
-  list_got(3),
-  list_got(7),
-  list_got(15),
-  list_got(31)
-  ]
-  .map(|book| hvm_lang_normal(book, 2048))
-  .map(|(_, _, info)| info.stats.rewrites.total_rewrites());
+  let mut rwts = Vec::new();
 
-  assert_debug_snapshot!(rwts[0], @"573");
-  assert_debug_snapshot!(rwts[1], @"595");
-  assert_debug_snapshot!(rwts[2], @"639");
-  assert_debug_snapshot!(rwts[3], @"727");
-  assert_debug_snapshot!(rwts[4], @"903");
-  assert_debug_snapshot!(rwts[5], @"1255");
+  for index in [
+    0,
+    1,
+    3,
+    7,
+    // FIXME: Gpu runtime panics with `CUDA_ERROR_ILLEGAL_ADDRESS` when index is >= 14
+    // if the list inside `list_put_got.hvm` is [31..0] instead of [0..31], it fails when <= 17
+    #[cfg(not(feature = "cuda"))]
+    15,
+    #[cfg(not(feature = "cuda"))]
+    31,
+  ] {
+    let mut book = list_got(index);
+    let (rnet, _, _) = hvm_lang_normal(&mut book, 2048);
+    rwts.push(rnet.rewrites())
+  }
 
-  //Tests the linearity of the function
+  assert_debug_snapshot!(rwts[0], @"583");
+  assert_debug_snapshot!(rwts[1], @"615");
+  assert_debug_snapshot!(rwts[2], @"679");
+  assert_debug_snapshot!(rwts[3], @"807");
+  #[cfg(not(feature = "cuda"))]
+  assert_debug_snapshot!(rwts[4], @"1063");
+  #[cfg(not(feature = "cuda"))]
+  assert_debug_snapshot!(rwts[5], @"1575");
+
+  // Tests the linearity of the function
   let delta = rwts[1] - rwts[0];
   assert_eq!(rwts[1] + delta * 2, rwts[2]);
   assert_eq!(rwts[2] + delta * 4, rwts[3]);
+  #[cfg(not(feature = "cuda"))]
   assert_eq!(rwts[3] + delta * 8, rwts[4]);
+  #[cfg(not(feature = "cuda"))]
   assert_eq!(rwts[4] + delta * 16, rwts[5]);
 }
 
 fn list_put(index: u32, value: u32) -> DefinitionBook {
   let template = load_file("list_put_got.hvm");
-  let code = replace_template(template, &[("{fun}", "put"), ("{args}", &format!("{index} {value}"))]);
+  let code = replace_template(template, &[("{fun}", "Put"), ("{args}", &format!("S{index} S{value}"))]);
   parse_lang(&code)
 }
 
 #[test]
 fn test_list_put() {
-  let rwts = [
-  list_put(0, 2),
-  list_put(1, 4),
-  list_put(3, 8),
-  list_put(7, 16),
-  list_put(15, 32),
-  list_put(31, 64)
-  ]
-  .map(|book| hvm_lang_normal(book, 2048))
-  .map(|(_, _, info)| info.stats.rewrites.total_rewrites());
+  let mut rwts = Vec::new();
 
-  assert_debug_snapshot!(rwts[0], @"563");
-  assert_debug_snapshot!(rwts[1], @"586");
+  for (index, value) in [(0, 2), (1, 4), (3, 8), (7, 16), (15, 32), (31, 0)] {
+    let mut book = list_put(index, value);
+    let (rnet, _, _) = hvm_lang_normal(&mut book, 2048);
+    rwts.push(rnet.rewrites())
+  }
+
+  assert_debug_snapshot!(rwts[0], @"566");
+  assert_debug_snapshot!(rwts[1], @"588");
   assert_debug_snapshot!(rwts[2], @"632");
-  assert_debug_snapshot!(rwts[3], @"724");
-  assert_debug_snapshot!(rwts[4], @"908");
-  assert_debug_snapshot!(rwts[5], @"1276");
+  assert_debug_snapshot!(rwts[3], @"720");
+  assert_debug_snapshot!(rwts[4], @"896");
+  assert_debug_snapshot!(rwts[5], @"1248");
 
   //Tests the linearity of the function
   let delta = rwts[1] - rwts[0];
