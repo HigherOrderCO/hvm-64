@@ -1,0 +1,6 @@
+@pred = (? (#0 (x x)) R R)
+
+@main
+  = R
+  & @pred ~ (#10 R)
+

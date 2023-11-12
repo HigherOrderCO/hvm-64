@@ -1,0 +1,6 @@
+// #1 represents addition
+@add = (a (b R))
+& #1 ~ <a <b R>>
+
+@main = R
+  & @add ~ (#123 (#100 R))

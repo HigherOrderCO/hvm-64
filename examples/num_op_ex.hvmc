@@ -1,6 +1,0 @@
-// Performs '123 * 321'.
-// '3' is used for MUL.
-
-@main
-  = R
-  & #3 ~ <#123 <#321 R>>

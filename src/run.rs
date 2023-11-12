@@ -62,10 +62,9 @@ pub struct Ptr(pub Val);
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Heap {
-  pub(crate) data: Vec<(Ptr, Ptr)>,
-  next: usize,
-  used: usize,
-  full: bool,
+  pub data: Vec<(Ptr, Ptr)>,
+  pub next: usize,
+  pub full: bool,
 }
 
 // A interaction combinator net.
@@ -228,17 +227,17 @@ impl Heap {
     return Heap {
       data: vec![(NULL, NULL); size],
       next: INIT + 1,
-      used: 0,
       full: false,
     };
   }
 
   #[inline(always)]
   pub fn alloc(&mut self, size: usize) -> Val {
+    //self.next += size;
+    //return (self.next - size) as Val;
     if size == 0 {
       return 0;
     } else if !self.full && self.next + size <= self.data.len() {
-      self.used += size;
       self.next += size;
       return (self.next - size) as Val;
     } else {
@@ -256,7 +255,6 @@ impl Heap {
         }
         self.next += 1;
         if space == size {
-          self.used += size;
           return (self.next - space) as Val;
         }
       }
@@ -265,7 +263,6 @@ impl Heap {
 
   #[inline(always)]
   pub fn free(&mut self, index: Val) {
-    self.used -= 1;
     self.set(index, P1, NULL);
     self.set(index, P2, NULL);
   }
@@ -521,7 +518,7 @@ impl Net {
       let mut p2 = self.heap.get(a.val(), P2);
       loop {
         self.oper += 1;
-        rt = self.prim(rt, p1.val());
+        rt = self.op(rt, p1.val());
         // If P2 is OP2, keep looping
         if p2.is_op2() {
           p1 = self.heap.get(p2.val(), P1);
@@ -554,12 +551,13 @@ impl Net {
     let p2 = self.heap.get(a.val(), P2);
     let v0 = p1.val() as Val;
     let v1 = b.val() as Val;
-    let v2 = self.prim(v0, v1);
+    let v2 = self.op(v0, v1);
     self.link(Ptr::new(NUM, v2), p2);
     self.heap.free(a.val());
   }
 
-  pub fn prim(&mut self, a: Val, b: Val) -> Val {
+  #[inline(always)]
+  pub fn op(&self, a: Val, b: Val) -> Val {
     let a_opr = (a >> 24) & 0xF;
     let b_opr = (b >> 24) & 0xF; // not used yet
     let a_val = a & 0xFFFFFF;
