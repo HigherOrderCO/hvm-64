@@ -19,10 +19,17 @@ Install HVM-Core as:
 cargo install hvm-core
 ```
 
-Then, run the reference single-core implementation as:
+Then, run the reference single-core interpeter as:
 
 ```
 hvmc run file.hvmc -s
+```
+
+You can also compile it to a fast executable as:
+
+```
+hvmc compile file.hvmc
+./file
 ```
 
 If you have a GPU, run it with thousands of threads as:
@@ -39,21 +46,35 @@ add that to the CLI soon. Accepting PRs though :)
 ## Example
 
 HVMC is a low-level compile target for high-level languages. The
-file below performs 2^2 with [Church Nats](https://en.wikipedia.org/wiki/Church_encoding):
+file below performs a simple recursive sum:
 
 ```javascript
-// closed net for the Church Nat 2
-@c2_a = ([(b a) (a R)] (b R))
+@sum = (? (#1 @sumS) a a)
 
-// also 2, but with a different label
-@c2_b = ({2 (b a) (a R)} (b R))
+@sumS = ({2 a b} c)
+  & @sum ~ (a e)
+  & @sum ~ (b d)
+  & #1   ~ <d <e c>>
 
-// applies 2 to 2 to exponentiate
-@main = ret
-      & @c2_a ~ (@c2_b ret)
+@main = R
+  & @sum ~ (#24 R)
 ```
 
-To understand this syntax, see below. More on [`/examples`](/examples).
+If that look alien to you, don't worry; it does to me too. Fortunatelly, we have
+`[HVM-Lang](https://github.com/HigherOrderCO/hvm-lang)`, a tool that generates
+`.hvmc` files from a familiar syntax. On HVM-Lang, the program above is just:
+
+```javascript
+sum = λn match n {
+  0   : 1
+  1+p : (+ (sum p) (sum p))
+}
+
+main = (sum 24)
+```
+
+If you do want to understand the hardcore syntax, though, keep reading. For more
+examples, see the [`/examples`](/examples) directory.
 
 ## Language
 
