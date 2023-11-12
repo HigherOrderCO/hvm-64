@@ -99,7 +99,6 @@ fn load(file: &str) -> (run::Book, run::Net) {
 
 pub fn compile_book_to_rust_crate(f_name: &str, book: &run::Book) -> Result<(), std::io::Error> {
   let fns_rs = jit::compile_book(book);
-  println!("{}", fns_rs);
   let outdir = ".hvm";
   if std::path::Path::new(&outdir).exists() {
     fs::remove_dir_all(&outdir)?;

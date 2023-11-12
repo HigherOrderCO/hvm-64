@@ -395,6 +395,7 @@ fn adjust_redex(rf: run::Ptr, rx: run::Ptr) -> (run::Ptr, run::Ptr) {
     println!("  & ATOM ~ TERM");
     println!("  ...");
     println!("Where ATOM must be either a ref (`@foo`), a num (`#123`), or an era (`*`).");
+    println!("If you used HVM-Lang, please report on https://github.com/HigherOrderCO/hvm-lang.");
     panic!("Invalid HVMC file.");
   }
 }
