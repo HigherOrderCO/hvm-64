@@ -1,68 +1,91 @@
 #![allow(dead_code)]
-#![allow(unused_variables)]
-#![allow(unused_imports)]
 #![allow(non_snake_case)]
 #![allow(non_upper_case_globals)]
+#![allow(unused_imports)]
+#![allow(unused_variables)]
 
-use hvmc::ast;
-#[cfg(feature = "cuda")]
-use hvmc::cuda::host::{run_on_gpu, gen_cuda_book_data};
-use hvmc::run;
 use std::env;
 use std::fs;
 
-// TODO: Proper error handling in `main` function
+use hvmc::ast;
+use hvmc::fns;
+use hvmc::jit;
+use hvmc::run;
+
+#[cfg(not(feature = "hvm_cli_options"))]
+fn main() {
+  let args: Vec<String> = env::args().collect();
+  let book = run::Book::new();
+  let mut net = run::Net::new(1 << 28);
+  net.boot(ast::name_to_val("main"));
+  let start_time = std::time::Instant::now();
+  net.normal(&book);
+  println!("{}", ast::show_runtime_net(&net));
+  print_stats(&net, start_time);
+}
+
+#[cfg(feature = "hvm_cli_options")]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
   let args: Vec<String> = env::args().collect();
-
-  if args.len() < 3 {
-    println!("Usage: hvmc <cmd> <file.hvmc> [-s]");
-    std::process::exit(1);
-  }
-
-  let action = &args[1];
-  let f_name = &args[2];
-
+  let help = "help".to_string();
+  let action = args.get(1).unwrap_or(&help);
+  let f_name = args.get(2);
   match action.as_str() {
     "run" => {
-      let (book, mut net) = load(f_name);
-      let start_time = std::time::Instant::now();
-      net.expand(&book, run::ROOT);
-      net.normal(&book);
-
-      println!("{}", ast::show_runtime_net(&net));
-
-      if args.len() >= 4 && args[3] == "-s" {
-        println!("");
-        println!("RWTS   : {}", net.anni + net.comm + net.eras + net.dref + net.oper);
-        println!("- ANNI : {}", net.anni);
-        println!("- COMM : {}", net.comm);
-        println!("- ERAS : {}", net.eras);
-        println!("- DREF : {}", net.dref);
-        println!("- OPER : {}", net.oper);
-        println!("TIME   : {:.3} s", (start_time.elapsed().as_millis() as f64) / 1000.0);
-        println!("RPS    : {:.3} m", (net.rewrites() as f64) / (start_time.elapsed().as_millis() as f64) / 1000.0);
+      if let Some(file_name) = f_name {
+        let (book, mut net) = load(file_name);
+        let start_time = std::time::Instant::now();
+        net.normal(&book);
+        println!("{}", ast::show_runtime_net(&net));
+        if args.len() >= 4 && args[3] == "-s" {
+          print_stats(&net, start_time);
+        }
+      } else {
+        println!("Usage: hvmc run <file.hvmc> [-s]");
+        std::process::exit(1);
       }
     }
-    #[cfg(feature = "cuda")]
-    "run-gpu" => {
-      let book = load(f_name).0;
-      let (time_elapsed_secs, norm) = run_on_gpu(&book, "main")?;
-
-      println!("\nNORMAL ~ rewrites={}\n======\n", norm.rewrites());
-      println!("{norm}");
-      println!("Time: {:.3} s", time_elapsed_secs);
-      println!("RPS : {:.3} million", norm.rewrites() as f64 / time_elapsed_secs / 1_000_000.);
+    "compile" => {
+      if let Some(file_name) = f_name {
+        let (book, _) = load(file_name);
+        compile_book_to_rust_crate(file_name, &book)?;
+        compile_rust_crate_to_executable(file_name)?;
+      } else {
+        println!("Usage: hvmc compile <file.hvmc>");
+        std::process::exit(1);
+      }
     }
     "gen-cuda-book" => {
-      let book = load(f_name).0;
-      println!("{}", gen_cuda_book(&book));
+      if let Some(file_name) = f_name {
+        let book = load(file_name).0;
+        println!("{}", gen_cuda_book(&book));
+      } else {
+        println!("Usage: hvmc gen-cuda-book <file.hvmc>");
+        std::process::exit(1);
+      }
     }
     _ => {
-      println!("Invalid command. Usage: hvmc <cmd> <file.hvmc>");
+      println!("Usage: hvmc <cmd> <file.hvmc> [-s]");
+      println!("Commands:");
+      println!("  run           - Run the given file");
+      println!("  compile       - Compile the given file to an executable");
+      println!("  gen-cuda-book - Generate a CUDA book from the given file");
+      println!("Options:");
+      println!("  [-s] Show stats, including rewrite count");
     }
   }
   Ok(())
+}
+
+fn print_stats(net: &run::Net, start_time: std::time::Instant) {
+  println!("RWTS   : {}", net.anni + net.comm + net.eras + net.dref + net.oper);
+  println!("- ANNI : {}", net.anni);
+  println!("- COMM : {}", net.comm);
+  println!("- ERAS : {}", net.eras);
+  println!("- DREF : {}", net.dref);
+  println!("- OPER : {}", net.oper);
+  println!("TIME   : {:.3} s", (start_time.elapsed().as_millis() as f64) / 1000.0);
+  println!("RPS    : {:.3} m", (net.rewrites() as f64) / (start_time.elapsed().as_millis() as f64) / 1000.0);
 }
 
 // Load file and generate net
@@ -74,7 +97,38 @@ fn load(file: &str) -> (run::Book, run::Net) {
   return (book, net);
 }
 
-// Compile to a CUDA book (TODO: move to another repo)
+pub fn compile_book_to_rust_crate(f_name: &str, book: &run::Book) -> Result<(), std::io::Error> {
+  let fns_rs = jit::compile_book(book);
+  println!("{}", fns_rs);
+  let outdir = ".hvm";
+  if std::path::Path::new(&outdir).exists() {
+    fs::remove_dir_all(&outdir)?;
+  }
+  let cargo_toml = include_str!("../Cargo.toml");
+  let cargo_toml = cargo_toml.split("##--COMPILER-CUTOFF--##").next().unwrap();
+  let cargo_toml = cargo_toml.replace("\"hvm_cli_options\"", "");
+  fs::create_dir_all(&format!("{}/src", outdir))?;
+  fs::write(".hvm/Cargo.toml", cargo_toml)?;
+  fs::write(".hvm/src/ast.rs", include_str!("../src/ast.rs"))?;
+  fs::write(".hvm/src/jit.rs", include_str!("../src/jit.rs"))?;
+  fs::write(".hvm/src/lib.rs", include_str!("../src/lib.rs"))?;
+  fs::write(".hvm/src/main.rs", include_str!("../src/main.rs"))?;
+  fs::write(".hvm/src/run.rs", include_str!("../src/run.rs"))?;
+  fs::write(".hvm/src/fns.rs", fns_rs)?;
+  return Ok(());
+}
+
+pub fn compile_rust_crate_to_executable(f_name: &str) -> Result<(), std::io::Error> {
+  let output = std::process::Command::new("cargo").current_dir("./.hvm").arg("build").arg("--release").output()?;
+  let target = format!("./{}", f_name.replace(".hvmc", ""));
+  if std::path::Path::new(&target).exists() {
+    fs::remove_file(&target)?;
+  }
+  fs::copy("./.hvm/target/release/hvmc", target)?;
+  return Ok(());
+}
+
+// TODO: move to hvm-cuda repo
 pub fn gen_cuda_book(book: &run::Book) -> String {
   use std::collections::BTreeMap;
 

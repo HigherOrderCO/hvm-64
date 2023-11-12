@@ -51,9 +51,6 @@ pub const ERAS: Ptr   = Ptr::new(ERA, 0);
 pub const ROOT: Ptr   = Ptr::new(VR2, INIT as Val);
 pub const NULL: Ptr   = Ptr(0x0000_0000);
 
-// Manually compiled example
-pub const FOO : Val = 0xf618;
-
 // An auxiliary port.
 pub type Port = Val;
 pub const P1: Port = 0;
@@ -169,6 +166,11 @@ impl Ptr {
   #[inline(always)]
   pub fn is_mat(&self) -> bool {
     return matches!(self.tag(), MAT);
+  }
+
+  #[inline(always)]
+  pub fn is_nod(&self) -> bool {
+    return matches!(self.tag(), OP2..);
   }
 
   #[inline(always)]
@@ -612,11 +614,8 @@ impl Net {
     // FIXME: change "while" to "if" once lang prevents refs from returning refs
     if ptr.is_ref() {
 
-      // MANUALLY COMPILED:
-      if ptr.val() == FOO {
-        if self.foo(ptr, par) {
-          return;
-        }
+      if self.call_native(book, ptr, par) {
+        return;
       }
 
       // Load the closed net.
@@ -685,92 +684,4 @@ impl Net {
     return self.anni + self.comm + self.eras + self.dref + self.oper;
   }
 
-  // The FOO function has been manually compiled from:
-  //
-  // @FOO = (? (#0 (x y)) a a) & @FOO ~ (x y)
-  //
-  // Deref @FOO ~ (#N R):
-  //
-  // If #N > 0:
-  //
-  //   (?<(#0 (x y)) a> a) ~ (#N R)
-  //   @FOO ~ (x y)
-  //   --------------------------- anni
-  //   ?<(#0 (x y)) a> ~ #N
-  //   a ~ R
-  //   @FOO ~ (x y)
-  //   --------------------------- oper
-  //   (#0 (x y)) ~ (* (#(X-1) a))
-  //   a ~ R
-  //   @FOO ~ (x y)
-  //   --------------------------- anni
-  //   #0 ~ *
-  //   (x y) ~ (#(X-1) a)
-  //   a ~ R
-  //   @FOO ~ (x y)
-  //   --------------------------- anni
-  //   #0 ~ *
-  //   x ~ #(X-1)
-  //   y ~ a
-  //   a ~ R
-  //   @FOO ~ (x y)
-  //   --------------------------- eras
-  //   @FOO ~ (#(X-1) R)
-  //   
-  // If N == 0:
-  //
-  //   (?<(#0 (x y)) a> a) ~ par=(#0 R)
-  //   @FOO ~ (x y)
-  //   --------------------------- anni
-  //   ?<(#0 (x y)) a> ~ #0
-  //   a ~ R
-  //   @FOO ~ (x y)
-  //   --------------------------- oper
-  //   (#0 (x y)) ~ (a *)
-  //   a ~ R
-  //   @FOO ~ (x y)
-  //   --------------------------- anni
-  //   #0 ~ a
-  //   (x y) ~ *
-  //   a ~ R
-  //   @FOO ~ (x y)
-  //   --------------------------- eras
-  //   #0 ~ a
-  //   x ~ *
-  //   y ~ *
-  //   a ~ R
-  //   @FOO ~ (x y)
-  //   -----------
-  //   #0 ~ R
-  //   @FOO ~ (* *)
-  //
-  // TODO: build a general compiler based on that.
-  fn foo(&mut self, ptr: Ptr, par: Ptr) -> bool {
-    loop {
-      if par.tag() == CT0 {
-        let p1 = self.heap.get(par.val(), P1);
-        let p2 = self.heap.get(par.val(), P2);
-        if p1.is_num() {
-          self.anni += 3;
-          self.oper += 1;
-          self.eras += 1;
-          if p1.val() == 0 {
-            self.link(p2, Ptr::new(NUM, 0));
-            return true;
-          } else {
-            self.link(Ptr::new(VR1, par.val()), Ptr::new(NUM, p1.val() - 1));
-            self.link(Ptr::new(VR2, par.val()), p2);
-            //self.link(Ptr::new(REF, 0xbf3), Ptr::new(CT0, par.val()));
-            continue;
-          }
-        }
-      }
-      break;
-    }
-    return false;
-  }
-
 }
-
-
-

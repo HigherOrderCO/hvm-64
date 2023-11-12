@@ -1,6 +1,6 @@
 [package]
 name = "hvm-core"
-version = "0.1.11"
+version = "0.1.12"
 edition = "2021"
 description = "HVM-Core is a massively parallel Interaction Combinator evaluator."
 license = "MIT"
@@ -15,14 +15,17 @@ name = "hvmc"
 path = "src/lib.rs"
 bench = false
 
-[dependencies]
-cudarc = { version = "0.9.14", optional = true }
-
 [profile.release]
 codegen-units = 1
 lto = "fat"
 opt-level = 3
 panic = "abort"
+
+[features]
+default = ["hvm_cli_options"]
+hvm_cli_options = []
+
+##--COMPILER-CUTOFF--##
 
 # Benchmark dependencies
 
@@ -37,6 +40,3 @@ hvm-core = { path = "." }
 [[bench]]
 name = "benches"
 harness = false
-
-[features]
-cuda = ["cudarc"]
