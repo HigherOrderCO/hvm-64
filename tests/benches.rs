@@ -16,7 +16,7 @@ fn load_core(file: &str) -> hvmc::ast::Book {
 }
 
 // Loads file and generate DefinitionBook from hvm-lang syntax
-pub fn load_lang(file: &str) -> hvm_lang::term::DefinitionBook {
+pub fn load_lang(file: &str) -> hvm_lang::term::Book {
   let code = load_bench(file);
   parse_lang(&code)
 }
