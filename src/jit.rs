@@ -174,7 +174,7 @@ pub fn compile_term(book: &run::Book, tab: usize, fid: run::Val) -> String {
           code.push_str(&format!("{}let {} = self.heap.get({}.val(), P1);\n", ident(tab+1), num, target(x)));
           code.push_str(&format!("{}let {} = self.heap.get({}.val(), P2);\n", ident(tab+1), res, target(x)));
           code.push_str(&format!("{}if {}.val() == 0 {{\n", ident(tab+1), num));
-          code.push_str(&format!("{}self.heap.free({}.val());\n", ident(tab+2), target(x)));
+          code.push_str(&format!("{}self.free({}.val());\n", ident(tab+2), target(x)));
           code.push_str(&format!("{}{} = {};\n", ident(tab+2), target(&c_z), res));
           code.push_str(&format!("{}{} = {};\n", ident(tab+2), target(&c_s), "ERAS"));
           code.push_str(&format!("{}}} else {{\n", ident(tab+1)));
@@ -183,9 +183,9 @@ pub fn compile_term(book: &run::Book, tab: usize, fid: run::Val) -> String {
           code.push_str(&format!("{}{} = {};\n", ident(tab+2), target(&c_s), target(x)));
           code.push_str(&format!("{}}}\n", ident(tab+1)));
           code.push_str(&format!("{}}} else {{\n", ident(tab)));
-          code.push_str(&format!("{}let {} = self.heap.alloc(1);\n", ident(tab+1), lam));
-          code.push_str(&format!("{}let {} = self.heap.alloc(1);\n", ident(tab+1), mat));
-          code.push_str(&format!("{}let {} = self.heap.alloc(1);\n", ident(tab+1), cse));
+          code.push_str(&format!("{}let {} = self.alloc(1);\n", ident(tab+1), lam));
+          code.push_str(&format!("{}let {} = self.alloc(1);\n", ident(tab+1), mat));
+          code.push_str(&format!("{}let {} = self.alloc(1);\n", ident(tab+1), cse));
           code.push_str(&format!("{}self.heap.set({}, P1, Ptr::new(MAT, {}));\n", ident(tab+1), lam, mat));
           code.push_str(&format!("{}self.heap.set({}, P2, Ptr::new(VR2, {}));\n", ident(tab+1), lam, mat));
           code.push_str(&format!("{}self.heap.set({}, P1, Ptr::new(CT0, {}));\n", ident(tab+1), mat, cse));
@@ -220,8 +220,8 @@ pub fn compile_term(book: &run::Book, tab: usize, fid: run::Val) -> String {
           code.push_str(&format!("{}self.oper += 4;\n", ident(tab+1))); // OP2 + OP1 + OP2 + OP1
           code.push_str(&format!("{}{} = Ptr::new(NUM, self.op(self.op({}.val(),{}.val()),{}.val()));\n", ident(tab+1), target(&nxt), target(x), v_x, v_y));
           code.push_str(&format!("{}}} else {{\n", ident(tab)));
-          code.push_str(&format!("{}let {} = self.heap.alloc(1);\n", ident(tab+1), opx));
-          code.push_str(&format!("{}let {} = self.heap.alloc(1);\n", ident(tab+1), opy));
+          code.push_str(&format!("{}let {} = self.alloc(1);\n", ident(tab+1), opx));
+          code.push_str(&format!("{}let {} = self.alloc(1);\n", ident(tab+1), opy));
           code.push_str(&format!("{}self.heap.set({}, P2, Ptr::new(OP2, {}));\n", ident(tab+1), opx, opy));
           code.push_str(&format!("{}self.link(Ptr::new(VR1,{}), {});\n", ident(tab+1), opx, v_x));
           code.push_str(&format!("{}self.link(Ptr::new(VR1,{}), {});\n", ident(tab+1), opy, v_y));
@@ -252,7 +252,7 @@ pub fn compile_term(book: &run::Book, tab: usize, fid: run::Val) -> String {
       code.push_str(&format!("{}{} = {};\n", ident(tab+1), target(&x1), target(x)));
       code.push_str(&format!("{}{} = {};\n", ident(tab+1), target(&x2), target(x)));
       code.push_str(&format!("{}}} else {{\n", ident(tab)));
-      code.push_str(&format!("{}let {} = self.heap.alloc(1);\n", ident(tab+1), lc));
+      code.push_str(&format!("{}let {} = self.alloc(1);\n", ident(tab+1), lc));
       code.push_str(&format!("{}{} = Ptr::new(VR1, {});\n", ident(tab+1), target(&x1), lc));
       code.push_str(&format!("{}{} = Ptr::new(VR2, {});\n", ident(tab+1), target(&x2), lc));
       code.push_str(&format!("{}self.link(Ptr::new({}, {}), {});\n", ident(tab+1), tag(ptr.tag()), lc, target(x)));
@@ -279,9 +279,9 @@ pub fn compile_term(book: &run::Book, tab: usize, fid: run::Val) -> String {
       code.push_str(&format!("{}self.anni += 1;\n", ident(tab+1)));
       code.push_str(&format!("{}{} = self.heap.get({}.val(), P1);\n", ident(tab+1), target(&x1), target(x)));
       code.push_str(&format!("{}{} = self.heap.get({}.val(), P2);\n", ident(tab+1), target(&x2), target(x)));
-      code.push_str(&format!("{}self.heap.free({}.val());\n", ident(tab+1), target(x)));
+      code.push_str(&format!("{}self.free({}.val());\n", ident(tab+1), target(x)));
       code.push_str(&format!("{}}} else {{\n", ident(tab)));
-      code.push_str(&format!("{}let {} = self.heap.alloc(1);\n", ident(tab+1), lc));
+      code.push_str(&format!("{}let {} = self.alloc(1);\n", ident(tab+1), lc));
       code.push_str(&format!("{}{} = Ptr::new(VR1, {});\n", ident(tab+1), target(&x1), lc));
       code.push_str(&format!("{}{} = Ptr::new(VR2, {});\n", ident(tab+1), target(&x2), lc));
       code.push_str(&format!("{}self.link(Ptr::new({}, {}), {});\n", ident(tab+1), tag(ptr.tag()), lc, target(x)));
@@ -335,7 +335,7 @@ pub fn compile_term(book: &run::Book, tab: usize, fid: run::Val) -> String {
       let lc = fresh(newx);
       let p1 = def.node[ptr.val() as usize].0;
       let p2 = def.node[ptr.val() as usize].1;
-      code.push_str(&format!("{}let {} = self.heap.alloc(1);\n", ident(tab), lc));
+      code.push_str(&format!("{}let {} = self.alloc(1);\n", ident(tab), lc));
       code.push_str(&make(tab, newx, vars, def, p1, &format!("Ptr::new(VR1, {})", lc)));
       code.push_str(&make(tab, newx, vars, def, p2, &format!("Ptr::new(VR2, {})", lc)));
       code.push_str(&format!("{}self.link(Ptr::new({}, {}), {});\n", ident(tab), tag(ptr.tag()), lc, x));
