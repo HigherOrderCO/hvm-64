@@ -468,12 +468,42 @@ pub fn book_to_runtime(book: &Book) -> run::Book {
     let id = name_to_val(name);
     let mut rt = run::Net::new(1 << 18);
     net_to_runtime(&mut rt, net);
-    rt_book.def(id, rt.to_def());
+    rt_book.def(id, runtime_net_to_runtime_def(&rt));
   }
   rt_book
 }
 
-// From runtime
+// Converts to a def.
+pub fn runtime_net_to_runtime_def(net: &run::Net) -> run::Def {
+  let mut node = vec![];
+  let mut rdex = vec![];
+  for i in 0 .. net.heap.data.len() {
+    let p1 = net.heap.get(node.len() as run::Val, run::P1);
+    let p2 = net.heap.get(node.len() as run::Val, run::P2);
+    if p1 != run::NULL || p2 != run::NULL {
+      node.push((p1, p2));
+    } else {
+      break;
+    }
+  }
+  for i in 0 .. net.rdex.len() {
+    let p1 = net.rdex[i].0;
+    let p2 = net.rdex[i].1;
+    rdex.push((p1, p2));
+  }
+  return run::Def { rdex, node };
+}
+
+// Reads back from a def.
+pub fn runtime_def_to_runtime_net(def: &run::Def) -> run::Net {
+  let mut net = run::Net::new(def.node.len());
+  for (i, &(p1, p2)) in def.node.iter().enumerate() {
+    net.heap.set(i as run::Val, run::P1, p1);
+    net.heap.set(i as run::Val, run::P2, p2);
+  }
+  net.rdex = def.rdex.clone();
+  net
+}
 
 pub fn tree_from_runtime_go(rt_net: &run::Net, ptr: run::Ptr, parent: Parent, vars: &mut HashMap<Parent, String>, fresh: &mut usize) -> Tree {
   match ptr.tag() {
@@ -550,7 +580,7 @@ pub fn book_from_runtime(rt_book: &run::Book) -> Book {
     let def = &rt_book.defs[id];
     if def.node.len() > 0 {
       let name = val_to_name(id as run::Val);
-      let net = net_from_runtime(&run::Net::from_def(def.clone()));
+      let net = net_from_runtime(&runtime_def_to_runtime_net(&def));
       book.insert(name, net);
     }
   }

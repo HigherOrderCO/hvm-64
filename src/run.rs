@@ -71,8 +71,8 @@ pub struct Heap {
 
 // A interaction combinator net.
 pub struct Net {
-  pub rdex: Vec<(Ptr,Ptr)>, // redexes
   pub heap: Heap, // nodes
+  pub rdex: Vec<(Ptr,Ptr)>, // redexes
   pub locs: Vec<Val>,
   pub next: usize,
   pub anni: usize, // anni rewrites
@@ -293,8 +293,8 @@ impl Net {
   // Creates an empty net with given size.
   pub fn new(size: usize) -> Self {
     Net {
-      rdex: vec![],
       heap: Heap::new(size),
+      rdex: vec![],
       locs: vec![0; 1 << 16],
       next: 1,
       anni: 0,
@@ -313,38 +313,6 @@ impl Net {
   // Total rewrite count.
   pub fn rewrites(&self) -> usize {
     return self.anni + self.comm + self.eras + self.dref + self.oper;
-  }
-
-  // Converts to a def.
-  pub fn to_def(self) -> Def {
-    let mut node = vec![];
-    let mut rdex = vec![];
-    for i in 0 .. self.heap.data.len() {
-      let p1 = self.heap.get(node.len() as Val, P1);
-      let p2 = self.heap.get(node.len() as Val, P2);
-      if p1 != NULL || p2 != NULL {
-        node.push((p1, p2));
-      } else {
-        break;
-      }
-    }
-    for i in 0 .. self.rdex.len() {
-      let p1 = self.rdex[i].0;
-      let p2 = self.rdex[i].1;
-      rdex.push((p1, p2));
-    }
-    return Def { rdex, node };
-  }
-
-  // Reads back from a def.
-  pub fn from_def(def: Def) -> Self {
-    let mut net = Net::new(def.node.len());
-    for (i, &(p1, p2)) in def.node.iter().enumerate() {
-      net.heap.set(i as Val, P1, p1);
-      net.heap.set(i as Val, P2, p2);
-    }
-    net.rdex = def.rdex;
-    net
   }
 
   #[inline(always)]
