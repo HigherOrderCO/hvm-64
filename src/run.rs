@@ -73,9 +73,8 @@ pub struct Heap {
 pub struct Net {
   pub rdex: Vec<(Ptr,Ptr)>, // redexes
   pub heap: Heap, // nodes
-  pub vars: Vec<Val>,
+  pub locs: Vec<Val>,
   pub next: usize,
-  pub full: bool,
   pub anni: usize, // anni rewrites
   pub comm: usize, // comm rewrites
   pub eras: usize, // eras rewrites
@@ -296,9 +295,8 @@ impl Net {
     Net {
       rdex: vec![],
       heap: Heap::new(size),
-      vars: vec![0; 1 << 16],
+      locs: vec![0; 1 << 16],
       next: 1,
-      full: false,
       anni: 0,
       comm: 0,
       eras: 0,
@@ -351,27 +349,19 @@ impl Net {
 
   #[inline(always)]
   pub fn alloc(&mut self, size: usize) -> Val {
-    if size == 0 {
-      return 0;
-    } else if !self.full && self.next + size <= self.heap.data.len() {
-      self.next += size;
-      return (self.next - size) as Val;
+    let len = self.heap.data.len();
+    // On the first pass, just alloc without looking.
+    if self.next < len {
+      let index = self.next as Val;
+      self.next += 1;
+      return index;
+    // On later passes, search for an available slot.
     } else {
-      self.full = true;
-      let mut space = 0;
       loop {
-        if self.next >= self.heap.data.len() {
-          space = 0;
-          self.next = 1;
-        }
-        if self.heap.data[self.next].0.load().is_nil() {
-          space += 1;
-        } else {
-          space = 0;
-        }
         self.next += 1;
-        if space == size {
-          return (self.next - space) as Val;
+        let index = (self.next % self.heap.data.len()) as Val;
+        if self.heap.get(index, P2).is_nil() {
+          return index;
         }
       }
     }
@@ -477,35 +467,40 @@ impl Net {
 
   pub fn comm(&mut self, a: Ptr, b: Ptr) {
     self.comm += 1;
-    let loc = self.alloc(4);
-    self.link(self.heap.get(a.val(), P1), Ptr::new(b.tag(), loc + 0));
-    self.link(self.heap.get(b.val(), P1), Ptr::new(a.tag(), loc + 2));
-    self.link(self.heap.get(a.val(), P2), Ptr::new(b.tag(), loc + 1));
-    self.link(self.heap.get(b.val(), P2), Ptr::new(a.tag(), loc + 3));
-    self.heap.set(loc + 0, P1, Ptr::new(VR1, loc + 2));
-    self.heap.set(loc + 0, P2, Ptr::new(VR1, loc + 3));
-    self.heap.set(loc + 1, P1, Ptr::new(VR2, loc + 2));
-    self.heap.set(loc + 1, P2, Ptr::new(VR2, loc + 3));
-    self.heap.set(loc + 2, P1, Ptr::new(VR1, loc + 0));
-    self.heap.set(loc + 2, P2, Ptr::new(VR1, loc + 1));
-    self.heap.set(loc + 3, P1, Ptr::new(VR2, loc + 0));
-    self.heap.set(loc + 3, P2, Ptr::new(VR2, loc + 1));
+    let loc0 = self.alloc(1);
+    let loc1 = self.alloc(1);
+    let loc2 = self.alloc(1);
+    let loc3 = self.alloc(1);
+    self.link(self.heap.get(a.val(), P1), Ptr::new(b.tag(), loc0));
+    self.link(self.heap.get(b.val(), P1), Ptr::new(a.tag(), loc2));
+    self.link(self.heap.get(a.val(), P2), Ptr::new(b.tag(), loc1));
+    self.link(self.heap.get(b.val(), P2), Ptr::new(a.tag(), loc3));
+    self.heap.set(loc0, P1, Ptr::new(VR1, loc2));
+    self.heap.set(loc0, P2, Ptr::new(VR1, loc3));
+    self.heap.set(loc1, P1, Ptr::new(VR2, loc2));
+    self.heap.set(loc1, P2, Ptr::new(VR2, loc3));
+    self.heap.set(loc2, P1, Ptr::new(VR1, loc0));
+    self.heap.set(loc2, P2, Ptr::new(VR1, loc1));
+    self.heap.set(loc3, P1, Ptr::new(VR2, loc0));
+    self.heap.set(loc3, P2, Ptr::new(VR2, loc1));
     self.free(a.val());
     self.free(b.val());
   }
 
   pub fn pass(&mut self, a: Ptr, b: Ptr) {
     self.comm += 1;
-    let loc = self.alloc(3);
-    self.link(self.heap.get(a.val(), P2), Ptr::new(b.tag(), loc+0));
-    self.link(self.heap.get(b.val(), P1), Ptr::new(a.tag(), loc+1));
-    self.link(self.heap.get(b.val(), P2), Ptr::new(a.tag(), loc+2));
-    self.heap.set(loc + 0, P1, Ptr::new(VR2, loc+1));
-    self.heap.set(loc + 0, P2, Ptr::new(VR2, loc+2));
-    self.heap.set(loc + 1, P1, self.heap.get(a.val(), P1));
-    self.heap.set(loc + 1, P2, Ptr::new(VR1, loc+0));
-    self.heap.set(loc + 2, P1, self.heap.get(a.val(), P1));
-    self.heap.set(loc + 2, P2, Ptr::new(VR2, loc+0));
+    let loc0 = self.alloc(1);
+    let loc1 = self.alloc(1);
+    let loc2 = self.alloc(1);
+    self.link(self.heap.get(a.val(), P2), Ptr::new(b.tag(), loc0));
+    self.link(self.heap.get(b.val(), P1), Ptr::new(a.tag(), loc1));
+    self.link(self.heap.get(b.val(), P2), Ptr::new(a.tag(), loc2));
+    self.heap.set(loc0, P1, Ptr::new(VR2, loc1));
+    self.heap.set(loc0, P2, Ptr::new(VR2, loc2));
+    self.heap.set(loc1, P1, self.heap.get(a.val(), P1));
+    self.heap.set(loc1, P2, Ptr::new(VR1, loc0));
+    self.heap.set(loc2, P1, self.heap.get(a.val(), P1));
+    self.heap.set(loc2, P2, Ptr::new(VR2, loc0));
     self.free(a.val());
     self.free(b.val());
   }
@@ -609,18 +604,19 @@ impl Net {
     let p1 = self.heap.get(a.val(), P1); // branch
     let p2 = self.heap.get(a.val(), P2); // return
     if b.val() == 0 {
-      let loc = self.alloc(1);
-      self.heap.set(loc+0, P2, ERAS);
-      self.link(p1, Ptr::new(CT0, loc+0));
-      self.link(p2, Ptr::new(VR1, loc+0));
+      let loc0 = self.alloc(1);
+      self.heap.set(loc0, P2, ERAS);
+      self.link(p1, Ptr::new(CT0, loc0));
+      self.link(p2, Ptr::new(VR1, loc0));
       self.free(a.val());
     } else {
-      let loc = self.alloc(2);
-      self.heap.set(loc+0, P1, ERAS);
-      self.heap.set(loc+0, P2, Ptr::new(CT0, loc + 1));
-      self.heap.set(loc+1, P1, Ptr::new(NUM, b.val() - 1));
-      self.link(p1, Ptr::new(CT0, loc+0));
-      self.link(p2, Ptr::new(VR2, loc+1));
+      let loc0 = self.alloc(1);
+      let loc1 = self.alloc(1);
+      self.heap.set(loc0, P1, ERAS);
+      self.heap.set(loc0, P2, Ptr::new(CT0, loc1));
+      self.heap.set(loc1, P1, Ptr::new(NUM, b.val() - 1));
+      self.link(p1, Ptr::new(CT0, loc0));
+      self.link(p2, Ptr::new(VR2, loc1));
       self.free(a.val());
     }
   }
@@ -642,13 +638,13 @@ impl Net {
         let len = got.node.len() - 1;
         // Allocates space.
         for i in 0 .. len {
-          *unsafe { self.vars.get_unchecked_mut(1 + i) } = self.alloc(1);
+          *unsafe { self.locs.get_unchecked_mut(1 + i) } = self.alloc(1);
         }
         // Load nodes, adjusted.
         for i in 0 .. len {
           let p1 = self.adjust(unsafe { got.node.get_unchecked(1 + i) }.0);
           let p2 = self.adjust(unsafe { got.node.get_unchecked(1 + i) }.1);
-          let lc = *unsafe { self.vars.get_unchecked(1 + i) };
+          let lc = *unsafe { self.locs.get_unchecked(1 + i) };
           self.heap.set(lc, P1, p1);
           self.heap.set(lc, P2, p2);
         }
@@ -667,7 +663,7 @@ impl Net {
 
   fn adjust(&self, ptr: Ptr) -> Ptr {
     if ptr.has_loc() {
-      return Ptr::new(ptr.tag(), *unsafe { self.vars.get_unchecked(ptr.val() as usize) });
+      return Ptr::new(ptr.tag(), *unsafe { self.locs.get_unchecked(ptr.val() as usize) });
     } else {
       return ptr;
     }
