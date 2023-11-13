@@ -1,0 +1,24 @@
+@node = (a (b ((a (b c)) (* c))))
+@leaf = (a (* ((a b) b)))
+
+@gen = (? (a @genS) b b)
+  & (#1 a) ~ @leaf
+
+@genS = ({2 a b} c)
+  & @gen  ~ (b d)
+  & @gen  ~ (a e)
+  & @node ~ (d (e c))
+
+@sum = ((@sumS (@sumZ a)) a)
+
+@sumS = (a (b c))
+  & <d <e c>> ~ #1
+  & (b e)     ~ @sum
+  & (a d)     ~ @sum
+
+// FIXME: inlining this causes compiled-mode to fail; investigate
+@sumZ = (x x)
+
+@main = R
+  & @gen ~ (#22 tree)
+  & @sum ~ (tree R)
