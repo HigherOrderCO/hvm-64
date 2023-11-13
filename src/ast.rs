@@ -291,15 +291,16 @@ pub fn show_runtime_book(book: &run::Book) -> String {
 // Conversion
 // ----------
 
-pub fn num_to_str(num: usize) -> String {
-  let mut num = num + 1;
-  let mut str = String::new();
+pub fn num_to_str(mut num: usize) -> String {
+  let mut txt = String::new();
+  num += 1;
   while num > 0 {
+    num -= 1;
     let c = ((num % 26) as u8 + b'a') as char;
-    str.push(c);
+    txt.push(c);
     num /= 26;
   }
-  return str.chars().rev().collect();
+  return txt.chars().rev().collect();
 }
 
 pub const fn tag_to_port(tag: run::Tag) -> run::Port {
