@@ -636,7 +636,7 @@ impl Net {
       let got = unsafe { book.defs.get_unchecked((ptr.val() as usize) & 0xFFFFFF) };
       if got.node.len() > 0 {
         let len = got.node.len() - 1;
-        // Allocates space.
+        // Allocate space.
         for i in 0 .. len {
           *unsafe { self.locs.get_unchecked_mut(1 + i) } = self.alloc(1);
         }
