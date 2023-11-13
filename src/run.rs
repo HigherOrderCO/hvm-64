@@ -181,10 +181,10 @@ impl Ptr {
     return matches!(self.tag(), VR1..=VR2 | OP2..);
   }
 
-  #[inline(always)]
-  pub fn adjust(&self, loc: Val) -> Ptr {
-    return Ptr::new(self.tag(), self.val() + if self.has_loc() { loc - 1 } else { 0 });
-  }
+  //#[inline(always)]
+  //pub fn adjust(&self, loc: Val) -> Ptr {
+    //return Ptr::new(self.tag(), self.val() + if self.has_loc() { loc - 1 } else { 0 });
+  //}
 
   // Can this redex be skipped (as an optimization)?
   #[inline(always)]
@@ -296,7 +296,7 @@ impl Net {
     Net {
       rdex: vec![],
       heap: Heap::new(size),
-      vars: vec![],
+      vars: vec![0; 1 << 16],
       next: 1,
       full: false,
       anni: 0,
@@ -632,36 +632,45 @@ impl Net {
     let mut ptr = ptr;
     // FIXME: change "while" to "if" once lang prevents refs from returning refs
     if ptr.is_ref() {
-
+      // Intercepts with a native function, if available.
       if self.call_native(book, ptr, par) {
         return;
       }
-
       // Load the closed net.
       let got = unsafe { book.defs.get_unchecked((ptr.val() as usize) & 0xFFFFFF) };
       if got.node.len() > 0 {
         let len = got.node.len() - 1;
-        let loc = self.alloc(len);
+        // Allocates space.
+        for i in 0 .. len {
+          *unsafe { self.vars.get_unchecked_mut(1 + i) } = self.alloc(1);
+        }
         // Load nodes, adjusted.
-        for i in 0..len as Val {
-          unsafe {
-            let p1 = got.node.get_unchecked(1 + i as usize).0.adjust(loc);
-            let p2 = got.node.get_unchecked(1 + i as usize).1.adjust(loc);
-            self.heap.set(loc + i, P1, p1);
-            self.heap.set(loc + i, P2, p2);
-          }
+        for i in 0 .. len {
+          let p1 = self.adjust(unsafe { got.node.get_unchecked(1 + i) }.0);
+          let p2 = self.adjust(unsafe { got.node.get_unchecked(1 + i) }.1);
+          let lc = *unsafe { self.vars.get_unchecked(1 + i) };
+          self.heap.set(lc, P1, p1);
+          self.heap.set(lc, P2, p2);
         }
         // Load redexes, adjusted.
         for r in &got.rdex {
-          let p1 = r.0.adjust(loc);
-          let p2 = r.1.adjust(loc);
+          let p1 = self.adjust(r.0);
+          let p2 = self.adjust(r.1);
           self.rdex.push((p1, p2));
         }
         // Load root, adjusted.
-        ptr = got.node[0].1.adjust(loc);
+        ptr = self.adjust(got.node[0].1);
       }
     }
     self.link(ptr, par);
+  }
+
+  fn adjust(&self, ptr: Ptr) -> Ptr {
+    if ptr.has_loc() {
+      return Ptr::new(ptr.tag(), *unsafe { self.vars.get_unchecked(ptr.val() as usize) });
+    } else {
+      return ptr;
+    }
   }
 
   // Reduces all redexes.
