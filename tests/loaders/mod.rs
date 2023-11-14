@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use hvm_lang::term::{parser, DefId, DefinitionBook};
+use hvm_lang::term::{parser, DefId, Book as DefinitionBook};
 use hvmc::{ast::*, run};
 use std::{collections::HashMap, fs};
 
@@ -34,7 +34,7 @@ pub fn replace_template(mut code: String, map: &[(&str, &str)]) -> String {
 }
 
 pub fn hvm_lang_readback(net: &Net, book: &DefinitionBook, id_map: HashMap<run::Val, DefId>) -> (String, bool) {
-  let net = hvm_lang::net::hvmc_to_net(net, &|val| id_map[&val]).unwrap();
+  let net = hvm_lang::net::hvmc_to_net::hvmc_to_net(net, &|val| id_map[&val]);
   let (res_term, valid_readback) = hvm_lang::term::net_to_term::net_to_term_non_linear(&net, book);
 
   (res_term.to_string(&book.def_names), valid_readback)

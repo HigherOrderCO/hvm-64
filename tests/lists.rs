@@ -1,10 +1,10 @@
 use crate::loaders::*;
-use hvm_lang::term::DefinitionBook;
+use hvm_lang::term::Book;
 use insta::assert_debug_snapshot;
 
 mod loaders;
 
-fn list_got(index: u32) -> DefinitionBook {
+fn list_got(index: u32) -> Book {
   let template = load_file("list_put_got.hvm");
   let code = replace_template(template, &[("{fun}", "Got"), ("{args}", &format!("S{}", index))]);
   parse_lang(&code)
@@ -50,7 +50,7 @@ fn test_list_got() {
   assert_eq!(rwts[4] + delta * 16, rwts[5]);
 }
 
-fn list_put(index: u32, value: u32) -> DefinitionBook {
+fn list_put(index: u32, value: u32) -> Book {
   let template = load_file("list_put_got.hvm");
   let code = replace_template(template, &[("{fun}", "Put"), ("{args}", &format!("S{index} S{value}"))]);
   parse_lang(&code)
