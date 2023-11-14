@@ -245,16 +245,6 @@ impl Heap {
   }
 
   #[inline(always)]
-  pub fn lock(&self, index: Val) {
-    return;
-  }
-
-  #[inline(always)]
-  pub fn unlock(&self, index: Val) {
-    return;
-  }
-
-  #[inline(always)]
   pub fn get(&self, index: Val, port: Port) -> Ptr {
     unsafe {
       let node = self.data.get_unchecked(index as usize);
@@ -275,6 +265,27 @@ impl Heap {
       } else {
         node.1.store(value);
       }
+    }
+  }
+
+  #[inline(always)]
+  pub fn cas(&self, index: Val, port: Port, expected: Ptr, value: Ptr) -> Result<Ptr,Ptr> {
+    unsafe {
+      let node = self.data.get_unchecked(index as usize);
+      let data = if port == P1 { &node.0.0 } else { &node.1.0 };
+      let done = data.compare_exchange_weak(expected.0, value.0, Ordering::Relaxed, Ordering::Relaxed);
+      match done {
+        Ok (done) => Ok(Ptr(done)),
+        Err(done) => Ok(Ptr(done)),
+      }
+    }
+  }
+
+  pub fn swap(&self, index: Val, port: Port, value: Ptr) -> Ptr {
+    unsafe {
+      let node = self.data.get_unchecked(index as usize);
+      let data = if port == P1 { &node.0.0 } else { &node.1.0 };
+      return Ptr(data.swap(value.0, Ordering::Relaxed));
     }
   }
 
@@ -341,7 +352,6 @@ impl Net {
     unsafe { self.heap.data.get_unchecked(index as usize) }.1.store(NULL);
   }
 
-
   // Gets a pointer's target.
   #[inline(always)]
   pub fn get_target(&self, ptr: Ptr) -> Ptr {
@@ -354,24 +364,71 @@ impl Net {
     self.heap.set(ptr.val(), ptr.0 & 1, val)
   }
 
+  // Takes a pointer's target.
+  #[inline(always)]
+  pub fn take_target(&self, ptr: Ptr) -> Ptr {
+    self.heap.swap(ptr.val(), ptr.0 & 1, NULL)
+  }
+
+  #[inline(always)]
+  pub fn redux(&mut self, a: Ptr, b: Ptr) {
+    if Ptr::can_skip(a, b) {
+      self.eras += 1;
+    } else {
+      self.rdex.push((a, b));
+    }
+  }
+  
   // Links two pointers, forming a new wire.
   pub fn link(&mut self, a: Ptr, b: Ptr) {
     // Creates redex A-B
     if a.is_pri() && b.is_pri() {
-      if Ptr::can_skip(a, b) {
-        self.eras += 1;
-      } else {
-        self.rdex.push((a, b));
-      }
-      return;
+      return self.redux(a, b);
     }
     // Substitutes A
     if a.is_var() {
+      //self.heap.cas(a.val(), a.0 & 1, a, b);
+      //println!("{:08x} == {:08x} | {}", self.get_target(a).0, a.0, self.get_target(a).0 == a.0);
       self.set_target(a, b);
     }
     // Substitutes B
     if b.is_var() {
+      //self.heap.cas(b.val(), b.0 & 1, b, a);
+      //println!("{:08x} == {:08x} | {}", self.get_target(b).0, b.0, self.get_target(b).0 == b.0);
       self.set_target(b, a);
+    }
+  }
+
+  pub fn atomic_link(&mut self, a_dir: Ptr, b_dir: Ptr) {
+    let a = self.get_target(a_dir);
+    let b = self.get_target(b_dir);
+    // Creates redex A-B
+    if a.is_pri() && b.is_pri() {
+      return self.redux(a, b);
+    }
+    // Substitutes A
+    if a.is_var() {
+      self.heap.cas(a.val(), a.0 & 1, a_dir, b).unwrap();
+      //println!("{:08x} == {:08x} | {}", self.get_target(a).0, a_dir.0, self.get_target(a).0 == a_dir.0);
+      //self.set_target(a, b);
+    }
+    // Substitutes B
+    if b.is_var() {
+      self.heap.cas(b.val(), b.0 & 1, b_dir, a).unwrap();
+      //println!("{:08x} == {:08x} | {}", self.get_target(b).0, b_dir.0, self.get_target(b).0 == b_dir.0);
+      //self.set_target(b, a);
+    }
+  }
+
+  pub fn atomic_link_1(&mut self, a: Ptr, b: Ptr) {
+    let a = self.get_target(a);
+    // Creates redex A-B
+    if a.is_pri() {
+      return self.redux(a, b);
+    }
+    // Substitutes A
+    if a.is_var() {
+      self.set_target(a, b);
     }
   }
 
@@ -387,10 +444,10 @@ impl Net {
       (REF   , ERA  ) => self.eras += 1,
       (ERA   , REF  ) => self.eras += 1,
       (ERA   , ERA  ) => self.eras += 1,
-      (VR1   , _    ) => self.link(a, b),
-      (VR2   , _    ) => self.link(a, b),
-      (_     , VR1  ) => self.link(b, a),
-      (_     , VR2  ) => self.link(b, a),
+      //(VR1   , _    ) => self.link(a, b),
+      //(VR2   , _    ) => self.link(a, b),
+      //(_     , VR1  ) => self.link(b, a),
+      //(_     , VR2  ) => self.link(b, a),
       (CT0.. , NUM  ) => self.copy(a, b),
       (NUM   , CT0..) => self.copy(b, a),
       (NUM   , ERA  ) => self.eras += 1,
@@ -418,17 +475,14 @@ impl Net {
     };
   }
 
-  pub fn conn(&mut self, a: Ptr, b: Ptr) {
-    self.anni += 1;
-    self.link(self.heap.get(a.val(), P2), self.heap.get(b.val(), P2));
-    self.free(a.val());
-    self.free(b.val());
-  }
-
   pub fn anni(&mut self, a: Ptr, b: Ptr) {
     self.anni += 1;
-    self.link(self.heap.get(a.val(), P1), self.heap.get(b.val(), P1));
-    self.link(self.heap.get(a.val(), P2), self.heap.get(b.val(), P2));
+    let a1 = Ptr::new(VR1, a.val());
+    let b1 = Ptr::new(VR1, b.val());
+    self.atomic_link(a1, b1);
+    let a2 = Ptr::new(VR2, a.val());
+    let b2 = Ptr::new(VR2, b.val());
+    self.atomic_link(a2, b2);
     self.free(a.val());
     self.free(b.val());
   }
@@ -439,10 +493,14 @@ impl Net {
     let loc1 = self.alloc(1);
     let loc2 = self.alloc(1);
     let loc3 = self.alloc(1);
-    self.link(self.heap.get(a.val(), P1), Ptr::new(b.tag(), loc0));
-    self.link(self.heap.get(b.val(), P1), Ptr::new(a.tag(), loc2));
-    self.link(self.heap.get(a.val(), P2), Ptr::new(b.tag(), loc1));
-    self.link(self.heap.get(b.val(), P2), Ptr::new(a.tag(), loc3));
+    let a1 = Ptr::new(VR1, a.val());
+    self.atomic_link_1(a1, Ptr::new(b.tag(), loc0));
+    let b1 = Ptr::new(VR1, b.val());
+    self.atomic_link_1(b1, Ptr::new(a.tag(), loc2));
+    let a2 = Ptr::new(VR2, a.val());
+    self.atomic_link_1(a2, Ptr::new(b.tag(), loc1));
+    let b2 = Ptr::new(VR2, b.val());
+    self.atomic_link_1(b2, Ptr::new(a.tag(), loc3));
     self.heap.set(loc0, P1, Ptr::new(VR1, loc2));
     self.heap.set(loc0, P2, Ptr::new(VR1, loc3));
     self.heap.set(loc1, P1, Ptr::new(VR2, loc2));
@@ -455,138 +513,147 @@ impl Net {
     self.free(b.val());
   }
 
-  pub fn pass(&mut self, a: Ptr, b: Ptr) {
-    self.comm += 1;
-    let loc0 = self.alloc(1);
-    let loc1 = self.alloc(1);
-    let loc2 = self.alloc(1);
-    self.link(self.heap.get(a.val(), P2), Ptr::new(b.tag(), loc0));
-    self.link(self.heap.get(b.val(), P1), Ptr::new(a.tag(), loc1));
-    self.link(self.heap.get(b.val(), P2), Ptr::new(a.tag(), loc2));
-    self.heap.set(loc0, P1, Ptr::new(VR2, loc1));
-    self.heap.set(loc0, P2, Ptr::new(VR2, loc2));
-    self.heap.set(loc1, P1, self.heap.get(a.val(), P1));
-    self.heap.set(loc1, P2, Ptr::new(VR1, loc0));
-    self.heap.set(loc2, P1, self.heap.get(a.val(), P1));
-    self.heap.set(loc2, P2, Ptr::new(VR2, loc0));
-    self.free(a.val());
-    self.free(b.val());
-  }
-
-  pub fn copy(&mut self, a: Ptr, b: Ptr) {
-    self.comm += 1;
-    self.link(self.heap.get(a.val(), P1), b);
-    self.link(self.heap.get(a.val(), P2), b);
-    self.free(a.val());
-  }
-
   pub fn era2(&mut self, a: Ptr) {
     self.eras += 1;
-    self.link(self.heap.get(a.val(), P1), ERAS);
-    self.link(self.heap.get(a.val(), P2), ERAS);
+    let a1 = Ptr::new(VR1, a.val());
+    self.atomic_link_1(a1, ERAS);
+    let a2 = Ptr::new(VR2, a.val());
+    self.atomic_link_1(a2, ERAS);
     self.free(a.val());
   }
 
   pub fn era1(&mut self, a: Ptr) {
-    self.eras += 1;
-    self.link(self.heap.get(a.val(), P2), ERAS);
-    self.free(a.val());
+    todo!()
+    //self.eras += 1;
+    //self.link(self.heap.get(a.val(), P2), ERAS);
+    //self.free(a.val());
+  }
+
+  pub fn pass(&mut self, a: Ptr, b: Ptr) {
+    todo!()
+    //self.comm += 1;
+    //let loc0 = self.alloc(1);
+    //let loc1 = self.alloc(1);
+    //let loc2 = self.alloc(1);
+    //self.link(self.heap.get(a.val(), P2), Ptr::new(b.tag(), loc0));
+    //self.link(self.heap.get(b.val(), P1), Ptr::new(a.tag(), loc1));
+    //self.link(self.heap.get(b.val(), P2), Ptr::new(a.tag(), loc2));
+    //self.heap.set(loc0, P1, Ptr::new(VR2, loc1));
+    //self.heap.set(loc0, P2, Ptr::new(VR2, loc2));
+    //self.heap.set(loc1, P1, self.heap.get(a.val(), P1));
+    //self.heap.set(loc1, P2, Ptr::new(VR1, loc0));
+    //self.heap.set(loc2, P1, self.heap.get(a.val(), P1));
+    //self.heap.set(loc2, P2, Ptr::new(VR2, loc0));
+    //self.free(a.val());
+    //self.free(b.val());
+  }
+
+  pub fn copy(&mut self, a: Ptr, b: Ptr) {
+    todo!()
+    //self.comm += 1;
+    //self.link(self.heap.get(a.val(), P1), b);
+    //self.link(self.heap.get(a.val(), P2), b);
+    //self.free(a.val());
   }
 
   pub fn op2n(&mut self, a: Ptr, b: Ptr) {
-    self.oper += 1;
-    let mut p1 = self.heap.get(a.val(), P1);
-    // Optimization: perform chained ops at once
-    if p1.is_num() {
-      let mut rt = b.val();
-      let mut p2 = self.heap.get(a.val(), P2);
-      loop {
-        self.oper += 1;
-        rt = self.op(rt, p1.val());
-        // If P2 is OP2, keep looping
-        if p2.is_op2() {
-          p1 = self.heap.get(p2.val(), P1);
-          if p1.is_num() {
-            p2 = self.heap.get(p2.val(), P2);
-            self.oper += 1; // since OP1 is skipped
-            continue;
-          }
-        }
-        // If P2 is OP1, flip args and keep looping
-        if p2.is_op1() {
-          let tmp = rt;
-          rt = self.heap.get(p2.val(), P1).val();
-          p1 = Ptr::new(NUM, tmp);
-          p2 = self.heap.get(p2.val(), P2);
-          continue;
-        }
-        break;
-      }
-      self.link(Ptr::new(NUM, rt), p2);
-      return;
-    }
-    self.heap.set(a.val(), P1, b);
-    self.link(Ptr::new(OP1, a.val()), p1);
+    todo!()
+    //self.oper += 1;
+    //let mut p1 = self.heap.get(a.val(), P1);
+    //// Optimization: perform chained ops at once
+    //if p1.is_num() {
+      //let mut rt = b.val();
+      //let mut p2 = self.heap.get(a.val(), P2);
+      //loop {
+        //self.oper += 1;
+        //rt = self.op(rt, p1.val());
+        //// If P2 is OP2, keep looping
+        //if p2.is_op2() {
+          //p1 = self.heap.get(p2.val(), P1);
+          //if p1.is_num() {
+            //p2 = self.heap.get(p2.val(), P2);
+            //self.oper += 1; // since OP1 is skipped
+            //continue;
+          //}
+        //}
+        //// If P2 is OP1, flip args and keep looping
+        //if p2.is_op1() {
+          //let tmp = rt;
+          //rt = self.heap.get(p2.val(), P1).val();
+          //p1 = Ptr::new(NUM, tmp);
+          //p2 = self.heap.get(p2.val(), P2);
+          //continue;
+        //}
+        //break;
+      //}
+      //self.link(Ptr::new(NUM, rt), p2);
+      //return;
+    //}
+    //self.heap.set(a.val(), P1, b);
+    //self.link(Ptr::new(OP1, a.val()), p1);
   }
 
   pub fn op1n(&mut self, a: Ptr, b: Ptr) {
-    self.oper += 1;
-    let p1 = self.heap.get(a.val(), P1);
-    let p2 = self.heap.get(a.val(), P2);
-    let v0 = p1.val() as Val;
-    let v1 = b.val() as Val;
-    let v2 = self.op(v0, v1);
-    self.link(Ptr::new(NUM, v2), p2);
-    self.free(a.val());
+    todo!()
+    //self.oper += 1;
+    //let p1 = self.heap.get(a.val(), P1);
+    //let p2 = self.heap.get(a.val(), P2);
+    //let v0 = p1.val() as Val;
+    //let v1 = b.val() as Val;
+    //let v2 = self.op(v0, v1);
+    //self.link(Ptr::new(NUM, v2), p2);
+    //self.free(a.val());
   }
 
   #[inline(always)]
   pub fn op(&self, a: Val, b: Val) -> Val {
-    let a_opr = (a >> 24) & 0xF;
-    let b_opr = (b >> 24) & 0xF; // not used yet
-    let a_val = a & 0xFFFFFF;
-    let b_val = b & 0xFFFFFF;
-    match a_opr as Tag {
-      USE => { ((a_val & 0xF) << 24) | b_val }
-      ADD => { (a_val.wrapping_add(b_val)) & 0xFFFFFF }
-      SUB => { (a_val.wrapping_sub(b_val)) & 0xFFFFFF }
-      MUL => { (a_val.wrapping_mul(b_val)) & 0xFFFFFF }
-      DIV => { if b_val == 0 { 0xFFFFFF } else { (a_val.wrapping_div(b_val)) & 0xFFFFFF } }
-      MOD => { (a_val.wrapping_rem(b_val)) & 0xFFFFFF }
-      EQ  => { ((a_val == b_val) as Val) & 0xFFFFFF }
-      NE  => { ((a_val != b_val) as Val) & 0xFFFFFF }
-      LT  => { ((a_val < b_val) as Val) & 0xFFFFFF }
-      GT  => { ((a_val > b_val) as Val) & 0xFFFFFF }
-      AND => { (a_val & b_val) & 0xFFFFFF }
-      OR  => { (a_val | b_val) & 0xFFFFFF }
-      XOR => { (a_val ^ b_val) & 0xFFFFFF }
-      NOT => { (!b_val) & 0xFFFFFF }
-      LSH => { (a_val << b_val) & 0xFFFFFF }
-      RSH => { (a_val >> b_val) & 0xFFFFFF }
-      _   => { unreachable!() }
-    }
+    todo!()
+    //let a_opr = (a >> 24) & 0xF;
+    //let b_opr = (b >> 24) & 0xF; // not used yet
+    //let a_val = a & 0xFFFFFF;
+    //let b_val = b & 0xFFFFFF;
+    //match a_opr as Tag {
+      //USE => { ((a_val & 0xF) << 24) | b_val }
+      //ADD => { (a_val.wrapping_add(b_val)) & 0xFFFFFF }
+      //SUB => { (a_val.wrapping_sub(b_val)) & 0xFFFFFF }
+      //MUL => { (a_val.wrapping_mul(b_val)) & 0xFFFFFF }
+      //DIV => { if b_val == 0 { 0xFFFFFF } else { (a_val.wrapping_div(b_val)) & 0xFFFFFF } }
+      //MOD => { (a_val.wrapping_rem(b_val)) & 0xFFFFFF }
+      //EQ  => { ((a_val == b_val) as Val) & 0xFFFFFF }
+      //NE  => { ((a_val != b_val) as Val) & 0xFFFFFF }
+      //LT  => { ((a_val < b_val) as Val) & 0xFFFFFF }
+      //GT  => { ((a_val > b_val) as Val) & 0xFFFFFF }
+      //AND => { (a_val & b_val) & 0xFFFFFF }
+      //OR  => { (a_val | b_val) & 0xFFFFFF }
+      //XOR => { (a_val ^ b_val) & 0xFFFFFF }
+      //NOT => { (!b_val) & 0xFFFFFF }
+      //LSH => { (a_val << b_val) & 0xFFFFFF }
+      //RSH => { (a_val >> b_val) & 0xFFFFFF }
+      //_   => { unreachable!() }
+    //}
   }
 
   pub fn mtch(&mut self, a: Ptr, b: Ptr) {
-    self.oper += 1;
-    let p1 = self.heap.get(a.val(), P1); // branch
-    let p2 = self.heap.get(a.val(), P2); // return
-    if b.val() == 0 {
-      let loc0 = self.alloc(1);
-      self.heap.set(loc0, P2, ERAS);
-      self.link(p1, Ptr::new(CT0, loc0));
-      self.link(p2, Ptr::new(VR1, loc0));
-      self.free(a.val());
-    } else {
-      let loc0 = self.alloc(1);
-      let loc1 = self.alloc(1);
-      self.heap.set(loc0, P1, ERAS);
-      self.heap.set(loc0, P2, Ptr::new(CT0, loc1));
-      self.heap.set(loc1, P1, Ptr::new(NUM, b.val() - 1));
-      self.link(p1, Ptr::new(CT0, loc0));
-      self.link(p2, Ptr::new(VR2, loc1));
-      self.free(a.val());
-    }
+    todo!()
+    //self.oper += 1;
+    //let p1 = self.heap.get(a.val(), P1); // branch
+    //let p2 = self.heap.get(a.val(), P2); // return
+    //if b.val() == 0 {
+      //let loc0 = self.alloc(1);
+      //self.heap.set(loc0, P2, ERAS);
+      //self.link(p1, Ptr::new(CT0, loc0));
+      //self.link(p2, Ptr::new(VR1, loc0));
+      //self.free(a.val());
+    //} else {
+      //let loc0 = self.alloc(1);
+      //let loc1 = self.alloc(1);
+      //self.heap.set(loc0, P1, ERAS);
+      //self.heap.set(loc0, P2, Ptr::new(CT0, loc1));
+      //self.heap.set(loc1, P1, Ptr::new(NUM, b.val() - 1));
+      //self.link(p1, Ptr::new(CT0, loc0));
+      //self.link(p2, Ptr::new(VR2, loc1));
+      //self.free(a.val());
+    //}
   }
 
   // Expands a closed net.
