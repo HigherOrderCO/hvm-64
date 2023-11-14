@@ -26,6 +26,7 @@ fn main() {
 
 #[cfg(feature = "hvm_cli_options")]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+  let heap = run::Heap::new(1 << 28);
   let args: Vec<String> = env::args().collect();
   let help = "help".to_string();
   let action = args.get(1).unwrap_or(&help);
@@ -33,7 +34,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
   match action.as_str() {
     "run" => {
       if let Some(file_name) = f_name {
-        let (book, mut net) = load(file_name);
+        let (book, mut net) = load(&heap, file_name);
         let start_time = std::time::Instant::now();
         net.normal(&book);
         println!("{}", ast::show_runtime_net(&net));
@@ -47,7 +48,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     "compile" => {
       if let Some(file_name) = f_name {
-        let (book, _) = load(file_name);
+        let (book, _) = load(&heap, file_name);
         compile_book_to_rust_crate(file_name, &book)?;
         compile_rust_crate_to_executable(file_name)?;
       } else {
@@ -57,7 +58,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     "gen-cuda-book" => {
       if let Some(file_name) = f_name {
-        let book = load(file_name).0;
+        let book = load(&heap, file_name).0;
         println!("{}", gen_cuda_book(&book));
       } else {
         println!("Usage: hvmc gen-cuda-book <file.hvmc>");
@@ -89,10 +90,10 @@ fn print_stats(net: &run::Net, start_time: std::time::Instant) {
 }
 
 // Load file and generate net
-fn load(file: &str) -> (run::Book, run::Net) {
+fn load<'a>(heap: &'a run::Heap, file: &str) -> (run::Book, run::Net<'a>) {
   let file = fs::read_to_string(file).unwrap();
   let book = ast::book_to_runtime(&ast::do_parse_book(&file));
-  let mut net = run::Net::new(1 << 28);
+  let mut net = run::Net::new(&heap);
   net.boot(ast::name_to_val("main"));
   return (book, net);
 }

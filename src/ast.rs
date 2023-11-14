@@ -466,7 +466,8 @@ pub fn book_to_runtime(book: &Book) -> run::Book {
   let mut rt_book = run::Book::new();
   for (name, net) in book {
     let id = name_to_val(name);
-    let mut rt = run::Net::new(1 << 18);
+    let heap = run::Heap::new(1 << 16);
+    let mut rt = run::Net::new(&heap);
     net_to_runtime(&mut rt, net);
     rt_book.def(id, runtime_net_to_runtime_def(&rt));
   }
@@ -495,8 +496,8 @@ pub fn runtime_net_to_runtime_def(net: &run::Net) -> run::Def {
 }
 
 // Reads back from a def.
-pub fn runtime_def_to_runtime_net(def: &run::Def) -> run::Net {
-  let mut net = run::Net::new(def.node.len());
+pub fn runtime_def_to_runtime_net<'a>(heap: &'a run::Heap, def: &run::Def) -> run::Net<'a> {
+  let mut net = run::Net::new(&heap);
   for (i, &(p1, p2)) in def.node.iter().enumerate() {
     net.heap.set(i as run::Val, run::P1, p1);
     net.heap.set(i as run::Val, run::P2, p2);
@@ -580,7 +581,8 @@ pub fn book_from_runtime(rt_book: &run::Book) -> Book {
     let def = &rt_book.defs[id];
     if def.node.len() > 0 {
       let name = val_to_name(id as run::Val);
-      let net = net_from_runtime(&runtime_def_to_runtime_net(&def));
+      let heap = run::Heap::new(def.node.len());
+      let net  = net_from_runtime(&runtime_def_to_runtime_net(&heap, &def));
       book.insert(name, net);
     }
   }

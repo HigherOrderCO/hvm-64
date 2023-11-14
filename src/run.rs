@@ -70,8 +70,8 @@ pub struct Heap {
 }
 
 // A interaction combinator net.
-pub struct Net {
-  pub heap: Heap, // nodes
+pub struct Net<'a> {
+  pub heap: &'a Heap, // nodes
   pub rdex: Vec<(Ptr,Ptr)>, // redexes
   pub locs: Vec<Val>,
   pub next: usize,
@@ -300,11 +300,11 @@ impl Heap {
   }
 }
 
-impl Net {
+impl<'a> Net<'a> {
   // Creates an empty net with given size.
-  pub fn new(size: usize) -> Self {
+  pub fn new(heap: &'a Heap) -> Self {
     Net {
-      heap: Heap::new(size),
+      heap: heap,
       rdex: vec![],
       locs: vec![0; 1 << 16],
       next: 1,
