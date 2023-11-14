@@ -19,7 +19,7 @@ pub fn compile_book(book: &run::Book) -> String {
   }
   code.push_str(&format!("\n"));
 
-  code.push_str(&format!("impl Net {{\n"));
+  code.push_str(&format!("impl<'a> Net<'a> {{\n"));
   code.push_str(&format!("\n"));
 
   code.push_str(&format!("{}pub fn call_native(&mut self, book: &Book, ptr: Ptr, x: Ptr) -> bool {{\n", ident(1)));

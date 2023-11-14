@@ -65,13 +65,15 @@ pub struct Ptr(pub Val);
 // An atomic tagged pointer.
 pub struct APtr(pub AVal);
 
-pub struct Heap {
-  pub data: Vec<(APtr, APtr)>,
+pub type Data = [(APtr, APtr)];
+
+pub struct Heap<'a> {
+  pub data: &'a Data,
 }
 
 // A interaction combinator net.
 pub struct Net<'a> {
-  pub heap: &'a Heap, // nodes
+  pub heap: Heap<'a>, // nodes
   pub rdex: Vec<(Ptr,Ptr)>, // redexes
   pub locs: Vec<Val>,
   pub next: usize,
@@ -235,13 +237,17 @@ impl Def {
   }
 }
 
-impl Heap {
-  pub fn new(size: usize) -> Heap {
+impl<'a> Heap<'a> {
+  pub fn init(size: usize) -> Box<[(APtr, APtr)]> {
     let mut data = vec![];
     for _ in 0..size {
       data.push((APtr::new(NULL), APtr::new(NULL)));
     }
-    return Heap { data };
+    return data.into_boxed_slice();
+  }
+
+  pub fn new(data: &'a Data) -> Self {
+    Heap { data }
   }
 
   #[inline(always)]
@@ -302,9 +308,9 @@ impl Heap {
 
 impl<'a> Net<'a> {
   // Creates an empty net with given size.
-  pub fn new(heap: &'a Heap) -> Self {
+  pub fn new(data: &'a Data) -> Self {
     Net {
-      heap: heap,
+      heap: Heap { data },
       rdex: vec![],
       locs: vec![0; 1 << 16],
       next: 1,
@@ -736,6 +742,10 @@ impl<'a> Net<'a> {
       self.reduce(book);
       self.expand(book, ROOT);
     }
+  }
+
+  pub fn parallel_normal(&mut self, book: &Book) {
+    
   }
 
 }
