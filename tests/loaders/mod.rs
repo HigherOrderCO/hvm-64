@@ -48,6 +48,8 @@ pub fn hvm_lang_normal(book: &mut DefinitionBook, size: usize) -> (run::Net, Net
 
 #[allow(unused_variables)]
 pub fn normal(book: Book, size: usize) -> (run::Net, Net) {
+  let size = run::INIT + size;
+
   fn normal_cpu(book: run::Book, size: usize) -> run::Net {
     let mut rnet = run::Net::new(size);
     rnet.boot(name_to_val("main"));
