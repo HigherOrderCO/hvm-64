@@ -88,12 +88,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn print_stats(net: &run::Net, start_time: std::time::Instant) {
-  println!("RWTS   : {}", net.anni + net.comm + net.eras + net.dref + net.oper);
-  println!("- ANNI : {}", net.anni);
-  println!("- COMM : {}", net.comm);
-  println!("- ERAS : {}", net.eras);
-  println!("- DREF : {}", net.dref);
-  println!("- OPER : {}", net.oper);
+  println!("RWTS   : {}", net.rewrites());
+  println!("- ANNI : {}", net.rwts.anni);
+  println!("- COMM : {}", net.rwts.comm);
+  println!("- ERAS : {}", net.rwts.eras);
+  println!("- DREF : {}", net.rwts.dref);
+  println!("- OPER : {}", net.rwts.oper);
   println!("TIME   : {:.3} s", (start_time.elapsed().as_millis() as f64) / 1000.0);
   println!("RPS    : {:.3} m", (net.rewrites() as f64) / (start_time.elapsed().as_millis() as f64) / 1000.0);
 }

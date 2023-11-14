@@ -13,7 +13,7 @@ pub fn compile_book(book: &run::Book) -> String {
 
   for fid in 0 .. book.defs.len() as run::Val {
     if book.defs[fid as usize].node.len() > 0 {
-      let name = &ast::val_to_name(fid as u32);
+      let name = &ast::val_to_name(fid as run::Val);
       code.push_str(&format!("pub const F_{:4} : Val = 0x{:06x};\n", name, fid));
     }
   }
@@ -169,8 +169,8 @@ pub fn compile_term(book: &run::Book, tab: usize, fid: run::Val) -> String {
           code.push_str(&format!("{}let {} : Ptr;\n", ident(tab), target(&c_s)));
           code.push_str(&format!("{}// fast match\n", ident(tab)));
           code.push_str(&format!("{}if {}.tag() == CT0 && self.heap.get({}.val(), P1).is_num() {{\n", ident(tab), target(x), target(x)));
-          code.push_str(&format!("{}self.anni += 2;\n", ident(tab+1)));
-          code.push_str(&format!("{}self.oper += 1;\n", ident(tab+1)));
+          code.push_str(&format!("{}self.rwts.anni += 2;\n", ident(tab+1)));
+          code.push_str(&format!("{}self.rwts.oper += 1;\n", ident(tab+1)));
           code.push_str(&format!("{}let {} = self.heap.get({}.val(), P1);\n", ident(tab+1), num, target(x)));
           code.push_str(&format!("{}let {} = self.heap.get({}.val(), P2);\n", ident(tab+1), res, target(x)));
           code.push_str(&format!("{}if {}.val() == 0 {{\n", ident(tab+1), num));
@@ -217,7 +217,7 @@ pub fn compile_term(book: &run::Book, tab: usize, fid: run::Val) -> String {
           code.push_str(&format!("{}let {} : Ptr;\n", ident(tab), target(&nxt)));
           code.push_str(&format!("{}// fast op\n", ident(tab)));
           code.push_str(&format!("{}if {}.is_num() && {}.is_num() && {}.is_num() {{\n", ident(tab), target(x), v_x, v_y));
-          code.push_str(&format!("{}self.oper += 4;\n", ident(tab+1))); // OP2 + OP1 + OP2 + OP1
+          code.push_str(&format!("{}self.rwts.oper += 4;\n", ident(tab+1))); // OP2 + OP1 + OP2 + OP1
           code.push_str(&format!("{}{} = Ptr::new(NUM, self.op(self.op({}.val(),{}.val()),{}.val()));\n", ident(tab+1), target(&nxt), target(x), v_x, v_y));
           code.push_str(&format!("{}}} else {{\n", ident(tab)));
           code.push_str(&format!("{}let {} = self.alloc(1);\n", ident(tab+1), opx));
@@ -248,7 +248,7 @@ pub fn compile_term(book: &run::Book, tab: usize, fid: run::Val) -> String {
       code.push_str(&format!("{}let {} : Ptr;\n", ident(tab), target(&x2)));
       code.push_str(&format!("{}// fast copy\n", ident(tab)));
       code.push_str(&format!("{}if {}.tag() == NUM {{\n", ident(tab), target(x)));
-      code.push_str(&format!("{}self.comm += 1;\n", ident(tab+1)));
+      code.push_str(&format!("{}self.rwts.comm += 1;\n", ident(tab+1)));
       code.push_str(&format!("{}{} = {};\n", ident(tab+1), target(&x1), target(x)));
       code.push_str(&format!("{}{} = {};\n", ident(tab+1), target(&x2), target(x)));
       code.push_str(&format!("{}}} else {{\n", ident(tab)));
@@ -276,7 +276,7 @@ pub fn compile_term(book: &run::Book, tab: usize, fid: run::Val) -> String {
       code.push_str(&format!("{}let {} : Ptr;\n", ident(tab), target(&x2)));
       code.push_str(&format!("{}// fast apply\n", ident(tab)));
       code.push_str(&format!("{}if {}.tag() == {} {{\n", ident(tab), target(x), tag(ptr.tag())));
-      code.push_str(&format!("{}self.anni += 1;\n", ident(tab+1)));
+      code.push_str(&format!("{}self.rwts.anni += 1;\n", ident(tab+1)));
       code.push_str(&format!("{}{} = self.heap.get({}.val(), P1);\n", ident(tab+1), target(&x1), target(x)));
       code.push_str(&format!("{}{} = self.heap.get({}.val(), P2);\n", ident(tab+1), target(&x2), target(x)));
       code.push_str(&format!("{}self.free({}.val());\n", ident(tab+1), target(x)));
@@ -296,7 +296,7 @@ pub fn compile_term(book: &run::Book, tab: usize, fid: run::Val) -> String {
     //if ptr.is_ref() {
       //code.push_str(&format!("{}// inline @{}\n", ident(tab), ast::val_to_name(ptr.val())));
       //code.push_str(&format!("{}if !{}.is_skp() {{\n", ident(tab), target(x)));
-      //code.push_str(&format!("{}self.dref += 1;\n", ident(tab+1)));
+      //code.push_str(&format!("{}self.rwts.dref += 1;\n", ident(tab+1)));
       //code.push_str(&call(book, tab+1, newx, &mut HashMap::new(), ptr.val(), x));
       //code.push_str(&format!("{}}} else {{\n", ident(tab)));
       //code.push_str(&make(tab+1, newx, vars, def, ptr, &target(x)));
@@ -310,7 +310,7 @@ pub fn compile_term(book: &run::Book, tab: usize, fid: run::Val) -> String {
     if ptr.is_num() || ptr.is_era() {
       code.push_str(&format!("{}// fast erase\n", ident(tab)));
       code.push_str(&format!("{}if {}.is_skp() {{\n", ident(tab), target(x)));
-      code.push_str(&format!("{}self.eras += 1;\n", ident(tab+1)));
+      code.push_str(&format!("{}self.rwts.eras += 1;\n", ident(tab+1)));
       code.push_str(&format!("{}}} else {{\n", ident(tab)));
       code.push_str(&make(tab+1, newx, vars, def, ptr, &target(x)));
       code.push_str(&format!("{}}}\n", ident(tab)));

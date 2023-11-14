@@ -1,56 +1,3 @@
-//Function std::thread::scopeCopy item path
-//1.63.0 · source · [−]
-//pub fn scope<'env, F, T>(f: F) -> T
-//where
-    //F: for<'scope> FnOnce(&'scope Scope<'scope, 'env>) -> T,
-//Create a scope for spawning scoped threads.
-
-//The function passed to scope will be provided a Scope object, through which scoped threads can be spawned.
-
-//Unlike non-scoped threads, scoped threads can borrow non-'static data, as the scope guarantees all threads will be joined at the end of the scope.
-
-//All threads spawned within the scope that haven’t been manually joined will be automatically joined before this function returns.
-
-//Panics
-//If any of the automatically joined threads panicked, this function will panic.
-
-//If you want to handle panics from spawned threads, join them before the end of the scope.
-
-//Example
-//use std::thread;
-
-//let mut a = vec![1, 2, 3];
-//let mut x = 0;
-
-//thread::scope(|s| {
-    //s.spawn(|| {
-        //println!("hello from the first scoped thread");
-        //// We can borrow `a` here.
-        //dbg!(&a);
-    //});
-    //s.spawn(|| {
-        //println!("hello from the second scoped thread");
-        //// We can even mutably borrow `x` here,
-        //// because no other threads are using it.
-        //x += a[0] + a[2];
-    //});
-    //println!("hello from the main thread");
-//});
-
-//// After the scope, we can modify and access our variables again:
-//a.push(4);
-//assert_eq!(x, a.len());
-//Lifetimes
-//Scoped threads involve two lifetimes: 'scope and 'env.
-
-//The 'scope lifetime represents the lifetime of the scope itself. That is: the time during which new scoped threads may be spawned, and also the time during which they might still be running. Once this lifetime ends, all scoped threads are joined. This lifetime starts within the scope function, before f (the argument to scope) starts. It ends after f returns and all scoped threads have been joined, but before scope returns.
-
-//The 'env lifetime represents the lifetime of whatever is borrowed by the scoped threads. This lifetime must outlast the call to scope, and thus cannot be smaller than 'scope. It can be as small as the call to scope, meaning that anything that outlives this call, such as local variables defined right before the scope, can be borrowed by the scoped threads.
-
-//The 'env: 'scope bound is part of the definition of the Scope type.
-
-// ###
-
 // An efficient Interaction Combinator runtime
 // ===========================================
 // This file implements an efficient interaction combinator runtime. Nodes are represented by 2 aux
@@ -60,11 +7,11 @@
 // they interact with nodes, and are cleared when they interact with ERAs, allowing for constant
 // space evaluation of recursive functions on Scott encoded datatypes.
 
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 pub type Tag  = u8;
-pub type Val  = u32;
-pub type AVal = AtomicU32;
+pub type Val  = u64;
+pub type AVal = AtomicU64;
 
 // Core terms.
 pub const VR1: Tag = 0x0; // Variable to aux port 1
@@ -118,10 +65,30 @@ pub struct Ptr(pub Val);
 // An atomic tagged pointer.
 pub struct APtr(pub AVal);
 
+// The global node buffer.
 pub type Data = [(APtr, APtr)];
 
+// A handy wrapper around Data.
 pub struct Heap<'a> {
   pub data: &'a Data,
+}
+
+// Rewrite counter.
+pub struct Rewrites {
+  pub anni: usize, // anni rewrites
+  pub comm: usize, // comm rewrites
+  pub eras: usize, // eras rewrites
+  pub dref: usize, // dref rewrites
+  pub oper: usize, // oper rewrites
+}
+
+// Rewrite counter, atomic.
+pub struct AtomicRewrites {
+  pub anni: AtomicUsize, // anni rewrites
+  pub comm: AtomicUsize, // comm rewrites
+  pub eras: AtomicUsize, // eras rewrites
+  pub dref: AtomicUsize, // dref rewrites
+  pub oper: AtomicUsize, // oper rewrites
 }
 
 // A interaction combinator net.
@@ -129,12 +96,10 @@ pub struct Net<'a> {
   pub heap: Heap<'a>, // nodes
   pub rdex: Vec<(Ptr,Ptr)>, // redexes
   pub locs: Vec<Val>,
-  pub next: usize,
-  pub anni: usize, // anni rewrites
-  pub comm: usize, // comm rewrites
-  pub eras: usize, // eras rewrites
-  pub dref: usize, // dref rewrites
-  pub oper: usize, // oper rewrites
+  pub init: usize, // allocation area init index
+  pub area: usize, // allocation area size
+  pub next: usize, // next allocation index within area
+  pub rwts: Rewrites, // rewrite count
 }
 
 // A compact closed net, used for dereferences.
@@ -249,7 +214,7 @@ impl Ptr {
 
 impl APtr {
   pub fn new(ptr: Ptr) -> Self {
-    APtr(AtomicU32::new(ptr.0))
+    APtr(AtomicU64::new(ptr.0))
   }
 
   pub fn load(&self) -> Ptr {
@@ -359,6 +324,47 @@ impl<'a> Heap<'a> {
   }
 }
 
+impl Rewrites {
+  pub fn new() -> Self {
+    Rewrites {
+      anni: 0,
+      comm: 0,
+      eras: 0,
+      dref: 0,
+      oper: 0,
+    }
+  }
+
+  pub fn add_to(&self, target: &AtomicRewrites) {
+    target.anni.fetch_add(self.anni, Ordering::Relaxed);
+    target.comm.fetch_add(self.comm, Ordering::Relaxed);
+    target.eras.fetch_add(self.eras, Ordering::Relaxed);
+    target.dref.fetch_add(self.dref, Ordering::Relaxed);
+    target.oper.fetch_add(self.oper, Ordering::Relaxed);
+  }
+
+}
+
+impl AtomicRewrites {
+  pub fn new() -> Self {
+    AtomicRewrites {
+      anni: AtomicUsize::new(0),
+      comm: AtomicUsize::new(0),
+      eras: AtomicUsize::new(0),
+      dref: AtomicUsize::new(0),
+      oper: AtomicUsize::new(0),
+    }
+  }
+
+  pub fn add_to(&self, target: &mut Rewrites) {
+    target.anni += self.anni.load(Ordering::Relaxed);
+    target.comm += self.comm.load(Ordering::Relaxed);
+    target.eras += self.eras.load(Ordering::Relaxed);
+    target.dref += self.dref.load(Ordering::Relaxed);
+    target.oper += self.oper.load(Ordering::Relaxed);
+  }
+}
+
 impl<'a> Net<'a> {
   // Creates an empty net with given size.
   pub fn new(data: &'a Data) -> Self {
@@ -366,13 +372,27 @@ impl<'a> Net<'a> {
       heap: Heap { data },
       rdex: vec![],
       locs: vec![0; 1 << 16],
-      next: 1,
-      anni: 0,
-      comm: 0,
-      eras: 0,
-      dref: 0,
-      oper: 0,
+      init: 0,
+      area: data.len(),
+      next: 0,
+      rwts: Rewrites::new(),
     }
+  }
+
+  // Forks into child threads, returning a Net for the (tid/cores)'th thread.
+  pub fn fork(&self, tid: usize, cores: usize) -> Self {
+    let mut net = Net::new(self.heap.data);
+    net.init = self.heap.data.len() * tid / cores;
+    net.area = self.heap.data.len() / cores;
+    let from = self.rdex.len() * (tid + 0) / cores;
+    let upto = self.rdex.len() * (tid + 1) / cores;
+    for i in from .. upto {
+      net.rdex.push(self.rdex[i]);
+    }
+    if tid == 0 {
+      net.next = self.next;
+    }
+    return net;
   }
 
   // Creates a net and boots from a REF.
@@ -382,24 +402,23 @@ impl<'a> Net<'a> {
 
   // Total rewrite count.
   pub fn rewrites(&self) -> usize {
-    return self.anni + self.comm + self.eras + self.dref + self.oper;
+    return self.rwts.anni + self.rwts.comm + self.rwts.eras + self.rwts.dref + self.rwts.oper;
   }
 
   #[inline(always)]
   pub fn alloc(&mut self, size: usize) -> Val {
-    let len = self.heap.data.len();
-    // On the first pass, just alloc without looking.
-    if self.next < len {
-      let index = self.next as Val;
+    // On the first pass, just alloc without checking.
+    // Note: we add 1 to avoid overwritting root.
+    if self.next < self.area - 1 {
       self.next += 1;
-      return index;
+      return self.init as Val + self.next as Val;
     // On later passes, search for an available slot.
     } else {
       loop {
         self.next += 1;
-        let index = (self.next % self.heap.data.len()) as Val;
+        let index = (self.next % self.area) as Val;
         if self.heap.get(index, P2).is_nil() {
-          return index;
+          return self.init as Val + index;
         }
       }
     }
@@ -432,7 +451,7 @@ impl<'a> Net<'a> {
   #[inline(always)]
   pub fn redux(&mut self, a: Ptr, b: Ptr) {
     if Ptr::can_skip(a, b) {
-      self.eras += 1;
+      self.rwts.eras += 1;
     } else {
       self.rdex.push((a, b));
     }
@@ -459,8 +478,8 @@ impl<'a> Net<'a> {
   }
 
   pub fn atomic_link(&mut self, a_dir: Ptr, b_dir: Ptr) {
-    let a = self.get_target(a_dir);
-    let b = self.get_target(b_dir);
+    let a = self.take_target(a_dir);
+    let b = self.take_target(b_dir);
     // Creates redex A-B
     if a.is_pri() && b.is_pri() {
       return self.redux(a, b);
@@ -492,7 +511,9 @@ impl<'a> Net<'a> {
   }
 
   // Performs an interaction over a redex.
+  #[inline(always)]
   pub fn interact(&mut self, book: &Book, a: Ptr, b: Ptr) {
+    //println!("{:08x} {:08x}", a.0, b.0);
     match (a.tag(), b.tag()) {
       (REF   , OP2..) => self.call(book, a, b),
       (OP2.. , REF  ) => self.call(book, b, a),
@@ -500,18 +521,18 @@ impl<'a> Net<'a> {
       (CT0.. , CT0..) => self.comm(a, b),
       (CT0.. , ERA  ) => self.era2(a),
       (ERA   , CT0..) => self.era2(b),
-      (REF   , ERA  ) => self.eras += 1,
-      (ERA   , REF  ) => self.eras += 1,
-      (ERA   , ERA  ) => self.eras += 1,
+      (REF   , ERA  ) => self.rwts.eras += 1,
+      (ERA   , REF  ) => self.rwts.eras += 1,
+      (ERA   , ERA  ) => self.rwts.eras += 1,
       //(VR1   , _    ) => self.link(a, b),
       //(VR2   , _    ) => self.link(a, b),
       //(_     , VR1  ) => self.link(b, a),
       //(_     , VR2  ) => self.link(b, a),
       (CT0.. , NUM  ) => self.copy(a, b),
       (NUM   , CT0..) => self.copy(b, a),
-      (NUM   , ERA  ) => self.eras += 1,
-      (ERA   , NUM  ) => self.eras += 1,
-      (NUM   , NUM  ) => self.eras += 1,
+      (NUM   , ERA  ) => self.rwts.eras += 1,
+      (ERA   , NUM  ) => self.rwts.eras += 1,
+      (NUM   , NUM  ) => self.rwts.eras += 1,
       (OP2   , NUM  ) => self.op2n(a, b),
       (NUM   , OP2  ) => self.op2n(b, a),
       (OP1   , NUM  ) => self.op1n(a, b),
@@ -535,7 +556,7 @@ impl<'a> Net<'a> {
   }
 
   pub fn anni(&mut self, a: Ptr, b: Ptr) {
-    self.anni += 1;
+    self.rwts.anni += 1;
     let a1 = Ptr::new(VR1, a.val());
     let b1 = Ptr::new(VR1, b.val());
     self.atomic_link(a1, b1);
@@ -547,7 +568,7 @@ impl<'a> Net<'a> {
   }
 
   pub fn comm(&mut self, a: Ptr, b: Ptr) {
-    self.comm += 1;
+    self.rwts.comm += 1;
     let loc0 = self.alloc(1);
     let loc1 = self.alloc(1);
     let loc2 = self.alloc(1);
@@ -573,7 +594,7 @@ impl<'a> Net<'a> {
   }
 
   pub fn era2(&mut self, a: Ptr) {
-    self.eras += 1;
+    self.rwts.eras += 1;
     let a1 = Ptr::new(VR1, a.val());
     self.atomic_link_1(a1, ERAS);
     let a2 = Ptr::new(VR2, a.val());
@@ -583,14 +604,14 @@ impl<'a> Net<'a> {
 
   pub fn era1(&mut self, a: Ptr) {
     todo!()
-    //self.eras += 1;
+    //self.rwts.eras += 1;
     //self.link(self.heap.get(a.val(), P2), ERAS);
     //self.free(a.val());
   }
 
   pub fn pass(&mut self, a: Ptr, b: Ptr) {
     todo!()
-    //self.comm += 1;
+    //self.rwts.comm += 1;
     //let loc0 = self.alloc(1);
     //let loc1 = self.alloc(1);
     //let loc2 = self.alloc(1);
@@ -609,7 +630,7 @@ impl<'a> Net<'a> {
 
   pub fn copy(&mut self, a: Ptr, b: Ptr) {
     todo!()
-    //self.comm += 1;
+    //self.rwts.comm += 1;
     //self.link(self.heap.get(a.val(), P1), b);
     //self.link(self.heap.get(a.val(), P2), b);
     //self.free(a.val());
@@ -617,21 +638,21 @@ impl<'a> Net<'a> {
 
   pub fn op2n(&mut self, a: Ptr, b: Ptr) {
     todo!()
-    //self.oper += 1;
+    //self.rwts.oper += 1;
     //let mut p1 = self.heap.get(a.val(), P1);
     //// Optimization: perform chained ops at once
     //if p1.is_num() {
       //let mut rt = b.val();
       //let mut p2 = self.heap.get(a.val(), P2);
       //loop {
-        //self.oper += 1;
+        //self.rwts.oper += 1;
         //rt = self.op(rt, p1.val());
         //// If P2 is OP2, keep looping
         //if p2.is_op2() {
           //p1 = self.heap.get(p2.val(), P1);
           //if p1.is_num() {
             //p2 = self.heap.get(p2.val(), P2);
-            //self.oper += 1; // since OP1 is skipped
+            //self.rwts.oper += 1; // since OP1 is skipped
             //continue;
           //}
         //}
@@ -654,7 +675,7 @@ impl<'a> Net<'a> {
 
   pub fn op1n(&mut self, a: Ptr, b: Ptr) {
     todo!()
-    //self.oper += 1;
+    //self.rwts.oper += 1;
     //let p1 = self.heap.get(a.val(), P1);
     //let p2 = self.heap.get(a.val(), P2);
     //let v0 = p1.val() as Val;
@@ -694,7 +715,7 @@ impl<'a> Net<'a> {
 
   pub fn mtch(&mut self, a: Ptr, b: Ptr) {
     todo!()
-    //self.oper += 1;
+    //self.rwts.oper += 1;
     //let p1 = self.heap.get(a.val(), P1); // branch
     //let p2 = self.heap.get(a.val(), P2); // return
     //if b.val() == 0 {
@@ -718,7 +739,7 @@ impl<'a> Net<'a> {
   // Expands a closed net.
   #[inline(always)]
   pub fn call(&mut self, book: &Book, ptr: Ptr, par: Ptr) {
-    self.dref += 1;
+    self.rwts.dref += 1;
     let mut ptr = ptr;
     // FIXME: change "while" to "if" once lang prevents refs from returning refs
     if ptr.is_ref() {
@@ -764,6 +785,7 @@ impl<'a> Net<'a> {
   }
 
   // Reduces all redexes.
+  #[inline(always)]
   pub fn reduce(&mut self, book: &Book) {
     let mut rdex: Vec<(Ptr, Ptr)> = vec![];
     std::mem::swap(&mut self.rdex, &mut rdex);
@@ -777,6 +799,7 @@ impl<'a> Net<'a> {
   }
 
   // Expands heads.
+  #[inline(always)]
   pub fn expand(&mut self, book: &Book, dir: Ptr) {
     let ptr = self.get_target(dir);
     if ptr.is_ctr() {
@@ -789,47 +812,96 @@ impl<'a> Net<'a> {
   }
 
   // Reduce a net to normal form.
+  //pub fn normal(&mut self, book: &Book) {
+    //self.expand(book, ROOT);
+    //while self.rdex.len() > 0 {
+      //self.reduce(book);
+      //self.expand(book, ROOT);
+    //}
+  //}
+
   pub fn normal(&mut self, book: &Book) {
-    self.expand(book, ROOT);
+    let cores = 8;
 
-    // Uncomment:
-    //self.reduce(book);
-    //self.expand(book, ROOT);
-    //self.reduce(book);
-    //self.expand(book, ROOT);
+    println!("{}", crate::ast::show_runtime_net(self));
 
-    // Comment
-    while self.rdex.len() > 0 {
-      self.reduce(book);
-      self.expand(book, ROOT);
-    }
+    println!("---------------------- FORKING");
+
+    let delta_rewrites = AtomicRewrites::new();
+
+    std::thread::scope(|s| {
+      for tid in 0 .. cores {
+        let mut child = self.fork(tid, cores);
+        let delta_rewrites = &delta_rewrites;
+        s.spawn(move || {
+
+          let root = child.alloc(1);
+          let main = crate::ast::name_to_val("brnZ");
+          child.heap.set(root, P2, Ptr::new(REF, main));
+          child.expand(book, Ptr::new(VR2, root));
+          println!("[{:04x}] root={:08x} init={:08x} area={:08x} {:08x?}", tid, root, child.init, child.area, child.rdex);
+
+          child.reduce(book);
+          child.rwts.add_to(delta_rewrites);
+          println!("done {} {}", tid, child.rewrites());
+        });
+      }
+    });
+
+    self.rdex.clear();
+    delta_rewrites.add_to(&mut self.rwts);
+
+    println!("ALL DONE");
 
   }
-
-  pub fn parallel_normal(&mut self, book: &Book) {
-    self.normal(book);
-    // Gets this CPU's core count
-    //let cores = num_cpus::get();
-    
-    // Spawn 16 scoped threads and print "hello <thread_id>" from each
-    //std::thread::scope(|s| {
-      //for i in 0 .. 16 {
-        //let mut net = Net::new(&self.heap.data);
-          ////heap: Heap { data },
-          ////rdex: vec![],
-          ////locs: vec![0; 1 << 16],
-          ////next: 1,
-          ////anni: 0,
-          ////comm: 0,
-          ////eras: 0,
-          ////dref: 0,
-          ////oper: 0,
-        ////}
-        //s.spawn(move || {
-          //println!("hello {}", i);
-        //});
-      //}
-    //});
-  }
-
 }
+
+//###
+
+//Question:
+
+//The file above, in a single thread, runs at 180 million rewrites per second. Using 8 threads in an
+//Apple M1 Max, which has 8 performance cores, and with nothing else running on the background, we
+//achieve 520 million rewrites per second. That is less than expected, since 180*8=1440. Note that,
+//in the code above, as far as I understand, threads don't interfere with each other at all. In fact,
+//there are 8 threads, each one writing to a different part of the shared &Heap object. Usually that
+//kind of sub-ideal speedup is due to cache line contention or similar issues where multiple threads
+//read/write to near locations in memory, but, as far as I can tell, that doesn't occur. The inner
+//loop is:
+
+          //child.reduce(book);
+
+
+//Which should execute the child.reduce function in a way that each thread is completely isolated,
+//thus, a larger speedup would be expected. What is causing the sub-ideal speedup here? Read the
+//entire code and figure out the culprit. Answer below.
+
+//The issue likely lies in the false sharing of cache lines due to the layout of the `Heap` data structure. Although each thread operates on a different part of the heap, the `Heap` is an array of `(APtr, APtr)` tuples, which means that two adjacent elements (representing auxiliary ports of different nodes) are stored next to each other in memory.
+
+//When a thread writes to an `APtr`, it may cause the entire cache line containing that `APtr` to be loaded into the CPU cache. If another thread is operating on an adjacent `APtr` that happens to be on the same cache line, this can lead to cache line contention. The CPU cache coherency protocol will have to invalidate and update the cache line across cores, causing delays and reducing parallel efficiency.
+
+//To mitigate this issue, you could redesign the `Heap` data structure to ensure that each thread works on data that is spaced far enough apart in memory to avoid sharing cache lines. This could involve padding or aligning the data structures to cache line boundaries, or changing the allocation strategy to distribute node data more evenly across the heap in a way that aligns with cache line boundaries.
+
+//###
+
+//I don't think you understand the issue. The data is already spread apart. The Heap structure has 2GB, and each thread will allocate exclusively in its own slice of 2/8 GB.
+
+//###
+
+//The issue might be related to the `locs` vector in the `Net` struct. Each thread has its own copy of the `Net` struct, but they all share a reference to the same `locs` vector through the `Heap`. When threads allocate new nodes, they write to their respective locations in the `locs` vector, potentially causing cache line contention as this vector is shared across all threads.
+
+//To resolve this, you could give each thread its own copy of the `locs` vector to prevent them from writing to the same memory location, thus avoiding cache line contention on this shared resource.
+
+//###
+
+//What do you mean? Each thread has its own locs vector, right?
+
+//###
+
+//Apologies for the confusion. Upon reviewing the code again, it appears that each thread does indeed have its own `locs` vector as part of its `Net` struct instance. Therefore, the `locs` vector is not the cause of the sub-ideal speedup.
+
+//Another potential issue could be related to the atomic operations on the `Heap`. Even though each thread operates on a different part of the heap, the use of atomic operations (`AtomicU32`) for every read and write may introduce significant overhead due to the memory barriers they enforce. These barriers can slow down the performance as they ensure memory ordering across cores, which might not be necessary if each thread is guaranteed to only access its own portion of the heap.
+
+//To improve performance, you could consider using regular non-atomic operations for accessing the heap within each thread's dedicated area, assuming that no other thread will access or modify that same area. This would reduce the overhead introduced by the atomic operations and potentially lead to better scaling with the number of threads.
+
+

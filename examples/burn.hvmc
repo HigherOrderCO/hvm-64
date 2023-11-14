@@ -1,6 +1,7 @@
 // Decreases a tree of λ-encoded binary counters until they're all 0 (parallel).
 // Takes about ~16s on Apple M1, and ~0.5s on RTX 4090
 
+@c3  = ([[(c b) (b a)] (a R)] (c R))
 @c4  = ([[[(d c) (c b)] (b a)] (a R)] (d R))
 @c6  = ([[[[[(f e) (e d)] (d c)] (c b)] (b a)] (a R)] (f R))
 @c8  = ([[[[[[[(h g) (g f)] (f e)] (e d)] (d c)] (c b)] (b a)] (a R)] (h R))
@@ -8,6 +9,8 @@
 @c12 = ([[[[[[[[[[[(l k) (k j)] (j i)] (i h)] (h g)] (g f)] (f e)] (e d)] (d c)] (c b)] (b a)] (a R)] (l R))
 @c14 = ([[[[[[[[[[[[[(n m) (m l)] (l k)] (k j)] (j i)] (i h)] (h g)] (g f)] (f e)] (e d)] (d c)] (c b)] (b a)] (a R)] (n R))
 @c16 = ([[[[[[[[[[[[[[[(p o) (o n)] (n m)] (m l)] (l k)] (k j)] (j i)] (i h)] (h g)] (g f)] (f e)] (e d)] (d c)] (c b)] (b a)] (a R)] (p R))
+@c20 = ([[[[[[[[[[[[[[[[[[[(t s) (s r)] (r q)] (q p)] (p o)] (o n)] (n m)] (m l)] (l k)] (k j)] (j i)] (i h)] (h g)] (g f)] (f e)] (e d)] (d c)] (c b)] (b a)] (a R)] (t R))
+@c22 = ([[[[[[[[[[[[[[[[[[[[[(v u) (u t)] (t s)] (s r)] (r q)] (q p)] (p o)] (o n)] (n m)] (m l)] (l k)] (k j)] (j i)] (i h)] (h g)] (g f)] (f e)] (e d)] (d c)] (c b)] (b a)] (a R)] (v R))
 
 @S = (a ((a b) (* b)))
 @Z = (* (a a))
@@ -28,11 +31,31 @@
 @runI = (p R) & @run ~ (decip R) & @dec ~ (ip decip) & @I ~ (p ip)
 @run  = ((@runO (@runI (@E R))) R)
 
-@brnZ = R & @run ~ (val R) & @c10 ~ (@I (@E val))
+@brnZ = R & @run ~ (val R) & @c22 ~ (@I (@E val))
 @brnS = ([p0 p1] (r0 r1)) & @brn ~ (p0 r0) & @brn ~ (p1 r1)
 @brn  = ((@brnS (@brnZ r)) r)
 
-@main
-  = R
-  & @c12 ~ (@S (@Z dep))
-  & @brn ~ (dep R)
+//@main = R
+  //& (* @brnZ) ~ (* R)
+
+//@main
+  //= R
+  //& @c3  ~ (@S (@Z dep))
+  //& @brn ~ (dep R)
+
+//RWTS   : 10587
+//- ANNI : 5586
+//- COMM : 315
+//- ERAS : 1980
+//- DREF : 2706
+//- OPER : 0
+//TIME   : 0.000 s
+
+//RWTS   : 10587
+//- ANNI : 5586
+//- COMM : 315
+//- ERAS : 1980
+//- DREF : 2706
+//- OPER : 0
+//TIME   : 0.002 s
+//RPS    : 5.293 m
