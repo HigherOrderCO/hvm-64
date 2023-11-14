@@ -27,7 +27,7 @@ fn dec_bits() {
   let book = load_core("binary-counter/dec_bits.hvmc");
   let (rnet, net) = normal(book, 1 << 16);
 
-  assert_snapshot!(show_net(&net), @"(* (* (b b)))");
+  assert_snapshot!(show_net(&net), @"(* (* (a a)))");
   assert_debug_snapshot!(rnet.rewrites(), @"180113");
 }
 
@@ -41,7 +41,7 @@ fn dec_bits_tree() {
     assert_snapshot!(show_net(&net), @"((((((@E @E) (@E @E)) ((@E @E) (@E @E))) (((@E @E) (@E @E)) ((@E @E) (@E @E)))) ((((@E @E) (@E @E)) ((@E @E) (@E @E))) (((@E @E) (@E @E)) ((@E @E) (@E @E))))) (((((@E @E) (@E @E)) ((@E @E) (@E @E))) (((@E @E) (@E @E)) ((@E @E) (@E @E)))) ((((@E @E) (@E @E)) ((@E @E) (@E @E))) (((@E @E) (@E @E)) ((@E @E) (@E @E))))))");
     assert_debug_snapshot!(rnet.rewrites(), @"2878529");
   } else {
-    assert_snapshot!(show_net(&net), @"(((((((* (* (b b))) (* (* (c c)))) ((* (* (d d))) (* (* (e e))))) (((* (* (f f))) (* (* (g g)))) ((* (* (h h))) (* (* (i i)))))) ((((* (* (j j))) (* (* (k k)))) ((* (* (l l))) (* (* (m m))))) (((* (* (n n))) (* (* (o o)))) ((* (* (p p))) (* (* (q q))))))) (((((* (* (r r))) (* (* (s s)))) ((* (* (t t))) (* (* (u u))))) (((* (* (v v))) (* (* (w w)))) ((* (* (x x))) (* (* (y y)))))) ((((* (* (z z))) (* (* (ba ba)))) ((* (* (bb bb))) (* (* (bc bc))))) (((* (* (bd bd))) (* (* (be be)))) ((* (* (bf bf))) (* (* (bg bg)))))))) ((((((* (* (bh bh))) (* (* (bi bi)))) ((* (* (bj bj))) (* (* (bk bk))))) (((* (* (bl bl))) (* (* (bm bm)))) ((* (* (bn bn))) (* (* (bo bo)))))) ((((* (* (bp bp))) (* (* (bq bq)))) ((* (* (br br))) (* (* (bs bs))))) (((* (* (bt bt))) (* (* (bu bu)))) ((* (* (bv bv))) (* (* (bw bw))))))) (((((* (* (bx bx))) (* (* (by by)))) ((* (* (bz bz))) (* (* (ca ca))))) (((* (* (cb cb))) (* (* (cc cc)))) ((* (* (cd cd))) (* (* (ce ce)))))) ((((* (* (cf cf))) (* (* (cg cg)))) ((* (* (ch ch))) (* (* (ci ci))))) (((* (* (cj cj))) (* (* (ck ck)))) ((* (* (cl cl))) (* (* (cm cm)))))))))");
+    assert_snapshot!(show_net(&net), @"(((((((* (* (a a))) (* (* (b b)))) ((* (* (c c))) (* (* (d d))))) (((* (* (e e))) (* (* (f f)))) ((* (* (g g))) (* (* (h h)))))) ((((* (* (i i))) (* (* (j j)))) ((* (* (k k))) (* (* (l l))))) (((* (* (m m))) (* (* (n n)))) ((* (* (o o))) (* (* (p p))))))) (((((* (* (q q))) (* (* (r r)))) ((* (* (s s))) (* (* (t t))))) (((* (* (u u))) (* (* (v v)))) ((* (* (w w))) (* (* (x x)))))) ((((* (* (y y))) (* (* (z z)))) ((* (* (aa aa))) (* (* (ab ab))))) (((* (* (ac ac))) (* (* (ad ad)))) ((* (* (ae ae))) (* (* (af af)))))))) ((((((* (* (ag ag))) (* (* (ah ah)))) ((* (* (ai ai))) (* (* (aj aj))))) (((* (* (ak ak))) (* (* (al al)))) ((* (* (am am))) (* (* (an an)))))) ((((* (* (ao ao))) (* (* (ap ap)))) ((* (* (aq aq))) (* (* (ar ar))))) (((* (* (as as))) (* (* (at at)))) ((* (* (au au))) (* (* (av av))))))) (((((* (* (aw aw))) (* (* (ax ax)))) ((* (* (ay ay))) (* (* (az az))))) (((* (* (ba ba))) (* (* (bb bb)))) ((* (* (bc bc))) (* (* (bd bd)))))) ((((* (* (be be))) (* (* (bf bf)))) ((* (* (bg bg))) (* (* (bh bh))))) (((* (* (bi bi))) (* (* (bj bj)))) ((* (* (bk bk))) (* (* (bl bl)))))))))");
     assert_debug_snapshot!(rnet.rewrites(), @"2878593");
   }
 }
@@ -70,7 +70,7 @@ fn test_church_mul() {
     assert_snapshot!(readback, @"λa λb ((* {λc d {λd e {λe (a (a (a {b {c {c c}}}))) {a a}}}}) c)");
     assert_debug_snapshot!(rnet.rewrites(), @"15");
   } else {
-    assert_snapshot!(show_net(&net), @"({2 ({2 b {3 c {4 d {5 e f}}}} g) {3 (g h) {4 (h i) {5 (i j) k}}}} (b l))");
+    assert_snapshot!(show_net(&net), @"({2 ({2 a {3 b {4 c {5 d e}}}} f) {3 (f g) {4 (g h) {5 (h i) j}}}} (a k))");
     assert_snapshot!(readback, @"λa λb ((* {λc d {λd e {λe f {λf (a (a (a (a {b {c {c {c c}}}})))) a}}}}) c)");
     assert_debug_snapshot!(rnet.rewrites(), @"17");
   }
@@ -93,7 +93,7 @@ fn test_neg_fusion() {
   let (readback, valid_readback) = hvm_lang_readback(&net, &book, id_map);
 
   assert!(valid_readback);
-  assert_snapshot!(show_net(&net), @"(b (* b))");
+  assert_snapshot!(show_net(&net), @"(a (* a))");
   assert_snapshot!(readback, @"λa λ* a");
 
   // TODO: investigate why this difference exists
