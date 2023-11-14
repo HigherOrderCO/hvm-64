@@ -1,3 +1,56 @@
+//Function std::thread::scopeCopy item path
+//1.63.0 · source · [−]
+//pub fn scope<'env, F, T>(f: F) -> T
+//where
+    //F: for<'scope> FnOnce(&'scope Scope<'scope, 'env>) -> T,
+//Create a scope for spawning scoped threads.
+
+//The function passed to scope will be provided a Scope object, through which scoped threads can be spawned.
+
+//Unlike non-scoped threads, scoped threads can borrow non-'static data, as the scope guarantees all threads will be joined at the end of the scope.
+
+//All threads spawned within the scope that haven’t been manually joined will be automatically joined before this function returns.
+
+//Panics
+//If any of the automatically joined threads panicked, this function will panic.
+
+//If you want to handle panics from spawned threads, join them before the end of the scope.
+
+//Example
+//use std::thread;
+
+//let mut a = vec![1, 2, 3];
+//let mut x = 0;
+
+//thread::scope(|s| {
+    //s.spawn(|| {
+        //println!("hello from the first scoped thread");
+        //// We can borrow `a` here.
+        //dbg!(&a);
+    //});
+    //s.spawn(|| {
+        //println!("hello from the second scoped thread");
+        //// We can even mutably borrow `x` here,
+        //// because no other threads are using it.
+        //x += a[0] + a[2];
+    //});
+    //println!("hello from the main thread");
+//});
+
+//// After the scope, we can modify and access our variables again:
+//a.push(4);
+//assert_eq!(x, a.len());
+//Lifetimes
+//Scoped threads involve two lifetimes: 'scope and 'env.
+
+//The 'scope lifetime represents the lifetime of the scope itself. That is: the time during which new scoped threads may be spawned, and also the time during which they might still be running. Once this lifetime ends, all scoped threads are joined. This lifetime starts within the scope function, before f (the argument to scope) starts. It ends after f returns and all scoped threads have been joined, but before scope returns.
+
+//The 'env lifetime represents the lifetime of whatever is borrowed by the scoped threads. This lifetime must outlast the call to scope, and thus cannot be smaller than 'scope. It can be as small as the call to scope, meaning that anything that outlives this call, such as local variables defined right before the scope, can be borrowed by the scoped threads.
+
+//The 'env: 'scope bound is part of the definition of the Scope type.
+
+// ###
+
 // An efficient Interaction Combinator runtime
 // ===========================================
 // This file implements an efficient interaction combinator runtime. Nodes are represented by 2 aux
@@ -738,14 +791,45 @@ impl<'a> Net<'a> {
   // Reduce a net to normal form.
   pub fn normal(&mut self, book: &Book) {
     self.expand(book, ROOT);
+
+    // Uncomment:
+    //self.reduce(book);
+    //self.expand(book, ROOT);
+    //self.reduce(book);
+    //self.expand(book, ROOT);
+
+    // Comment
     while self.rdex.len() > 0 {
       self.reduce(book);
       self.expand(book, ROOT);
     }
+
   }
 
   pub fn parallel_normal(&mut self, book: &Book) {
+    self.normal(book);
+    // Gets this CPU's core count
+    //let cores = num_cpus::get();
     
+    // Spawn 16 scoped threads and print "hello <thread_id>" from each
+    //std::thread::scope(|s| {
+      //for i in 0 .. 16 {
+        //let mut net = Net::new(&self.heap.data);
+          ////heap: Heap { data },
+          ////rdex: vec![],
+          ////locs: vec![0; 1 << 16],
+          ////next: 1,
+          ////anni: 0,
+          ////comm: 0,
+          ////eras: 0,
+          ////dref: 0,
+          ////oper: 0,
+        ////}
+        //s.spawn(move || {
+          //println!("hello {}", i);
+        //});
+      //}
+    //});
   }
 
 }
