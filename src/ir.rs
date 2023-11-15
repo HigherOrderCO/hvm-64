@@ -5,13 +5,55 @@
 pub enum TypeRepr {
   HvmPtr,
   Ptr,
-  Usize,
+  USize,
+  U8,
+  U32,
   Bool,
 }
 
 /// Constant values
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Con {}
+pub enum Con {
+  Int { value: usize },
+  Bool { value: bool },
+  P1,   // [crate::run::P1]
+  P2,   // [crate::run::P2]
+  NULL, // [crate::run::NULL]
+  ROOT, // [crate::run::ROOT]
+  ERAS, // [crate::run::ERAS]
+  VR1,  // [crate::run::VR1]
+  VR2,  // [crate::run::VR2]
+  RD1,  // [crate::run::RD1]
+  RD2,  // [crate::run::RD2]
+  REF,  // [crate::run::REF]
+  ERA,  // [crate::run::ERA]
+  NUM,  // [crate::run::NUM]
+  OP1,  // [crate::run::OP1]
+  OP2,  // [crate::run::OP2]
+  MAT,  // [crate::run::MAT]
+  CT0,  // [crate::run::CT0]
+  CT1,  // [crate::run::CT1]
+  CT2,  // [crate::run::CT2]
+  CT3,  // [crate::run::CT3]
+  CT4,  // [crate::run::CT4]
+  CT5,  // [crate::run::CT5]
+  USE,  // [crate::run::USE]
+  ADD,  // [crate::run::ADD]
+  SUB,  // [crate::run::SUB]
+  MUL,  // [crate::run::MUL]
+  DIV,  // [crate::run::DIV]
+  MOD,  // [crate::run::MOD]
+  EQ,   // [crate::run::EQ]
+  NE,   // [crate::run::NE]
+  LT,   // [crate::run::LT]
+  GT,   // [crate::run::GT]
+  AND,  // [crate::run::AND]
+  OR,   // [crate::run::OR]
+  XOR,  // [crate::run::XOR]
+  NOT,  // [crate::run::NOT]
+  RSH,  // [crate::run::RSH]
+  LSH,  // [crate::run::LSH]
+}
 
 /// Constant values
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -31,6 +73,10 @@ pub enum Ins {
     cond: Box<Ins>,
     then: Box<Ins>,
     els: Box<Ins>,
+  },
+  /// name
+  Var {
+    name: String,
   },
   /// !ins
   Not {

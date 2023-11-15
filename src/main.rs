@@ -8,7 +8,6 @@ use std::env;
 use std::fs;
 
 use hvmc::ast;
-use hvmc::fns;
 use hvmc::jit;
 use hvmc::run;
 
@@ -91,7 +90,7 @@ fn print_stats(net: &run::Net, start_time: std::time::Instant) {
 // Load file and generate net
 fn load(file: &str) -> (run::Book, run::Net) {
   let file = fs::read_to_string(file).unwrap();
-  let book = ast::book_to_runtime(&ast::do_parse_book(&file));
+  let book = ast::book_to_runtime(&ast::do_parse_book(&file), run::call_native());
   let mut net = run::Net::new(1 << 28);
   net.boot(ast::name_to_val("main"));
   return (book, net);
