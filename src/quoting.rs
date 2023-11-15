@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
 use proc_macro2::{Ident, Span, TokenStream};
-use quote::{quote, ToTokens, TokenStreamExt};
+use quote::{quote, ToTokens, TokenStreamExt, format_ident};
 
 use crate::ir::{Constant, Function, Instr, Program, Stmt};
 
@@ -11,7 +11,6 @@ impl ToTokens for Program {
     let functions = &self.functions;
 
     tokens.append_all(quote! {
-    quote! {
       use crate::run::*;
 
       #( #constants )*
@@ -24,7 +23,6 @@ impl ToTokens for Program {
           }
         }
       }
-    }
     })
   }
 }
@@ -56,8 +54,8 @@ impl ToTokens for Instr {
 
 impl ToTokens for Constant {
   fn to_tokens(&self, tokens: &mut TokenStream) {
-    let name = Ident::new(&format!("F_{}", self.name), Span::call_site());
-    let value = TokenStream::from_str(&format!("0x{:06x}", self.value));
+    let name = format_ident!("F_{}", self.name);
+    let value = TokenStream::from_str(&format!("0x{:06x}", self.value)).unwrap();
 
     tokens.append_all(quote! {
       pub const #name: u32 = #value;
