@@ -9,6 +9,7 @@ use std::fs;
 
 use hvmc::ast;
 use hvmc::run;
+use quote::ToTokens;
 
 #[cfg(not(feature = "hvm_cli_options"))]
 fn main() {

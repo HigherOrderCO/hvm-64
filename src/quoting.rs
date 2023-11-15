@@ -3,13 +3,14 @@ use std::str::FromStr;
 use proc_macro2::{Ident, Span, TokenStream};
 use quote::{quote, ToTokens, TokenStreamExt};
 
-use crate::ir::{Function, Instr, Program, Stmt, Constant};
+use crate::ir::{Constant, Function, Instr, Program, Stmt};
 
-impl Program {
-  pub fn into_token_stream(self) -> TokenStream {
-    let constants = self.values;
-    let functions = self.functions;
+impl ToTokens for Program {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
+    let constants = &self.values;
+    let functions = &self.functions;
 
+    tokens.append_all(quote! {
     quote! {
       use crate::run::*;
 
@@ -24,6 +25,7 @@ impl Program {
         }
       }
     }
+    })
   }
 }
 
