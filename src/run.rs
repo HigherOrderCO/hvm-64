@@ -30,7 +30,6 @@ pub const CT1: Tag = 0xB; // Main port of con node, label 1
 pub const CT2: Tag = 0xC; // Main port of con node, label 2
 pub const CT3: Tag = 0xD; // Main port of con node, label 3
 pub const CT4: Tag = 0xE; // Main port of con node, label 4
-pub const CT5: Tag = 0xF; // Main port of con node, label 5
 
 // Numeric operations.
 pub const USE: Tag = 0x0; // set-next-op
@@ -53,7 +52,7 @@ pub const RSH: Tag = 0xF; // right-shift
 pub const ERAS: Ptr   = Ptr::new(ERA, 0);
 pub const ROOT: Ptr   = Ptr::new(VR2, 0);
 pub const NULL: Ptr   = Ptr(0x0000_0000_0000_0000);
-pub const LOCK: Ptr   = Ptr(0xFFFF_FFFF_FFFF_FFFF);
+pub const LOCK: Ptr   = Ptr(0xFFFF_FFFF_FFFF_FFFF); // if last digit is F it will be seen as a CTR
 
 // An auxiliary port.
 pub type Port = Val;
@@ -156,7 +155,7 @@ impl Ptr {
 
   #[inline(always)]
   pub fn is_ctr(&self) -> bool {
-    return matches!(self.tag(), CT0..);
+    return matches!(self.tag(), CT0..=CT4);
   }
 
   #[inline(always)]
@@ -819,6 +818,7 @@ impl<'a> Net<'a> {
   #[inline(always)]
   pub fn expand(&mut self, book: &Book) {
     fn go(net: &mut Net, book: &Book, dir: Ptr, len: usize, key: usize) {
+      //println!("[{:04x}] expand dir: {:016x}", net.tid, dir.0);
       let ptr = net.get_target(dir);
       if ptr.is_ctr() {
         if len >= net.tlen || key % 2 == 0 {
@@ -830,7 +830,7 @@ impl<'a> Net<'a> {
       } else if ptr.is_ref() {
         let got = net.take_target(dir);
         if got != LOCK {
-          println!("[{:08x}] expand {:08x}", net.tid, dir.0);
+          //println!("[{:08x}] expand {:08x}", net.tid, dir.0);
           net.call(book, ptr, dir);
         }
       }
@@ -862,12 +862,12 @@ impl<'a> Net<'a> {
 
     // Initializes the rlens buffer
     for i in 0 .. tlen {
-      rlens.push(AtomicUsize::new(0xFFFF_FFFF_FFFF_FFFF));
+      rlens.push(AtomicUsize::new(0x4321_FFFF_FFFF_FFFF));
     }
     
     // Initializes the steal buffer
     for i in 0 .. STLEN * tlen {
-      steal.push((AtomicU64::new(u64::MAX), AtomicU64::new(u64::MAX)));
+      steal.push((AtomicU64::new(0x1234_FFFF_FFFF_FFFF), AtomicU64::new(0x1234_FFFF_FFFF_FFFF)));
     }
 
     // Creates a thread scope
@@ -895,7 +895,7 @@ impl<'a> Net<'a> {
             // Synchronizes threads
             barry.wait();
 
-            println!("[{:08x}] reducing {}", tid, child.rdex.len());
+            //println!("[{:08x}] reducing {}", tid, child.rdex.len());
 
             // Rewrites current redexes
             child.reduce(book);
