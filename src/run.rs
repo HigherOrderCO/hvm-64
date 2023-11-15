@@ -8,6 +8,7 @@
 // space evaluation of recursive functions on Scott encoded datatypes.
 
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, Barrier};
 
 pub type Tag  = u8;
 pub type Val  = u64;
@@ -93,6 +94,8 @@ pub struct AtomicRewrites {
 
 // A interaction combinator net.
 pub struct Net<'a> {
+  pub tid : usize, // thread id
+  pub tlen: usize, // thread count
   pub heap: Heap<'a>, // nodes
   pub rdex: Vec<(Ptr,Ptr)>, // redexes
   pub locs: Vec<Val>,
@@ -369,6 +372,8 @@ impl<'a> Net<'a> {
   // Creates an empty net with given size.
   pub fn new(data: &'a Data) -> Self {
     Net {
+      tid : 0,
+      tlen: 1,
       heap: Heap { data },
       rdex: vec![],
       locs: vec![0; 1 << 16],
@@ -379,15 +384,20 @@ impl<'a> Net<'a> {
     }
   }
 
-  // Forks into child threads, returning a Net for the (tid/cores)'th thread.
-  pub fn fork(&self, tid: usize, cores: usize) -> Self {
+  // Forks into child threads, returning a Net for the (tid/tlen)'th thread.
+  pub fn fork(&self, tid: usize, tlen: usize) -> Self {
     let mut net = Net::new(self.heap.data);
-    net.init = self.heap.data.len() * tid / cores;
-    net.area = self.heap.data.len() / cores;
-    let from = self.rdex.len() * (tid + 0) / cores;
-    let upto = self.rdex.len() * (tid + 1) / cores;
+    net.tid  = tid;
+    net.tlen = tlen;
+    net.init = self.heap.data.len() * tid / tlen;
+    net.area = self.heap.data.len() / tlen;
+    let from = self.rdex.len() * (tid + 0) / tlen;
+    let upto = self.rdex.len() * (tid + 1) / tlen;
     for i in from .. upto {
-      net.rdex.push(self.rdex[i]);
+      let r = self.rdex[i];
+      let x = r.0;
+      let y = r.1;
+      net.rdex.push((x,y));
     }
     if tid == 0 {
       net.next = self.next;
@@ -416,9 +426,9 @@ impl<'a> Net<'a> {
     } else {
       loop {
         self.next += 1;
-        let index = (self.next % self.area) as Val;
+        let index = (self.init + self.next % self.area) as Val;
         if self.heap.get(index, P2).is_nil() {
-          return self.init as Val + index;
+          return index;
         }
       }
     }
@@ -477,6 +487,7 @@ impl<'a> Net<'a> {
     }
   }
 
+  // TODO: continue...
   pub fn atomic_link(&mut self, a_dir: Ptr, b_dir: Ptr) {
     let a = self.take_target(a_dir);
     let b = self.take_target(b_dir);
@@ -486,18 +497,19 @@ impl<'a> Net<'a> {
     }
     // Substitutes A
     if a.is_var() {
-      self.heap.cas(a.val(), a.0 & 1, a_dir, b).unwrap();
+      //self.heap.cas(a.val(), a.0 & 1, a_dir, b).unwrap();
       //println!("{:08x} == {:08x} | {}", self.get_target(a).0, a_dir.0, self.get_target(a).0 == a_dir.0);
-      //self.set_target(a, b);
+      self.set_target(a, b);
     }
     // Substitutes B
     if b.is_var() {
-      self.heap.cas(b.val(), b.0 & 1, b_dir, a).unwrap();
+      //self.heap.cas(b.val(), b.0 & 1, b_dir, a).unwrap();
       //println!("{:08x} == {:08x} | {}", self.get_target(b).0, b_dir.0, self.get_target(b).0 == b_dir.0);
-      //self.set_target(b, a);
+      self.set_target(b, a);
     }
   }
 
+  // TODO: continue...
   pub fn atomic_link_1(&mut self, a: Ptr, b: Ptr) {
     let a = self.get_target(a);
     // Creates redex A-B
@@ -776,6 +788,7 @@ impl<'a> Net<'a> {
     self.link(ptr, par);
   }
 
+  // Adjusts dereferenced pointer locations.
   fn adjust(&self, ptr: Ptr) -> Ptr {
     if ptr.has_loc() {
       return Ptr::new(ptr.tag(), *unsafe { self.locs.get_unchecked(ptr.val() as usize) });
@@ -799,109 +812,159 @@ impl<'a> Net<'a> {
   }
 
   // Expands heads.
+  // TODO: must use atomic exchange
   #[inline(always)]
-  pub fn expand(&mut self, book: &Book, dir: Ptr) {
-    let ptr = self.get_target(dir);
-    if ptr.is_ctr() {
-      self.expand(book, Ptr::new(VR1, ptr.val()));
-      self.expand(book, Ptr::new(VR2, ptr.val()));
-    } else if ptr.is_ref() {
-      self.call(book, ptr, dir);
-      //self.set_target(dir, exp);
+  pub fn expand(&mut self, book: &Book) {
+    fn go(net: &mut Net, book: &Book, dir: Ptr, len: usize, key: usize) {
+      let ptr = net.get_target(dir);
+      if ptr.is_ctr() {
+        if len >= net.tlen || key % 2 == 0 {
+          go(net, book, Ptr::new(VR1, ptr.val()), len * 2, key / 2);
+        }
+        if len >= net.tlen || key % 2 == 1 {
+          go(net, book, Ptr::new(VR2, ptr.val()), len * 2, key / 2);
+        }
+      } else if ptr.is_ref() {
+        net.call(book, ptr, dir);
+      }
     }
+    return go(self, book, ROOT, 1, self.tid);
   }
 
   // Reduce a net to normal form.
   //pub fn normal(&mut self, book: &Book) {
-    //self.expand(book, ROOT);
+    //self.expand(book);
     //while self.rdex.len() > 0 {
       //self.reduce(book);
-      //self.expand(book, ROOT);
+      //self.expand(book);
     //}
   //}
 
   pub fn normal(&mut self, book: &Book) {
-    let cores = 8;
+    let tlen_l2 = 3;
+    let tlen    = 1 << tlen_l2;
+
+    const STLEN : usize = 65536; // max steal redexes / split 
+
+    self.expand(book);
+    self.reduce(book);
+    //self.expand(book);
 
     println!("{}", crate::ast::show_runtime_net(self));
-
     println!("---------------------- FORKING");
 
-    let delta_rewrites = AtomicRewrites::new();
+    // Global values
+    let delta = AtomicRewrites::new(); // delta rewrite counter
+    let steal = &mut vec![]; // steal buffer for redex exchange
+    let rlens = &mut vec![]; // length of each tid's redex bags
+    let total = AtomicUsize::new(0); // sum of redex bag length
+    let barry = Arc::new(Barrier::new(tlen)); // global barrier
 
+    // Initializes the rlens buffer
+    for i in 0 .. tlen {
+      rlens.push(AtomicUsize::new(0xFFFF_FFFF_FFFF_FFFF));
+    }
+    
+    // Initializes the steal buffer
+    for i in 0 .. STLEN * tlen {
+      steal.push((AtomicU64::new(u64::MAX), AtomicU64::new(u64::MAX)));
+    }
+
+    // Creates a thread scope
     std::thread::scope(|s| {
-      for tid in 0 .. cores {
-        let mut child = self.fork(tid, cores);
-        let delta_rewrites = &delta_rewrites;
+
+      // For each thread...
+      for tid in 0 .. tlen {
+
+        // Creates thread local attributes
+        let     delta = &delta;
+        let     steal = &steal;
+        let     rlens = &rlens;
+        let     total = &total;
+        let     barry = Arc::clone(&barry);
+        let mut tick  = 0;
+        //let mut rbuff = vec![];
+        let mut child = self.fork(tid, tlen);
+
+        // Spawns the thread
         s.spawn(move || {
 
-          let root = child.alloc(1);
-          let main = crate::ast::name_to_val("brnZ");
-          child.heap.set(root, P2, Ptr::new(REF, main));
-          child.expand(book, Ptr::new(VR2, root));
-          println!("[{:04x}] root={:08x} init={:08x} area={:08x} {:08x?}", tid, root, child.init, child.area, child.rdex);
+          // Parallel reduction loop
+          loop {
 
-          child.reduce(book);
-          child.rwts.add_to(delta_rewrites);
-          println!("done {} {}", tid, child.rewrites());
+            //println!("[{:08x}] tick={}", tid, tick);
+
+            // Expands head refs
+            child.expand(book);
+
+            // Synchronizes threads
+            barry.wait();
+
+            // Rewrites current redexes
+            child.reduce(book);
+            //while child.rdex.len() > 0 {
+              //std::mem::swap(&mut child.rdex, &mut rbuff);
+              ////println!("[{:08x}] will rewrite {} redexes", tid, rbuff.len());
+              //for (a, b) in &rbuff {
+                //child.interact(book, *a, *b);
+              //}
+              //rbuff.clear();
+            //}
+            //println!("[{:08x}] now have {} redexes", tid, child.rdex.len());
+
+            // Stores redex length
+            rlens[tid].store(child.rdex.len(), Ordering::Relaxed);
+            total.fetch_add(child.rdex.len(), Ordering::Relaxed);
+
+            // Synchronizes threads
+            barry.wait();
+
+            //println!("[{:08x}] total is {}", tid, total.load(Ordering::Relaxed));
+
+            // Stops if work is complete
+            if total.load(Ordering::Relaxed) == 0 {
+              break;
+            }
+
+            // Shares redexes with target thread
+            let side  = (child.tid >> (tlen_l2 - 1 - (tick % tlen_l2))) & 1;
+            let shift = (1 << (tlen_l2 - 1)) >> (tick % tlen_l2);
+            let b_tid = if side == 1 { child.tid - shift } else { child.tid + shift };
+            let a_len = child.rdex.len();
+            let b_len = rlens[b_tid].load(Ordering::Relaxed);
+            for i in b_len .. a_len { // TODO: avoid reversing
+              let r = child.rdex.pop().unwrap();
+              steal[tid * STLEN + i].0.store(r.0.0, Ordering::Relaxed);
+              steal[tid * STLEN + i].1.store(r.1.0, Ordering::Relaxed);
+            }
+            barry.wait();
+            for i in a_len .. b_len {
+              let r = &steal[tid * STLEN + i];
+              let x = Ptr(r.0.load(Ordering::Relaxed));
+              let y = Ptr(r.1.load(Ordering::Relaxed));
+              child.rdex.push((x, y));
+            }
+
+            // Clears total counter
+            if tid == 0 {
+              total.store(0, Ordering::Relaxed);
+            }
+
+            // Incs tick
+            tick += 1;
+          }
+
+          // Adds rewrites to stats
+          child.rwts.add_to(delta);
         });
       }
     });
 
     self.rdex.clear();
-    delta_rewrites.add_to(&mut self.rwts);
+    delta.add_to(&mut self.rwts);
 
     println!("ALL DONE");
 
   }
 }
-
-//###
-
-//Question:
-
-//The file above, in a single thread, runs at 180 million rewrites per second. Using 8 threads in an
-//Apple M1 Max, which has 8 performance cores, and with nothing else running on the background, we
-//achieve 520 million rewrites per second. That is less than expected, since 180*8=1440. Note that,
-//in the code above, as far as I understand, threads don't interfere with each other at all. In fact,
-//there are 8 threads, each one writing to a different part of the shared &Heap object. Usually that
-//kind of sub-ideal speedup is due to cache line contention or similar issues where multiple threads
-//read/write to near locations in memory, but, as far as I can tell, that doesn't occur. The inner
-//loop is:
-
-          //child.reduce(book);
-
-
-//Which should execute the child.reduce function in a way that each thread is completely isolated,
-//thus, a larger speedup would be expected. What is causing the sub-ideal speedup here? Read the
-//entire code and figure out the culprit. Answer below.
-
-//The issue likely lies in the false sharing of cache lines due to the layout of the `Heap` data structure. Although each thread operates on a different part of the heap, the `Heap` is an array of `(APtr, APtr)` tuples, which means that two adjacent elements (representing auxiliary ports of different nodes) are stored next to each other in memory.
-
-//When a thread writes to an `APtr`, it may cause the entire cache line containing that `APtr` to be loaded into the CPU cache. If another thread is operating on an adjacent `APtr` that happens to be on the same cache line, this can lead to cache line contention. The CPU cache coherency protocol will have to invalidate and update the cache line across cores, causing delays and reducing parallel efficiency.
-
-//To mitigate this issue, you could redesign the `Heap` data structure to ensure that each thread works on data that is spaced far enough apart in memory to avoid sharing cache lines. This could involve padding or aligning the data structures to cache line boundaries, or changing the allocation strategy to distribute node data more evenly across the heap in a way that aligns with cache line boundaries.
-
-//###
-
-//I don't think you understand the issue. The data is already spread apart. The Heap structure has 2GB, and each thread will allocate exclusively in its own slice of 2/8 GB.
-
-//###
-
-//The issue might be related to the `locs` vector in the `Net` struct. Each thread has its own copy of the `Net` struct, but they all share a reference to the same `locs` vector through the `Heap`. When threads allocate new nodes, they write to their respective locations in the `locs` vector, potentially causing cache line contention as this vector is shared across all threads.
-
-//To resolve this, you could give each thread its own copy of the `locs` vector to prevent them from writing to the same memory location, thus avoiding cache line contention on this shared resource.
-
-//###
-
-//What do you mean? Each thread has its own locs vector, right?
-
-//###
-
-//Apologies for the confusion. Upon reviewing the code again, it appears that each thread does indeed have its own `locs` vector as part of its `Net` struct instance. Therefore, the `locs` vector is not the cause of the sub-ideal speedup.
-
-//Another potential issue could be related to the atomic operations on the `Heap`. Even though each thread operates on a different part of the heap, the use of atomic operations (`AtomicU32`) for every read and write may introduce significant overhead due to the memory barriers they enforce. These barriers can slow down the performance as they ensure memory ordering across cores, which might not be necessary if each thread is guaranteed to only access its own portion of the heap.
-
-//To improve performance, you could consider using regular non-atomic operations for accessing the heap within each thread's dedicated area, assuming that no other thread will access or modify that same area. This would reduce the overhead introduced by the atomic operations and potentially lead to better scaling with the number of threads.
-
 
