@@ -106,6 +106,7 @@ impl Lowering<'_> {
     name
   }
 
+  /// Compiles a function call
   fn call(&mut self, fid: Val) {
     let def = &self.book.defs[fid as usize];
     self.burn(def, def.node[0].1, self.target.clone());
@@ -120,6 +121,7 @@ impl Lowering<'_> {
     }
   }
 
+  /// Declares a variable without name
   fn declare_fresh(&mut self, type_repr: TypeRepr) -> String {
     let name = self.fresh_name();
     self.stmts.push(Stmt::Val {
@@ -129,6 +131,7 @@ impl Lowering<'_> {
     name
   }
 
+  /// Declares a variable
   fn declare(&mut self, name: String, type_repr: TypeRepr) -> String {
     self.stmts.push(Stmt::Val {
       name: name.clone(),
@@ -137,6 +140,7 @@ impl Lowering<'_> {
     name
   }
 
+  /// Defines a variable without name
   fn define_fresh(&mut self, value: Instr) -> String {
     let name = self.fresh_name();
     self.stmts.push(Stmt::Let {
@@ -146,6 +150,7 @@ impl Lowering<'_> {
     name
   }
 
+  /// Defines a variable
   fn define(&mut self, name: String, value: Instr) -> String {
     self.stmts.push(Stmt::Let {
       name: name.clone(),
@@ -154,6 +159,7 @@ impl Lowering<'_> {
     name
   }
 
+  /// Assigns a value to a property
   fn assign(&mut self, prop: Prop, value: Instr) {
     self.stmts.push(Stmt::Assign { name: prop, value });
   }
@@ -177,7 +183,14 @@ impl Lowering<'_> {
     todo!()
   }
 
+  /// Get value from vars
+  fn get(&self, ptr: Ptr) -> Option<Instr> {
+    todo!()
+  }
+
   /// @loop = (?<(#0 (x y)) R> R) & @loop ~ (x y)
+  ///
+  /// This function basically concentrates all the optimizations
   fn burn(&mut self, def: &Def, ptr: Ptr, target: Target) {
     // (<?(ifz ifs) ret> ret) ~ (#X R)
     // ------------------------------- fast match
@@ -310,6 +323,90 @@ impl Lowering<'_> {
       }
     }
 
+    // <x <y r>> ~ #N
+    // --------------------- fast op
+    // r <~ #(op(op(N,x),y))
+    if ptr.is_op2() {
+      let (v_x, cnt) = def.node[ptr.val() as usize];
+      if cnt.is_op2() {
+        let (v_y, ret) = def.node[cnt.val() as usize];
+        if let (Some(v_x), Some(v_y)) = (self.get(v_x), self.get(v_y)) {
+          let nxt = self.declare_fresh(TypeRepr::HvmPtr);
+          // FAST OP
+          // if is-num(target) && is-num(v-x) && is-num(v-y)
+          //   self.oper += 4
+          //   nxt = Ptr::new(NUM, self.op(self.op(val(target), val(v-x)), val(v-y)))
+          // else
+          //   let opx = self.alloc(1)
+          //   let opy = self.alloc(1)
+          //   self.heap.set(opx, P2, Ptr::new(OP2, opy))
+          //   self.link(Ptr::new(VR1, opx), v-x)
+          //   self.link(Ptr::new(VR1, opy), v-y)
+          //   self.link(Ptr::new(OP2, opx), target)
+          //   nxt = Ptr::new(VR2, opy)
+          self.stmts.push(Stmt::Instr(Instr::If {
+            cond: Instr::from(target.clone())
+              .is_num()
+              .and(v_x.clone().is_num())
+              .and(v_y.clone().is_num())
+              .into(),
+            then: self.fork_on(|lowering| {
+              lowering.assign(Prop::Oper, Instr::from(Prop::Oper).add(Instr::Int(4)));
+              lowering.assign(
+                Prop::Var(nxt.clone()),
+                Instr::new_ptr(Const::NUM, Instr::Op {
+                  lhs: Instr::Op {
+                    lhs: Instr::from(target.clone()).val().into(),
+                    rhs: v_x.clone().val().into(),
+                  }
+                  .into(),
+                  rhs: v_y.clone().val().into(),
+                }),
+              );
+            }),
+            otherwise: self.fork_on(|lowering| {
+              let opx = lowering.define_fresh(Instr::Alloc { size: 1 });
+              let opy = lowering.define_fresh(Instr::Alloc { size: 1 });
+
+              // self.heap.set(opx, P2, Ptr::new(OP2, opy))
+              lowering.stmts.push(SetHeap {
+                idx: Instr::from(opx.clone()).into(),
+                port: Instr::from(Const::P2).into(),
+                value: Instr::new_ptr(Const::OP2, Instr::from(opy.clone())).into(),
+              });
+
+              // self.link(Ptr::new(VR1, opx), v-x)
+              lowering.stmts.push(
+                Instr::new_ptr(Const::VR1, Instr::from(opx.clone()))
+                  .link(Instr::from(v_x.clone())),
+              );
+
+              // self.link(Ptr::new(VR1, opy), v-y)
+              lowering.stmts.push(
+                Instr::new_ptr(Const::VR1, Instr::from(opy.clone()))
+                  .link(Instr::from(v_y.clone())),
+              );
+
+              // self.link(Ptr::new(OP2, opx), target)
+              lowering.stmts.push(
+                Instr::new_ptr(Const::OP2, Instr::from(opx.clone()))
+                  .link(Instr::from(target.clone())),
+              );
+
+              // nxt = Ptr::new(VR2, opy)
+              lowering.assign(
+                Prop::Var(nxt.clone()),
+                Instr::new_ptr(Const::VR2, Instr::from(opy.clone())),
+              );
+            }),
+          }));
+          
+          self.burn(def, ret, nxt.clone());
+          return;
+        }
+      }
+    }
+
     // {p1 p2} <~ #N
     // ------------- fast copy
     // p1 <~ #N
@@ -341,8 +438,14 @@ impl Lowering<'_> {
         }),
         otherwise: self.fork_on(|lowering| {
           let lc = lowering.define_fresh(Instr::Alloc { size: 1 });
-          lowering.assign(Prop::Var(x1.clone()), Instr::new_ptr(Const::VR1, lc.clone().into()));
-          lowering.assign(Prop::Var(x2.clone()), Instr::new_ptr(Const::VR2, lc.clone().into()));
+          lowering.assign(
+            Prop::Var(x1.clone()),
+            Instr::new_ptr(Const::VR1, lc.clone().into()),
+          );
+          lowering.assign(
+            Prop::Var(x2.clone()),
+            Instr::new_ptr(Const::VR2, lc.clone().into()),
+          );
           lowering.stmts.push(
             Instr::new_ptr(compile_tag(ptr.tag()), lc.into()).link(Instr::from(target.clone())),
           );
@@ -395,8 +498,14 @@ impl Lowering<'_> {
         }),
         otherwise: self.fork_on(|lowering| {
           let lc = lowering.define_fresh(Instr::Alloc { size: 1 });
-          lowering.assign(Prop::Var(x1.clone()), Instr::new_ptr(Const::VR1, lc.clone().into()));
-          lowering.assign(Prop::Var(x2.clone()), Instr::new_ptr(Const::VR2, lc.clone().into()));
+          lowering.assign(
+            Prop::Var(x1.clone()),
+            Instr::new_ptr(Const::VR1, lc.clone().into()),
+          );
+          lowering.assign(
+            Prop::Var(x2.clone()),
+            Instr::new_ptr(Const::VR2, lc.clone().into()),
+          );
           lowering.stmts.push(
             Instr::new_ptr(compile_tag(ptr.tag()), lc.into()).link(Instr::from(target.clone())),
           );

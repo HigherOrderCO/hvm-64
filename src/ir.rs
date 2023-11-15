@@ -164,7 +164,6 @@ pub enum Instr {
   /// self.ops(lhs, op, rhs)
   Op {
     lhs: Box<Instr>,
-    op: Box<Instr>,
     rhs: Box<Instr>,
   },
   /// self.alloc(n)
