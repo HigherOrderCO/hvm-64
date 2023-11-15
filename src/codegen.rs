@@ -192,7 +192,7 @@ impl Lowering<'_> {
           let c_s = self.declare_fresh(TypeRepr::HvmPtr);
           // FAST MATCH
           // if tag(target) = CT0 && is-num(get-heap(val(target))
-          self.stmts.push(Stmt::Ins(Instr::If {
+          self.stmts.push(Stmt::Instr(Instr::If {
             cond: Instr::from(target.clone())
               .eq(Instr::from(Const::CT0))
               .and(
@@ -230,7 +230,7 @@ impl Lowering<'_> {
               //   self.heap.set(target.val(), P1, Ptr::new(NUM, num.val() - 1))
               //   c_z = ERAS
               //   c_s = target
-              lowering.stmts.push(Stmt::Ins(Instr::If {
+              lowering.stmts.push(Stmt::Instr(Instr::If {
                 cond: Instr::from(num.clone()).eq(Instr::Int(0)).into(),
                 then: lowering.fork_on(|lowering| {
                   lowering
@@ -311,6 +311,7 @@ impl Lowering<'_> {
       let x1 = self.declare_fresh(TypeRepr::HvmPtr);
       let x2 = self.declare_fresh(TypeRepr::HvmPtr);
       let (p1, p2) = def.node[ptr.val() as usize];
+
       // FAST COPY
       // if tag(target) = NUM
       //   self.comm += 1
@@ -321,7 +322,7 @@ impl Lowering<'_> {
       //   x1 = Ptr::new(VR1, lc)
       //   x2 = Ptr::new(VR2, lc)
       //   self.link(Ptr::new(ptr.tag(), lc), target)
-      self.stmts.push(Stmt::Ins(Instr::If {
+      self.stmts.push(Stmt::Instr(Instr::If {
         cond: Instr::from(target.clone())
           .tag()
           .eq(Instr::from(Const::NUM))
@@ -330,6 +331,60 @@ impl Lowering<'_> {
           lowering.assign(Prop::Comm, Instr::from(Prop::Comm).add(Instr::Int(1)));
           lowering.assign(Prop::Var(x1.clone()), Instr::from(target.clone()));
           lowering.assign(Prop::Var(x2.clone()), Instr::from(target.clone()));
+        }),
+        otherwise: self.fork_on(|lowering| {
+          let lc = lowering.define_fresh(Instr::Alloc { size: 1 });
+          lowering.assign(Prop::Var(x1.clone()), Instr::new_ptr(Const::VR1, lc.into()));
+          lowering.assign(Prop::Var(x2.clone()), Instr::new_ptr(Const::VR2, lc.into()));
+          lowering.stmts.push(
+            Instr::new_ptr(compile_tag(ptr.tag()), lc.into()).link(Instr::from(target.clone())),
+          );
+        }),
+      }));
+
+      self.burn(def, p1, x1.clone());
+      self.burn(def, p2, x2.clone());
+      return;
+    }
+
+    // (p1 p2) <~ (x1 x2)
+    // ------------------ fast apply
+    // p1 <~ x1
+    // p2 <~ x2
+    if ptr.is_ctr() && ptr.tag() == run::CT0 {
+      let (p1, p2) = def.node[ptr.val() as usize];
+
+      let x1 = self.declare_fresh(TypeRepr::HvmPtr);
+      let x2 = self.declare_fresh(TypeRepr::HvmPtr);
+
+      // FAST APPLY
+      // if tag(target) = ptr.tag()
+      //   self.anni += 1
+      //   x1 = heap-get(val(target), P1)
+      //   x2 = heap-get(val(target), P2)
+      // else
+      //   let lc = self.alloc(1)
+      //   x1 = Ptr::new(VR1, lc)
+      //   x2 = Ptr::new(VR2, lc)
+      //   self.link(Ptr::new(ptr.tag(), lc), target)
+      self.stmts.push(Stmt::Instr(Instr::If {
+        cond: Instr::from(target.clone())
+          .tag()
+          .eq(Instr::from(compile_tag(ptr.tag())))
+          .into(),
+        then: self.fork_on(|lowering| {
+          lowering.assign(Prop::Anni, Instr::from(Prop::Anni).add(Instr::Int(1)));
+          lowering.assign(Prop::Var(x1.clone()), Instr::GetHeap {
+            idx: Instr::from(target.clone()).into(),
+            port: Instr::from(Const::P1).into(),
+          });
+          lowering.assign(Prop::Var(x2.clone()), Instr::GetHeap {
+            idx: Instr::from(target.clone()).into(),
+            port: Instr::from(Const::P2).into(),
+          });
+          lowering
+            .stmts
+            .push(Stmt::Free(Instr::from(target.clone()).val().into()))
         }),
         otherwise: self.fork_on(|lowering| {
           let lc = lowering.define_fresh(Instr::Alloc { size: 1 });

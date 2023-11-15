@@ -85,7 +85,7 @@ pub enum Stmt {
     name: Prop,
     value: Instr,
   },
-  Ins(Instr),
+  Instr(Instr),
   Free(Instr),
   Return(Instr),
   /// self.heap.set(idx, port, value)
