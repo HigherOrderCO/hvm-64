@@ -66,10 +66,15 @@ pub enum Prop {
   Var(String),
 }
 
+pub struct Constant {
+  pub name: String,
+  pub value: u32,
+}
+
 /// Represents the entire IR.
 pub struct Program {
   pub functions: Vec<Function>,
-  pub values: HashMap<String, u32>,
+  pub values: Vec<Constant>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

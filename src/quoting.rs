@@ -1,40 +1,19 @@
 use std::str::FromStr;
 
 use proc_macro2::{Ident, Span, TokenStream};
-use quote::quote;
+use quote::{quote, ToTokens, TokenStreamExt};
 
-use crate::ir::{Instr, Program, Stmt};
+use crate::ir::{Function, Instr, Program, Stmt, Constant};
 
 impl Program {
   pub fn into_token_stream(self) -> TokenStream {
-    let constants = self.values.iter().map(|(name, value)| {
-      let name = Ident::new(&format!("F_{name}"), Span::call_site());
-      let value = TokenStream::from_str(&format!("0x{value:06x}"));
-
-      quote! { pub const #name: u32 = #value; }
-    });
-
-    let functions = self.functions.into_iter().map(|function| {
-      let name = function.name.clone();
-      let name = Ident::new(&format!("F_{name}"), Span::call_site());
-      let body = function
-        .body
-        .into_iter()
-        .map(|stmt| stmt.into_token_stream())
-        .collect::<Vec<_>>();
-
-      quote! {
-        pub fn #name(&mut self, book: &Book, ptr: Ptr, argument: Ptr) -> bool {
-          #( #body ; )*
-        }
-      }
-    });
+    let constants = self.values;
+    let functions = self.functions;
 
     quote! {
       use crate::run::*;
 
       #( #constants )*
-
       #( #functions )*
 
       impl Net {
@@ -48,46 +27,38 @@ impl Program {
   }
 }
 
-impl Stmt {
-  pub fn into_token_stream(self) -> TokenStream {
-    match self {
-      Stmt::Let { name, value } => quote! {},
-      Stmt::Val { name, type_repr } => quote! {},
-      Stmt::Assign { name, value } => quote! {},
-      Stmt::Instr(_) => quote! {},
-      Stmt::Free(_) => quote! {},
-      Stmt::Return(_) => quote! {},
-      Stmt::SetHeap { idx, port, value } => quote! {},
-      Stmt::Link { lhs, rhs } => quote! {},
-    }
+impl ToTokens for Function {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
+    let name = Ident::new(&format!("F_{}", self.name), Span::call_site());
+    let body = &self.body;
+
+    tokens.append_all(quote! {
+      pub fn #name(&mut self, book: &Book, ptr: Ptr, argument: Ptr) -> bool {
+        #( #body ; )*
+      }
+    })
   }
 }
 
-impl Instr {
-  pub fn into_token_stream(self) -> TokenStream {
-    match self {
-      Instr::True => quote! {},
-      Instr::False => quote! {},
-      Instr::Int(_) => quote! {},
-      Instr::Hex(_) => quote! {},
-      Instr::Con(_) => quote! {},
-      Instr::Prop(_) => quote! {},
-      Instr::Call { name, args } => quote! {},
-      Instr::If {
-        cond,
-        then,
-        otherwise,
-      } => quote! {},
-      Instr::Not { ins } => quote! {},
-      Instr::Bin { op, lhs, rhs } => quote! {},
-      Instr::Val { ins } => quote! {},
-      Instr::Tag { ins } => quote! {},
-      Instr::IsNum { ins } => quote! {},
-      Instr::IsSkp { ins } => quote! {},
-      Instr::NewPtr { tag, value } => quote! {},
-      Instr::Op { lhs, rhs } => quote! {},
-      Instr::Alloc { size } => quote! {},
-      Instr::GetHeap { idx, port } => quote! {},
-    }
+impl ToTokens for Stmt {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
+    tokens.append_all(quote! {})
+  }
+}
+
+impl ToTokens for Instr {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
+    tokens.append_all(quote! {})
+  }
+}
+
+impl ToTokens for Constant {
+  fn to_tokens(&self, tokens: &mut TokenStream) {
+    let name = Ident::new(&format!("F_{}", self.name), Span::call_site());
+    let value = TokenStream::from_str(&format!("0x{:06x}", self.value));
+
+    tokens.append_all(quote! {
+      pub const #name: u32 = #value;
+    })
   }
 }

@@ -4,18 +4,18 @@ use std::rc::Rc;
 
 use crate::ast;
 use crate::ir::Stmt::SetHeap;
-use crate::ir::{Const, Function, Instr, Program, Prop, Stmt, TypeRepr};
+use crate::ir::{Const, Function, Instr, Program, Prop, Stmt, TypeRepr, Constant};
 use crate::run::{self, Book, Def, Ptr, Val};
 
 pub fn compile_book(book: &Book) -> Program {
   let mut functions = vec![];
-  let mut values = HashMap::new();
+  let mut values = vec![];
 
   for fid in 0..book.defs.len() as run::Val {
     let name = ast::val_to_name(fid as Val);
     if book.defs[fid as usize].node.len() > 0 {
       functions.push(compile_term(book, fid as Val));
-      values.insert(name, fid as u32);
+      values.push(Constant { name, value: fid as u32 });
     }
   }
 
