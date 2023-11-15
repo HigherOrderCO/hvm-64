@@ -107,11 +107,13 @@ pub fn compile_book_to_rust_crate(f_name: &str, book: &run::Book) -> Result<(), 
   fs::create_dir_all(&format!("{}/src", outdir))?;
   fs::write(".hvm/Cargo.toml", cargo_toml)?;
   fs::write(".hvm/src/ast.rs", include_str!("../src/ast.rs"))?;
-  fs::write(".hvm/src/jit.rs", include_str!("../src/jit.rs"))?;
   fs::write(".hvm/src/lib.rs", include_str!("../src/lib.rs"))?;
   fs::write(".hvm/src/main.rs", include_str!("../src/main.rs"))?;
   fs::write(".hvm/src/run.rs", include_str!("../src/run.rs"))?;
-  fs::write(".hvm/src/fns.rs", fns_rs)?;
+  fs::write(".hvm/src/ir.rs", include_str!("../src/ir.rs"))?;
+  fs::write(".hvm/src/codegen.rs", include_str!("../src/codegen.rs"))?;
+  fs::write(".hvm/src/quoting.rs", include_str!("../src/quoting.rs"))?;
+  fs::write(".hvm/src/fns.rs", fns_rs.to_string())?;
   return Ok(());
 }
 

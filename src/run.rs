@@ -638,7 +638,7 @@ impl Net {
     // FIXME: change "while" to "if" once lang prevents refs from returning refs
     if ptr.is_ref() {
       // Intercepts with a native function, if available.
-      if book.call_native(book, ptr, par) {
+      if self.call_native(book, ptr, par) {
         return;
       }
       // Load the closed net.
