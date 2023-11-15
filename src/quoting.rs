@@ -29,7 +29,7 @@ impl ToTokens for Program {
 
 impl ToTokens for Function {
   fn to_tokens(&self, tokens: &mut TokenStream) {
-    let name = Ident::new(&format!("F_{}", self.name), Span::call_site());
+    let name = format_ident!("F_{}", self.name);
     let body = &self.body;
 
     tokens.append_all(quote! {
