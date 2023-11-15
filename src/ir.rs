@@ -101,98 +101,6 @@ pub enum Stmt {
   },
 }
 
-impl From<Const> for Instr {
-  fn from(value: Const) -> Self {
-    Instr::Con(value)
-  }
-}
-
-impl From<String> for Instr {
-  fn from(value: String) -> Self {
-    Instr::Var { name: value }
-  }
-}
-
-impl Instr {
-  pub fn is_num(self) -> Instr {
-    Instr::IsNum {
-      ins: Box::new(self),
-    }
-  }
-
-  pub fn is_skp(self) -> Instr {
-    Instr::IsSkp {
-      ins: Box::new(self),
-    }
-  }
-
-  pub fn val(self) -> Instr {
-    Instr::Val {
-      ins: Box::new(self),
-    }
-  }
-
-  pub fn tag(self) -> Instr {
-    Instr::Tag {
-      ins: Box::new(self),
-    }
-  }
-
-  pub fn not(self) -> Instr {
-    Instr::Not {
-      ins: Box::new(self),
-    }
-  }
-
-  pub fn bin(self, op: &str, rhs: Instr) -> Instr {
-    Instr::Bin {
-      op: op.to_string(),
-      lhs: Box::new(self),
-      rhs: Box::new(rhs),
-    }
-  }
-
-  pub fn eq(self, rhs: Instr) -> Instr {
-    self.bin("==", rhs)
-  }
-
-  pub fn ne(self, rhs: Instr) -> Instr {
-    self.bin("!=", rhs)
-  }
-
-  pub fn and(self, rhs: Instr) -> Instr {
-    self.bin("&&", rhs)
-  }
-
-  pub fn sub(self, rhs: Instr) -> Instr {
-    self.bin("-", rhs)
-  }
-
-  pub fn add(self, rhs: Instr) -> Instr {
-    self.bin("+", rhs)
-  }
-
-  pub fn link(self, rhs: Instr) -> Stmt {
-    Stmt::Link {
-      lhs: self,
-      rhs: rhs,
-    }
-  }
-
-  pub fn new_ptr(tag: impl Into<Instr>, value: Instr) -> Instr {
-    Instr::NewPtr {
-      tag: Box::new(tag.into()),
-      value: Box::new(value),
-    }
-  }
-}
-
-impl From<Prop> for Instr {
-  fn from(value: Prop) -> Self {
-    todo!()
-  }
-}
-
 /// Represents a single instruction in the IR.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Instr {
@@ -268,4 +176,96 @@ pub enum Instr {
     idx: Box<Instr>,
     port: Box<Instr>,
   },
+}
+
+impl From<Const> for Instr {
+  fn from(value: Const) -> Self {
+    Instr::Con(value)
+  }
+}
+
+impl From<String> for Instr {
+  fn from(value: String) -> Self {
+    Instr::Prop(Prop::Var(value))
+  }
+}
+
+impl Instr {
+  pub fn is_num(self) -> Instr {
+    Instr::IsNum {
+      ins: Box::new(self),
+    }
+  }
+
+  pub fn is_skp(self) -> Instr {
+    Instr::IsSkp {
+      ins: Box::new(self),
+    }
+  }
+
+  pub fn val(self) -> Instr {
+    Instr::Val {
+      ins: Box::new(self),
+    }
+  }
+
+  pub fn tag(self) -> Instr {
+    Instr::Tag {
+      ins: Box::new(self),
+    }
+  }
+
+  pub fn not(self) -> Instr {
+    Instr::Not {
+      ins: Box::new(self),
+    }
+  }
+
+  pub fn bin(self, op: &str, rhs: Instr) -> Instr {
+    Instr::Bin {
+      op: op.to_string(),
+      lhs: Box::new(self),
+      rhs: Box::new(rhs),
+    }
+  }
+
+  pub fn eq(self, rhs: Instr) -> Instr {
+    self.bin("==", rhs)
+  }
+
+  pub fn ne(self, rhs: Instr) -> Instr {
+    self.bin("!=", rhs)
+  }
+
+  pub fn and(self, rhs: Instr) -> Instr {
+    self.bin("&&", rhs)
+  }
+
+  pub fn sub(self, rhs: Instr) -> Instr {
+    self.bin("-", rhs)
+  }
+
+  pub fn add(self, rhs: Instr) -> Instr {
+    self.bin("+", rhs)
+  }
+
+  pub fn link(self, rhs: Instr) -> Stmt {
+    Stmt::Link {
+      lhs: self,
+      rhs,
+    }
+  }
+
+  pub fn new_ptr(tag: impl Into<Instr>, value: Instr) -> Instr {
+    Instr::NewPtr {
+      tag: Box::new(tag.into()),
+      value: Box::new(value),
+    }
+  }
+}
+
+impl From<Prop> for Instr {
+  fn from(value: Prop) -> Self {
+    Instr::Prop(value)
+  }
 }

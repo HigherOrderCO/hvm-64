@@ -96,7 +96,7 @@ impl Lowering<'_> {
   fn fresh(&mut self) -> Instr {
     let name = format!("v{}", self.newx.get());
     self.newx.set(self.newx.get() + 1);
-    Instr::Var { name }
+    Instr::Prop(Prop::Var(name))
   }
 
   /// returns a fresh variable: 'v<NUM>'
@@ -158,16 +158,23 @@ impl Lowering<'_> {
     self.stmts.push(Stmt::Assign { name: prop, value });
   }
 
+  /// Fork returning Self
   fn fork(&self) -> Self {
     let mut new_fork = self.clone();
     new_fork.stmts = vec![];
     new_fork
   }
 
+  /// Fork returning vec of statements
   fn fork_on(&self, f: impl FnOnce(&mut Self)) -> Vec<Stmt> {
     let mut fork = self.fork();
     f(&mut fork);
     fork.stmts
+  }
+
+  /// Generates code
+  fn make(&mut self, def: &Def, ptr: Ptr, target: Target) {
+    todo!()
   }
 
   /// @loop = (?<(#0 (x y)) R> R) & @loop ~ (x y)
@@ -334,8 +341,8 @@ impl Lowering<'_> {
         }),
         otherwise: self.fork_on(|lowering| {
           let lc = lowering.define_fresh(Instr::Alloc { size: 1 });
-          lowering.assign(Prop::Var(x1.clone()), Instr::new_ptr(Const::VR1, lc.into()));
-          lowering.assign(Prop::Var(x2.clone()), Instr::new_ptr(Const::VR2, lc.into()));
+          lowering.assign(Prop::Var(x1.clone()), Instr::new_ptr(Const::VR1, lc.clone().into()));
+          lowering.assign(Prop::Var(x2.clone()), Instr::new_ptr(Const::VR2, lc.clone().into()));
           lowering.stmts.push(
             Instr::new_ptr(compile_tag(ptr.tag()), lc.into()).link(Instr::from(target.clone())),
           );
@@ -388,8 +395,8 @@ impl Lowering<'_> {
         }),
         otherwise: self.fork_on(|lowering| {
           let lc = lowering.define_fresh(Instr::Alloc { size: 1 });
-          lowering.assign(Prop::Var(x1.clone()), Instr::new_ptr(Const::VR1, lc.into()));
-          lowering.assign(Prop::Var(x2.clone()), Instr::new_ptr(Const::VR2, lc.into()));
+          lowering.assign(Prop::Var(x1.clone()), Instr::new_ptr(Const::VR1, lc.clone().into()));
+          lowering.assign(Prop::Var(x2.clone()), Instr::new_ptr(Const::VR2, lc.clone().into()));
           lowering.stmts.push(
             Instr::new_ptr(compile_tag(ptr.tag()), lc.into()).link(Instr::from(target.clone())),
           );
@@ -398,6 +405,23 @@ impl Lowering<'_> {
 
       self.burn(def, p1, x1.clone());
       self.burn(def, p2, x2.clone());
+      return;
+    }
+
+    // ATOM <~ *
+    // --------- fast erase
+    // nothing
+    if ptr.is_num() || ptr.is_era() {
+      // FAST ERASE
+      self.stmts.push(Stmt::Instr(Instr::If {
+        cond: Instr::from(target.clone()).is_skp().into(),
+        then: self.fork_on(|lowering| {
+          lowering.assign(Prop::Eras, Instr::from(Prop::Eras).add(Instr::Int(1)));
+        }),
+        otherwise: self.fork_on(|lowering| {
+          lowering.make(def, ptr, target.clone());
+        }),
+      }));
       return;
     }
   }
