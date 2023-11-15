@@ -15,78 +15,42 @@ pub enum TypeRepr {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Con {
   F(String),
-  P1,
-  // [crate::run::P1]
-  P2,
-  // [crate::run::P2]
-  NULL,
-  // [crate::run::NULL]
-  ROOT,
-  // [crate::run::ROOT]
-  ERAS,
-  // [crate::run::ERAS]
-  VR1,
-  // [crate::run::VR1]
-  VR2,
-  // [crate::run::VR2]
-  RD1,
-  // [crate::run::RD1]
-  RD2,
-  // [crate::run::RD2]
-  REF,
-  // [crate::run::REF]
-  ERA,
-  // [crate::run::ERA]
-  NUM,
-  // [crate::run::NUM]
-  OP1,
-  // [crate::run::OP1]
-  OP2,
-  // [crate::run::OP2]
-  MAT,
-  // [crate::run::MAT]
-  CT0,
-  // [crate::run::CT0]
-  CT1,
-  // [crate::run::CT1]
-  CT2,
-  // [crate::run::CT2]
-  CT3,
-  // [crate::run::CT3]
-  CT4,
-  // [crate::run::CT4]
-  CT5,
-  // [crate::run::CT5]
-  USE,
-  // [crate::run::USE]
-  ADD,
-  // [crate::run::ADD]
-  SUB,
-  // [crate::run::SUB]
-  MUL,
-  // [crate::run::MUL]
-  DIV,
-  // [crate::run::DIV]
-  MOD,
-  // [crate::run::MOD]
-  EQ,
-  // [crate::run::EQ]
-  NE,
-  // [crate::run::NE]
-  LT,
-  // [crate::run::LT]
-  GT,
-  // [crate::run::GT]
-  AND,
-  // [crate::run::AND]
-  OR,
-  // [crate::run::OR]
-  XOR,
-  // [crate::run::XOR]
-  NOT,
-  // [crate::run::NOT]
-  RSH,
-  // [crate::run::RSH]
+  P1,   // [crate::run::P1]
+  P2,   // [crate::run::P2]
+  NULL, // [crate::run::NULL]
+  ROOT, // [crate::run::ROOT]
+  ERAS, // [crate::run::ERAS]
+  VR1,  // [crate::run::VR1]
+  VR2,  // [crate::run::VR2]
+  RD1,  // [crate::run::RD1]
+  RD2,  // [crate::run::RD2]
+  REF,  // [crate::run::REF]
+  ERA,  // [crate::run::ERA]
+  NUM,  // [crate::run::NUM]
+  OP1,  // [crate::run::OP1]
+  OP2,  // [crate::run::OP2]
+  MAT,  // [crate::run::MAT]
+  CT0,  // [crate::run::CT0]
+  CT1,  // [crate::run::CT1]
+  CT2,  // [crate::run::CT2]
+  CT3,  // [crate::run::CT3]
+  CT4,  // [crate::run::CT4]
+  CT5,  // [crate::run::CT5]
+  USE,  // [crate::run::USE]
+  ADD,  // [crate::run::ADD]
+  SUB,  // [crate::run::SUB]
+  MUL,  // [crate::run::MUL]
+  DIV,  // [crate::run::DIV]
+  MOD,  // [crate::run::MOD]
+  EQ,   // [crate::run::EQ]
+  NE,   // [crate::run::NE]
+  LT,   // [crate::run::LT]
+  GT,   // [crate::run::GT]
+  AND,  // [crate::run::AND]
+  OR,   // [crate::run::OR]
+  XOR,  // [crate::run::XOR]
+  NOT,  // [crate::run::NOT]
+  RSH,  // [crate::run::RSH]
   LSH,  // [crate::run::LSH]
 }
 
@@ -94,8 +58,10 @@ pub enum Con {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Prop {
   Anni,
+  Oper,
   Eras,
   Comm,
+  Var(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -109,21 +75,117 @@ pub struct Function {
 pub enum Stmt {
   Let {
     name: String,
-    value: Ins,
+    value: Instr,
   },
-  Ins(Ins),
-  Return(Ins),
+  Val {
+    name: String,
+    type_repr: TypeRepr,
+  },
+  Assign {
+    name: Prop,
+    value: Instr,
+  },
+  Ins(Instr),
+  Free(Instr),
+  Return(Instr),
+  /// self.heap.set(idx, port, value)
+  SetHeap {
+    idx: Instr,
+    port: Instr,
+    value: Instr,
+  },
+  /// self.link(lhs, rhs)
+  Link {
+    lhs: Instr,
+    rhs: Instr,
+  },
 }
 
-impl From<Con> for Ins {
+impl From<Con> for Instr {
   fn from(value: Con) -> Self {
-    Ins::Con(value)
+    Instr::Con(value)
+  }
+}
+
+impl From<String> for Instr {
+  fn from(value: String) -> Self {
+    Instr::Var { name: value }
+  }
+}
+
+impl Instr {
+  pub fn is_num(self) -> Instr {
+    Instr::IsNum {
+      ins: Box::new(self),
+    }
+  }
+
+  pub fn is_skp(self) -> Instr {
+    Instr::IsSkp {
+      ins: Box::new(self),
+    }
+  }
+
+  pub fn val(self) -> Instr {
+    Instr::Val {
+      ins: Box::new(self),
+    }
+  }
+
+  pub fn tag(self) -> Instr {
+    Instr::Tag {
+      ins: Box::new(self),
+    }
+  }
+
+  pub fn not(self) -> Instr {
+    Instr::Not {
+      ins: Box::new(self),
+    }
+  }
+
+  pub fn bin(self, op: &str, rhs: Instr) -> Instr {
+    Instr::Bin {
+      op: op.to_string(),
+      lhs: Box::new(self),
+      rhs: Box::new(rhs),
+    }
+  }
+
+  pub fn eq(self, rhs: Instr) -> Instr {
+    self.bin("==", rhs)
+  }
+
+  pub fn ne(self, rhs: Instr) -> Instr {
+    self.bin("!=", rhs)
+  }
+
+  pub fn and(self, rhs: Instr) -> Instr {
+    self.bin("&&", rhs)
+  }
+
+  pub fn sub(self, rhs: Instr) -> Instr {
+    self.bin("-", rhs)
+  }
+
+  pub fn link(self, rhs: Instr) -> Stmt {
+    Stmt::Link {
+      lhs: self,
+      rhs: rhs,
+    }
+  }
+
+  pub fn new_ptr(tag: impl Into<Instr>, value: Instr) -> Instr {
+    Instr::NewPtr {
+      tag: Box::new(tag.into()),
+      value: Box::new(value),
+    }
   }
 }
 
 /// Represents a single instruction in the IR.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Ins {
+pub enum Instr {
   True,
   False,
   Int(u32),
@@ -134,12 +196,12 @@ pub enum Ins {
   /// It's used to call generated functions
   Call {
     name: String,
-    args: Vec<Ins>,
+    args: Vec<Instr>,
   },
 
   /// if cond then else els
   If {
-    cond: Box<Ins>,
+    cond: Box<Instr>,
     then: Vec<Stmt>,
     otherwise: Vec<Stmt>,
   },
@@ -149,56 +211,46 @@ pub enum Ins {
   },
   /// !ins
   Not {
-    ins: Box<Ins>,
-  },
-  /// ptr += value
-  Inc {
-    ptr: Box<Ins>,
-    value: Box<Ins>,
+    ins: Box<Instr>,
   },
   /// lhs op rhs
   Bin {
     op: String,
-    lhs: Box<Ins>,
-    rhs: Box<Ins>,
+    lhs: Box<Instr>,
+    rhs: Box<Instr>,
   },
 
   // VALUE FUNCTIONS:
   // These are the functions that are exposed to the user.
   /// ins.val()
   Val {
-    ins: Box<Ins>,
+    ins: Box<Instr>,
   },
   /// ins.tag()
   Tag {
-    ins: Box<Ins>,
+    ins: Box<Instr>,
   },
   /// ins.is_num()
   IsNum {
-    ins: Box<Ins>,
+    ins: Box<Instr>,
   },
   /// ins.is_skp()
   IsSkp {
-    ins: Box<Ins>,
+    ins: Box<Instr>,
   },
   /// Ptr::new(tag, value)
   NewPtr {
-    tag: Box<Ins>,
-    value: Box<Ins>,
+    tag: Box<Instr>,
+    value: Box<Instr>,
   },
 
   // FUNCTIONS:
   // These are the functions that are internal to the IR.
   /// self.ops(lhs, op, rhs)
   Op {
-    lhs: Box<Ins>,
-    op: Box<Ins>,
-    rhs: Box<Ins>,
-  },
-  /// self.link(lhs, rhs)
-  Link {
-    lhs: Box<Ins>,
-    rhs: Box<Ins>,
+    lhs: Box<Instr>,
+    op: Box<Instr>,
+    rhs: Box<Instr>,
   },
   /// self.alloc(n)
   Alloc {
@@ -206,15 +258,7 @@ pub enum Ins {
   },
   /// self.heap.get(idx, port)
   GetHeap {
-    idx: Box<Ins>,
-    port: Box<Ins>,
+    idx: Box<Instr>,
+    port: Box<Instr>,
   },
-  /// self.heap.set(idx, port, value)
-  SetHeap {
-    idx: Box<Ins>,
-    port: Box<Ins>,
-    value: Box<Ins>,
-  },
-  /// self.prop
-  Prop(Prop),
 }
