@@ -49,10 +49,11 @@ pub const NOT: Tag = 0xD; // logical-not
 pub const LSH: Tag = 0xE; // left-shift
 pub const RSH: Tag = 0xF; // right-shift
 
-pub const ERAS: Ptr   = Ptr::new(ERA, 0);
-pub const ROOT: Ptr   = Ptr::new(VR2, 0);
-pub const NULL: Ptr   = Ptr(0x0000_0000_0000_0000);
-pub const LOCK: Ptr   = Ptr(0xFFFF_FFFF_FFFF_FFFF); // if last digit is F it will be seen as a CTR
+pub const ERAS: Ptr = Ptr::new(ERA, 0);
+pub const ROOT: Ptr = Ptr::new(VR2, 0);
+pub const LOCK: Ptr = Ptr(0xFFFF_FFFF_FFFF_FFDF);
+pub const GONE: Ptr = Ptr(0xFFFF_FFFF_FFFF_FFEF);
+pub const NULL: Ptr = Ptr(0xFFFF_FFFF_FFFF_FFFF);
 
 // An auxiliary port.
 pub type Port = Val;
@@ -60,7 +61,7 @@ pub const P1: Port = 0;
 pub const P2: Port = 1;
 
 // A tagged pointer.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 pub struct Ptr(pub Val);
 
 // An atomic tagged pointer.
@@ -95,7 +96,7 @@ pub struct AtomicRewrites {
 // A interaction combinator net.
 pub struct Net<'a> {
   pub tid : usize, // thread id
-  pub tlen: usize, // thread count
+  pub tids: usize, // thread ids count
   pub heap: Heap<'a>, // nodes
   pub rdex: Vec<(Ptr,Ptr)>, // redexes
   pub locs: Vec<Val>,
@@ -140,12 +141,17 @@ impl Ptr {
 
   #[inline(always)]
   pub fn is_nil(&self) -> bool {
-    return self.data() == 0;
+    return self.data() == NULL.0;
   }
 
   #[inline(always)]
   pub fn is_var(&self) -> bool {
     return matches!(self.tag(), VR1..=VR2);
+  }
+
+  #[inline(always)]
+  pub fn is_red(&self) -> bool {
+    return matches!(self.tag(), RD1..=RD2);
   }
 
   #[inline(always)]
@@ -165,7 +171,7 @@ impl Ptr {
 
   #[inline(always)]
   pub fn is_pri(&self) -> bool {
-    return matches!(self.tag(), REF..);
+    return matches!(self.tag(), REF..=CT4);
   }
 
   #[inline(always)]
@@ -195,18 +201,27 @@ impl Ptr {
 
   #[inline(always)]
   pub fn is_nod(&self) -> bool {
-    return matches!(self.tag(), OP2..);
+    return matches!(self.tag(), OP2..=CT4);
   }
 
   #[inline(always)]
   pub fn has_loc(&self) -> bool {
-    return matches!(self.tag(), VR1..=VR2 | OP2..);
+    return matches!(self.tag(), VR1..=VR2 | OP2..=CT4);
   }
 
-  //#[inline(always)]
-  //pub fn adjust(&self, loc: Val) -> Ptr {
-    //return Ptr::new(self.tag(), self.val() + if self.has_loc() { loc - 1 } else { 0 });
-  //}
+  #[inline(always)]
+  pub fn redirect(&self) -> Ptr {
+    let ptr = Ptr::new(self.tag() + RD2 - VR2, self.val());
+    assert!(ptr.is_red());
+    return ptr;
+  }
+
+  #[inline(always)]
+  pub fn unredirect(&self) -> Ptr {
+    let ptr = Ptr::new(self.tag() + RD2 - VR2, self.val());
+    assert!(ptr.is_var());
+    return ptr;
+  }
 
   // Can this redex be skipped (as an optimization)?
   #[inline(always)]
@@ -303,16 +318,18 @@ impl<'a> Heap<'a> {
       let done = data.compare_exchange_weak(expected.0, value.0, Ordering::Relaxed, Ordering::Relaxed);
       match done {
         Ok (done) => Ok(Ptr(done)),
-        Err(done) => Ok(Ptr(done)),
+        Err(done) => Err(Ptr(done)),
       }
     }
   }
 
-  pub fn swap(&self, index: Val, port: Port, value: Ptr) -> Ptr {
+  pub fn swap(&self, index: Val, port: Port, value: Ptr, id: u64, tid: usize) -> Ptr {
     unsafe {
       let node = self.data.get_unchecked(index as usize);
       let data = if port == P1 { &node.0.0 } else { &node.1.0 };
-      return Ptr(data.swap(value.0, Ordering::Relaxed));
+      let got  = data.swap(value.0, Ordering::Relaxed);
+      //println!("| swap {:016x}:{} from {:016x} to {:016x} | {} {:04x}", index, port, got, value.0, id, tid);
+      return Ptr(got);
     }
   }
 
@@ -373,7 +390,7 @@ impl<'a> Net<'a> {
   pub fn new(data: &'a Data) -> Self {
     Net {
       tid : 0,
-      tlen: 1,
+      tids: 1,
       heap: Heap { data },
       rdex: vec![],
       locs: vec![0; 1 << 16],
@@ -382,27 +399,6 @@ impl<'a> Net<'a> {
       next: 0,
       rwts: Rewrites::new(),
     }
-  }
-
-  // Forks into child threads, returning a Net for the (tid/tlen)'th thread.
-  pub fn fork(&self, tid: usize, tlen: usize) -> Self {
-    let mut net = Net::new(self.heap.data);
-    net.tid  = tid;
-    net.tlen = tlen;
-    net.init = self.heap.data.len() * tid / tlen;
-    net.area = self.heap.data.len() / tlen;
-    let from = self.rdex.len() * (tid + 0) / tlen;
-    let upto = self.rdex.len() * (tid + 1) / tlen;
-    for i in from .. upto {
-      let r = self.rdex[i];
-      let x = r.0;
-      let y = r.1;
-      net.rdex.push((x,y));
-    }
-    if tid == 0 {
-      net.next = self.next;
-    }
-    return net;
   }
 
   // Creates a net and boots from a REF.
@@ -436,8 +432,8 @@ impl<'a> Net<'a> {
 
   #[inline(always)]
   pub fn free(&self, index: Val) {
-    unsafe { self.heap.data.get_unchecked(index as usize) }.0.store(NULL);
-    unsafe { self.heap.data.get_unchecked(index as usize) }.1.store(NULL);
+    //unsafe { self.heap.data.get_unchecked(index as usize) }.0.store(NULL);
+    //unsafe { self.heap.data.get_unchecked(index as usize) }.1.store(NULL);
   }
 
   // Gets a pointer's target.
@@ -447,17 +443,28 @@ impl<'a> Net<'a> {
   }
 
   // Sets a pointer's target.
-  #[inline(always)]
-  pub fn set_target(&mut self, ptr: Ptr, val: Ptr) {
-    self.heap.set(ptr.val(), ptr.0 & 1, val)
-  }
+  //#[inline(always)]
+  //pub fn set_target(&mut self, ptr: Ptr, val: Ptr) {
+    //let old = self.heap.swap(ptr.val(), ptr.0 & 1, val);
+    //if old == LOCK {
+      //println!("[{:04x}] old == LOCK! {:016x} {:016x}", self.tid, ptr.0, val.0);
+      //panic!();
+    //}
+  //}
 
   // Takes a pointer's target.
   #[inline(always)]
-  pub fn take_target(&self, ptr: Ptr) -> Ptr {
-    self.heap.swap(ptr.val(), ptr.0 & 1, LOCK)
+  pub fn swap_target(&self, ptr: Ptr, value: Ptr, id: u64, tid: usize) -> Ptr {
+    self.heap.swap(ptr.val(), ptr.0 & 1, value, id, tid)
   }
 
+  // Sets a pointer's target, using CAS.
+  #[inline(always)]
+  pub fn cas_target(&self, ptr: Ptr, expected: Ptr, value: Ptr) -> Result<Ptr,Ptr> {
+    self.heap.cas(ptr.val(), ptr.0 & 1, expected, value)
+  }
+
+  // Inserts a new active pair in the redex buffer.
   #[inline(always)]
   pub fn redux(&mut self, a: Ptr, b: Ptr) {
     if Ptr::can_skip(a, b) {
@@ -468,61 +475,162 @@ impl<'a> Net<'a> {
   }
   
   // Links two pointers, forming a new wire.
-  pub fn link(&mut self, a: Ptr, b: Ptr) {
-    // Creates redex A-B
-    if a.is_pri() && b.is_pri() {
-      return self.redux(a, b);
-    }
-    // Substitutes A
-    if a.is_var() {
-      //self.heap.cas(a.val(), a.0 & 1, a, b);
-      //println!("{:08x} == {:08x} | {}", self.get_target(a).0, a.0, self.get_target(a).0 == a.0);
-      self.set_target(a, b);
-    }
-    // Substitutes B
-    if b.is_var() {
-      //self.heap.cas(b.val(), b.0 & 1, b, a);
-      //println!("{:08x} == {:08x} | {}", self.get_target(b).0, b.0, self.get_target(b).0 == b.0);
-      self.set_target(b, a);
+  pub fn link(&mut self, a_ptr: Ptr, b_ptr: Ptr) {
+    println!("LINK");
+    if a_ptr.is_pri() && b_ptr.is_pri() {
+      return self.redux(a_ptr, b_ptr);
+    } else {
+      if a_ptr.is_var() { self.swap_target(a_ptr, b_ptr, 17, self.tid); }
+      if b_ptr.is_var() { self.swap_target(b_ptr, a_ptr, 18, self.tid); }
     }
   }
 
-  // TODO: continue...
+  // Given two locations, links both stored pointers, atomically.
   pub fn atomic_link(&mut self, a_dir: Ptr, b_dir: Ptr) {
-    //println!("link {:016x} {:016x}", a_dir.0, b_dir.0);
-    let a = self.take_target(a_dir);
-    let b = self.take_target(b_dir);
-    // Creates redex A-B
-    if a.is_pri() && b.is_pri() {
-      return self.redux(a, b);
+    let a_ptr = self.swap_target(a_dir, LOCK, 1, self.tid);
+    let b_ptr = self.swap_target(b_dir, LOCK, 2, self.tid);
+    if a_ptr.is_pri() && b_ptr.is_pri() {
+      return self.redux(a_ptr, b_ptr);
+    } else {
+      self.atomic_linker(a_ptr, a_dir, b_ptr, 0);
+      self.atomic_linker(b_ptr, b_dir, a_ptr, 1);
     }
-    // Substitutes A
-    if a.is_var() {
-      if self.heap.cas(a.val(), a.0 & 1, a_dir, b).is_err() {
-        todo!()
-      }
+  }
+
+  // Given a location, link the pointer stored to another pointer, atomically.
+  pub fn atomic_link_1(&mut self, a_dir: Ptr, b_ptr: Ptr) {
+    let a_ptr = self.swap_target(a_dir, LOCK, 3, self.tid);
+    if a_ptr.is_pri() {
+      return self.redux(a_ptr, b_ptr);
+    } else {
+      self.atomic_linker(a_ptr, a_dir, b_ptr, 2);
     }
-    // Substitutes B
-    if b.is_var() {
-      if self.heap.cas(b.val(), b.0 & 1, b_dir, a).is_err() {
-        todo!();
+  }
+
+  // When two threads interfere, uses the lock-free link algorithm described on the 'paper/'.
+  pub fn atomic_linker(&mut self, a_ptr: Ptr, a_dir: Ptr, b_ptr: Ptr, id: u32) {
+    // If 'a_ptr' is a var...
+    if a_ptr.is_var() {
+      // Attempts to link using a compare-and-swap.
+      if self.cas_target(a_ptr, a_dir, b_ptr).is_ok() {
+        let old = self.swap_target(a_dir, NULL, 4, self.tid);
+        //println!("[{:04x}] oxi {:016x}", self.tid, old.0);
+        assert!(old == LOCK);
+      // If the CAS failed, resolve by using redirections.
+      } else {
+        println!("[{:04x}] cas failed {:016x} {:016x} {:016x}", self.tid, a_ptr.0, a_dir.0, b_ptr.0);
+        if b_ptr.is_var() {
+          println!("[{:04x}] b_ptr is var", self.tid);
+          let old = self.swap_target(a_dir, b_ptr.redirect(), 5, self.tid);
+          assert!(old == LOCK);
+          //self.atomic_linker_var(a_ptr, a_dir, b_ptr.redirect());
+        } else if b_ptr.is_pri() {
+          println!("[{:04x}] b_ptr is pri", self.tid);
+          let old = self.swap_target(a_dir, b_ptr, 6, self.tid);
+          if old != LOCK {
+            println!("oxi {:016x} | {}", old.0, id);
+            panic!();
+          }
+          self.atomic_linker_pri(a_ptr, a_dir, b_ptr);
+        } else {
+          println!("[{:04x}] b_ptr is WTF", self.tid);
+          todo!();
+        }
       }
     }
   }
 
-  // TODO: continue...
-  pub fn atomic_link_1(&mut self, a_dir: Ptr, b: Ptr) {
-    let a = self.take_target(a_dir);
-    // Creates redex A-B
-    if a.is_pri() {
-      return self.redux(a, b);
-    }
-    // Substitutes A
-    if a.is_var() {
-      if self.heap.cas(a.val(), a.0 & 1, a_dir, b).is_err() {
-        todo!()
+  // Atomic linker for when 'b_ptr' is a principal port.
+  pub fn atomic_linker_pri(&mut self, mut a_ptr: Ptr, a_dir: Ptr, b_ptr: Ptr) {
+    println!("[{:04x}] ON LINKER a_ptr={:016x} a_dir={:016x} b_ptr={:016x}", self.tid, a_ptr.0, a_dir.0, b_ptr.0);
+    loop {
+      // Peek the target, which may not be owned by us.
+      let mut t_dir = a_ptr;
+      let mut t_ptr = self.get_target(t_dir);
+      // If target is a redirection, we own it. Clear and move forward.
+      if t_ptr.is_red() {
+        println!("[{:04x}] REDIR", self.tid);
+        if self.swap_target(t_dir, NULL, 7, self.tid) != t_ptr {
+          panic!();
+        }
+        a_ptr = t_ptr;
+        continue;
       }
+      // If target is a variable, we don't own it. Try replacing it.
+      if t_ptr.is_var() {
+        if self.cas_target(t_dir, t_ptr, b_ptr).is_ok() {
+          println!("[{:04x}] VAR", self.tid);
+          // Clear source location.
+          let got = self.swap_target(a_dir, NULL, 8, self.tid);
+          if got != b_ptr {
+            println!("[{:04x}] unexpected at {:016x} | got={:016x} exp={:016x} exp={:016x}", self.tid, a_dir.0, got.0, a_ptr.0, b_ptr.0);
+            panic!();
+          }
+          // Collect the orphaned backward path.
+          //t_dir = t_ptr;
+          //t_ptr = self.get_target(t_ptr);
+          //while t_ptr.is_red() {
+            //self.set_target(t_dir, NULL);
+            //t_dir = t_ptr;
+            //t_ptr = self.get_target(t_dir);
+          //}
+          return;
+        }
+        // If the CAS failed, the var changed, so we try again.
+        continue;
+      }
+      // If it is a node, two threads will reach this branch.
+      if t_ptr.is_pri() || t_ptr == GONE {
+        // Sort references, to avoid deadlocks.
+        let x_dir = if a_dir < t_dir { a_dir } else { t_dir };
+        let y_dir = if a_dir < t_dir { t_dir } else { a_dir };
+        // Swap first reference by GONE placeholder.
+        let x_ptr = self.swap_target(x_dir, GONE, 9, self.tid);
+        // First to arrive creates a redex.
+        if x_ptr != GONE {
+          println!("[{:04x}] FST, SETTING {:016x} TO GONE", self.tid, y_dir.0);
+          let y_ptr = self.swap_target(y_dir, GONE, 10, self.tid);
+          self.redux(x_ptr, y_ptr);
+          return;
+        // Second to arrive clears up the memory.
+        } else {
+          println!("[{:04x}] SND", self.tid);
+          self.swap_target(x_dir, NULL, 11, self.tid);
+          while self.cas_target(y_dir, GONE, NULL).is_err() {};
+          return;
+        }
+      }
+      // If it is taken, we wait.
+      if t_ptr == LOCK {
+        println!("[{:04x}] WAITING FOR LOCKED {:016x}", self.tid, t_dir.0);
+        std::thread::sleep(std::time::Duration::from_nanos(10));
+        continue;
+      }
+      // Shouldn't be reached.
+      println!("[{:04x}] wat {:016x}", self.tid, t_ptr.0);
+      unreachable!()
     }
+  }
+
+  // Atomic linker for when 'b_ptr' is an aux port.
+  pub fn atomic_linker_var(&mut self, a_ptr: Ptr, a_dir: Ptr, b_ptr: Ptr) {
+    todo!();
+    //loop {
+      //let ste_dir = b_ptr;
+      //let ste_ptr = self.get_target(ste_dir);
+      //if ste_ptr.is_var() {
+        //let trg_dir = ste_ptr;
+        //let trg_ptr = self.get_target(trg_dir);
+        //if trg_ptr.is_red() {
+          //let neo_ptr = trg_ptr.unredirect();
+          //if self.cas_target(ste_dir, ste_ptr, neo_ptr).is_ok() {
+            //self.set_target(trg_dir, NULL);
+            //continue;
+          //}
+        //}
+      //}
+      //break;
+    //}
   }
 
   // Performs an interaction over a redex.
@@ -620,7 +728,8 @@ impl<'a> Net<'a> {
   pub fn era1(&mut self, a: Ptr) {
     todo!()
     //self.rwts.eras += 1;
-    //self.link(self.heap.get(a.val(), P2), ERAS);
+    //let a2 = Ptr::new(VR2, a.val());
+    //self.atomic_link_1(a2, ERAS);
     //self.free(a.val());
   }
 
@@ -788,7 +897,19 @@ impl<'a> Net<'a> {
         ptr = self.adjust(got.node[0].1);
       }
     }
-    self.link(ptr, par);
+    // TODO: improve this mess
+    if ptr.is_var() {
+      self.swap_target(ptr, par, 22, self.tid);
+      if par.is_var() {
+        if self.cas_target(par, LOCK, ptr).is_err() {
+          panic!();
+        }
+      }
+    } else if ptr.is_pri() && par.is_pri() {
+      self.redux(ptr, par);
+    } else {
+      todo!();
+    }
   }
 
   // Adjusts dereferenced pointer locations.
@@ -802,16 +923,27 @@ impl<'a> Net<'a> {
 
   // Reduces all redexes.
   #[inline(always)]
-  pub fn reduce(&mut self, book: &Book) {
+  pub fn reduce(&mut self, book: &Book, limit: usize) -> usize {
     let mut rdex: Vec<(Ptr, Ptr)> = vec![];
     std::mem::swap(&mut self.rdex, &mut rdex);
+    //println!("[{:04x}] tid reduce", tid);
+    let mut count = 0;
     while rdex.len() > 0 {
+      count += rdex.len();
       for (a, b) in &rdex {
         self.interact(book, *a, *b);
       }
       rdex.clear();
-      std::mem::swap(&mut self.rdex, &mut rdex);
+      if count < limit {
+        std::mem::swap(&mut self.rdex, &mut rdex);
+      } else {
+        break;
+      }
     }
+    if rdex.len() > 0 {
+      panic!("oops");
+    }
+    return count;
   }
 
   // Expands heads.
@@ -821,143 +953,203 @@ impl<'a> Net<'a> {
       //println!("[{:04x}] expand dir: {:016x}", net.tid, dir.0);
       let ptr = net.get_target(dir);
       if ptr.is_ctr() {
-        if len >= net.tlen || key % 2 == 0 {
+        if len >= net.tids || key % 2 == 0 {
           go(net, book, Ptr::new(VR1, ptr.val()), len * 2, key / 2);
         }
-        if len >= net.tlen || key % 2 == 1 {
+        if len >= net.tids || key % 2 == 1 {
           go(net, book, Ptr::new(VR2, ptr.val()), len * 2, key / 2);
         }
       } else if ptr.is_ref() {
-        let got = net.take_target(dir);
-        if got != LOCK {
+        let got = net.swap_target(dir, LOCK, 0, net.tid);
+        if got == ptr {
           //println!("[{:08x}] expand {:08x}", net.tid, dir.0);
-          net.call(book, ptr, dir);
+          net.call(book, got, dir);
         }
       }
     }
     return go(self, book, ROOT, 1, self.tid);
   }
 
+  // Forks a net into the 'tid/tids' child net, splitting redexes evenly
+  pub fn fork(&self, tid: usize, tids: usize) -> Self {
+    let mut net = Net::new(self.heap.data);
+    net.tid  = tid;
+    net.tids = tids;
+    net.init = self.heap.data.len() * tid / tids;
+    net.area = self.heap.data.len() / tids;
+    let from = net.rdex.len() * (tid + 0) / tids;
+    let upto = net.rdex.len() * (tid + 1) / tids;
+    for i in from .. upto {
+      let r = net.rdex[i];
+      let x = r.0;
+      let y = r.1;
+      net.rdex.push((x,y));
+    }
+    if tid == 0 {
+      net.next = net.next;
+    }
+    return net;
+  }
+
   // Reduce a net to normal form.
   //pub fn normal(&mut self, book: &Book) {
     //self.expand(book);
     //while self.rdex.len() > 0 {
-      //self.reduce(book);
+      //self.reduce(book, usize::MAX);
       //self.expand(book);
     //}
   //}
 
+  // Reduces a net to normal form.
   pub fn normal(&mut self, book: &Book) {
-    let tlen_l2 = 3;
-    let tlen    = 1 << tlen_l2;
 
-    const STLEN : usize = 65536; // max steal redexes / split 
+    const STLEN : usize = 1 << 12; // max redexes to shared_redexes
+    const LIMIT : usize = 1 << 8; // max rewrites per epoch
 
-    // Global values
-    let delta = AtomicRewrites::new(); // delta rewrite counter
-    let steal = &mut vec![]; // steal buffer for redex exchange
-    let rlens = &mut vec![]; // length of each tid's redex bags
-    let total = AtomicUsize::new(0); // sum of redex bag length
-    let barry = Arc::new(Barrier::new(tlen)); // global barrier
+    struct ThreadContext<'a> {
+      tid: usize,
+      net: Net<'a>,
+      epoch: usize,
+      delta_rewrites: &'a AtomicRewrites,
+      shared_redexes: &'a Vec<(AtomicU64, AtomicU64)>,
+      redex_counters: &'a Vec<AtomicUsize>,
+      redex_count: &'a AtomicUsize,
+      barrier: Arc<Barrier>,
+    }
 
-    // Initializes the rlens buffer
-    for i in 0 .. tlen {
-      rlens.push(AtomicUsize::new(0x4321_FFFF_FFFF_FFFF));
+    // Global constants
+    let clog2 = 1; // thread count (log2)
+    let cores = 1 << clog2; // thread count
+
+    // Create global objects
+    let delta_rewrites = AtomicRewrites::new(); // delta rewrite counter
+    let shared_redexes = &mut vec![]; // shared_redexes buffer for redex exchange
+    let redex_counters = &mut vec![]; // length of each tid's redex bags
+    let redex_count = AtomicUsize::new(0); // sum of redex bag length
+    let barrier = Arc::new(Barrier::new(cores)); // global barrier
+
+    // Initializes the redex_counters buffer
+    for i in 0 .. cores {
+      redex_counters.push(AtomicUsize::new(0xFFFF_FFFF_FFFF_FFFF));
     }
     
-    // Initializes the steal buffer
-    for i in 0 .. STLEN * tlen {
-      steal.push((AtomicU64::new(0x1234_FFFF_FFFF_FFFF), AtomicU64::new(0x1234_FFFF_FFFF_FFFF)));
+    // Initializes the shared_redexes buffer
+    for i in 0 .. STLEN * cores {
+      shared_redexes.push((AtomicU64::new(0xFFFF_FFFF_FFFF_FFFF), AtomicU64::new(0xFFFF_FFFF_FFFF_FFFF)));
     }
 
     // Creates a thread scope
     std::thread::scope(|s| {
 
       // For each thread...
-      for tid in 0 .. tlen {
+      for tid in 0 .. cores {
 
         // Creates thread local attributes
-        let     delta = &delta;
-        let     steal = &steal;
-        let     rlens = &rlens;
-        let     total = &total;
-        let     barry = Arc::clone(&barry);
-        let mut tick  = 0;
-        //let mut rbuff = vec![];
-        let mut child = self.fork(tid, tlen);
+        let mut context = ThreadContext {
+          tid: tid,
+          net: self.fork(tid, cores),
+          epoch: 0,
+          delta_rewrites: &delta_rewrites,
+          shared_redexes: &shared_redexes,
+          redex_counters: &redex_counters,
+          redex_count: &redex_count,
+          barrier: Arc::clone(&barrier),
+        };
 
         // Spawns the thread
         s.spawn(move || {
 
           // Parallel reduction loop
           loop {
-
-            // Synchronizes threads
-            barry.wait();
-
-            //println!("[{:08x}] reducing {}", tid, child.rdex.len());
-
             // Rewrites current redexes
-            child.reduce(book);
+            let count = context.net.reduce(book, LIMIT);
+            //println!("[{:08x}] reduced {}", tid, count);
 
-            // Expands if redex count is 0
-            rlens[tid].store(child.rdex.len(), Ordering::Relaxed);
-            total.fetch_add(child.rdex.len(), Ordering::Relaxed);
-            barry.wait();
-            if total.load(Ordering::Relaxed) == 0 {
-              child.expand(book);
+            // If zero redexes, expand
+            if count_redexes(&mut context) == 0 {
+              context.net.expand(book);
             }
-            barry.wait();
-            total.store(0, Ordering::Relaxed);
-            barry.wait();
 
-            // Halts if redex count is still 0
-            rlens[tid].store(child.rdex.len(), Ordering::Relaxed);
-            total.fetch_add(child.rdex.len(), Ordering::Relaxed);
-            barry.wait();
-            if total.load(Ordering::Relaxed) == 0 {
+            // If zero redexes, halt
+            if count_redexes(&mut context) == 0 {
               break;
             }
-            barry.wait();
-            total.store(0, Ordering::Relaxed);
 
             // Shares redexes with target thread
-            let side  = (child.tid >> (tlen_l2 - 1 - (tick % tlen_l2))) & 1;
-            let shift = (1 << (tlen_l2 - 1)) >> (tick % tlen_l2);
-            let b_tid = if side == 1 { child.tid - shift } else { child.tid + shift };
-            let a_len = child.rdex.len();
-            let b_len = rlens[b_tid].load(Ordering::Relaxed);
-            if a_len > b_len {
-              for i in 0 .. (a_len - b_len) / 2 { // TODO: avoid reversing
-                let r = child.rdex.pop().unwrap();
-                steal[b_tid * STLEN + i].0.store(r.0.0, Ordering::Relaxed);
-                steal[b_tid * STLEN + i].1.store(r.1.0, Ordering::Relaxed);
-              }
-            }
-            barry.wait();
-            if b_len > a_len {
-              for i in 0 .. (b_len - a_len) / 2 {
-                let r = &steal[tid * STLEN + i];
-                let x = Ptr(r.0.load(Ordering::Relaxed));
-                let y = Ptr(r.1.load(Ordering::Relaxed));
-                child.rdex.push((x, y));
-              }
-            }
+            share_redexes(&mut context, clog2);
 
-            // Incs tick
-            tick += 1;
+            // Incs epoch
+            context.epoch += 1;
           }
 
           // Adds rewrites to stats
-          child.rwts.add_to(delta);
+          context.net.rwts.add_to(context.delta_rewrites);
+
+          //println!("{} >> {}", context.tid, context.net.rdex.len());
         });
       }
+
     });
 
+    fn count_redexes(context: &mut ThreadContext) -> usize {
+      context.redex_counters[context.tid].store(context.net.rdex.len(), Ordering::Relaxed);
+      context.redex_count.fetch_add(context.net.rdex.len(), Ordering::Relaxed);
+      context.barrier.wait();
+      let redex_count = context.redex_count.load(Ordering::Relaxed);
+      context.barrier.wait();
+      context.redex_count.store(0, Ordering::Relaxed);
+      context.barrier.wait();
+      return redex_count;
+    }
+
+    fn share_redexes(context: &mut ThreadContext, clog2: usize) {
+      let b_tid = 1 - context.net.tid;
+      let a_len = context.net.rdex.len();
+      let b_len = context.redex_counters[b_tid].load(Ordering::Relaxed);
+      if a_len > b_len {
+        //println!("[{:04x}] shares b_tid={:04x} a_len={} b_len={}", context.net.tid, b_tid, a_len, b_len);
+        let r = context.net.rdex.pop().unwrap();
+        context.shared_redexes[0].0.store(r.0.0, Ordering::Relaxed);
+        context.shared_redexes[0].1.store(r.1.0, Ordering::Relaxed);
+      }
+      context.barrier.wait();
+      if b_len > a_len {
+        //println!("[{:04x}] steals b_tid={:04x} a_len={} b_len={}", context.net.tid, b_tid, a_len, b_len);
+        let r = &context.shared_redexes[0];
+        let x = Ptr(r.0.load(Ordering::Relaxed));
+        let y = Ptr(r.1.load(Ordering::Relaxed));
+        context.net.rdex.push((x, y));
+      }
+      context.barrier.wait();
+    }
+
+    //fn share_redexes(context: &mut ThreadContext, clog2: usize) {
+      //let side = (context.net.tid >> (clog2 - 1 - (context.epoch % clog2))) & 1;
+      //let shift = (1 << (clog2 - 1)) >> (context.epoch % clog2);
+      //let b_tid = if side == 1 { context.net.tid - shift } else { context.net.tid + shift };
+      //let a_len = context.net.rdex.len();
+      //let b_len = context.redex_counters[b_tid].load(Ordering::Relaxed);
+      //if a_len > b_len {
+        //for i in 0..(a_len - b_len) / 2 { // TODO: avoid reverse
+          //let r = context.net.rdex.pop().unwrap();
+          //context.shared_redexes[b_tid * STLEN + i].0.store(r.0.0, Ordering::Relaxed);
+          //context.shared_redexes[b_tid * STLEN + i].1.store(r.1.0, Ordering::Relaxed);
+        //}
+      //}
+      //context.barrier.wait();
+      //if b_len > a_len {
+        //for i in 0..(b_len - a_len) / 2 {
+          //let r = &context.shared_redexes[context.net.tid * STLEN + i];
+          //let x = Ptr(r.0.load(Ordering::Relaxed));
+          //let y = Ptr(r.1.load(Ordering::Relaxed));
+          //context.net.rdex.push((x, y));
+        //}
+      //}
+      //context.barrier.wait();
+    //}
+
     self.rdex.clear();
-    delta.add_to(&mut self.rwts);
-
-    println!("ALL DONE");
-
+    delta_rewrites.add_to(&mut self.rwts);
   }
+
 }
