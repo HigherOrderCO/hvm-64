@@ -13,8 +13,10 @@ pub fn compile_book(book: &Book) -> Program {
 
   for fid in 0..book.defs.len() as run::Val {
     let name = ast::val_to_name(fid as Val);
-    functions.push(compile_term(book, fid as Val));
-    values.insert(name, fid as u32);
+    if book.defs[fid as usize].node.len() > 0 {
+      functions.push(compile_term(book, fid as Val));
+      values.insert(name, fid as u32);
+    }
   }
 
   Program { functions, values }
