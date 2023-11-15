@@ -52,7 +52,8 @@ pub const RSH: Tag = 0xF; // right-shift
 
 pub const ERAS: Ptr   = Ptr::new(ERA, 0);
 pub const ROOT: Ptr   = Ptr::new(VR2, 0);
-pub const NULL: Ptr   = Ptr(0x0000_0000);
+pub const NULL: Ptr   = Ptr(0x0000_0000_0000_0000);
+pub const LOCK: Ptr   = Ptr(0xFFFF_FFFF_FFFF_FFFF);
 
 // An auxiliary port.
 pub type Port = Val;
@@ -455,7 +456,7 @@ impl<'a> Net<'a> {
   // Takes a pointer's target.
   #[inline(always)]
   pub fn take_target(&self, ptr: Ptr) -> Ptr {
-    self.heap.swap(ptr.val(), ptr.0 & 1, NULL)
+    self.heap.swap(ptr.val(), ptr.0 & 1, LOCK)
   }
 
   #[inline(always)]
@@ -489,6 +490,7 @@ impl<'a> Net<'a> {
 
   // TODO: continue...
   pub fn atomic_link(&mut self, a_dir: Ptr, b_dir: Ptr) {
+    //println!("link {:016x} {:016x}", a_dir.0, b_dir.0);
     let a = self.take_target(a_dir);
     let b = self.take_target(b_dir);
     // Creates redex A-B
@@ -497,28 +499,30 @@ impl<'a> Net<'a> {
     }
     // Substitutes A
     if a.is_var() {
-      //self.heap.cas(a.val(), a.0 & 1, a_dir, b).unwrap();
-      //println!("{:08x} == {:08x} | {}", self.get_target(a).0, a_dir.0, self.get_target(a).0 == a_dir.0);
-      self.set_target(a, b);
+      if self.heap.cas(a.val(), a.0 & 1, a_dir, b).is_err() {
+        todo!()
+      }
     }
     // Substitutes B
     if b.is_var() {
-      //self.heap.cas(b.val(), b.0 & 1, b_dir, a).unwrap();
-      //println!("{:08x} == {:08x} | {}", self.get_target(b).0, b_dir.0, self.get_target(b).0 == b_dir.0);
-      self.set_target(b, a);
+      if self.heap.cas(b.val(), b.0 & 1, b_dir, a).is_err() {
+        todo!();
+      }
     }
   }
 
   // TODO: continue...
-  pub fn atomic_link_1(&mut self, a: Ptr, b: Ptr) {
-    let a = self.get_target(a);
+  pub fn atomic_link_1(&mut self, a_dir: Ptr, b: Ptr) {
+    let a = self.take_target(a_dir);
     // Creates redex A-B
     if a.is_pri() {
       return self.redux(a, b);
     }
     // Substitutes A
     if a.is_var() {
-      self.set_target(a, b);
+      if self.heap.cas(a.val(), a.0 & 1, a_dir, b).is_err() {
+        todo!()
+      }
     }
   }
 
@@ -812,7 +816,6 @@ impl<'a> Net<'a> {
   }
 
   // Expands heads.
-  // TODO: must use atomic exchange
   #[inline(always)]
   pub fn expand(&mut self, book: &Book) {
     fn go(net: &mut Net, book: &Book, dir: Ptr, len: usize, key: usize) {
@@ -825,7 +828,11 @@ impl<'a> Net<'a> {
           go(net, book, Ptr::new(VR2, ptr.val()), len * 2, key / 2);
         }
       } else if ptr.is_ref() {
-        net.call(book, ptr, dir);
+        let got = net.take_target(dir);
+        if got != LOCK {
+          println!("[{:08x}] expand {:08x}", net.tid, dir.0);
+          net.call(book, ptr, dir);
+        }
       }
     }
     return go(self, book, ROOT, 1, self.tid);
@@ -845,13 +852,6 @@ impl<'a> Net<'a> {
     let tlen    = 1 << tlen_l2;
 
     const STLEN : usize = 65536; // max steal redexes / split 
-
-    self.expand(book);
-    self.reduce(book);
-    //self.expand(book);
-
-    println!("{}", crate::ast::show_runtime_net(self));
-    println!("---------------------- FORKING");
 
     // Global values
     let delta = AtomicRewrites::new(); // delta rewrite counter
@@ -892,39 +892,34 @@ impl<'a> Net<'a> {
           // Parallel reduction loop
           loop {
 
-            //println!("[{:08x}] tick={}", tid, tick);
-
-            // Expands head refs
-            child.expand(book);
-
             // Synchronizes threads
             barry.wait();
+
+            println!("[{:08x}] reducing {}", tid, child.rdex.len());
 
             // Rewrites current redexes
             child.reduce(book);
-            //while child.rdex.len() > 0 {
-              //std::mem::swap(&mut child.rdex, &mut rbuff);
-              ////println!("[{:08x}] will rewrite {} redexes", tid, rbuff.len());
-              //for (a, b) in &rbuff {
-                //child.interact(book, *a, *b);
-              //}
-              //rbuff.clear();
-            //}
-            //println!("[{:08x}] now have {} redexes", tid, child.rdex.len());
 
-            // Stores redex length
+            // Expands if redex count is 0
             rlens[tid].store(child.rdex.len(), Ordering::Relaxed);
             total.fetch_add(child.rdex.len(), Ordering::Relaxed);
-
-            // Synchronizes threads
+            barry.wait();
+            if total.load(Ordering::Relaxed) == 0 {
+              child.expand(book);
+            }
+            barry.wait();
+            total.store(0, Ordering::Relaxed);
             barry.wait();
 
-            //println!("[{:08x}] total is {}", tid, total.load(Ordering::Relaxed));
-
-            // Stops if work is complete
+            // Halts if redex count is still 0
+            rlens[tid].store(child.rdex.len(), Ordering::Relaxed);
+            total.fetch_add(child.rdex.len(), Ordering::Relaxed);
+            barry.wait();
             if total.load(Ordering::Relaxed) == 0 {
               break;
             }
+            barry.wait();
+            total.store(0, Ordering::Relaxed);
 
             // Shares redexes with target thread
             let side  = (child.tid >> (tlen_l2 - 1 - (tick % tlen_l2))) & 1;
@@ -932,22 +927,21 @@ impl<'a> Net<'a> {
             let b_tid = if side == 1 { child.tid - shift } else { child.tid + shift };
             let a_len = child.rdex.len();
             let b_len = rlens[b_tid].load(Ordering::Relaxed);
-            for i in b_len .. a_len { // TODO: avoid reversing
-              let r = child.rdex.pop().unwrap();
-              steal[tid * STLEN + i].0.store(r.0.0, Ordering::Relaxed);
-              steal[tid * STLEN + i].1.store(r.1.0, Ordering::Relaxed);
+            if a_len > b_len {
+              for i in 0 .. (a_len - b_len) / 2 { // TODO: avoid reversing
+                let r = child.rdex.pop().unwrap();
+                steal[b_tid * STLEN + i].0.store(r.0.0, Ordering::Relaxed);
+                steal[b_tid * STLEN + i].1.store(r.1.0, Ordering::Relaxed);
+              }
             }
             barry.wait();
-            for i in a_len .. b_len {
-              let r = &steal[tid * STLEN + i];
-              let x = Ptr(r.0.load(Ordering::Relaxed));
-              let y = Ptr(r.1.load(Ordering::Relaxed));
-              child.rdex.push((x, y));
-            }
-
-            // Clears total counter
-            if tid == 0 {
-              total.store(0, Ordering::Relaxed);
+            if b_len > a_len {
+              for i in 0 .. (b_len - a_len) / 2 {
+                let r = &steal[tid * STLEN + i];
+                let x = Ptr(r.0.load(Ordering::Relaxed));
+                let y = Ptr(r.1.load(Ordering::Relaxed));
+                child.rdex.push((x, y));
+              }
             }
 
             // Incs tick
@@ -967,4 +961,3 @@ impl<'a> Net<'a> {
 
   }
 }
-
