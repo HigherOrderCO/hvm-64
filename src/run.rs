@@ -696,14 +696,6 @@ impl<'a> Net<'a> {
     let loc1 = self.alloc(1);
     let loc2 = self.alloc(1);
     let loc3 = self.alloc(1);
-    let a1 = Ptr::new(VR1, a.val());
-    self.atomic_link_1(a1, Ptr::new(b.tag(), loc0));
-    let b1 = Ptr::new(VR1, b.val());
-    self.atomic_link_1(b1, Ptr::new(a.tag(), loc2));
-    let a2 = Ptr::new(VR2, a.val());
-    self.atomic_link_1(a2, Ptr::new(b.tag(), loc1));
-    let b2 = Ptr::new(VR2, b.val());
-    self.atomic_link_1(b2, Ptr::new(a.tag(), loc3));
     self.heap.set(loc0, P1, Ptr::new(VR1, loc2));
     self.heap.set(loc0, P2, Ptr::new(VR1, loc3));
     self.heap.set(loc1, P1, Ptr::new(VR2, loc2));
@@ -712,6 +704,14 @@ impl<'a> Net<'a> {
     self.heap.set(loc2, P2, Ptr::new(VR1, loc1));
     self.heap.set(loc3, P1, Ptr::new(VR2, loc0));
     self.heap.set(loc3, P2, Ptr::new(VR2, loc1));
+    let a1 = Ptr::new(VR1, a.val());
+    self.atomic_link_1(a1, Ptr::new(b.tag(), loc0));
+    let b1 = Ptr::new(VR1, b.val());
+    self.atomic_link_1(b1, Ptr::new(a.tag(), loc2));
+    let a2 = Ptr::new(VR2, a.val());
+    self.atomic_link_1(a2, Ptr::new(b.tag(), loc1));
+    let b2 = Ptr::new(VR2, b.val());
+    self.atomic_link_1(b2, Ptr::new(a.tag(), loc3));
     self.free(a.val());
     self.free(b.val());
   }
