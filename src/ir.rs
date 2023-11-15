@@ -120,17 +120,10 @@ pub enum Instr {
   True,
   False,
   Int(u32),
-  Hex(u32),
-  Con(Const),
+  Const(Const),
   Prop(Prop),
 
   /// SPECIAL TERM: Call
-  /// It's used to call generated functions
-  Call {
-    name: String,
-    args: Vec<Instr>,
-  },
-
   /// if cond then else els
   If {
     cond: Box<Instr>,
@@ -192,7 +185,7 @@ pub enum Instr {
 
 impl From<Const> for Instr {
   fn from(value: Const) -> Self {
-    Instr::Con(value)
+    Instr::Const(value)
   }
 }
 

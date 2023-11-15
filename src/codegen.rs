@@ -49,7 +49,7 @@ fn assert_is_atom(ptr: Ptr) -> Instr {
   } else {
     Instr::NewPtr {
       tag: Instr::from(compile_tag(ptr.tag())).into(),
-      value: Instr::Hex(ptr.val()).into(),
+      value: Instr::Int(ptr.val()).into(),
     }
   }
 }
