@@ -4,14 +4,27 @@ use std::rc::Rc;
 
 use crate::ast;
 use crate::ir::Stmt::SetHeap;
-use crate::ir::{Const, Function, Instr, Prop, Stmt, TypeRepr};
+use crate::ir::{Const, Function, Instr, Program, Prop, Stmt, TypeRepr};
 use crate::run::{self, Book, Def, Ptr, Val};
+
+pub fn compile_book(book: &Book) -> Program {
+  let mut functions = vec![];
+  let mut values = HashMap::new();
+
+  for fid in 0..book.defs.len() as run::Val {
+    let name = ast::val_to_name(fid as Val);
+    functions.push(compile_term(book, fid as Val));
+    values.insert(name, fid as u32);
+  }
+
+  Program { functions, values }
+}
 
 pub fn compile_term(book: &Book, fid: Val) -> Function {
   let mut lowering = Lowering {
     newx: Rc::new(Cell::new(0)),
     book,
-    target: Instr::from("x".to_string()),
+    target: Instr::from("argument".to_string()),
     vars: Rc::new(RefCell::new(HashMap::new())),
     stmts: vec![],
   };

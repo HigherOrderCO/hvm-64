@@ -1,6 +1,8 @@
 //! This file represents the intermediate representation of the compiler as an imperative
 //! language, to be translated into the target language.
 
+use std::collections::HashMap;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TypeRepr {
   HvmPtr,
@@ -62,6 +64,12 @@ pub enum Prop {
   Eras,
   Comm,
   Var(String),
+}
+
+/// Represents the entire IR.
+pub struct Program {
+  pub functions: Vec<Function>,
+  pub values: HashMap<String, u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
