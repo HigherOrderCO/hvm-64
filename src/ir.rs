@@ -13,7 +13,7 @@ pub enum TypeRepr {
 
 /// Constant values
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Con {
+pub enum Const {
   F(String),
   P1,   // [crate::run::P1]
   P2,   // [crate::run::P2]
@@ -101,8 +101,8 @@ pub enum Stmt {
   },
 }
 
-impl From<Con> for Instr {
-  fn from(value: Con) -> Self {
+impl From<Const> for Instr {
+  fn from(value: Const) -> Self {
     Instr::Con(value)
   }
 }
@@ -168,6 +168,10 @@ impl Instr {
     self.bin("-", rhs)
   }
 
+  pub fn add(self, rhs: Instr) -> Instr {
+    self.bin("+", rhs)
+  }
+
   pub fn link(self, rhs: Instr) -> Stmt {
     Stmt::Link {
       lhs: self,
@@ -183,6 +187,12 @@ impl Instr {
   }
 }
 
+impl From<Prop> for Instr {
+  fn from(value: Prop) -> Self {
+    todo!()
+  }
+}
+
 /// Represents a single instruction in the IR.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Instr {
@@ -190,7 +200,8 @@ pub enum Instr {
   False,
   Int(u32),
   Hex(u32),
-  Con(Con),
+  Con(Const),
+  Prop(Prop),
 
   /// SPECIAL TERM: Call
   /// It's used to call generated functions
@@ -204,10 +215,6 @@ pub enum Instr {
     cond: Box<Instr>,
     then: Vec<Stmt>,
     otherwise: Vec<Stmt>,
-  },
-  /// name
-  Var {
-    name: String,
   },
   /// !ins
   Not {

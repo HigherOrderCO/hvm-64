@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use crate::ast;
 use crate::ir::Stmt::SetHeap;
-use crate::ir::{Con, Function, Instr, Prop, Stmt, TypeRepr};
+use crate::ir::{Const, Function, Instr, Prop, Stmt, TypeRepr};
 use crate::run::{self, Book, Def, Ptr, Val};
 
 pub fn compile_term(book: &Book, fid: Val) -> Function {
@@ -28,8 +28,8 @@ pub fn compile_term(book: &Book, fid: Val) -> Function {
 fn assert_is_atom(ptr: Ptr) -> Instr {
   if ptr.is_ref() {
     Instr::NewPtr {
-      tag: Instr::from(Con::REF).into(),
-      value: Instr::from(Con::F(ast::val_to_name(ptr.val()))).into(),
+      tag: Instr::from(Const::REF).into(),
+      value: Instr::from(Const::F(ast::val_to_name(ptr.val()))).into(),
     }
   } else {
     Instr::NewPtr {
@@ -39,24 +39,24 @@ fn assert_is_atom(ptr: Ptr) -> Instr {
   }
 }
 
-fn compile_tag(tag: run::Tag) -> Con {
+fn compile_tag(tag: run::Tag) -> Const {
   match tag {
-    run::VR1 => Con::VR1,
-    run::VR2 => Con::VR2,
-    run::RD1 => Con::RD1,
-    run::RD2 => Con::RD2,
-    run::REF => Con::REF,
-    run::ERA => Con::ERA,
-    run::NUM => Con::NUM,
-    run::OP2 => Con::OP2,
-    run::OP1 => Con::OP1,
-    run::MAT => Con::MAT,
-    run::CT0 => Con::CT0,
-    run::CT1 => Con::CT1,
-    run::CT2 => Con::CT2,
-    run::CT3 => Con::CT3,
-    run::CT4 => Con::CT4,
-    run::CT5 => Con::CT5,
+    run::VR1 => Const::VR1,
+    run::VR2 => Const::VR2,
+    run::RD1 => Const::RD1,
+    run::RD2 => Const::RD2,
+    run::REF => Const::REF,
+    run::ERA => Const::ERA,
+    run::NUM => Const::NUM,
+    run::OP2 => Const::OP2,
+    run::OP1 => Const::OP1,
+    run::MAT => Const::MAT,
+    run::CT0 => Const::CT0,
+    run::CT1 => Const::CT1,
+    run::CT2 => Const::CT2,
+    run::CT3 => Const::CT3,
+    run::CT4 => Const::CT4,
+    run::CT5 => Const::CT5,
     _ => unreachable!(),
   }
 }
@@ -120,7 +120,7 @@ impl Lowering<'_> {
     }
   }
 
-  fn fresh_declare(&mut self, type_repr: TypeRepr) -> String {
+  fn declare_fresh(&mut self, type_repr: TypeRepr) -> String {
     let name = self.fresh_name();
     self.stmts.push(Stmt::Val {
       name: name.clone(),
@@ -137,7 +137,7 @@ impl Lowering<'_> {
     name
   }
 
-  fn fresh_define(&mut self, value: Instr) -> String {
+  fn define_fresh(&mut self, value: Instr) -> String {
     let name = self.fresh_name();
     self.stmts.push(Stmt::Let {
       name: name.clone(),
@@ -188,44 +188,38 @@ impl Lowering<'_> {
         let rtz = if rty.tag() == run::VR1 { got.0 } else { got.1 };
         if cse.tag() == run::CT0 && rtx.is_var() && rtx == rtz {
           let (ifz, ifs) = def.node[cse.val() as usize];
-          let c_z = self.fresh_declare(TypeRepr::HvmPtr);
-          let c_s = self.fresh_declare(TypeRepr::HvmPtr);
+          let c_z = self.declare_fresh(TypeRepr::HvmPtr);
+          let c_s = self.declare_fresh(TypeRepr::HvmPtr);
           // FAST MATCH
           // if tag(target) = CT0 && is-num(get-heap(val(target))
           self.stmts.push(Stmt::Ins(Instr::If {
             cond: Instr::from(target.clone())
-              .eq(Instr::from(Con::CT0))
+              .eq(Instr::from(Const::CT0))
               .and(
                 Instr::GetHeap {
                   idx: Instr::from(target.clone()).into(),
-                  port: Instr::from(Con::P1).into(),
+                  port: Instr::from(Const::P1).into(),
                 }
                 .is_num(),
               )
               .into(),
             then: self.fork_on(|lowering| {
               // self.anni += 2
-              lowering.stmts.push(Stmt::Assign {
-                name: Prop::Anni,
-                value: Instr::Int(2),
-              });
+              lowering.assign(Prop::Anni, Instr::from(Prop::Anni).add(Instr::Int(2)));
 
               // self.oper += 1
-              lowering.stmts.push(Stmt::Assign {
-                name: Prop::Oper,
-                value: Instr::Int(1),
-              });
+              lowering.assign(Prop::Oper, Instr::from(Prop::Anni).add(Instr::Int(1)));
 
               // let num = self.heap.get(target.val(), P1)
               let num = lowering.define(format!("{}_x", target), Instr::GetHeap {
                 idx: Instr::from(target.clone()).val().into(),
-                port: Instr::from(Con::P1).into(),
+                port: Instr::from(Const::P1).into(),
               });
 
               // let res = self.heap.get(target.val(), P2)
               let res = lowering.define(format!("{}_y", target), Instr::GetHeap {
                 idx: Instr::from(target.clone()).val().into(),
-                port: Instr::from(Con::P2).into(),
+                port: Instr::from(Const::P2).into(),
               });
 
               // if num.val() == 0
@@ -243,69 +237,113 @@ impl Lowering<'_> {
                     .stmts
                     .push(Stmt::Free(Instr::from(target.clone()).val()));
                   lowering.assign(Prop::Var(c_z.clone()), Instr::from(res.clone()));
-                  lowering.assign(Prop::Var(c_s.clone()), Instr::from(Con::ERAS));
+                  lowering.assign(Prop::Var(c_s.clone()), Instr::from(Const::ERAS));
                 }),
                 otherwise: lowering.fork_on(|lowering| {
                   lowering.stmts.push(Stmt::SetHeap {
                     idx: Instr::from(target.clone()).val().into(),
-                    port: Instr::from(Con::P1).into(),
+                    port: Instr::from(Const::P1).into(),
                     value: Instr::new_ptr(
-                      Instr::from(Con::NUM),
+                      Instr::from(Const::NUM),
                       Instr::from(num).sub(Instr::Int(1)),
                     )
                     .into(),
                   });
-                  lowering.assign(Prop::Var(c_z.clone()), Instr::from(Con::ERAS));
+                  lowering.assign(Prop::Var(c_z.clone()), Instr::from(Const::ERAS));
                   lowering.assign(Prop::Var(c_s.clone()), Instr::from(target.clone()));
                 }),
               }))
             }),
             otherwise: self.fork_on(|lowering| {
-              let lam = lowering.fresh_define(Instr::Alloc { size: 1 });
-              let mat = lowering.fresh_define(Instr::Alloc { size: 1 });
-              let cse = lowering.fresh_define(Instr::Alloc { size: 1 });
+              let lam = lowering.define_fresh(Instr::Alloc { size: 1 });
+              let mat = lowering.define_fresh(Instr::Alloc { size: 1 });
+              let cse = lowering.define_fresh(Instr::Alloc { size: 1 });
               lowering.stmts.push(SetHeap {
                 // self.heap.set(lam, P1, Ptr::new(MAT, mat));
                 idx: Instr::from(lam.clone()).into(),
-                port: Instr::from(Con::P1).into(),
-                value: Instr::new_ptr(Con::MAT, Instr::from(mat.clone())).into(),
+                port: Instr::from(Const::P1).into(),
+                value: Instr::new_ptr(Const::MAT, Instr::from(mat.clone())).into(),
               });
               lowering.stmts.push(SetHeap {
                 // self.heap.set(lam, P2, Ptr::new(VR2, mat));
                 idx: Instr::from(lam.clone()).into(),
-                port: Instr::from(Con::P2).into(),
-                value: Instr::new_ptr(Con::VR2, Instr::from(mat.clone())).into(),
+                port: Instr::from(Const::P2).into(),
+                value: Instr::new_ptr(Const::VR2, Instr::from(mat.clone())).into(),
               });
               lowering.stmts.push(SetHeap {
                 // self.heap.set(mat, P1, Ptr::new(CT0, cse));
                 idx: Instr::from(mat.clone()),
-                port: Instr::from(Con::P1),
-                value: Instr::new_ptr(Con::CT0, Instr::from(cse.clone())),
+                port: Instr::from(Const::P1),
+                value: Instr::new_ptr(Const::CT0, Instr::from(cse.clone())),
               });
               lowering.stmts.push(SetHeap {
                 // self.heap.set(mat, P2, Ptr::new(VR2, cse));
                 idx: Instr::from(mat.clone()),
-                port: Instr::from(Con::P2),
-                value: Instr::new_ptr(Con::VR2, Instr::from(lam.clone())),
+                port: Instr::from(Const::P2),
+                value: Instr::new_ptr(Const::VR2, Instr::from(lam.clone())),
               });
               lowering.stmts.push(
-                Instr::new_ptr(Con::CT0, Instr::from(lam.clone()))
+                Instr::new_ptr(Const::CT0, Instr::from(lam.clone()))
                   .link(Instr::from(target.clone())),
               );
               lowering.assign(
                 Prop::Var(c_z.clone()),
-                Instr::new_ptr(Con::VR1, Instr::from(cse.clone())),
+                Instr::new_ptr(Const::VR1, Instr::from(cse.clone())),
               );
               lowering.assign(
                 Prop::Var(c_s.clone()),
-                Instr::new_ptr(Con::VR2, Instr::from(cse.clone())),
+                Instr::new_ptr(Const::VR2, Instr::from(cse.clone())),
               );
             }),
           }));
           self.burn(def, ifz, c_z.clone());
           self.burn(def, ifs, c_s.clone());
+          return;
         }
       }
+    }
+
+    // {p1 p2} <~ #N
+    // ------------- fast copy
+    // p1 <~ #N
+    // p2 <~ #N
+    if ptr.is_ctr() && ptr.tag() > run::CT0 {
+      let x1 = self.declare_fresh(TypeRepr::HvmPtr);
+      let x2 = self.declare_fresh(TypeRepr::HvmPtr);
+      let (p1, p2) = def.node[ptr.val() as usize];
+      // FAST COPY
+      // if tag(target) = NUM
+      //   self.comm += 1
+      //   x1 = target
+      //   x2 = target
+      // else
+      //   let lc = self.alloc(1)
+      //   x1 = Ptr::new(VR1, lc)
+      //   x2 = Ptr::new(VR2, lc)
+      //   self.link(Ptr::new(ptr.tag(), lc), target)
+      self.stmts.push(Stmt::Ins(Instr::If {
+        cond: Instr::from(target.clone())
+          .tag()
+          .eq(Instr::from(Const::NUM))
+          .into(),
+        then: self.fork_on(|lowering| {
+          lowering.assign(Prop::Comm, Instr::from(Prop::Comm).add(Instr::Int(1)));
+          lowering.assign(Prop::Var(x1.clone()), Instr::from(target.clone()));
+          lowering.assign(Prop::Var(x2.clone()), Instr::from(target.clone()));
+        }),
+        otherwise: self.fork_on(|lowering| {
+          let lc = lowering.define_fresh(Instr::Alloc { size: 1 });
+          lowering.assign(Prop::Var(x1.clone()), Instr::new_ptr(Const::VR1, lc.into()));
+          lowering.assign(Prop::Var(x2.clone()), Instr::new_ptr(Const::VR2, lc.into()));
+          lowering.stmts.push(
+            Instr::new_ptr(compile_tag(ptr.tag()), lc.into()).link(Instr::from(target.clone())),
+          );
+        }),
+      }));
+
+      self.burn(def, p1, x1.clone());
+      self.burn(def, p2, x2.clone());
+      return;
     }
   }
 }
