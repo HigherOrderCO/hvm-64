@@ -8,3 +8,4 @@ pub mod ast;
 pub mod jit;
 pub mod run;
 pub mod ir;
+pub mod codegen;
