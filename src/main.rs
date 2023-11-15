@@ -8,7 +8,6 @@ use std::env;
 use std::fs;
 
 use hvmc::ast;
-use hvmc::jit;
 use hvmc::run;
 
 #[cfg(not(feature = "hvm_cli_options"))]
@@ -97,7 +96,7 @@ fn load(file: &str) -> (run::Book, run::Net) {
 }
 
 pub fn compile_book_to_rust_crate(f_name: &str, book: &run::Book) -> Result<(), std::io::Error> {
-  let fns_rs = jit::compile_book(book);
+  let fns_rs = hvmc::codegen::compile_book(book).into_token_stream();
   let outdir = ".hvm";
   if std::path::Path::new(&outdir).exists() {
     fs::remove_dir_all(&outdir)?;

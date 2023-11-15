@@ -365,6 +365,8 @@ dependencies = [
  "criterion",
  "hvm-lang",
  "insta",
+ "proc-macro2",
+ "quote",
 ]
 
 [[package]]

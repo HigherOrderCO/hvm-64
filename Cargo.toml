@@ -40,3 +40,7 @@ hvm-core = { path = "." }
 [[bench]]
 name = "benches"
 harness = false
+
+[dependencies]
+proc-macro2 = "1.0.69"
+quote = "1.0.33"

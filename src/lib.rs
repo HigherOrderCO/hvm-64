@@ -5,8 +5,8 @@
 #![allow(non_upper_case_globals)]
 
 pub mod ast;
-pub mod jit;
-pub mod run;
-pub mod ir;
 pub mod codegen;
 pub mod fns;
+pub mod ir;
+pub mod quoting;
+pub mod run;
