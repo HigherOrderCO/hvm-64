@@ -44,3 +44,4 @@ harness = false
 [dependencies]
 proc-macro2 = "1.0.69"
 quote = "1.0.33"
+rust-format = "0.3.4"
