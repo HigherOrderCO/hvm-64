@@ -11,7 +11,7 @@ pub fn compile_term(book: &Book, fid: Val) -> Function {
   let mut lowering = Lowering {
     newx: Rc::new(Cell::new(0)),
     book,
-    target: "x".to_string(),
+    target: Instr::from("x".to_string()),
     vars: Rc::new(RefCell::new(HashMap::new())),
     stmts: vec![],
   };
@@ -86,8 +86,8 @@ type Target = String;
 struct Lowering<'book> {
   newx: Rc<Cell<usize>>,
   book: &'book Book,
-  vars: Rc<RefCell<HashMap<Ptr, String>>>,
-  target: Target,
+  vars: Rc<RefCell<HashMap<Ptr, Instr>>>,
+  target: Instr,
   stmts: Vec<Stmt>,
 }
 
@@ -117,7 +117,7 @@ impl Lowering<'_> {
         name: ref_name.clone(),
         value: assert_is_atom(rf),
       });
-      self.burn(def, rx, ref_name);
+      self.burn(def, rx, ref_name.into());
     }
   }
 
@@ -179,19 +179,44 @@ impl Lowering<'_> {
   }
 
   /// Generates code
-  fn make(&mut self, def: &Def, ptr: Ptr, target: Target) {
-    todo!()
+  fn make(&mut self, def: &Def, ptr: Ptr, target: Instr) {
+    if ptr.is_nod() {
+      let lc = self.define_fresh(Instr::Alloc { size: 1 });
+      let (p1, p2) = def.node[ptr.val() as usize];
+      self.make(def, p1, Instr::new_ptr(Const::VR1, lc.clone().into()));
+      self.make(def, p2, Instr::new_ptr(Const::VR2, lc.clone().into()));
+      self
+        .stmts
+        .push(Instr::new_ptr(compile_tag(ptr.tag()), lc.into()).link(target.clone()));
+    } else if ptr.is_var() {
+      match self.get(def, ptr) {
+        None => {
+          self.vars.borrow_mut().insert(ptr, target.clone());
+        }
+        Some(value) => {
+          self.stmts.push(target.clone().link(value));
+        }
+      }
+    } else {
+      self.stmts.push(target.clone().link(assert_is_atom(ptr)));
+    }
   }
 
   /// Get value from vars
-  fn get(&self, ptr: Ptr) -> Option<Instr> {
-    todo!()
+  fn get(&self, def: &Def, ptr: Ptr) -> Option<Instr> {
+    if ptr.is_var() {
+      let got = def.node[ptr.val() as usize];
+      let slf = if ptr.tag() == run::VR1 { got.0 } else { got.1 };
+      self.vars.borrow().get(&slf).cloned()
+    } else {
+      None
+    }
   }
 
   /// @loop = (?<(#0 (x y)) R> R) & @loop ~ (x y)
   ///
   /// This function basically concentrates all the optimizations
-  fn burn(&mut self, def: &Def, ptr: Ptr, target: Target) {
+  fn burn(&mut self, def: &Def, ptr: Ptr, target: Instr) {
     // (<?(ifz ifs) ret> ret) ~ (#X R)
     // ------------------------------- fast match
     // if X == 0:
@@ -231,13 +256,13 @@ impl Lowering<'_> {
               lowering.assign(Prop::Oper, Instr::from(Prop::Anni).add(Instr::Int(1)));
 
               // let num = self.heap.get(target.val(), P1)
-              let num = lowering.define(format!("{}_x", target), Instr::GetHeap {
+              let num = lowering.define_fresh(Instr::GetHeap {
                 idx: Instr::from(target.clone()).val().into(),
                 port: Instr::from(Const::P1).into(),
               });
 
               // let res = self.heap.get(target.val(), P2)
-              let res = lowering.define(format!("{}_y", target), Instr::GetHeap {
+              let res = lowering.define_fresh(Instr::GetHeap {
                 idx: Instr::from(target.clone()).val().into(),
                 port: Instr::from(Const::P2).into(),
               });
@@ -316,8 +341,8 @@ impl Lowering<'_> {
               );
             }),
           }));
-          self.burn(def, ifz, c_z.clone());
-          self.burn(def, ifs, c_s.clone());
+          self.burn(def, ifz, Instr::from(c_z).clone());
+          self.burn(def, ifs, Instr::from(c_s).clone());
           return;
         }
       }
@@ -330,7 +355,7 @@ impl Lowering<'_> {
       let (v_x, cnt) = def.node[ptr.val() as usize];
       if cnt.is_op2() {
         let (v_y, ret) = def.node[cnt.val() as usize];
-        if let (Some(v_x), Some(v_y)) = (self.get(v_x), self.get(v_y)) {
+        if let (Some(v_x), Some(v_y)) = (self.get(def, v_x), self.get(def, v_y)) {
           let nxt = self.declare_fresh(TypeRepr::HvmPtr);
           // FAST OP
           // if is-num(target) && is-num(v-x) && is-num(v-y)
@@ -377,14 +402,12 @@ impl Lowering<'_> {
 
               // self.link(Ptr::new(VR1, opx), v-x)
               lowering.stmts.push(
-                Instr::new_ptr(Const::VR1, Instr::from(opx.clone()))
-                  .link(Instr::from(v_x.clone())),
+                Instr::new_ptr(Const::VR1, Instr::from(opx.clone())).link(Instr::from(v_x.clone())),
               );
 
               // self.link(Ptr::new(VR1, opy), v-y)
               lowering.stmts.push(
-                Instr::new_ptr(Const::VR1, Instr::from(opy.clone()))
-                  .link(Instr::from(v_y.clone())),
+                Instr::new_ptr(Const::VR1, Instr::from(opy.clone())).link(Instr::from(v_y.clone())),
               );
 
               // self.link(Ptr::new(OP2, opx), target)
@@ -400,8 +423,8 @@ impl Lowering<'_> {
               );
             }),
           }));
-          
-          self.burn(def, ret, nxt.clone());
+
+          self.burn(def, ret, Instr::from(nxt).clone());
           return;
         }
       }
@@ -452,8 +475,8 @@ impl Lowering<'_> {
         }),
       }));
 
-      self.burn(def, p1, x1.clone());
-      self.burn(def, p2, x2.clone());
+      self.burn(def, p1, x1.clone().into());
+      self.burn(def, p2, x2.clone().into());
       return;
     }
 
@@ -512,8 +535,8 @@ impl Lowering<'_> {
         }),
       }));
 
-      self.burn(def, p1, x1.clone());
-      self.burn(def, p2, x2.clone());
+      self.burn(def, p1, x1.clone().into());
+      self.burn(def, p2, x2.clone().into());
       return;
     }
 
