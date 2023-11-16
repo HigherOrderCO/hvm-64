@@ -66,7 +66,7 @@ pub enum Const {
   LSH,  // [crate::run::LSH]
 }
 
-/// Constant values
+/// Property or variable, it's self.prop, like self.anni, self.oper, etc.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Prop {
   Anni,
@@ -142,7 +142,7 @@ pub enum Expr {
   },
   /// !ins
   Not {
-    ins: Box<Expr>,
+    expr: Box<Expr>,
   },
   /// lhs op rhs
   Bin {
@@ -155,19 +155,19 @@ pub enum Expr {
   // These are the functions that are exposed to the user.
   /// ins.val()
   Val {
-    ins: Box<Expr>,
+    expr: Box<Expr>,
   },
   /// ins.tag()
   Tag {
-    ins: Box<Expr>,
+    expr: Box<Expr>,
   },
   /// ins.is_num()
   IsNum {
-    ins: Box<Expr>,
+    expr: Box<Expr>,
   },
   /// ins.is_skp()
   IsSkp {
-    ins: Box<Expr>,
+    expr: Box<Expr>,
   },
   /// Ptr::new(tag, value)
   NewPtr {
@@ -558,11 +558,8 @@ fn fast_match(lowering: &mut Lowering, def: &Def, ptr: Ptr, target: Expr) -> boo
                 lowering.stmts.push(Instr::SetHeap {
                   idx: Expr::from(target.clone()).val().into(),
                   port: Expr::from(Const::P1).into(),
-                  value: Expr::new_ptr(
-                    Expr::from(Const::NUM),
-                    Expr::from(num).sub(Expr::Int(1)),
-                  )
-                  .into(),
+                  value: Expr::new_ptr(Expr::from(Const::NUM), Expr::from(num).sub(Expr::Int(1)))
+                    .into(),
                 });
                 lowering.assign(Prop::Var(c_z.clone()), Expr::from(Const::ERAS));
                 lowering.assign(Prop::Var(c_s.clone()), Expr::from(target.clone()));
@@ -598,8 +595,7 @@ fn fast_match(lowering: &mut Lowering, def: &Def, ptr: Ptr, target: Expr) -> boo
               value: Expr::new_ptr(Const::VR2, Expr::from(lam.clone())),
             });
             lowering.stmts.push(
-              Expr::new_ptr(Const::CT0, Expr::from(lam.clone()))
-                .link(Expr::from(target.clone())),
+              Expr::new_ptr(Const::CT0, Expr::from(lam.clone())).link(Expr::from(target.clone())),
             );
             lowering.assign(
               Prop::Var(c_z.clone()),
@@ -685,8 +681,7 @@ fn fast_op(lowering: &mut Lowering, def: &Def, ptr: Ptr, target: Expr) -> bool {
 
             // self.link(Ptr::new(OP2, opx), target)
             lowering.stmts.push(
-              Expr::new_ptr(Const::OP2, Expr::from(opx.clone()))
-                .link(Expr::from(target.clone())),
+              Expr::new_ptr(Const::OP2, Expr::from(opx.clone())).link(Expr::from(target.clone())),
             );
 
             // nxt = Ptr::new(VR2, opy)
@@ -745,9 +740,9 @@ fn fast_copy(lowering: &mut Lowering, def: &Def, ptr: Ptr, target: Expr) -> bool
           Prop::Var(x2.clone()),
           Expr::new_ptr(Const::VR2, lc.clone().into()),
         );
-        lowering.stmts.push(
-          Expr::new_ptr(compile_tag(ptr.tag()), lc.into()).link(Expr::from(target.clone())),
-        );
+        lowering
+          .stmts
+          .push(Expr::new_ptr(compile_tag(ptr.tag()), lc.into()).link(Expr::from(target.clone())));
       }),
     }));
 
@@ -808,9 +803,9 @@ fn fast_apply(lowering: &mut Lowering, def: &Def, ptr: Ptr, target: Expr) -> boo
           Prop::Var(x2.clone()),
           Expr::new_ptr(Const::VR2, lc.clone().into()),
         );
-        lowering.stmts.push(
-          Expr::new_ptr(compile_tag(ptr.tag()), lc.into()).link(Expr::from(target.clone())),
-        );
+        lowering
+          .stmts
+          .push(Expr::new_ptr(compile_tag(ptr.tag()), lc.into()).link(Expr::from(target.clone())));
       }),
     }));
 
@@ -960,6 +955,9 @@ impl LoweringProgram {
 }
 
 macro_rules! declare_external_function {
+  ([$($name:ident ($($argn:ident : $args:expr),*) -> $ret:expr),*]) => {
+    $(declare_external_function!($name ($($argn : $args),*) -> $ret);)*
+  };
   ($name:ident ($($argn:ident : $args:expr),*) -> $ret:expr) => {
     pub fn $name (&mut self, $( $argn : Value ),*) -> Value {
       let mut sig = self.module.make_signature();
@@ -988,30 +986,79 @@ struct FunctionLowering<'a> {
 }
 
 impl FunctionLowering<'_> {
-  declare_external_function! {
-    GET_HEAP (idx: types::I32, port: types::I32) -> types::I32
+  declare_external_function!([
+    VAL (val: types::I32) -> types::I32,
+    TAG (val: types::I32) -> types::I32,
+    IS_NUM (val: types::I32) -> types::I8,
+    IS_SKP (val: types::I32) -> types::I8,
+    NEW_PTR (tag: types::I8, value: types::I32) -> types::I32,
+    ALLOC (net: types::I64,size: types::I64) -> types::I32,
+    OP (net: types::I64, lhs: types::I32, rhs: types::I32) -> types::I32,
+    GET_HEAP (net: types::I64,idx: types::I32, port: types::I32) -> types::I32,
+    SET_HEAP (net: types::I64,idx: types::I32, port: types::I32, value: types::I32) -> types::I8
+  ]);
+
+  fn lower_prop(&mut self, prop: Prop) -> Value {
+    match prop {
+      Prop::Anni => todo!(),
+      Prop::Oper => todo!(),
+      Prop::Eras => todo!(),
+      Prop::Comm => todo!(),
+      Prop::Var(_) => todo!(),
+    }
   }
 
   fn lower_expr(&mut self, program: &LoweringProgram, expr: Expr) -> Value {
     match expr {
-      Expr::True => self.builder.ins().iconst(self.int, 0),
-      Expr::False => self.builder.ins().iconst(self.int, 0),
-      Expr::Int(v) => self.builder.ins().iconst(self.int, v as i64),
+      Expr::True => self.builder.ins().iconst(types::I8, 1),
+      Expr::False => self.builder.ins().iconst(types::I8, 0),
+      Expr::Int(v) => self.builder.ins().iconst(types::I32, v as i64),
       Expr::Const(constant) => {
         let value_constant = program.lower_constant(constant);
-        self.builder.ins().iconst(self.int, value_constant)
+        self.builder.ins().iconst(types::I8, value_constant)
       }
-      Expr::Prop(prop) => todo!(),
-      Expr::Not { ins } => todo!(),
+      Expr::Prop(prop) => self.lower_prop(prop),
+      Expr::Not { expr } => todo!(),
       Expr::Bin { op, lhs, rhs } => todo!(),
-      Expr::Val { ins } => todo!(),
-      Expr::Tag { ins } => todo!(),
-      Expr::IsNum { ins } => todo!(),
-      Expr::IsSkp { ins } => todo!(),
-      Expr::NewPtr { tag, value } => todo!(),
-      Expr::Op { lhs, rhs } => todo!(),
-      Expr::Alloc { size } => todo!(),
-      Expr::GetHeap { idx, port } => todo!(),
+      Expr::Val { expr } => {
+        let expr = self.lower_expr(program, *expr);
+        self.VAL(expr)
+      }
+      Expr::Tag { expr } => {
+        let expr = self.lower_expr(program, *expr);
+        self.TAG(expr)
+      }
+      Expr::IsNum { expr } => {
+        let expr = self.lower_expr(program, *expr);
+        self.IS_NUM(expr)
+      }
+      Expr::IsSkp { expr } => {
+        let expr = self.lower_expr(program, *expr);
+        self.IS_SKP(expr)
+      }
+      Expr::NewPtr { tag, value } => {
+        let net = todo!();
+        let tag = self.lower_expr(program, *tag);
+        let value = self.lower_expr(program, *value);
+        self.NEW_PTR(tag, value)
+      }
+      Expr::Op { lhs, rhs } => {
+        let net = todo!();
+        let lhs = self.lower_expr(program, *lhs);
+        let rhs = self.lower_expr(program, *rhs);
+        self.OP(net, lhs, rhs)
+      },
+      Expr::Alloc { size } => {
+        let net = todo!();
+        let size = self.builder.ins().iconst(types::I64, size as i64);
+        self.ALLOC(net, size)
+      }
+      Expr::GetHeap { idx, port } => {
+        let net = todo!();
+        let idx = self.lower_expr(program, *idx);
+        let port = self.lower_expr(program, *port);
+        self.GET_HEAP(net, idx, port)
+      }
       Expr::If {
         cond,
         then,
@@ -1029,8 +1076,8 @@ impl Program {
 
   #[cfg(feature = "hvm_cli_options")]
   pub fn compile_to_rust_fns(self) -> String {
-    use rust_format::Formatter;
     use quote::ToTokens;
+    use rust_format::Formatter;
     let tokens = self.to_token_stream();
     rust_format::RustFmt::new()
       .format_str(tokens.to_string())
@@ -1179,11 +1226,11 @@ mod rust_codegen {
         Expr::Prop(Prop::Comm) => quote! { self.comm },
         Expr::Prop(Prop::Eras) => quote! { self.eras },
         Expr::Prop(Prop::Oper) => quote! { self.oper },
-        Expr::Not { ins } => quote! { !#ins },
-        Expr::Val { ins } => quote! { #ins.val() },
-        Expr::Tag { ins } => quote! { #ins.tag() },
-        Expr::IsNum { ins } => quote! { #ins.is_num() },
-        Expr::IsSkp { ins } => quote! { #ins.is_skp() },
+        Expr::Not { expr: ins } => quote! { !#ins },
+        Expr::Val { expr: ins } => quote! { #ins.val() },
+        Expr::Tag { expr: ins } => quote! { #ins.tag() },
+        Expr::IsNum { expr: ins } => quote! { #ins.is_num() },
+        Expr::IsSkp { expr: ins } => quote! { #ins.is_skp() },
         Expr::NewPtr { tag, value } => quote! { Ptr::new(#tag, #value) },
         Expr::Op { lhs, rhs } => quote! { self.op(#lhs, #rhs) },
         Expr::Alloc { size } => quote! { self.alloc(#size) },
@@ -1227,31 +1274,31 @@ mod rust_codegen {
 impl Expr {
   pub fn is_num(self) -> Expr {
     Expr::IsNum {
-      ins: Box::new(self),
+      expr: Box::new(self),
     }
   }
 
   pub fn is_skp(self) -> Expr {
     Expr::IsSkp {
-      ins: Box::new(self),
+      expr: Box::new(self),
     }
   }
 
   pub fn val(self) -> Expr {
     Expr::Val {
-      ins: Box::new(self),
+      expr: Box::new(self),
     }
   }
 
   pub fn tag(self) -> Expr {
     Expr::Tag {
-      ins: Box::new(self),
+      expr: Box::new(self),
     }
   }
 
   pub fn not(self) -> Expr {
     Expr::Not {
-      ins: Box::new(self),
+      expr: Box::new(self),
     }
   }
 
