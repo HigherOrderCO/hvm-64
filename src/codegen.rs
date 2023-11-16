@@ -282,15 +282,15 @@ impl Lowering<'_> {
   }
 }
 
-// (<?(ifz ifs) ret> ret) ~ (#X R)
-// ------------------------------- fast match
-// if X == 0:
-//   ifz ~ R
-//   ifs ~ *
-// else:
-//   ifz ~ *
-//   ifs ~ (#(X-1) R)
-// When ifs is REF, tail-call optimization is applied.
+/// (<?(ifz ifs) ret> ret) ~ (#X R)
+/// ------------------------------- fast match
+/// if X == 0:
+///   ifz ~ R
+///   ifs ~ *
+/// else:
+///   ifz ~ *
+///   ifs ~ (#(X-1) R)
+/// When ifs is REF, tail-call optimization is applied.
 fn fast_match(lowering: &mut Lowering, def: &Def, ptr: Ptr, target: Instr) -> bool {
   if ptr.tag() == run::CT0 {
     let (mat, rty) = def.node[ptr.val() as usize];

@@ -72,6 +72,60 @@ impl Lowering {
   }
 }
 
+/// The state of the program being lowered.
+struct LoweringProgram {
+  constants: HashMap<String, i64>,
+}
+
+impl LoweringProgram {
+  pub fn lower_constant(&self, constant: Const) -> i64 {
+    match constant {
+      Const::F(name) => self
+        .constants
+        .get(&name)
+        .expect("Can't find value for const")
+        .clone(),
+      Const::P1 => crate::run::P1 as i64,
+      Const::P2 => crate::run::P2 as i64,
+      Const::NULL => crate::run::NULL.0 as i64,
+      Const::ROOT => crate::run::ERAS.0 as i64,
+      Const::ERAS => crate::run::ERAS.0 as i64,
+      Const::VR1 => crate::run::VR1 as i64,
+      Const::VR2 => crate::run::VR2 as i64,
+      Const::RD1 => crate::run::RD1 as i64,
+      Const::RD2 => crate::run::RD2 as i64,
+      Const::REF => crate::run::REF as i64,
+      Const::ERA => crate::run::ERA as i64,
+      Const::NUM => crate::run::NUM as i64,
+      Const::OP1 => crate::run::OP1 as i64,
+      Const::OP2 => crate::run::OP2 as i64,
+      Const::MAT => crate::run::MAT as i64,
+      Const::CT0 => crate::run::CT0 as i64,
+      Const::CT1 => crate::run::CT1 as i64,
+      Const::CT2 => crate::run::CT2 as i64,
+      Const::CT3 => crate::run::CT3 as i64,
+      Const::CT4 => crate::run::CT4 as i64,
+      Const::CT5 => crate::run::CT5 as i64,
+      Const::USE => crate::run::USE as i64,
+      Const::ADD => crate::run::ADD as i64,
+      Const::SUB => crate::run::SUB as i64,
+      Const::MUL => crate::run::MUL as i64,
+      Const::DIV => crate::run::DIV as i64,
+      Const::MOD => crate::run::MOD as i64,
+      Const::EQ => crate::run::EQ as i64,
+      Const::NE => crate::run::NE as i64,
+      Const::LT => crate::run::LT as i64,
+      Const::GT => crate::run::GT as i64,
+      Const::AND => crate::run::AND as i64,
+      Const::OR => crate::run::OR as i64,
+      Const::XOR => crate::run::XOR as i64,
+      Const::NOT => crate::run::NOT as i64,
+      Const::RSH => crate::run::RSH as i64,
+      Const::LSH => crate::run::LSH as i64,
+    }
+  }
+}
+
 /// A collection of state used for translating from toy-language AST nodes
 /// into Cranelift IR.
 struct FunctionLowering<'a> {
@@ -82,60 +136,15 @@ struct FunctionLowering<'a> {
 }
 
 impl FunctionLowering<'_> {
-  fn lower_instr(&mut self, instr: Instr) -> Value {
+  fn lower_instr(&mut self, program: &LoweringProgram, instr: Instr) -> Value {
     match instr {
       Instr::True => self.builder.ins().iconst(self.int, 0),
       Instr::False => self.builder.ins().iconst(self.int, 0),
       Instr::Int(v) => self.builder.ins().iconst(self.int, v as i64),
-      Instr::Const(cons) => match cons {
-        Const::F(v) => todo!(),
-        Const::P1 => self.builder.ins().iconst(self.int, crate::run::P1 as i64),
-        Const::P2 => self.builder.ins().iconst(self.int, crate::run::P2 as i64),
-        Const::NULL => self
-          .builder
-          .ins()
-          .iconst(self.int, crate::run::NULL.0 as i64),
-        Const::ROOT => self
-          .builder
-          .ins()
-          .iconst(self.int, crate::run::ERAS.0 as i64),
-        Const::ERAS => self
-          .builder
-          .ins()
-          .iconst(self.int, crate::run::ERAS.0 as i64),
-        Const::VR1 => self.builder.ins().iconst(self.int, crate::run::VR1 as i64),
-        Const::VR2 => self.builder.ins().iconst(self.int, crate::run::VR2 as i64),
-        Const::RD1 => self.builder.ins().iconst(self.int, crate::run::RD1 as i64),
-        Const::RD2 => self.builder.ins().iconst(self.int, crate::run::RD2 as i64),
-        Const::REF => self.builder.ins().iconst(self.int, crate::run::REF as i64),
-        Const::ERA => self.builder.ins().iconst(self.int, crate::run::ERA as i64),
-        Const::NUM => self.builder.ins().iconst(self.int, crate::run::NUM as i64),
-        Const::OP1 => self.builder.ins().iconst(self.int, crate::run::OP1 as i64),
-        Const::OP2 => self.builder.ins().iconst(self.int, crate::run::OP2 as i64),
-        Const::MAT => self.builder.ins().iconst(self.int, crate::run::MAT as i64),
-        Const::CT0 => self.builder.ins().iconst(self.int, crate::run::CT0 as i64),
-        Const::CT1 => self.builder.ins().iconst(self.int, crate::run::CT1 as i64),
-        Const::CT2 => self.builder.ins().iconst(self.int, crate::run::CT2 as i64),
-        Const::CT3 => self.builder.ins().iconst(self.int, crate::run::CT3 as i64),
-        Const::CT4 => self.builder.ins().iconst(self.int, crate::run::CT4 as i64),
-        Const::CT5 => self.builder.ins().iconst(self.int, crate::run::CT5 as i64),
-        Const::USE => self.builder.ins().iconst(self.int, crate::run::USE as i64),
-        Const::ADD => self.builder.ins().iconst(self.int, crate::run::ADD as i64),
-        Const::SUB => self.builder.ins().iconst(self.int, crate::run::SUB as i64),
-        Const::MUL => self.builder.ins().iconst(self.int, crate::run::MUL as i64),
-        Const::DIV => self.builder.ins().iconst(self.int, crate::run::DIV as i64),
-        Const::MOD => self.builder.ins().iconst(self.int, crate::run::MOD as i64),
-        Const::EQ => self.builder.ins().iconst(self.int, crate::run::EQ as i64),
-        Const::NE => self.builder.ins().iconst(self.int, crate::run::NE as i64),
-        Const::LT => self.builder.ins().iconst(self.int, crate::run::LT as i64),
-        Const::GT => self.builder.ins().iconst(self.int, crate::run::GT as i64),
-        Const::AND => self.builder.ins().iconst(self.int, crate::run::AND as i64),
-        Const::OR => self.builder.ins().iconst(self.int, crate::run::OR as i64),
-        Const::XOR => self.builder.ins().iconst(self.int, crate::run::XOR as i64),
-        Const::NOT => self.builder.ins().iconst(self.int, crate::run::NOT as i64),
-        Const::RSH => self.builder.ins().iconst(self.int, crate::run::RSH as i64),
-        Const::LSH => self.builder.ins().iconst(self.int, crate::run::LSH as i64),
-      },
+      Instr::Const(constant) => self
+        .builder
+        .ins()
+        .iconst(self.int, program.lower_constant(constant)),
       Instr::Prop(prop) => todo!(),
       Instr::If {
         cond,
