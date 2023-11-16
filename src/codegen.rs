@@ -257,7 +257,7 @@ impl Lowering<'_> {
               .eq(Instr::from(Const::CT0))
               .and(
                 Instr::GetHeap {
-                  idx: Instr::from(target.clone()).into(),
+                  idx: Instr::from(target.clone()).val().into(),
                   port: Instr::from(Const::P1).into(),
                 }
                 .is_num(),
@@ -523,11 +523,11 @@ impl Lowering<'_> {
         then: self.fork_on(|lowering| {
           lowering.assign(Prop::Anni, Instr::from(Prop::Anni).add(Instr::Int(1)));
           lowering.assign(Prop::Var(x1.clone()), Instr::GetHeap {
-            idx: Instr::from(target.clone()).into(),
+            idx: Instr::from(target.clone()).val().into(),
             port: Instr::from(Const::P1).into(),
           });
           lowering.assign(Prop::Var(x2.clone()), Instr::GetHeap {
-            idx: Instr::from(target.clone()).into(),
+            idx: Instr::from(target.clone()).val().into(),
             port: Instr::from(Const::P2).into(),
           });
           lowering
