@@ -571,5 +571,7 @@ impl Lowering<'_> {
       }));
       return;
     }
+
+    self.make(def, ptr, target);
   }
 }
