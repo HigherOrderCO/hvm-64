@@ -8,7 +8,7 @@ use std::str::FromStr;
 use cranelift::prelude::*;
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{DataDescription, Linkage, Module};
-use Stmt::SetHeap;
+use Instr::SetHeap;
 
 use crate::ast;
 use crate::run::{self, Book, Def, Ptr, Val};
@@ -90,12 +90,12 @@ pub struct Program {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Function {
   pub name: String,
-  pub body: Vec<Stmt>,
+  pub body: Vec<Instr>,
 }
 
 /// Represents a single statement in the IR.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Stmt {
+pub enum Instr {
   Let {
     name: String,
     value: Expr,
@@ -137,8 +137,8 @@ pub enum Expr {
   /// if cond then else els
   If {
     cond: Box<Expr>,
-    then: Vec<Stmt>,
-    otherwise: Vec<Stmt>,
+    then: Vec<Instr>,
+    otherwise: Vec<Instr>,
   },
   /// !ins
   Not {
@@ -239,7 +239,7 @@ pub fn compile_term(book: &Book, fid: Val) -> Function {
   };
 
   lowering.call(fid);
-  lowering.stmts.push(Stmt::Return(Expr::True));
+  lowering.stmts.push(Instr::Return(Expr::True));
 
   Function {
     name: ast::val_to_name(fid),
@@ -310,7 +310,7 @@ struct Lowering<'book> {
   book: &'book Book,
   vars: Rc<RefCell<HashMap<Ptr, Expr>>>,
   target: Expr,
-  stmts: Vec<Stmt>,
+  stmts: Vec<Instr>,
 }
 
 impl Lowering<'_> {
@@ -335,7 +335,7 @@ impl Lowering<'_> {
     for (rf, rx) in &def.rdex {
       let (rf, rx) = adjust_redex(*rf, *rx);
       let ref_name = self.fresh_name();
-      self.stmts.push(Stmt::Let {
+      self.stmts.push(Instr::Let {
         name: ref_name.clone(),
         value: assert_is_atom(rf),
       });
@@ -346,7 +346,7 @@ impl Lowering<'_> {
   /// Declares a variable without name
   fn declare_fresh(&mut self, type_repr: TypeRepr) -> String {
     let name = self.fresh_name();
-    self.stmts.push(Stmt::Val {
+    self.stmts.push(Instr::Val {
       name: name.clone(),
       type_repr,
     });
@@ -355,7 +355,7 @@ impl Lowering<'_> {
 
   /// Declares a variable
   fn declare(&mut self, name: String, type_repr: TypeRepr) -> String {
-    self.stmts.push(Stmt::Val {
+    self.stmts.push(Instr::Val {
       name: name.clone(),
       type_repr,
     });
@@ -365,7 +365,7 @@ impl Lowering<'_> {
   /// Defines a variable without name
   fn define_fresh(&mut self, value: Expr) -> String {
     let name = self.fresh_name();
-    self.stmts.push(Stmt::Let {
+    self.stmts.push(Instr::Let {
       name: name.clone(),
       value,
     });
@@ -374,7 +374,7 @@ impl Lowering<'_> {
 
   /// Defines a variable
   fn define(&mut self, name: String, value: Expr) -> String {
-    self.stmts.push(Stmt::Let {
+    self.stmts.push(Instr::Let {
       name: name.clone(),
       value,
     });
@@ -383,7 +383,7 @@ impl Lowering<'_> {
 
   /// Assigns a value to a property
   fn assign(&mut self, prop: Prop, value: Expr) {
-    self.stmts.push(Stmt::Assign { name: prop, value });
+    self.stmts.push(Instr::Assign { name: prop, value });
   }
 
   /// Fork returning Self
@@ -394,7 +394,7 @@ impl Lowering<'_> {
   }
 
   /// Fork returning vec of statements
-  fn fork_on(&self, f: impl FnOnce(&mut Self)) -> Vec<Stmt> {
+  fn fork_on(&self, f: impl FnOnce(&mut Self)) -> Vec<Instr> {
     let mut fork = self.fork();
     f(&mut fork);
     fork.stmts
@@ -507,7 +507,7 @@ fn fast_match(lowering: &mut Lowering, def: &Def, ptr: Ptr, target: Expr) -> boo
         let c_s = lowering.declare_fresh(TypeRepr::HvmPtr);
         // FAST MATCH
         // if tag(target) = CT0 && is-num(get-heap(val(target))
-        lowering.stmts.push(Stmt::Instr(Expr::If {
+        lowering.stmts.push(Instr::Instr(Expr::If {
           cond: Expr::from(target.clone())
             .eq(Expr::from(Const::CT0))
             .and(
@@ -545,17 +545,17 @@ fn fast_match(lowering: &mut Lowering, def: &Def, ptr: Ptr, target: Expr) -> boo
             //   self.heap.set(target.val(), P1, Ptr::new(NUM, num.val() - 1))
             //   c_z = ERAS
             //   c_s = target
-            lowering.stmts.push(Stmt::Instr(Expr::If {
+            lowering.stmts.push(Instr::Instr(Expr::If {
               cond: Expr::from(num.clone()).eq(Expr::Int(0)).into(),
               then: lowering.fork_on(|lowering| {
                 lowering
                   .stmts
-                  .push(Stmt::Free(Expr::from(target.clone()).val()));
+                  .push(Instr::Free(Expr::from(target.clone()).val()));
                 lowering.assign(Prop::Var(c_z.clone()), Expr::from(res.clone()));
                 lowering.assign(Prop::Var(c_s.clone()), Expr::from(Const::ERAS));
               }),
               otherwise: lowering.fork_on(|lowering| {
-                lowering.stmts.push(Stmt::SetHeap {
+                lowering.stmts.push(Instr::SetHeap {
                   idx: Expr::from(target.clone()).val().into(),
                   port: Expr::from(Const::P1).into(),
                   value: Expr::new_ptr(
@@ -642,7 +642,7 @@ fn fast_op(lowering: &mut Lowering, def: &Def, ptr: Ptr, target: Expr) -> bool {
         //   self.link(Ptr::new(VR1, opy), v-y)
         //   self.link(Ptr::new(OP2, opx), target)
         //   nxt = Ptr::new(VR2, opy)
-        lowering.stmts.push(Stmt::Instr(Expr::If {
+        lowering.stmts.push(Instr::Instr(Expr::If {
           cond: Expr::from(target.clone())
             .is_num()
             .and(v_x.clone().is_num())
@@ -725,7 +725,7 @@ fn fast_copy(lowering: &mut Lowering, def: &Def, ptr: Ptr, target: Expr) -> bool
     //   x1 = Ptr::new(VR1, lc)
     //   x2 = Ptr::new(VR2, lc)
     //   self.link(Ptr::new(ptr.tag(), lc), target)
-    lowering.stmts.push(Stmt::Instr(Expr::If {
+    lowering.stmts.push(Instr::Instr(Expr::If {
       cond: Expr::from(target.clone())
         .tag()
         .eq(Expr::from(Const::NUM))
@@ -779,7 +779,7 @@ fn fast_apply(lowering: &mut Lowering, def: &Def, ptr: Ptr, target: Expr) -> boo
     //   x1 = Ptr::new(VR1, lc)
     //   x2 = Ptr::new(VR2, lc)
     //   self.link(Ptr::new(ptr.tag(), lc), target)
-    lowering.stmts.push(Stmt::Instr(Expr::If {
+    lowering.stmts.push(Instr::Instr(Expr::If {
       cond: Expr::from(target.clone())
         .tag()
         .eq(Expr::from(compile_tag(ptr.tag())))
@@ -796,7 +796,7 @@ fn fast_apply(lowering: &mut Lowering, def: &Def, ptr: Ptr, target: Expr) -> boo
         });
         lowering
           .stmts
-          .push(Stmt::Free(Expr::from(target.clone()).val().into()))
+          .push(Instr::Free(Expr::from(target.clone()).val().into()))
       }),
       otherwise: lowering.fork_on(|lowering| {
         let lc = lowering.define_fresh(Expr::Alloc { size: 1 });
@@ -827,7 +827,7 @@ fn fast_apply(lowering: &mut Lowering, def: &Def, ptr: Ptr, target: Expr) -> boo
 fn fast_erase(lowering: &mut Lowering, def: &Def, ptr: Ptr, target: Expr) -> bool {
   if ptr.is_num() || ptr.is_era() {
     // FAST ERASE
-    lowering.stmts.push(Stmt::Instr(Expr::If {
+    lowering.stmts.push(Instr::Instr(Expr::If {
       cond: Expr::from(target.clone()).is_skp().into(),
       then: lowering.fork_on(|lowering| {
         lowering.assign(Prop::Eras, Expr::from(Prop::Eras).add(Expr::Int(1)));
@@ -992,7 +992,7 @@ impl FunctionLowering<'_> {
     GET_HEAP (idx: types::I32, port: types::I32) -> types::I32
   }
 
-  fn lower_instr(&mut self, program: &LoweringProgram, expr: Expr) -> Value {
+  fn lower_expr(&mut self, program: &LoweringProgram, expr: Expr) -> Value {
     match expr {
       Expr::True => self.builder.ins().iconst(self.int, 0),
       Expr::False => self.builder.ins().iconst(self.int, 0),
@@ -1100,18 +1100,18 @@ mod rust_codegen {
     }
   }
 
-  impl ToTokens for Stmt {
+  impl ToTokens for Instr {
     fn to_tokens(&self, tokens: &mut TokenStream) {
       tokens.append_all(match self {
-        Stmt::Let { name, value } => {
+        Instr::Let { name, value } => {
           let name = format_ident!("{name}");
           quote! { let #name = #value; }
         }
-        Stmt::Val { name, type_repr } => {
+        Instr::Val { name, type_repr } => {
           let name = format_ident!("{name}");
           quote! { let #name: #type_repr; }
         }
-        Stmt::Assign { name, value } => match name {
+        Instr::Assign { name, value } => match name {
           Prop::Anni => quote! { self.anni = #value; },
           Prop::Oper => quote! { self.oper = #value; },
           Prop::Eras => quote! { self.eras = #value; },
@@ -1121,11 +1121,11 @@ mod rust_codegen {
             quote! { #name = #value; }
           }
         },
-        Stmt::Instr(instr) => quote! { #instr; },
-        Stmt::Free(value) => quote! { self.free(#value); },
-        Stmt::Return(value) => quote! { return #value; },
-        Stmt::SetHeap { idx, port, value } => quote! { self.heap.set(#idx, #port, #value); },
-        Stmt::Link { lhs, rhs } => quote! { self.link(#lhs, #rhs); },
+        Instr::Instr(instr) => quote! { #instr; },
+        Instr::Free(value) => quote! { self.free(#value); },
+        Instr::Return(value) => quote! { return #value; },
+        Instr::SetHeap { idx, port, value } => quote! { self.heap.set(#idx, #port, #value); },
+        Instr::Link { lhs, rhs } => quote! { self.link(#lhs, #rhs); },
       })
     }
   }
@@ -1283,8 +1283,8 @@ impl Expr {
     self.bin("+", rhs)
   }
 
-  pub fn link(self, rhs: Expr) -> Stmt {
-    Stmt::Link { lhs: self, rhs }
+  pub fn link(self, rhs: Expr) -> Instr {
+    Instr::Link { lhs: self, rhs }
   }
 
   pub fn new_ptr(tag: impl Into<Expr>, value: Expr) -> Expr {
