@@ -61,9 +61,11 @@ pub const P2: Port = 1;
 
 // A tagged pointer.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+#[repr(transparent)]
 pub struct Ptr(pub Val);
 
 // An atomic tagged pointer.
+#[repr(transparent)]
 pub struct APtr(pub AVal);
 
 pub struct Heap {

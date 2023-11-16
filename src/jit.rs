@@ -164,10 +164,10 @@ impl FunctionLowering<'_> {
       Instr::True => self.builder.ins().iconst(self.int, 0),
       Instr::False => self.builder.ins().iconst(self.int, 0),
       Instr::Int(v) => self.builder.ins().iconst(self.int, v as i64),
-      Instr::Const(constant) => self
-        .builder
-        .ins()
-        .iconst(self.int, program.lower_constant(constant)),
+      Instr::Const(constant) => {
+        let value_constant = program.lower_constant(constant);
+        self.builder.ins().iconst(self.int, value_constant)
+      }
       Instr::Prop(prop) => todo!(),
       Instr::If {
         cond,
