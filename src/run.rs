@@ -19,18 +19,18 @@ pub const VR1: Tag = 0x0; // Variable to aux port 1
 pub const VR2: Tag = 0x1; // Variable to aux port 2
 pub const RD1: Tag = 0x2; // Redirect to aux port 1
 pub const RD2: Tag = 0x3; // Redirect to aux port 2
-pub const TKN: Tag = 0x4; // Special tokens
-pub const REF: Tag = 0x5; // Lazy closed net
-pub const ERA: Tag = 0x6; // Unboxed eraser
-pub const NUM: Tag = 0x7; // Unboxed number
-pub const OP2: Tag = 0x8; // Binary numeric operation
-pub const OP1: Tag = 0x9; // Unary numeric operation
-pub const MAT: Tag = 0xA; // Numeric pattern-matching
-pub const CT0: Tag = 0xB; // Main port of con node, label 0
-pub const CT1: Tag = 0xC; // Main port of con node, label 1
-pub const CT2: Tag = 0xD; // Main port of con node, label 2
-pub const CT3: Tag = 0xE; // Main port of con node, label 3
-pub const CT4: Tag = 0xF; // Main port of con node, label 4
+pub const REF: Tag = 0x4; // Lazy closed net
+pub const ERA: Tag = 0x5; // Unboxed eraser
+pub const NUM: Tag = 0x6; // Unboxed number
+pub const OP2: Tag = 0x7; // Binary numeric operation
+pub const OP1: Tag = 0x8; // Unary numeric operation
+pub const MAT: Tag = 0x9; // Numeric pattern-matching
+pub const CT0: Tag = 0xA; // Main port of con node, label 0
+pub const CT1: Tag = 0xB; // Main port of con node, label 1
+pub const CT2: Tag = 0xC; // Main port of con node, label 2
+pub const CT3: Tag = 0xD; // Main port of con node, label 3
+pub const CT4: Tag = 0xE; // Main port of con node, label 4
+pub const CT5: Tag = 0xF; // Main port of con node, label 5
 
 // Numeric operations.
 pub const USE: Tag = 0x0; // set-next-op
@@ -53,8 +53,8 @@ pub const RSH: Tag = 0xF; // right-shift
 pub const NULL: Ptr = Ptr(0);
 pub const ERAS: Ptr = Ptr::new(ERA, 0);
 pub const ROOT: Ptr = Ptr::new(VR2, 0);
-pub const GONE: Ptr = Ptr::new(TKN, 0);
-pub const LOCK: Ptr = Ptr::new(TKN, 1);
+pub const GONE: Ptr = Ptr(0xFFFF_FFFF_FFFF_FFFE);
+pub const LOCK: Ptr = Ptr(0xFFFF_FFFF_FFFF_FFFF);
 
 // An auxiliary port.
 pub type Port = Val;
@@ -142,7 +142,12 @@ impl Ptr {
 
   #[inline(always)]
   pub fn is_nil(&self) -> bool {
-    return self.data() == NULL.0;
+    return self.0 == NULL.0;
+  }
+
+  #[inline(always)]
+  pub fn is_spc(&self) -> bool {
+    return self.0 >= GONE.0;
   }
 
   #[inline(always)]
@@ -152,7 +157,7 @@ impl Ptr {
 
   #[inline(always)]
   pub fn is_red(&self) -> bool {
-    return matches!(self.tag(), RD1..=RD2);
+    return matches!(self.tag(), RD1..=RD2) && !self.is_nil();
   }
 
   #[inline(always)]
@@ -162,7 +167,7 @@ impl Ptr {
 
   #[inline(always)]
   pub fn is_ctr(&self) -> bool {
-    return matches!(self.tag(), CT0..);
+    return matches!(self.tag(), CT0..) && !self.is_spc();
   }
 
   #[inline(always)]
@@ -172,7 +177,7 @@ impl Ptr {
 
   #[inline(always)]
   pub fn is_pri(&self) -> bool {
-    return matches!(self.tag(), REF..);
+    return matches!(self.tag(), REF..) && !self.is_spc();
   }
 
   #[inline(always)]
@@ -202,12 +207,12 @@ impl Ptr {
 
   #[inline(always)]
   pub fn is_nod(&self) -> bool {
-    return matches!(self.tag(), OP2..);
+    return matches!(self.tag(), OP2..) && !self.is_spc();
   }
 
   #[inline(always)]
   pub fn has_loc(&self) -> bool {
-    return matches!(self.tag(), VR1..=VR2 | OP2..);
+    return matches!(self.tag(), VR1..=VR2 | OP2..) && !self.is_spc();
   }
 
   #[inline(always)]
@@ -520,6 +525,8 @@ impl<'a> Net<'a> {
           todo!();
         }
       }
+    } else {
+      self.set_target(a_dir, NULL);
     }
   }
 
@@ -884,7 +891,6 @@ impl<'a> Net<'a> {
     return go(self, book, ROOT, 1, self.tid);
   }
 
-
   // Forks into child threads, returning a Net for the (tid/tids)'th thread.
   pub fn fork(&self, tid: usize, tids: usize) -> Self {
     let mut net = Net::new(self.heap.data);
@@ -1030,6 +1036,5 @@ impl<'a> Net<'a> {
       self.expand(book);
     }
   }
-
 
 }
