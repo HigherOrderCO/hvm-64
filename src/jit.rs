@@ -81,14 +81,43 @@ pub fn atom(ptr: run::Ptr) -> String {
   }
 }
 
-enum Target {
-  Var { nam: String },
-  //Val { ptr: run:: Ptr },
+#[derive(Clone)]
+struct Target {
+  ptr: String,
+  dir: Option<String>,
 }
 
-fn target(trg: &Target) -> String {
-  match trg {
-    Target::Var { nam } => format!("{}", nam),
+impl Target {
+  fn show(&self) -> String {
+    format!("{}", self.ptr)
+  }
+  
+  fn link1(&self, to: &String) -> String {
+    match &self.dir {
+      None => {
+        format!("self.link({}, {})", self.ptr, to)
+      }
+      Some(self_dir) => {
+        format!("self.atomic_link_1({}, {}, {})", self.ptr, self_dir, to)
+      }
+    }
+  }
+
+  fn link(&self, to: &Target) -> String {
+    match (&self.dir, &to.dir) {
+      (None, None) => {
+        format!("self.link({}, {})", self.ptr, to.ptr)
+      }
+      (Some(self_dir), None) => {
+        format!("self.atomic_link_1({}, {}, {})", self.ptr, self_dir, to.ptr)
+      }
+      (None, Some(to_dir)) => {
+        format!("self.atomic_link_1({}, {}, {})", to.ptr, to_dir, self.ptr)
+      }
+      (Some(self_dir), Some(to_dir)) => {
+        format!("self.atomic_link({}, {}, {})", self.ptr, self_dir, to_dir)
+      }
+    }
   }
 }
 
@@ -104,20 +133,20 @@ pub fn compile_term(book: &run::Book, tab: usize, fid: run::Val) -> String {
     book : &run::Book,
     tab  : usize,
     newx : &mut usize,
-    vars : &mut HashMap<run::Ptr, String>,
+    vars : &mut HashMap<run::Ptr, Target>,
     fid  : run::Val,
-    x    : &Target,
+    trg  : &Target,
   ) -> String {
     //let newx = &mut 0;
     //let vars = &mut HashMap::new();
     let def = &book.defs[fid as usize];
     let mut code = String::new();
-    code.push_str(&burn(book, tab, newx, vars, def, def.node[0].1, &x));
+    code.push_str(&burn(book, tab, newx, vars, def, def.node[0].1, &trg));
     for (rf, rx) in &def.rdex {
       let (rf, rx) = adjust_redex(*rf, *rx);
       let rf_name = format!("_{}", fresh(newx));
       code.push_str(&format!("{}let {} = {};\n", ident(tab), rf_name, &atom(rf)));
-      code.push_str(&burn(book, tab, newx, vars, def, rx, &Target::Var { nam: rf_name }));
+      code.push_str(&burn(book, tab, newx, vars, def, rx, &Target { dir: None, ptr: rf_name }));
       //code.push_str(&make(tab, newx, vars, def, rx, &atom(rf)));
     }
 
@@ -129,10 +158,10 @@ pub fn compile_term(book: &run::Book, tab: usize, fid: run::Val) -> String {
     book : &run::Book,
     tab  : usize,
     newx : &mut usize,
-    vars : &mut HashMap<run::Ptr, String>,
+    vars : &mut HashMap<run::Ptr, Target>,
     def  : &run::Def,
     ptr  : run::Ptr,
-    x    : &Target,
+    trg  : &Target,
   ) -> String {
     //println!("burn {:08x} {}", ptr.0, x);
     let mut code = String::new();
@@ -157,29 +186,29 @@ pub fn compile_term(book: &run::Book, tab: usize, fid: run::Val) -> String {
         if cse.tag() == run::CT0 && rtx.is_var() && rtx == rtz {
           let ifz = def.node[cse.val() as usize].0;
           let ifs = def.node[cse.val() as usize].1;
-          let c_z = Target::Var { nam: fresh(newx) };
-          let c_s = Target::Var { nam: fresh(newx) };
-          let num = format!("{}x", target(x));
-          let res = format!("{}y", target(x));
+          let c_z = Target { dir: None, ptr: fresh(newx) };
+          let c_s = Target { dir: None, ptr: fresh(newx) };
+          let num = format!("{}x", trg.show());
+          let res = format!("{}y", trg.show());
           let lam = fresh(newx);
           let mat = fresh(newx);
           let cse = fresh(newx);
-          code.push_str(&format!("{}let {} : Ptr;\n", ident(tab), target(&c_z)));
-          code.push_str(&format!("{}let {} : Ptr;\n", ident(tab), target(&c_s)));
+          code.push_str(&format!("{}let {} : Ptr;\n", ident(tab), &c_z.show()));
+          code.push_str(&format!("{}let {} : Ptr;\n", ident(tab), &c_s.show()));
           code.push_str(&format!("{}// fast match\n", ident(tab)));
-          code.push_str(&format!("{}if {}.tag() == CT0 && self.heap.get({}.val(), P1).is_num() {{\n", ident(tab), target(x), target(x)));
+          code.push_str(&format!("{}if {}.tag() == CT0 && self.heap.get({}.val(), P1).is_num() {{\n", ident(tab), trg.show(), trg.show()));
           code.push_str(&format!("{}self.rwts.anni += 2;\n", ident(tab+1)));
           code.push_str(&format!("{}self.rwts.oper += 1;\n", ident(tab+1)));
-          code.push_str(&format!("{}let {} = self.heap.get({}.val(), P1);\n", ident(tab+1), num, target(x)));
-          code.push_str(&format!("{}let {} = self.heap.get({}.val(), P2);\n", ident(tab+1), res, target(x)));
+          code.push_str(&format!("{}let {} = self.heap.get({}.val(), P1);\n", ident(tab+1), num, trg.show()));
+          code.push_str(&format!("{}let {} = self.heap.get({}.val(), P2);\n", ident(tab+1), res, trg.show()));
           code.push_str(&format!("{}if {}.val() == 0 {{\n", ident(tab+1), num));
-          code.push_str(&format!("{}self.free({}.val());\n", ident(tab+2), target(x)));
-          code.push_str(&format!("{}{} = {};\n", ident(tab+2), target(&c_z), res));
-          code.push_str(&format!("{}{} = {};\n", ident(tab+2), target(&c_s), "ERAS"));
+          code.push_str(&format!("{}self.free({}.val());\n", ident(tab+2), trg.show()));
+          code.push_str(&format!("{}{} = {};\n", ident(tab+2), &c_z.show(), res));
+          code.push_str(&format!("{}{} = {};\n", ident(tab+2), &c_s.show(), "ERAS"));
           code.push_str(&format!("{}}} else {{\n", ident(tab+1)));
-          code.push_str(&format!("{}self.heap.set({}.val(), P1, Ptr::new(NUM, {}.val() - 1));\n", ident(tab+2), target(x), num));
-          code.push_str(&format!("{}{} = {};\n", ident(tab+2), target(&c_z), "ERAS"));
-          code.push_str(&format!("{}{} = {};\n", ident(tab+2), target(&c_s), target(x)));
+          code.push_str(&format!("{}self.heap.set({}.val(), P1, Ptr::new(NUM, {}.val() - 1));\n", ident(tab+2), trg.show(), num));
+          code.push_str(&format!("{}{} = {};\n", ident(tab+2), &c_z.show(), "ERAS"));
+          code.push_str(&format!("{}{} = {};\n", ident(tab+2), &c_s.show(), trg.show()));
           code.push_str(&format!("{}}}\n", ident(tab+1)));
           code.push_str(&format!("{}}} else {{\n", ident(tab)));
           code.push_str(&format!("{}let {} = self.alloc(1);\n", ident(tab+1), lam));
@@ -189,9 +218,9 @@ pub fn compile_term(book: &run::Book, tab: usize, fid: run::Val) -> String {
           code.push_str(&format!("{}self.heap.set({}, P2, Ptr::new(VR2, {}));\n", ident(tab+1), lam, mat));
           code.push_str(&format!("{}self.heap.set({}, P1, Ptr::new(CT0, {}));\n", ident(tab+1), mat, cse));
           code.push_str(&format!("{}self.heap.set({}, P2, Ptr::new(VR2, {}));\n", ident(tab+1), mat, lam));
-          code.push_str(&format!("{}self.link(Ptr::new(CT0, {}), {});\n", ident(tab+1), lam, target(x)));
-          code.push_str(&format!("{}{} = Ptr::new(VR1, {});\n", ident(tab+1), target(&c_z), cse));
-          code.push_str(&format!("{}{} = Ptr::new(VR2, {});\n", ident(tab+1), target(&c_s), cse));
+          code.push_str(&format!("{}self.link(Ptr::new(CT0, {}), {});\n", ident(tab+1), lam, trg.show()));
+          code.push_str(&format!("{}{} = Ptr::new(VR1, {});\n", ident(tab+1), &c_z.show(), cse));
+          code.push_str(&format!("{}{} = Ptr::new(VR2, {});\n", ident(tab+1), &c_s.show(), cse));
           code.push_str(&format!("{}}}\n", ident(tab)));
           code.push_str(&burn(book, tab, newx, vars, def, ifz, &c_z));
           code.push_str(&burn(book, tab, newx, vars, def, ifs, &c_s));
@@ -210,22 +239,22 @@ pub fn compile_term(book: &run::Book, tab: usize, fid: run::Val) -> String {
         let v_y = def.node[cnt.val() as usize].0;
         let ret = def.node[cnt.val() as usize].1;
         if let (Some(v_x), Some(v_y)) = (got(vars, def, v_x), got(vars, def, v_y)) {
-          let nxt = Target::Var { nam: fresh(newx) };
+          let nxt = Target { dir: None, ptr: fresh(newx) };
           let opx = fresh(newx);
           let opy = fresh(newx);
-          code.push_str(&format!("{}let {} : Ptr;\n", ident(tab), target(&nxt)));
+          code.push_str(&format!("{}let {} : Ptr;\n", ident(tab), &nxt.show()));
           code.push_str(&format!("{}// fast op\n", ident(tab)));
-          code.push_str(&format!("{}if {}.is_num() && {}.is_num() && {}.is_num() {{\n", ident(tab), target(x), v_x, v_y));
+          code.push_str(&format!("{}if {}.is_num() && {}.is_num() && {}.is_num() {{\n", ident(tab), trg.show(), &v_x.show(), &v_y.show()));
           code.push_str(&format!("{}self.rwts.oper += 4;\n", ident(tab+1))); // OP2 + OP1 + OP2 + OP1
-          code.push_str(&format!("{}{} = Ptr::new(NUM, self.op(self.op({}.val(),{}.val()),{}.val()));\n", ident(tab+1), target(&nxt), target(x), v_x, v_y));
+          code.push_str(&format!("{}{} = Ptr::new(NUM, self.op(self.op({}.val(),{}.val()),{}.val()));\n", ident(tab+1), &nxt.show(), trg.show(), &v_x.show(), &v_y.show()));
           code.push_str(&format!("{}}} else {{\n", ident(tab)));
           code.push_str(&format!("{}let {} = self.alloc(1);\n", ident(tab+1), opx));
           code.push_str(&format!("{}let {} = self.alloc(1);\n", ident(tab+1), opy));
           code.push_str(&format!("{}self.heap.set({}, P2, Ptr::new(OP2, {}));\n", ident(tab+1), opx, opy));
-          code.push_str(&format!("{}self.link(Ptr::new(VR1,{}), {});\n", ident(tab+1), opx, v_x));
-          code.push_str(&format!("{}self.link(Ptr::new(VR1,{}), {});\n", ident(tab+1), opy, v_y));
-          code.push_str(&format!("{}self.link(Ptr::new(OP2,{}), {});\n", ident(tab+1), opx, target(x)));
-          code.push_str(&format!("{}{} = Ptr::new(VR2, {});\n", ident(tab+1), target(&nxt), opy));
+          code.push_str(&format!("{}self.link(Ptr::new(VR1,{}), {});\n", ident(tab+1), opx, &v_x.show()));
+          code.push_str(&format!("{}self.link(Ptr::new(VR1,{}), {});\n", ident(tab+1), opy, &v_y.show()));
+          code.push_str(&format!("{}self.link(Ptr::new(OP2,{}), {});\n", ident(tab+1), opx, trg.show()));
+          code.push_str(&format!("{}{} = Ptr::new(VR2, {});\n", ident(tab+1), &nxt.show(), opy));
           code.push_str(&format!("{}}}\n", ident(tab)));
           code.push_str(&burn(book, tab, newx, vars, def, ret, &nxt));
           return code;
@@ -238,23 +267,23 @@ pub fn compile_term(book: &run::Book, tab: usize, fid: run::Val) -> String {
     // p1 <~ #N
     // p2 <~ #N
     if ptr.is_ctr() && ptr.tag() > run::CT0 {
-      let x1 = Target::Var { nam: format!("{}x", target(x)) };
-      let x2 = Target::Var { nam: format!("{}y", target(x)) };
+      let x1 = Target { dir: None, ptr: format!("{}x", trg.show()) };
+      let x2 = Target { dir: None, ptr: format!("{}y", trg.show()) };
       let p1 = def.node[ptr.val() as usize].0;
       let p2 = def.node[ptr.val() as usize].1;
       let lc = fresh(newx);
-      code.push_str(&format!("{}let {} : Ptr;\n", ident(tab), target(&x1)));
-      code.push_str(&format!("{}let {} : Ptr;\n", ident(tab), target(&x2)));
+      code.push_str(&format!("{}let {} : Ptr;\n", ident(tab), &x1.show()));
+      code.push_str(&format!("{}let {} : Ptr;\n", ident(tab), &x2.show()));
       code.push_str(&format!("{}// fast copy\n", ident(tab)));
-      code.push_str(&format!("{}if {}.tag() == NUM {{\n", ident(tab), target(x)));
+      code.push_str(&format!("{}if {}.tag() == NUM {{\n", ident(tab), trg.show()));
       code.push_str(&format!("{}self.rwts.comm += 1;\n", ident(tab+1)));
-      code.push_str(&format!("{}{} = {};\n", ident(tab+1), target(&x1), target(x)));
-      code.push_str(&format!("{}{} = {};\n", ident(tab+1), target(&x2), target(x)));
+      code.push_str(&format!("{}{} = {};\n", ident(tab+1), &x1.show(), trg.show()));
+      code.push_str(&format!("{}{} = {};\n", ident(tab+1), &x2.show(), trg.show()));
       code.push_str(&format!("{}}} else {{\n", ident(tab)));
       code.push_str(&format!("{}let {} = self.alloc(1);\n", ident(tab+1), lc));
-      code.push_str(&format!("{}{} = Ptr::new(VR1, {});\n", ident(tab+1), target(&x1), lc));
-      code.push_str(&format!("{}{} = Ptr::new(VR2, {});\n", ident(tab+1), target(&x2), lc));
-      code.push_str(&format!("{}self.link(Ptr::new({}, {}), {});\n", ident(tab+1), tag(ptr.tag()), lc, target(x)));
+      code.push_str(&format!("{}{} = Ptr::new(VR1, {});\n", ident(tab+1), &x1.show(), lc));
+      code.push_str(&format!("{}{} = Ptr::new(VR2, {});\n", ident(tab+1), &x2.show(), lc));
+      code.push_str(&format!("{}self.link(Ptr::new({}, {}), {});\n", ident(tab+1), tag(ptr.tag()), lc, trg.show()));
       code.push_str(&format!("{}}}\n", ident(tab)));
       code.push_str(&burn(book, tab, newx, vars, def, p1, &x1));
       code.push_str(&burn(book, tab, newx, vars, def, p2, &x2));
@@ -266,24 +295,24 @@ pub fn compile_term(book: &run::Book, tab: usize, fid: run::Val) -> String {
     // p1 <~ x1
     // p2 <~ x2
     if ptr.is_ctr() && ptr.tag() == run::CT0 {
-      let x1 = Target::Var { nam: format!("{}x", target(x)) };
-      let x2 = Target::Var { nam: format!("{}y", target(x)) };
+      let x1 = Target { dir: None, ptr: format!("{}x", trg.show()) };
+      let x2 = Target { dir: None, ptr: format!("{}y", trg.show()) };
       let p1 = def.node[ptr.val() as usize].0;
       let p2 = def.node[ptr.val() as usize].1;
       let lc = fresh(newx);
-      code.push_str(&format!("{}let {} : Ptr;\n", ident(tab), target(&x1)));
-      code.push_str(&format!("{}let {} : Ptr;\n", ident(tab), target(&x2)));
+      code.push_str(&format!("{}let {} : Ptr;\n", ident(tab), &x1.show()));
+      code.push_str(&format!("{}let {} : Ptr;\n", ident(tab), &x2.show()));
       code.push_str(&format!("{}// fast apply\n", ident(tab)));
-      code.push_str(&format!("{}if {}.tag() == {} {{\n", ident(tab), target(x), tag(ptr.tag())));
+      code.push_str(&format!("{}if {}.tag() == {} {{\n", ident(tab), trg.show(), tag(ptr.tag())));
       code.push_str(&format!("{}self.rwts.anni += 1;\n", ident(tab+1)));
-      code.push_str(&format!("{}{} = self.heap.get({}.val(), P1);\n", ident(tab+1), target(&x1), target(x)));
-      code.push_str(&format!("{}{} = self.heap.get({}.val(), P2);\n", ident(tab+1), target(&x2), target(x)));
-      code.push_str(&format!("{}self.free({}.val());\n", ident(tab+1), target(x)));
+      code.push_str(&format!("{}{} = self.heap.get({}.val(), P1);\n", ident(tab+1), &x1.show(), trg.show()));
+      code.push_str(&format!("{}{} = self.heap.get({}.val(), P2);\n", ident(tab+1), &x2.show(), trg.show()));
+      code.push_str(&format!("{}self.free({}.val());\n", ident(tab+1), trg.show()));
       code.push_str(&format!("{}}} else {{\n", ident(tab)));
       code.push_str(&format!("{}let {} = self.alloc(1);\n", ident(tab+1), lc));
-      code.push_str(&format!("{}{} = Ptr::new(VR1, {});\n", ident(tab+1), target(&x1), lc));
-      code.push_str(&format!("{}{} = Ptr::new(VR2, {});\n", ident(tab+1), target(&x2), lc));
-      code.push_str(&format!("{}self.link(Ptr::new({}, {}), {});\n", ident(tab+1), tag(ptr.tag()), lc, target(x)));
+      code.push_str(&format!("{}{} = Ptr::new(VR1, {});\n", ident(tab+1), &x1.show(), lc));
+      code.push_str(&format!("{}{} = Ptr::new(VR2, {});\n", ident(tab+1), &x2.show(), lc));
+      code.push_str(&format!("{}self.link(Ptr::new({}, {}), {});\n", ident(tab+1), tag(ptr.tag()), lc, trg.show()));
       code.push_str(&format!("{}}}\n", ident(tab)));
       code.push_str(&burn(book, tab, newx, vars, def, p1, &x1));
       code.push_str(&burn(book, tab, newx, vars, def, p2, &x2));
@@ -308,25 +337,25 @@ pub fn compile_term(book: &run::Book, tab: usize, fid: run::Val) -> String {
     // nothing
     if ptr.is_num() || ptr.is_era() {
       code.push_str(&format!("{}// fast erase\n", ident(tab)));
-      code.push_str(&format!("{}if {}.is_skp() {{\n", ident(tab), target(x)));
+      code.push_str(&format!("{}if {}.is_skp() {{\n", ident(tab), trg.show()));
       code.push_str(&format!("{}self.rwts.eras += 1;\n", ident(tab+1)));
       code.push_str(&format!("{}}} else {{\n", ident(tab)));
-      code.push_str(&make(tab+1, newx, vars, def, ptr, &target(x)));
+      code.push_str(&make(tab+1, newx, vars, def, ptr, &trg));
       code.push_str(&format!("{}}}\n", ident(tab)));
       return code;
     }
 
-    code.push_str(&make(tab, newx, vars, def, ptr, &target(x)));
+    code.push_str(&make(tab, newx, vars, def, ptr, &trg));
     return code;
   }
 
   fn make(
     tab  : usize,
     newx : &mut usize,
-    vars : &mut HashMap<run::Ptr, String>,
+    vars : &mut HashMap<run::Ptr, Target>,
     def  : &run::Def,
     ptr  : run::Ptr,
-    x    : &String,
+    trg  : &Target,
   ) -> String {
     //println!("make {:08x} {}", ptr.0, x);
     let mut code = String::new();
@@ -335,31 +364,30 @@ pub fn compile_term(book: &run::Book, tab: usize, fid: run::Val) -> String {
       let p1 = def.node[ptr.val() as usize].0;
       let p2 = def.node[ptr.val() as usize].1;
       code.push_str(&format!("{}let {} = self.alloc(1);\n", ident(tab), lc));
-      code.push_str(&make(tab, newx, vars, def, p1, &format!("Ptr::new(VR1, {})", lc)));
-      code.push_str(&make(tab, newx, vars, def, p2, &format!("Ptr::new(VR2, {})", lc)));
-      code.push_str(&format!("{}self.link(Ptr::new({}, {}), {});\n", ident(tab), tag(ptr.tag()), lc, x));
+      code.push_str(&make(tab, newx, vars, def, p1, &Target { dir: None, ptr: format!("Ptr::new(VR1, {})", lc) }));
+      code.push_str(&make(tab, newx, vars, def, p2, &Target { dir: None, ptr: format!("Ptr::new(VR2, {})", lc) }));
+      code.push_str(&format!("{}{}", ident(tab), &trg.link1(&format!("Ptr::new({}, {})", tag(ptr.tag()), lc))));
     } else if ptr.is_var() {
       match got(vars, def, ptr) {
         None => {
           //println!("-var fst");
-          vars.insert(ptr, x.clone());
+          vars.insert(ptr, trg.clone());
         },
         Some(got) => {
-          //println!("-var snd");
-          code.push_str(&format!("{}self.link({}, {});\n", ident(tab), x, got));
+          code.push_str(&format!("{}{}", ident(tab), &trg.link(&got)));
         }
       }
     } else {
-      code.push_str(&format!("{}self.link({}, {});\n", ident(tab), x, atom(ptr)));
+      code.push_str(&format!("{}{};\n", ident(tab), &trg.link1(&atom(ptr))));
     }
     return code;
   }
 
   fn got(
-    vars : &HashMap<run::Ptr, String>,
+    vars : &HashMap<run::Ptr, Target>,
     def  : &run::Def,
     ptr  : run::Ptr,
-  ) -> Option<String> {
+  ) -> Option<Target> {
     if ptr.is_var() {
       let got = def.node[ptr.val() as usize];
       let slf = if ptr.tag() == run::VR1 { got.0 } else { got.1 };
@@ -372,8 +400,8 @@ pub fn compile_term(book: &run::Book, tab: usize, fid: run::Val) -> String {
   let fun = ast::val_to_name(fid);
 
   let mut code = String::new();
-  code.push_str(&format!("{}pub fn F_{}(&mut self, ptr: Ptr, x: Ptr) -> bool {{\n", ident(tab), fun));
-  code.push_str(&call(book, tab+1, &mut 0, &mut HashMap::new(), fid, &Target::Var { nam: "x".to_string() }));
+  code.push_str(&format!("{}pub fn F_{}(&mut self, ptr: Ptr, trg: Ptr) -> bool {{\n", ident(tab), fun));
+  code.push_str(&call(book, tab+1, &mut 0, &mut HashMap::new(), fid, &Target { dir: None, ptr: "trg".to_string() }));
   code.push_str(&format!("{}return true;\n", ident(tab+1)));
   code.push_str(&format!("{}}}\n", ident(tab)));
 
