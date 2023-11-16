@@ -8,5 +8,7 @@ pub mod ast;
 pub mod codegen;
 pub mod fns;
 pub mod ir;
+pub mod jit;
 pub mod quoting;
 pub mod run;
+pub mod runtime;
