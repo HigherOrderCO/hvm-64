@@ -98,7 +98,7 @@ pub struct Function {
 pub enum Stmt {
   Let {
     name: String,
-    value: Instr,
+    value: Expr,
   },
   Val {
     name: String,
@@ -106,27 +106,27 @@ pub enum Stmt {
   },
   Assign {
     name: Prop,
-    value: Instr,
+    value: Expr,
   },
-  Instr(Instr),
-  Free(Instr),
-  Return(Instr),
+  Instr(Expr),
+  Free(Expr),
+  Return(Expr),
   /// self.heap.set(idx, port, value)
   SetHeap {
-    idx: Instr,
-    port: Instr,
-    value: Instr,
+    idx: Expr,
+    port: Expr,
+    value: Expr,
   },
   /// self.link(lhs, rhs)
   Link {
-    lhs: Instr,
-    rhs: Instr,
+    lhs: Expr,
+    rhs: Expr,
   },
 }
 
 /// Represents a single instruction in the IR.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Instr {
+pub enum Expr {
   True,
   False,
   Int(u32),
@@ -136,51 +136,51 @@ pub enum Instr {
   /// SPECIAL TERM: Call
   /// if cond then else els
   If {
-    cond: Box<Instr>,
+    cond: Box<Expr>,
     then: Vec<Stmt>,
     otherwise: Vec<Stmt>,
   },
   /// !ins
   Not {
-    ins: Box<Instr>,
+    ins: Box<Expr>,
   },
   /// lhs op rhs
   Bin {
     op: String,
-    lhs: Box<Instr>,
-    rhs: Box<Instr>,
+    lhs: Box<Expr>,
+    rhs: Box<Expr>,
   },
 
   // VALUE FUNCTIONS:
   // These are the functions that are exposed to the user.
   /// ins.val()
   Val {
-    ins: Box<Instr>,
+    ins: Box<Expr>,
   },
   /// ins.tag()
   Tag {
-    ins: Box<Instr>,
+    ins: Box<Expr>,
   },
   /// ins.is_num()
   IsNum {
-    ins: Box<Instr>,
+    ins: Box<Expr>,
   },
   /// ins.is_skp()
   IsSkp {
-    ins: Box<Instr>,
+    ins: Box<Expr>,
   },
   /// Ptr::new(tag, value)
   NewPtr {
-    tag: Box<Instr>,
-    value: Box<Instr>,
+    tag: Box<Expr>,
+    value: Box<Expr>,
   },
 
   // FUNCTIONS:
   // These are the functions that are internal to the IR.
   /// self.ops(lhs, op, rhs)
   Op {
-    lhs: Box<Instr>,
-    rhs: Box<Instr>,
+    lhs: Box<Expr>,
+    rhs: Box<Expr>,
   },
   /// self.alloc(n)
   Alloc {
@@ -188,26 +188,26 @@ pub enum Instr {
   },
   /// self.heap.get(idx, port)
   GetHeap {
-    idx: Box<Instr>,
-    port: Box<Instr>,
+    idx: Box<Expr>,
+    port: Box<Expr>,
   },
 }
 
-impl From<Const> for Instr {
+impl From<Const> for Expr {
   fn from(value: Const) -> Self {
-    Instr::Const(value)
+    Expr::Const(value)
   }
 }
 
-impl From<String> for Instr {
+impl From<String> for Expr {
   fn from(value: String) -> Self {
-    Instr::Prop(Prop::Var(value))
+    Expr::Prop(Prop::Var(value))
   }
 }
 
-impl From<Prop> for Instr {
+impl From<Prop> for Expr {
   fn from(value: Prop) -> Self {
-    Instr::Prop(value)
+    Expr::Prop(value)
   }
 }
 
@@ -233,13 +233,13 @@ pub fn compile_term(book: &Book, fid: Val) -> Function {
   let mut lowering = Lowering {
     newx: Rc::new(Cell::new(0)),
     book,
-    target: Instr::from("argument".to_string()),
+    target: Expr::from("argument".to_string()),
     vars: Rc::new(RefCell::new(HashMap::new())),
     stmts: vec![],
   };
 
   lowering.call(fid);
-  lowering.stmts.push(Stmt::Return(Instr::True));
+  lowering.stmts.push(Stmt::Return(Expr::True));
 
   Function {
     name: ast::val_to_name(fid),
@@ -247,16 +247,16 @@ pub fn compile_term(book: &Book, fid: Val) -> Function {
   }
 }
 
-fn assert_is_atom(ptr: Ptr) -> Instr {
+fn assert_is_atom(ptr: Ptr) -> Expr {
   if ptr.is_ref() {
-    Instr::NewPtr {
-      tag: Instr::from(Const::REF).into(),
-      value: Instr::from(Const::F(ast::val_to_name(ptr.val()))).into(),
+    Expr::NewPtr {
+      tag: Expr::from(Const::REF).into(),
+      value: Expr::from(Const::F(ast::val_to_name(ptr.val()))).into(),
     }
   } else {
-    Instr::NewPtr {
-      tag: Instr::from(compile_tag(ptr.tag())).into(),
-      value: Instr::Int(ptr.val()).into(),
+    Expr::NewPtr {
+      tag: Expr::from(compile_tag(ptr.tag())).into(),
+      value: Expr::Int(ptr.val()).into(),
     }
   }
 }
@@ -308,17 +308,17 @@ type Target = String;
 struct Lowering<'book> {
   newx: Rc<Cell<usize>>,
   book: &'book Book,
-  vars: Rc<RefCell<HashMap<Ptr, Instr>>>,
-  target: Instr,
+  vars: Rc<RefCell<HashMap<Ptr, Expr>>>,
+  target: Expr,
   stmts: Vec<Stmt>,
 }
 
 impl Lowering<'_> {
   /// returns a fresh variable: 'v<NUM>'
-  fn fresh(&mut self) -> Instr {
+  fn fresh(&mut self) -> Expr {
     let name = format!("v{}", self.newx.get());
     self.newx.set(self.newx.get() + 1);
-    Instr::Prop(Prop::Var(name))
+    Expr::Prop(Prop::Var(name))
   }
 
   /// returns a fresh variable: 'v<NUM>'
@@ -363,7 +363,7 @@ impl Lowering<'_> {
   }
 
   /// Defines a variable without name
-  fn define_fresh(&mut self, value: Instr) -> String {
+  fn define_fresh(&mut self, value: Expr) -> String {
     let name = self.fresh_name();
     self.stmts.push(Stmt::Let {
       name: name.clone(),
@@ -373,7 +373,7 @@ impl Lowering<'_> {
   }
 
   /// Defines a variable
-  fn define(&mut self, name: String, value: Instr) -> String {
+  fn define(&mut self, name: String, value: Expr) -> String {
     self.stmts.push(Stmt::Let {
       name: name.clone(),
       value,
@@ -382,7 +382,7 @@ impl Lowering<'_> {
   }
 
   /// Assigns a value to a property
-  fn assign(&mut self, prop: Prop, value: Instr) {
+  fn assign(&mut self, prop: Prop, value: Expr) {
     self.stmts.push(Stmt::Assign { name: prop, value });
   }
 
@@ -401,15 +401,15 @@ impl Lowering<'_> {
   }
 
   /// Generates code
-  fn make(&mut self, def: &Def, ptr: Ptr, target: Instr) {
+  fn make(&mut self, def: &Def, ptr: Ptr, target: Expr) {
     if ptr.is_nod() {
-      let lc = self.define_fresh(Instr::Alloc { size: 1 });
+      let lc = self.define_fresh(Expr::Alloc { size: 1 });
       let (p1, p2) = def.node[ptr.val() as usize];
-      self.make(def, p1, Instr::new_ptr(Const::VR1, lc.clone().into()));
-      self.make(def, p2, Instr::new_ptr(Const::VR2, lc.clone().into()));
+      self.make(def, p1, Expr::new_ptr(Const::VR1, lc.clone().into()));
+      self.make(def, p2, Expr::new_ptr(Const::VR2, lc.clone().into()));
       self
         .stmts
-        .push(Instr::new_ptr(compile_tag(ptr.tag()), lc.into()).link(target.clone()));
+        .push(Expr::new_ptr(compile_tag(ptr.tag()), lc.into()).link(target.clone()));
     } else if ptr.is_var() {
       match self.get(def, ptr) {
         None => {
@@ -425,7 +425,7 @@ impl Lowering<'_> {
   }
 
   /// Get value from vars
-  fn get(&self, def: &Def, ptr: Ptr) -> Option<Instr> {
+  fn get(&self, def: &Def, ptr: Ptr) -> Option<Expr> {
     if ptr.is_var() {
       let got = def.node[ptr.val() as usize];
       let slf = if ptr.tag() == run::VR1 { got.0 } else { got.1 };
@@ -438,7 +438,7 @@ impl Lowering<'_> {
   /// @loop = (?<(#0 (x y)) R> R) & @loop ~ (x y)
   ///
   /// This function basically concentrates all the optimizations
-  fn burn(&mut self, def: &Def, ptr: Ptr, target: Instr) {
+  fn burn(&mut self, def: &Def, ptr: Ptr, target: Expr) {
     // (<?(ifz ifs) ret> ret) ~ (#X R)
     // ------------------------------- fast match
     // if X == 0:
@@ -495,7 +495,7 @@ impl Lowering<'_> {
 ///   ifz ~ *
 ///   ifs ~ (#(X-1) R)
 /// When ifs is REF, tail-call optimization is applied.
-fn fast_match(lowering: &mut Lowering, def: &Def, ptr: Ptr, target: Instr) -> bool {
+fn fast_match(lowering: &mut Lowering, def: &Def, ptr: Ptr, target: Expr) -> bool {
   if ptr.tag() == run::CT0 {
     let (mat, rty) = def.node[ptr.val() as usize];
     if mat.tag() == run::MAT {
@@ -507,34 +507,34 @@ fn fast_match(lowering: &mut Lowering, def: &Def, ptr: Ptr, target: Instr) -> bo
         let c_s = lowering.declare_fresh(TypeRepr::HvmPtr);
         // FAST MATCH
         // if tag(target) = CT0 && is-num(get-heap(val(target))
-        lowering.stmts.push(Stmt::Instr(Instr::If {
-          cond: Instr::from(target.clone())
-            .eq(Instr::from(Const::CT0))
+        lowering.stmts.push(Stmt::Instr(Expr::If {
+          cond: Expr::from(target.clone())
+            .eq(Expr::from(Const::CT0))
             .and(
-              Instr::GetHeap {
-                idx: Instr::from(target.clone()).val().into(),
-                port: Instr::from(Const::P1).into(),
+              Expr::GetHeap {
+                idx: Expr::from(target.clone()).val().into(),
+                port: Expr::from(Const::P1).into(),
               }
               .is_num(),
             )
             .into(),
           then: lowering.fork_on(|lowering| {
             // self.anni += 2
-            lowering.assign(Prop::Anni, Instr::from(Prop::Anni).add(Instr::Int(2)));
+            lowering.assign(Prop::Anni, Expr::from(Prop::Anni).add(Expr::Int(2)));
 
             // self.oper += 1
-            lowering.assign(Prop::Oper, Instr::from(Prop::Anni).add(Instr::Int(1)));
+            lowering.assign(Prop::Oper, Expr::from(Prop::Anni).add(Expr::Int(1)));
 
             // let num = self.heap.get(target.val(), P1)
-            let num = lowering.define_fresh(Instr::GetHeap {
-              idx: Instr::from(target.clone()).val().into(),
-              port: Instr::from(Const::P1).into(),
+            let num = lowering.define_fresh(Expr::GetHeap {
+              idx: Expr::from(target.clone()).val().into(),
+              port: Expr::from(Const::P1).into(),
             });
 
             // let res = self.heap.get(target.val(), P2)
-            let res = lowering.define_fresh(Instr::GetHeap {
-              idx: Instr::from(target.clone()).val().into(),
-              port: Instr::from(Const::P2).into(),
+            let res = lowering.define_fresh(Expr::GetHeap {
+              idx: Expr::from(target.clone()).val().into(),
+              port: Expr::from(Const::P2).into(),
             });
 
             // if num.val() == 0
@@ -545,74 +545,74 @@ fn fast_match(lowering: &mut Lowering, def: &Def, ptr: Ptr, target: Instr) -> bo
             //   self.heap.set(target.val(), P1, Ptr::new(NUM, num.val() - 1))
             //   c_z = ERAS
             //   c_s = target
-            lowering.stmts.push(Stmt::Instr(Instr::If {
-              cond: Instr::from(num.clone()).eq(Instr::Int(0)).into(),
+            lowering.stmts.push(Stmt::Instr(Expr::If {
+              cond: Expr::from(num.clone()).eq(Expr::Int(0)).into(),
               then: lowering.fork_on(|lowering| {
                 lowering
                   .stmts
-                  .push(Stmt::Free(Instr::from(target.clone()).val()));
-                lowering.assign(Prop::Var(c_z.clone()), Instr::from(res.clone()));
-                lowering.assign(Prop::Var(c_s.clone()), Instr::from(Const::ERAS));
+                  .push(Stmt::Free(Expr::from(target.clone()).val()));
+                lowering.assign(Prop::Var(c_z.clone()), Expr::from(res.clone()));
+                lowering.assign(Prop::Var(c_s.clone()), Expr::from(Const::ERAS));
               }),
               otherwise: lowering.fork_on(|lowering| {
                 lowering.stmts.push(Stmt::SetHeap {
-                  idx: Instr::from(target.clone()).val().into(),
-                  port: Instr::from(Const::P1).into(),
-                  value: Instr::new_ptr(
-                    Instr::from(Const::NUM),
-                    Instr::from(num).sub(Instr::Int(1)),
+                  idx: Expr::from(target.clone()).val().into(),
+                  port: Expr::from(Const::P1).into(),
+                  value: Expr::new_ptr(
+                    Expr::from(Const::NUM),
+                    Expr::from(num).sub(Expr::Int(1)),
                   )
                   .into(),
                 });
-                lowering.assign(Prop::Var(c_z.clone()), Instr::from(Const::ERAS));
-                lowering.assign(Prop::Var(c_s.clone()), Instr::from(target.clone()));
+                lowering.assign(Prop::Var(c_z.clone()), Expr::from(Const::ERAS));
+                lowering.assign(Prop::Var(c_s.clone()), Expr::from(target.clone()));
               }),
             }))
           }),
           otherwise: lowering.fork_on(|lowering| {
-            let lam = lowering.define_fresh(Instr::Alloc { size: 1 });
-            let mat = lowering.define_fresh(Instr::Alloc { size: 1 });
-            let cse = lowering.define_fresh(Instr::Alloc { size: 1 });
+            let lam = lowering.define_fresh(Expr::Alloc { size: 1 });
+            let mat = lowering.define_fresh(Expr::Alloc { size: 1 });
+            let cse = lowering.define_fresh(Expr::Alloc { size: 1 });
             lowering.stmts.push(SetHeap {
               // self.heap.set(lam, P1, Ptr::new(MAT, mat));
-              idx: Instr::from(lam.clone()).into(),
-              port: Instr::from(Const::P1).into(),
-              value: Instr::new_ptr(Const::MAT, Instr::from(mat.clone())).into(),
+              idx: Expr::from(lam.clone()).into(),
+              port: Expr::from(Const::P1).into(),
+              value: Expr::new_ptr(Const::MAT, Expr::from(mat.clone())).into(),
             });
             lowering.stmts.push(SetHeap {
               // self.heap.set(lam, P2, Ptr::new(VR2, mat));
-              idx: Instr::from(lam.clone()).into(),
-              port: Instr::from(Const::P2).into(),
-              value: Instr::new_ptr(Const::VR2, Instr::from(mat.clone())).into(),
+              idx: Expr::from(lam.clone()).into(),
+              port: Expr::from(Const::P2).into(),
+              value: Expr::new_ptr(Const::VR2, Expr::from(mat.clone())).into(),
             });
             lowering.stmts.push(SetHeap {
               // self.heap.set(mat, P1, Ptr::new(CT0, cse));
-              idx: Instr::from(mat.clone()),
-              port: Instr::from(Const::P1),
-              value: Instr::new_ptr(Const::CT0, Instr::from(cse.clone())),
+              idx: Expr::from(mat.clone()),
+              port: Expr::from(Const::P1),
+              value: Expr::new_ptr(Const::CT0, Expr::from(cse.clone())),
             });
             lowering.stmts.push(SetHeap {
               // self.heap.set(mat, P2, Ptr::new(VR2, cse));
-              idx: Instr::from(mat.clone()),
-              port: Instr::from(Const::P2),
-              value: Instr::new_ptr(Const::VR2, Instr::from(lam.clone())),
+              idx: Expr::from(mat.clone()),
+              port: Expr::from(Const::P2),
+              value: Expr::new_ptr(Const::VR2, Expr::from(lam.clone())),
             });
             lowering.stmts.push(
-              Instr::new_ptr(Const::CT0, Instr::from(lam.clone()))
-                .link(Instr::from(target.clone())),
+              Expr::new_ptr(Const::CT0, Expr::from(lam.clone()))
+                .link(Expr::from(target.clone())),
             );
             lowering.assign(
               Prop::Var(c_z.clone()),
-              Instr::new_ptr(Const::VR1, Instr::from(cse.clone())),
+              Expr::new_ptr(Const::VR1, Expr::from(cse.clone())),
             );
             lowering.assign(
               Prop::Var(c_s.clone()),
-              Instr::new_ptr(Const::VR2, Instr::from(cse.clone())),
+              Expr::new_ptr(Const::VR2, Expr::from(cse.clone())),
             );
           }),
         }));
-        lowering.burn(def, ifz, Instr::from(c_z).clone());
-        lowering.burn(def, ifs, Instr::from(c_s).clone());
+        lowering.burn(def, ifz, Expr::from(c_z).clone());
+        lowering.burn(def, ifs, Expr::from(c_s).clone());
         return true;
       }
     }
@@ -623,7 +623,7 @@ fn fast_match(lowering: &mut Lowering, def: &Def, ptr: Ptr, target: Instr) -> bo
 // <x <y r>> ~ #N
 // --------------------- fast op
 // r <~ #(op(op(N,x),y))
-fn fast_op(lowering: &mut Lowering, def: &Def, ptr: Ptr, target: Instr) -> bool {
+fn fast_op(lowering: &mut Lowering, def: &Def, ptr: Ptr, target: Expr) -> bool {
   if ptr.is_op2() {
     let (v_x, cnt) = def.node[ptr.val() as usize];
     if cnt.is_op2() {
@@ -642,19 +642,19 @@ fn fast_op(lowering: &mut Lowering, def: &Def, ptr: Ptr, target: Instr) -> bool 
         //   self.link(Ptr::new(VR1, opy), v-y)
         //   self.link(Ptr::new(OP2, opx), target)
         //   nxt = Ptr::new(VR2, opy)
-        lowering.stmts.push(Stmt::Instr(Instr::If {
-          cond: Instr::from(target.clone())
+        lowering.stmts.push(Stmt::Instr(Expr::If {
+          cond: Expr::from(target.clone())
             .is_num()
             .and(v_x.clone().is_num())
             .and(v_y.clone().is_num())
             .into(),
           then: lowering.fork_on(|lowering| {
-            lowering.assign(Prop::Oper, Instr::from(Prop::Oper).add(Instr::Int(4)));
+            lowering.assign(Prop::Oper, Expr::from(Prop::Oper).add(Expr::Int(4)));
             lowering.assign(
               Prop::Var(nxt.clone()),
-              Instr::new_ptr(Const::NUM, Instr::Op {
-                lhs: Instr::Op {
-                  lhs: Instr::from(target.clone()).val().into(),
+              Expr::new_ptr(Const::NUM, Expr::Op {
+                lhs: Expr::Op {
+                  lhs: Expr::from(target.clone()).val().into(),
                   rhs: v_x.clone().val().into(),
                 }
                 .into(),
@@ -663,41 +663,41 @@ fn fast_op(lowering: &mut Lowering, def: &Def, ptr: Ptr, target: Instr) -> bool 
             );
           }),
           otherwise: lowering.fork_on(|lowering| {
-            let opx = lowering.define_fresh(Instr::Alloc { size: 1 });
-            let opy = lowering.define_fresh(Instr::Alloc { size: 1 });
+            let opx = lowering.define_fresh(Expr::Alloc { size: 1 });
+            let opy = lowering.define_fresh(Expr::Alloc { size: 1 });
 
             // self.heap.set(opx, P2, Ptr::new(OP2, opy))
             lowering.stmts.push(SetHeap {
-              idx: Instr::from(opx.clone()).into(),
-              port: Instr::from(Const::P2).into(),
-              value: Instr::new_ptr(Const::OP2, Instr::from(opy.clone())).into(),
+              idx: Expr::from(opx.clone()).into(),
+              port: Expr::from(Const::P2).into(),
+              value: Expr::new_ptr(Const::OP2, Expr::from(opy.clone())).into(),
             });
 
             // self.link(Ptr::new(VR1, opx), v-x)
             lowering.stmts.push(
-              Instr::new_ptr(Const::VR1, Instr::from(opx.clone())).link(Instr::from(v_x.clone())),
+              Expr::new_ptr(Const::VR1, Expr::from(opx.clone())).link(Expr::from(v_x.clone())),
             );
 
             // self.link(Ptr::new(VR1, opy), v-y)
             lowering.stmts.push(
-              Instr::new_ptr(Const::VR1, Instr::from(opy.clone())).link(Instr::from(v_y.clone())),
+              Expr::new_ptr(Const::VR1, Expr::from(opy.clone())).link(Expr::from(v_y.clone())),
             );
 
             // self.link(Ptr::new(OP2, opx), target)
             lowering.stmts.push(
-              Instr::new_ptr(Const::OP2, Instr::from(opx.clone()))
-                .link(Instr::from(target.clone())),
+              Expr::new_ptr(Const::OP2, Expr::from(opx.clone()))
+                .link(Expr::from(target.clone())),
             );
 
             // nxt = Ptr::new(VR2, opy)
             lowering.assign(
               Prop::Var(nxt.clone()),
-              Instr::new_ptr(Const::VR2, Instr::from(opy.clone())),
+              Expr::new_ptr(Const::VR2, Expr::from(opy.clone())),
             );
           }),
         }));
 
-        lowering.burn(def, ret, Instr::from(nxt).clone());
+        lowering.burn(def, ret, Expr::from(nxt).clone());
         return true;
       }
     }
@@ -709,7 +709,7 @@ fn fast_op(lowering: &mut Lowering, def: &Def, ptr: Ptr, target: Instr) -> bool 
 /// ------------- fast copy
 /// p1 <~ #N
 /// p2 <~ #N
-fn fast_copy(lowering: &mut Lowering, def: &Def, ptr: Ptr, target: Instr) -> bool {
+fn fast_copy(lowering: &mut Lowering, def: &Def, ptr: Ptr, target: Expr) -> bool {
   if ptr.is_ctr() && ptr.tag() > run::CT0 {
     let x1 = lowering.declare_fresh(TypeRepr::HvmPtr);
     let x2 = lowering.declare_fresh(TypeRepr::HvmPtr);
@@ -725,28 +725,28 @@ fn fast_copy(lowering: &mut Lowering, def: &Def, ptr: Ptr, target: Instr) -> boo
     //   x1 = Ptr::new(VR1, lc)
     //   x2 = Ptr::new(VR2, lc)
     //   self.link(Ptr::new(ptr.tag(), lc), target)
-    lowering.stmts.push(Stmt::Instr(Instr::If {
-      cond: Instr::from(target.clone())
+    lowering.stmts.push(Stmt::Instr(Expr::If {
+      cond: Expr::from(target.clone())
         .tag()
-        .eq(Instr::from(Const::NUM))
+        .eq(Expr::from(Const::NUM))
         .into(),
       then: lowering.fork_on(|lowering| {
-        lowering.assign(Prop::Comm, Instr::from(Prop::Comm).add(Instr::Int(1)));
-        lowering.assign(Prop::Var(x1.clone()), Instr::from(target.clone()));
-        lowering.assign(Prop::Var(x2.clone()), Instr::from(target.clone()));
+        lowering.assign(Prop::Comm, Expr::from(Prop::Comm).add(Expr::Int(1)));
+        lowering.assign(Prop::Var(x1.clone()), Expr::from(target.clone()));
+        lowering.assign(Prop::Var(x2.clone()), Expr::from(target.clone()));
       }),
       otherwise: lowering.fork_on(|lowering| {
-        let lc = lowering.define_fresh(Instr::Alloc { size: 1 });
+        let lc = lowering.define_fresh(Expr::Alloc { size: 1 });
         lowering.assign(
           Prop::Var(x1.clone()),
-          Instr::new_ptr(Const::VR1, lc.clone().into()),
+          Expr::new_ptr(Const::VR1, lc.clone().into()),
         );
         lowering.assign(
           Prop::Var(x2.clone()),
-          Instr::new_ptr(Const::VR2, lc.clone().into()),
+          Expr::new_ptr(Const::VR2, lc.clone().into()),
         );
         lowering.stmts.push(
-          Instr::new_ptr(compile_tag(ptr.tag()), lc.into()).link(Instr::from(target.clone())),
+          Expr::new_ptr(compile_tag(ptr.tag()), lc.into()).link(Expr::from(target.clone())),
         );
       }),
     }));
@@ -762,7 +762,7 @@ fn fast_copy(lowering: &mut Lowering, def: &Def, ptr: Ptr, target: Instr) -> boo
 /// ------------------ fast apply
 /// p1 <~ x1
 /// p2 <~ x2
-fn fast_apply(lowering: &mut Lowering, def: &Def, ptr: Ptr, target: Instr) -> bool {
+fn fast_apply(lowering: &mut Lowering, def: &Def, ptr: Ptr, target: Expr) -> bool {
   if ptr.is_ctr() && ptr.tag() == run::CT0 {
     let (p1, p2) = def.node[ptr.val() as usize];
 
@@ -779,37 +779,37 @@ fn fast_apply(lowering: &mut Lowering, def: &Def, ptr: Ptr, target: Instr) -> bo
     //   x1 = Ptr::new(VR1, lc)
     //   x2 = Ptr::new(VR2, lc)
     //   self.link(Ptr::new(ptr.tag(), lc), target)
-    lowering.stmts.push(Stmt::Instr(Instr::If {
-      cond: Instr::from(target.clone())
+    lowering.stmts.push(Stmt::Instr(Expr::If {
+      cond: Expr::from(target.clone())
         .tag()
-        .eq(Instr::from(compile_tag(ptr.tag())))
+        .eq(Expr::from(compile_tag(ptr.tag())))
         .into(),
       then: lowering.fork_on(|lowering| {
-        lowering.assign(Prop::Anni, Instr::from(Prop::Anni).add(Instr::Int(1)));
-        lowering.assign(Prop::Var(x1.clone()), Instr::GetHeap {
-          idx: Instr::from(target.clone()).val().into(),
-          port: Instr::from(Const::P1).into(),
+        lowering.assign(Prop::Anni, Expr::from(Prop::Anni).add(Expr::Int(1)));
+        lowering.assign(Prop::Var(x1.clone()), Expr::GetHeap {
+          idx: Expr::from(target.clone()).val().into(),
+          port: Expr::from(Const::P1).into(),
         });
-        lowering.assign(Prop::Var(x2.clone()), Instr::GetHeap {
-          idx: Instr::from(target.clone()).val().into(),
-          port: Instr::from(Const::P2).into(),
+        lowering.assign(Prop::Var(x2.clone()), Expr::GetHeap {
+          idx: Expr::from(target.clone()).val().into(),
+          port: Expr::from(Const::P2).into(),
         });
         lowering
           .stmts
-          .push(Stmt::Free(Instr::from(target.clone()).val().into()))
+          .push(Stmt::Free(Expr::from(target.clone()).val().into()))
       }),
       otherwise: lowering.fork_on(|lowering| {
-        let lc = lowering.define_fresh(Instr::Alloc { size: 1 });
+        let lc = lowering.define_fresh(Expr::Alloc { size: 1 });
         lowering.assign(
           Prop::Var(x1.clone()),
-          Instr::new_ptr(Const::VR1, lc.clone().into()),
+          Expr::new_ptr(Const::VR1, lc.clone().into()),
         );
         lowering.assign(
           Prop::Var(x2.clone()),
-          Instr::new_ptr(Const::VR2, lc.clone().into()),
+          Expr::new_ptr(Const::VR2, lc.clone().into()),
         );
         lowering.stmts.push(
-          Instr::new_ptr(compile_tag(ptr.tag()), lc.into()).link(Instr::from(target.clone())),
+          Expr::new_ptr(compile_tag(ptr.tag()), lc.into()).link(Expr::from(target.clone())),
         );
       }),
     }));
@@ -824,13 +824,13 @@ fn fast_apply(lowering: &mut Lowering, def: &Def, ptr: Ptr, target: Instr) -> bo
 /// ATOM <~ *
 /// --------- fast erase
 /// nothing
-fn fast_erase(lowering: &mut Lowering, def: &Def, ptr: Ptr, target: Instr) -> bool {
+fn fast_erase(lowering: &mut Lowering, def: &Def, ptr: Ptr, target: Expr) -> bool {
   if ptr.is_num() || ptr.is_era() {
     // FAST ERASE
-    lowering.stmts.push(Stmt::Instr(Instr::If {
-      cond: Instr::from(target.clone()).is_skp().into(),
+    lowering.stmts.push(Stmt::Instr(Expr::If {
+      cond: Expr::from(target.clone()).is_skp().into(),
       then: lowering.fork_on(|lowering| {
-        lowering.assign(Prop::Eras, Instr::from(Prop::Eras).add(Instr::Int(1)));
+        lowering.assign(Prop::Eras, Expr::from(Prop::Eras).add(Expr::Int(1)));
       }),
       otherwise: lowering.fork_on(|lowering| {
         lowering.make(def, ptr, target.clone());
@@ -992,31 +992,31 @@ impl FunctionLowering<'_> {
     GET_HEAP (idx: types::I32, port: types::I32) -> types::I32
   }
 
-  fn lower_instr(&mut self, program: &LoweringProgram, instr: Instr) -> Value {
-    match instr {
-      Instr::True => self.builder.ins().iconst(self.int, 0),
-      Instr::False => self.builder.ins().iconst(self.int, 0),
-      Instr::Int(v) => self.builder.ins().iconst(self.int, v as i64),
-      Instr::Const(constant) => {
+  fn lower_instr(&mut self, program: &LoweringProgram, expr: Expr) -> Value {
+    match expr {
+      Expr::True => self.builder.ins().iconst(self.int, 0),
+      Expr::False => self.builder.ins().iconst(self.int, 0),
+      Expr::Int(v) => self.builder.ins().iconst(self.int, v as i64),
+      Expr::Const(constant) => {
         let value_constant = program.lower_constant(constant);
         self.builder.ins().iconst(self.int, value_constant)
       }
-      Instr::Prop(prop) => todo!(),
-      Instr::If {
+      Expr::Prop(prop) => todo!(),
+      Expr::Not { ins } => todo!(),
+      Expr::Bin { op, lhs, rhs } => todo!(),
+      Expr::Val { ins } => todo!(),
+      Expr::Tag { ins } => todo!(),
+      Expr::IsNum { ins } => todo!(),
+      Expr::IsSkp { ins } => todo!(),
+      Expr::NewPtr { tag, value } => todo!(),
+      Expr::Op { lhs, rhs } => todo!(),
+      Expr::Alloc { size } => todo!(),
+      Expr::GetHeap { idx, port } => todo!(),
+      Expr::If {
         cond,
         then,
         otherwise,
       } => todo!(),
-      Instr::Not { ins } => todo!(),
-      Instr::Bin { op, lhs, rhs } => todo!(),
-      Instr::Val { ins } => todo!(),
-      Instr::Tag { ins } => todo!(),
-      Instr::IsNum { ins } => todo!(),
-      Instr::IsSkp { ins } => todo!(),
-      Instr::NewPtr { tag, value } => todo!(),
-      Instr::Op { lhs, rhs } => todo!(),
-      Instr::Alloc { size } => todo!(),
-      Instr::GetHeap { idx, port } => todo!(),
     }
   }
 }
@@ -1130,65 +1130,65 @@ mod rust_codegen {
     }
   }
 
-  impl ToTokens for Instr {
+  impl ToTokens for Expr {
     fn to_tokens(&self, tokens: &mut TokenStream) {
       tokens.append_all(match self {
-        Instr::True => quote! { true },
-        Instr::False => quote! { true },
-        Instr::Int(i) => TokenStream::from_str(&format!("{i}")).unwrap(),
-        Instr::Const(Const::F(name)) => format_ident!("F_{}", name).into_token_stream(),
-        Instr::Const(Const::P1) => quote! { crate::run::P1 },
-        Instr::Const(Const::P2) => quote! { crate::run::P2 },
-        Instr::Const(Const::NULL) => quote! { crate::run::NULL },
-        Instr::Const(Const::ROOT) => quote! { crate::run::ERAS },
-        Instr::Const(Const::ERAS) => quote! { crate::run::ERAS },
-        Instr::Const(Const::VR1) => quote! { crate::run::VR1 },
-        Instr::Const(Const::VR2) => quote! { crate::run::VR2 },
-        Instr::Const(Const::RD1) => quote! { crate::run::RD1 },
-        Instr::Const(Const::RD2) => quote! { crate::run::RD2 },
-        Instr::Const(Const::REF) => quote! { crate::run::REF },
-        Instr::Const(Const::ERA) => quote! { crate::run::ERA },
-        Instr::Const(Const::NUM) => quote! { crate::run::NUM },
-        Instr::Const(Const::OP1) => quote! { crate::run::OP1 },
-        Instr::Const(Const::OP2) => quote! { crate::run::OP2 },
-        Instr::Const(Const::MAT) => quote! { crate::run::MAT },
-        Instr::Const(Const::CT0) => quote! { crate::run::CT0 },
-        Instr::Const(Const::CT1) => quote! { crate::run::CT1 },
-        Instr::Const(Const::CT2) => quote! { crate::run::CT2 },
-        Instr::Const(Const::CT3) => quote! { crate::run::CT3 },
-        Instr::Const(Const::CT4) => quote! { crate::run::CT4 },
-        Instr::Const(Const::CT5) => quote! { crate::run::CT5 },
-        Instr::Const(Const::USE) => quote! { crate::run::USE },
-        Instr::Const(Const::ADD) => quote! { crate::run::ADD },
-        Instr::Const(Const::SUB) => quote! { crate::run::SUB },
-        Instr::Const(Const::MUL) => quote! { crate::run::MUL },
-        Instr::Const(Const::DIV) => quote! { crate::run::DIV },
-        Instr::Const(Const::MOD) => quote! { crate::run::MOD },
-        Instr::Const(Const::EQ) => quote! { crate::run::EQ },
-        Instr::Const(Const::NE) => quote! { crate::run::NE },
-        Instr::Const(Const::LT) => quote! { crate::run::LT },
-        Instr::Const(Const::GT) => quote! { crate::run::GT },
-        Instr::Const(Const::AND) => quote! { crate::run::AND },
-        Instr::Const(Const::OR) => quote! { crate::run::OR },
-        Instr::Const(Const::XOR) => quote! { crate::run::XOR },
-        Instr::Const(Const::NOT) => quote! { crate::run::NOT },
-        Instr::Const(Const::RSH) => quote! { crate::run::RSH },
-        Instr::Const(Const::LSH) => quote! { crate::run::LSH },
-        Instr::Prop(Prop::Var(name)) => format_ident!("{}", name).into_token_stream(),
-        Instr::Prop(Prop::Anni) => quote! { self.anni },
-        Instr::Prop(Prop::Comm) => quote! { self.comm },
-        Instr::Prop(Prop::Eras) => quote! { self.eras },
-        Instr::Prop(Prop::Oper) => quote! { self.oper },
-        Instr::Not { ins } => quote! { !#ins },
-        Instr::Val { ins } => quote! { #ins.val() },
-        Instr::Tag { ins } => quote! { #ins.tag() },
-        Instr::IsNum { ins } => quote! { #ins.is_num() },
-        Instr::IsSkp { ins } => quote! { #ins.is_skp() },
-        Instr::NewPtr { tag, value } => quote! { Ptr::new(#tag, #value) },
-        Instr::Op { lhs, rhs } => quote! { self.op(#lhs, #rhs) },
-        Instr::Alloc { size } => quote! { self.alloc(#size) },
-        Instr::GetHeap { idx, port } => quote! { self.heap.get(#idx, #port) },
-        Instr::Bin { op, lhs, rhs } => match op.as_str() {
+        Expr::True => quote! { true },
+        Expr::False => quote! { true },
+        Expr::Int(i) => TokenStream::from_str(&format!("{i}")).unwrap(),
+        Expr::Const(Const::F(name)) => format_ident!("F_{}", name).into_token_stream(),
+        Expr::Const(Const::P1) => quote! { crate::run::P1 },
+        Expr::Const(Const::P2) => quote! { crate::run::P2 },
+        Expr::Const(Const::NULL) => quote! { crate::run::NULL },
+        Expr::Const(Const::ROOT) => quote! { crate::run::ERAS },
+        Expr::Const(Const::ERAS) => quote! { crate::run::ERAS },
+        Expr::Const(Const::VR1) => quote! { crate::run::VR1 },
+        Expr::Const(Const::VR2) => quote! { crate::run::VR2 },
+        Expr::Const(Const::RD1) => quote! { crate::run::RD1 },
+        Expr::Const(Const::RD2) => quote! { crate::run::RD2 },
+        Expr::Const(Const::REF) => quote! { crate::run::REF },
+        Expr::Const(Const::ERA) => quote! { crate::run::ERA },
+        Expr::Const(Const::NUM) => quote! { crate::run::NUM },
+        Expr::Const(Const::OP1) => quote! { crate::run::OP1 },
+        Expr::Const(Const::OP2) => quote! { crate::run::OP2 },
+        Expr::Const(Const::MAT) => quote! { crate::run::MAT },
+        Expr::Const(Const::CT0) => quote! { crate::run::CT0 },
+        Expr::Const(Const::CT1) => quote! { crate::run::CT1 },
+        Expr::Const(Const::CT2) => quote! { crate::run::CT2 },
+        Expr::Const(Const::CT3) => quote! { crate::run::CT3 },
+        Expr::Const(Const::CT4) => quote! { crate::run::CT4 },
+        Expr::Const(Const::CT5) => quote! { crate::run::CT5 },
+        Expr::Const(Const::USE) => quote! { crate::run::USE },
+        Expr::Const(Const::ADD) => quote! { crate::run::ADD },
+        Expr::Const(Const::SUB) => quote! { crate::run::SUB },
+        Expr::Const(Const::MUL) => quote! { crate::run::MUL },
+        Expr::Const(Const::DIV) => quote! { crate::run::DIV },
+        Expr::Const(Const::MOD) => quote! { crate::run::MOD },
+        Expr::Const(Const::EQ) => quote! { crate::run::EQ },
+        Expr::Const(Const::NE) => quote! { crate::run::NE },
+        Expr::Const(Const::LT) => quote! { crate::run::LT },
+        Expr::Const(Const::GT) => quote! { crate::run::GT },
+        Expr::Const(Const::AND) => quote! { crate::run::AND },
+        Expr::Const(Const::OR) => quote! { crate::run::OR },
+        Expr::Const(Const::XOR) => quote! { crate::run::XOR },
+        Expr::Const(Const::NOT) => quote! { crate::run::NOT },
+        Expr::Const(Const::RSH) => quote! { crate::run::RSH },
+        Expr::Const(Const::LSH) => quote! { crate::run::LSH },
+        Expr::Prop(Prop::Var(name)) => format_ident!("{}", name).into_token_stream(),
+        Expr::Prop(Prop::Anni) => quote! { self.anni },
+        Expr::Prop(Prop::Comm) => quote! { self.comm },
+        Expr::Prop(Prop::Eras) => quote! { self.eras },
+        Expr::Prop(Prop::Oper) => quote! { self.oper },
+        Expr::Not { ins } => quote! { !#ins },
+        Expr::Val { ins } => quote! { #ins.val() },
+        Expr::Tag { ins } => quote! { #ins.tag() },
+        Expr::IsNum { ins } => quote! { #ins.is_num() },
+        Expr::IsSkp { ins } => quote! { #ins.is_skp() },
+        Expr::NewPtr { tag, value } => quote! { Ptr::new(#tag, #value) },
+        Expr::Op { lhs, rhs } => quote! { self.op(#lhs, #rhs) },
+        Expr::Alloc { size } => quote! { self.alloc(#size) },
+        Expr::GetHeap { idx, port } => quote! { self.heap.get(#idx, #port) },
+        Expr::Bin { op, lhs, rhs } => match op.as_str() {
           "==" => quote! { #lhs == #rhs },
           "!=" => quote! { #lhs != #rhs },
           "&&" => quote! { #lhs && #rhs },
@@ -1196,7 +1196,7 @@ mod rust_codegen {
           "-" => quote! { #lhs - #rhs },
           _ => panic!(),
         },
-        Instr::If {
+        Expr::If {
           cond,
           then,
           otherwise,
@@ -1224,71 +1224,71 @@ mod rust_codegen {
 }
 
 /// Utility functions
-impl Instr {
-  pub fn is_num(self) -> Instr {
-    Instr::IsNum {
+impl Expr {
+  pub fn is_num(self) -> Expr {
+    Expr::IsNum {
       ins: Box::new(self),
     }
   }
 
-  pub fn is_skp(self) -> Instr {
-    Instr::IsSkp {
+  pub fn is_skp(self) -> Expr {
+    Expr::IsSkp {
       ins: Box::new(self),
     }
   }
 
-  pub fn val(self) -> Instr {
-    Instr::Val {
+  pub fn val(self) -> Expr {
+    Expr::Val {
       ins: Box::new(self),
     }
   }
 
-  pub fn tag(self) -> Instr {
-    Instr::Tag {
+  pub fn tag(self) -> Expr {
+    Expr::Tag {
       ins: Box::new(self),
     }
   }
 
-  pub fn not(self) -> Instr {
-    Instr::Not {
+  pub fn not(self) -> Expr {
+    Expr::Not {
       ins: Box::new(self),
     }
   }
 
-  pub fn bin(self, op: &str, rhs: Instr) -> Instr {
-    Instr::Bin {
+  pub fn bin(self, op: &str, rhs: Expr) -> Expr {
+    Expr::Bin {
       op: op.to_string(),
       lhs: Box::new(self),
       rhs: Box::new(rhs),
     }
   }
 
-  pub fn eq(self, rhs: Instr) -> Instr {
+  pub fn eq(self, rhs: Expr) -> Expr {
     self.bin("==", rhs)
   }
 
-  pub fn ne(self, rhs: Instr) -> Instr {
+  pub fn ne(self, rhs: Expr) -> Expr {
     self.bin("!=", rhs)
   }
 
-  pub fn and(self, rhs: Instr) -> Instr {
+  pub fn and(self, rhs: Expr) -> Expr {
     self.bin("&&", rhs)
   }
 
-  pub fn sub(self, rhs: Instr) -> Instr {
+  pub fn sub(self, rhs: Expr) -> Expr {
     self.bin("-", rhs)
   }
 
-  pub fn add(self, rhs: Instr) -> Instr {
+  pub fn add(self, rhs: Expr) -> Expr {
     self.bin("+", rhs)
   }
 
-  pub fn link(self, rhs: Instr) -> Stmt {
+  pub fn link(self, rhs: Expr) -> Stmt {
     Stmt::Link { lhs: self, rhs }
   }
 
-  pub fn new_ptr(tag: impl Into<Instr>, value: Instr) -> Instr {
-    Instr::NewPtr {
+  pub fn new_ptr(tag: impl Into<Expr>, value: Expr) -> Expr {
+    Expr::NewPtr {
       tag: Box::new(tag.into()),
       value: Box::new(value),
     }
