@@ -111,7 +111,6 @@ pub fn compile_book_to_rust_crate(f_name: &str, book: &run::Book) -> Result<(), 
   fs::write(".hvm/src/lib.rs", include_str!("../src/lib.rs"))?;
   fs::write(".hvm/src/main.rs", include_str!("../src/main.rs"))?;
   fs::write(".hvm/src/run.rs", include_str!("../src/run.rs"))?;
-  // fs::write(".hvm/src/fns.rs", fns_rs.to_string())?;
   fs::write(".hvm/src/fns.rs", fns_rs.compile_to_rust_fns())?;
   return Ok(());
 }
