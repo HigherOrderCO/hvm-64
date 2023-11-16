@@ -884,6 +884,7 @@ impl<'a> Net<'a> {
     return go(self, book, ROOT, 1, self.tid);
   }
 
+
   // Forks into child threads, returning a Net for the (tid/tids)'th thread.
   pub fn fork(&self, tid: usize, tids: usize) -> Self {
     let mut net = Net::new(self.heap.data);
@@ -911,7 +912,7 @@ impl<'a> Net<'a> {
     let tids_l2 = 3;
     let tids    = 1 << tids_l2;
 
-    const STLEN : usize = 65536; // max steal redexes / split 
+    const STLEN : usize = 1 << 20; // max steal redexes / split 
     const LIMIT : usize = 1 << 20;
 
     // Global values
