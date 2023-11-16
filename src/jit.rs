@@ -126,6 +126,25 @@ impl LoweringProgram {
   }
 }
 
+macro_rules! declare_external_function {
+  ($name:ident ($($argn:ident : $args:expr),*) -> $ret:expr) => {
+    pub fn $name (&mut self, $( $argn : Value ),*) -> Value {
+      let mut sig = self.module.make_signature();
+      $( sig.params.push(AbiParam::new($args)); )*
+      sig.returns.push(AbiParam::new($ret));
+
+      let id = self.module.declare_function(stringify!($name), Linkage::Import, &sig).unwrap();
+      let local_id = self.module.declare_func_in_func(id, &mut self.builder.func);
+
+      let mut arguments = Vec::new();
+      $( arguments.push($argn); )*
+
+      let call = self.builder.ins().call(local_id, &arguments);
+      self.builder.inst_results(call)[0]
+    }
+  };
+}
+
 /// A collection of state used for translating from toy-language AST nodes
 /// into Cranelift IR.
 struct FunctionLowering<'a> {
@@ -136,6 +155,10 @@ struct FunctionLowering<'a> {
 }
 
 impl FunctionLowering<'_> {
+  declare_external_function! {
+    GET_HEAP (idx: types::I32, port: types::I32) -> types::I32
+  }
+
   fn lower_instr(&mut self, program: &LoweringProgram, instr: Instr) -> Value {
     match instr {
       Instr::True => self.builder.ins().iconst(self.int, 0),
