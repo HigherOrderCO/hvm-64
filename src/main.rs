@@ -97,8 +97,7 @@ fn load(file: &str) -> (run::Book, run::Net) {
 }
 
 pub fn compile_book_to_rust_crate(f_name: &str, book: &run::Book) -> Result<(), std::io::Error> {
-  use rust_format::Formatter;
-  let fns_rs = hvmc::codegen::compile_book(book).into_token_stream();
+  let fns_rs = hvmc::jit::compile_book(book);
   let outdir = ".hvm";
   if std::path::Path::new(&outdir).exists() {
     fs::remove_dir_all(&outdir)?;
@@ -112,11 +111,8 @@ pub fn compile_book_to_rust_crate(f_name: &str, book: &run::Book) -> Result<(), 
   fs::write(".hvm/src/lib.rs", include_str!("../src/lib.rs"))?;
   fs::write(".hvm/src/main.rs", include_str!("../src/main.rs"))?;
   fs::write(".hvm/src/run.rs", include_str!("../src/run.rs"))?;
-  fs::write(".hvm/src/ir.rs", include_str!("../src/ir.rs"))?;
-  fs::write(".hvm/src/codegen.rs", include_str!("../src/codegen.rs"))?;
-  fs::write(".hvm/src/quoting.rs", include_str!("../src/quoting.rs"))?;
   // fs::write(".hvm/src/fns.rs", fns_rs.to_string())?;
-  fs::write(".hvm/src/fns.rs", rust_format::RustFmt::new().format_str(fns_rs.to_string()).unwrap())?;
+  fs::write(".hvm/src/fns.rs", fns_rs.compile_to_rust_fns())?;
   return Ok(());
 }
 
