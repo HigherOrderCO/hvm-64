@@ -29,6 +29,10 @@ hvm_cli_options = []
 proc-macro2 = "1.0.69"
 quote = "1.0.33"
 rust-format = "0.3.4"
+cranelift = "0.101.4"
+cranelift-jit = "0.101.4"
+cranelift-module = "0.101.4"
+cranelift-native = "0.101.4"
 
 ##--COMPILER-CUTOFF--##
 
