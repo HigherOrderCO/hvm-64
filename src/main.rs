@@ -18,7 +18,7 @@ fn main() {
   let book = run::Book::new();
   let data = run::Heap::init(1 << 28);
   let mut net = run::Net::new(&data);
-  net.boot(ast::name_to_val("main"));
+  net.boot(ast::name_to_val("main") as run::Loc);
   let start_time = std::time::Instant::now();
   net.normal(&book);
   println!("{}", ast::show_runtime_net(&net));
@@ -103,7 +103,7 @@ fn load<'a>(data: &'a run::Data, file: &str) -> (run::Book, run::Net<'a>) {
   let file = fs::read_to_string(file).unwrap();
   let book = ast::book_to_runtime(&ast::do_parse_book(&file));
   let mut net = run::Net::new(&data);
-  net.boot(ast::name_to_val("main"));
+  net.boot(ast::name_to_val("main") as run::Loc);
   return (book, net);
 }
 
@@ -177,8 +177,8 @@ pub fn gen_cuda_book(book: &run::Book) -> String {
     // .node
     code.push_str("  // .node\n");
     for (i, node) in net.node.iter().enumerate() {
-      code.push_str(&format!("  0x{:08X},", node.0.data()));
-      code.push_str(&format!(" 0x{:08X},", node.1.data()));
+      code.push_str(&format!("  0x{:08X},", node.0.0));
+      code.push_str(&format!(" 0x{:08X},", node.1.0));
       if (i + 1) % 4 == 0 {
         code.push_str("\n");
       }
@@ -190,8 +190,8 @@ pub fn gen_cuda_book(book: &run::Book) -> String {
     // .rdex
     code.push_str("  // .rdex\n");
     for (i, (a, b)) in net.rdex.iter().enumerate() {
-      code.push_str(&format!("  0x{:08X},", a.data()));
-      code.push_str(&format!(" 0x{:08X},", b.data()));
+      code.push_str(&format!("  0x{:08X},", a.0));
+      code.push_str(&format!(" 0x{:08X},", b.0));
       if (i + 1) % 4 == 0 {
         code.push_str("\n");
       }
