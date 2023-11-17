@@ -73,9 +73,9 @@ pub fn tag(tag: run::Tag) -> &'static str {
 
 pub fn atom(ptr: run::Ptr) -> String {
   if ptr.is_ref() {
-    return format!("Ptr::new(REF, F_{})", ast::val_to_name(ptr.loc() as run::Val));
+    return format!("Ptr::new(REF, 0, F_{})", ast::val_to_name(ptr.loc() as run::Val));
   } else {
-    return format!("Ptr::new({}, 0x{:x})", tag(ptr.tag()), ptr.loc());
+    return format!("Ptr::new({}, 0, 0x{:x})", tag(ptr.tag()), ptr.loc());
   }
 }
 
@@ -282,13 +282,13 @@ pub fn compile_term(book: &run::Book, tab: usize, fid: run::Loc) -> String {
       code.push_str(&format!("{}if {}.tag() == {} {{\n", ident(tab), trg.get(), tag(ptr.tag())));
       code.push_str(&format!("{}self.rwts.anni += 1;\n", ident(tab+1)));
       code.push_str(&format!("{}let got = {};\n", ident(tab+1), trg.take()));
-      code.push_str(&format!("{}{} = Trg::Dir(Ptr::new(VR1, got.loc()));\n", ident(tab+1), &x1.show()));
-      code.push_str(&format!("{}{} = Trg::Dir(Ptr::new(VR2, got.loc()));\n", ident(tab+1), &x2.show()));
+      code.push_str(&format!("{}{} = Trg::Dir(Ptr::new(VR1, 0, got.loc()));\n", ident(tab+1), &x1.show()));
+      code.push_str(&format!("{}{} = Trg::Dir(Ptr::new(VR2, 0, got.loc()));\n", ident(tab+1), &x2.show()));
       code.push_str(&format!("{}}} else {{\n", ident(tab)));
       code.push_str(&format!("{}let {} = self.alloc(1);\n", ident(tab+1), lc));
-      code.push_str(&format!("{}{} = Trg::Ptr(Ptr::new(VR1, {}));\n", ident(tab+1), &x1.show(), lc));
-      code.push_str(&format!("{}{} = Trg::Ptr(Ptr::new(VR2, {}));\n", ident(tab+1), &x2.show(), lc));
-      code.push_str(&format!("{}self.safe_link(Trg::Ptr(Ptr::new({}, {})), {});\n", ident(tab+1), tag(ptr.tag()), lc, trg.show()));
+      code.push_str(&format!("{}{} = Trg::Ptr(Ptr::new(VR1, 0, {}));\n", ident(tab+1), &x1.show(), lc));
+      code.push_str(&format!("{}{} = Trg::Ptr(Ptr::new(VR2, 0, {}));\n", ident(tab+1), &x2.show(), lc));
+      code.push_str(&format!("{}self.safe_link(Trg::Ptr(Ptr::new({}, 0, {})), {});\n", ident(tab+1), tag(ptr.tag()), lc, trg.show()));
       code.push_str(&format!("{}}}\n", ident(tab)));
       code.push_str(&burn(book, tab, newx, vars, def, p1, &x1));
       code.push_str(&burn(book, tab, newx, vars, def, p2, &x2));
@@ -340,9 +340,9 @@ pub fn compile_term(book: &run::Book, tab: usize, fid: run::Loc) -> String {
       let p1 = def.node[ptr.loc() as usize].0;
       let p2 = def.node[ptr.loc() as usize].1;
       code.push_str(&format!("{}let {} = self.alloc(1);\n", ident(tab), lc));
-      code.push_str(&make(tab, newx, vars, def, p1, &format!("Trg::Ptr(Ptr::new(VR1, {}))", lc)));
-      code.push_str(&make(tab, newx, vars, def, p2, &format!("Trg::Ptr(Ptr::new(VR2, {}))", lc)));
-      code.push_str(&format!("{}self.safe_link(Trg::Ptr(Ptr::new({}, {})), {});\n", ident(tab), tag(ptr.tag()), lc, trg));
+      code.push_str(&make(tab, newx, vars, def, p1, &format!("Trg::Ptr(Ptr::new(VR1, 0, {}))", lc)));
+      code.push_str(&make(tab, newx, vars, def, p2, &format!("Trg::Ptr(Ptr::new(VR2, 0, {}))", lc)));
+      code.push_str(&format!("{}self.safe_link(Trg::Ptr(Ptr::new({}, 0, {})), {});\n", ident(tab), tag(ptr.tag()), lc, trg));
     } else if ptr.is_var() {
       match got(vars, def, ptr) {
         None => {
