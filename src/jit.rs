@@ -67,8 +67,6 @@ pub fn tag(tag: run::Tag) -> &'static str {
     run::CT0 => "CT0",
     run::CT1 => "CT1",
     run::CT2 => "CT2",
-    run::CT3 => "CT3",
-    run::CT4 => "CT4",
     _ => unreachable!(),
   }
 }

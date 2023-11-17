@@ -11,6 +11,7 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Barrier};
 
 pub type Tag  = u8;
+pub type Lab  = u32;
 pub type Loc  = u32;
 pub type Val  = u64;
 pub type AVal = AtomicU64;
@@ -29,9 +30,7 @@ pub const MAT: Tag = 0x9; // Numeric pattern-matching
 pub const CT0: Tag = 0xA; // Main port of con node, label 0
 pub const CT1: Tag = 0xB; // Main port of con node, label 1
 pub const CT2: Tag = 0xC; // Main port of con node, label 2
-pub const CT3: Tag = 0xD; // Main port of con node, label 3
-pub const CT4: Tag = 0xE; // Main port of con node, label 4
-pub const CT5: Tag = 0xF; // Main port of con node, label 5
+pub const END: Tag = 0xE; // Last pointer tag
 
 // Numeric operations.
 pub const USE: Tag = 0x0; // set-next-op
@@ -165,7 +164,7 @@ impl Ptr {
 
   #[inline(always)]
   pub fn is_ctr(&self) -> bool {
-    return matches!(self.tag(), CT0..=CT4);
+    return matches!(self.tag(), CT0..=END);
   }
 
   #[inline(always)]
@@ -175,7 +174,7 @@ impl Ptr {
 
   #[inline(always)]
   pub fn is_pri(&self) -> bool {
-    return matches!(self.tag(), REF..=CT4);
+    return matches!(self.tag(), REF..=END);
   }
 
   #[inline(always)]
@@ -205,12 +204,12 @@ impl Ptr {
 
   #[inline(always)]
   pub fn is_nod(&self) -> bool {
-    return matches!(self.tag(), OP2..=CT4);
+    return matches!(self.tag(), OP2..=END);
   }
 
   #[inline(always)]
   pub fn has_loc(&self) -> bool {
-    return matches!(self.tag(), VR1..=VR2 | OP2..=CT4);
+    return matches!(self.tag(), VR1..=VR2 | OP2..=END);
   }
 
   #[inline(always)]
