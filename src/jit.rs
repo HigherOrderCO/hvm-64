@@ -64,7 +64,7 @@ pub fn tag(tag: run::Tag) -> &'static str {
     run::OP2 => "OP2",
     run::OP1 => "OP1",
     run::MAT => "MAT",
-    run::CON => "CON",
+    run::LAM => "LAM",
     run::TUP => "TUP",
     run::DUP => "DUP",
     _ => unreachable!(),
@@ -270,7 +270,7 @@ pub fn compile_term(book: &run::Book, tab: usize, fid: run::Loc) -> String {
     // ------------------ fast apply
     // p1 <~ x1
     // p2 <~ x2
-    if ptr.is_ctr() && ptr.tag() == run::CON {
+    if ptr.is_ctr() && ptr.tag() == run::LAM {
       let x1 = Target { nam: format!("{}x", trg.show()) };
       let x2 = Target { nam: format!("{}y", trg.show()) };
       let p1 = def.node[ptr.loc() as usize].0;

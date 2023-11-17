@@ -27,28 +27,27 @@ pub const NUM: Tag = 0x6; // Unboxed number
 pub const OP2: Tag = 0x7; // Binary numeric operation
 pub const OP1: Tag = 0x8; // Unary numeric operation
 pub const MAT: Tag = 0x9; // Numeric pattern-matching
-pub const CON: Tag = 0xA; // Main port of con node, label 0
-pub const TUP: Tag = 0xB; // Main port of con node, label 1
-pub const DUP: Tag = 0xC; // Main port of con node, label 2
+pub const LAM: Tag = 0xA; // Main port of lam node
+pub const TUP: Tag = 0xB; // Main port of tup node
+pub const DUP: Tag = 0xC; // Main port of dup node
 pub const END: Tag = 0xE; // Last pointer tag
 
 // Numeric operations.
-pub const USE: Tag = 0x0; // set-next-op
-pub const ADD: Tag = 0x1; // addition
-pub const SUB: Tag = 0x2; // subtraction
-pub const MUL: Tag = 0x3; // multiplication
-pub const DIV: Tag = 0x4; // division
-pub const MOD: Tag = 0x5; // modulus
-pub const EQ : Tag = 0x6; // equal-to
-pub const NE : Tag = 0x7; // not-equal-to
-pub const LT : Tag = 0x8; // less-than
-pub const GT : Tag = 0x9; // greater-than
-pub const AND: Tag = 0xA; // logical-and
-pub const OR : Tag = 0xB; // logical-or
-pub const XOR: Tag = 0xC; // logical-xor
-pub const NOT: Tag = 0xD; // logical-not
-pub const LSH: Tag = 0xE; // left-shift
-pub const RSH: Tag = 0xF; // right-shift
+pub const ADD: Lab = 0x0; // addition
+pub const SUB: Lab = 0x1; // subtraction
+pub const MUL: Lab = 0x2; // multiplication
+pub const DIV: Lab = 0x3; // division
+pub const MOD: Lab = 0x4; // modulus
+pub const EQ : Lab = 0x5; // equal-to
+pub const NE : Lab = 0x6; // not-equal-to
+pub const LT : Lab = 0x7; // less-than
+pub const GT : Lab = 0x8; // greater-than
+pub const AND: Lab = 0x9; // logical-and
+pub const OR : Lab = 0xA; // logical-or
+pub const XOR: Lab = 0xB; // logical-xor
+pub const NOT: Lab = 0xC; // logical-not
+pub const LSH: Lab = 0xD; // left-shift
+pub const RSH: Lab = 0xE; // right-shift
 
 pub const ERAS: Ptr = Ptr::new(ERA, 0, 0);
 pub const ROOT: Ptr = Ptr::new(VR2, 0, 0);
@@ -169,7 +168,7 @@ impl Ptr {
 
   #[inline(always)]
   pub fn is_ctr(&self) -> bool {
-    return matches!(self.tag(), CON..=END);
+    return matches!(self.tag(), LAM..=END);
   }
 
   #[inline(always)]
@@ -654,15 +653,15 @@ impl<'a> Net<'a> {
     match (a.tag(), b.tag()) {
       (REF   , OP2..) => self.call(book, a, b),
       (OP2.. , REF  ) => self.call(book, b, a),
-      (CON.. , CON..) if a.tag() == b.tag() => self.anni(a, b),
-      (CON.. , CON..) => self.comm(a, b),
-      (CON.. , ERA  ) => self.era2(a),
-      (ERA   , CON..) => self.era2(b),
+      (LAM.. , LAM..) if a.tag() == b.tag() => self.anni(a, b),
+      (LAM.. , LAM..) => self.comm(a, b),
+      (LAM.. , ERA  ) => self.era2(a),
+      (ERA   , LAM..) => self.era2(b),
       (REF   , ERA  ) => self.rwts.eras += 1,
       (ERA   , REF  ) => self.rwts.eras += 1,
       (ERA   , ERA  ) => self.rwts.eras += 1,
-      (CON.. , NUM  ) => self.copy(a, b),
-      (NUM   , CON..) => self.copy(b, a),
+      (LAM.. , NUM  ) => self.copy(a, b),
+      (NUM   , LAM..) => self.copy(b, a),
       (NUM   , ERA  ) => self.rwts.eras += 1,
       (ERA   , NUM  ) => self.rwts.eras += 1,
       (NUM   , NUM  ) => self.rwts.eras += 1,
@@ -670,18 +669,18 @@ impl<'a> Net<'a> {
       (NUM   , OP2  ) => self.op2n(b, a),
       (OP1   , NUM  ) => self.op1n(a, b),
       (NUM   , OP1  ) => self.op1n(b, a),
-      (OP2   , CON..) => self.comm(a, b),
-      (CON.. , OP2  ) => self.comm(b, a),
-      (OP1   , CON..) => self.pass(a, b),
-      (CON.. , OP1  ) => self.pass(b, a),
+      (OP2   , LAM..) => self.comm(a, b),
+      (LAM.. , OP2  ) => self.comm(b, a),
+      (OP1   , LAM..) => self.pass(a, b),
+      (LAM.. , OP1  ) => self.pass(b, a),
       (OP2   , ERA  ) => self.era2(a),
       (ERA   , OP2  ) => self.era2(b),
       (OP1   , ERA  ) => self.era1(a),
       (ERA   , OP1  ) => self.era1(b),
       (MAT   , NUM  ) => self.mtch(a, b),
       (NUM   , MAT  ) => self.mtch(b, a),
-      (MAT   , CON..) => self.comm(a, b),
-      (CON.. , MAT  ) => self.comm(b, a),
+      (MAT   , LAM..) => self.comm(a, b),
+      (LAM.. , MAT  ) => self.comm(b, a),
       (MAT   , ERA  ) => self.era2(a),
       (ERA   , MAT  ) => self.era2(b),
       _               => unreachable!(),
@@ -770,15 +769,15 @@ impl<'a> Net<'a> {
     if b.loc() == 0 {
       let loc0 = self.alloc(1);
       self.heap.set(loc0, P2, ERAS);
-      self.half_atomic_link(a1, Ptr::new(CON, 0, loc0));
+      self.half_atomic_link(a1, Ptr::new(LAM, 0, loc0));
       self.half_atomic_link(a2, Ptr::new(VR1, 0, loc0));
     } else {
       let loc0 = self.alloc(1);
       let loc1 = self.alloc(1);
       self.heap.set(loc0, P1, ERAS);
-      self.heap.set(loc0, P2, Ptr::new(CON, 0, loc1));
+      self.heap.set(loc0, P2, Ptr::new(LAM, 0, loc1));
       self.heap.set(loc1, P1, Ptr::new(NUM, 0, b.loc() - 1));
-      self.half_atomic_link(a1, Ptr::new(CON, 0, loc0));
+      self.half_atomic_link(a1, Ptr::new(LAM, 0, loc0));
       self.half_atomic_link(a2, Ptr::new(VR2, 0, loc1));
     }
   }
@@ -792,40 +791,35 @@ impl<'a> Net<'a> {
 
   pub fn op1n(&mut self, a: Ptr, b: Ptr) {
     self.rwts.oper += 1;
+    let op = a.lab();
     let v0 = self.heap.get(a.loc(), P1).loc() as Loc;
-    let v1 = b.loc() as Loc;
-    let v2 = self.op(v0, v1);
+    let v1 = b.loc();
+    let v2 = self.op(op, v0, v1);
     let a2 = Ptr::new(VR2, 0, a.loc());
     self.half_atomic_link(a2, Ptr::new(NUM, 0, v2));
   }
 
   #[inline(always)]
-  pub fn op(&self, a: Loc, b: Loc) -> Loc {
-    let a_opr = (a >> 24) & 0xF;
-    let b_opr = (b >> 24) & 0xF; // not used yet
-    let a_val = a & 0xFFFFFF;
-    let b_val = b & 0xFFFFFF;
-    match a_opr as Tag {
-      USE => { ((a_val & 0xF) << 24) | b_val }
-      ADD => { (a_val.wrapping_add(b_val)) & 0xFFFFFF }
-      SUB => { (a_val.wrapping_sub(b_val)) & 0xFFFFFF }
-      MUL => { (a_val.wrapping_mul(b_val)) & 0xFFFFFF }
-      DIV => { if b_val == 0 { 0xFFFFFF } else { (a_val.wrapping_div(b_val)) & 0xFFFFFF } }
-      MOD => { (a_val.wrapping_rem(b_val)) & 0xFFFFFF }
-      EQ  => { ((a_val == b_val) as Loc) & 0xFFFFFF }
-      NE  => { ((a_val != b_val) as Loc) & 0xFFFFFF }
-      LT  => { ((a_val < b_val) as Loc) & 0xFFFFFF }
-      GT  => { ((a_val > b_val) as Loc) & 0xFFFFFF }
-      AND => { (a_val & b_val) & 0xFFFFFF }
-      OR  => { (a_val | b_val) & 0xFFFFFF }
-      XOR => { (a_val ^ b_val) & 0xFFFFFF }
-      NOT => { (!b_val) & 0xFFFFFF }
-      LSH => { (a_val << b_val) & 0xFFFFFF }
-      RSH => { (a_val >> b_val) & 0xFFFFFF }
+  pub fn op(&self, op: Lab, a: Loc, b: Loc) -> Loc {
+    match op {
+      ADD => { a.wrapping_add(b) }
+      SUB => { a.wrapping_sub(b) }
+      MUL => { a.wrapping_mul(b) }
+      DIV => { if b == 0 { 0 } else { a.wrapping_div(b) } }
+      MOD => { a.wrapping_rem(b) }
+      EQ  => { (a == b) as Loc }
+      NE  => { (a != b) as Loc }
+      LT  => { (a < b) as Loc }
+      GT  => { (a > b) as Loc }
+      AND => { a & b }
+      OR  => { a | b }
+      XOR => { a ^ b }
+      NOT => { !b }
+      LSH => { a << b }
+      RSH => { a >> b }
       _   => { unreachable!() }
     }
   }
-
 
   // Expands a closed net.
   #[inline(always)]
