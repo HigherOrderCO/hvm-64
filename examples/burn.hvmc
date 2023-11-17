@@ -32,7 +32,7 @@
 @runI = (p R) & @run ~ (decip R) & @dec ~ (ip decip) & @I ~ (p ip)
 @run  = ((@runO (@runI (@E R))) R)
 
-@brnZ = (* R) & @run ~ (val R) & @c22 ~ (@I (@E val))
+@brnZ = (* R) & @run ~ (val R) & @c20 ~ (@I (@E val))
 @brnS = ([p0 p1] (r0 r1)) & @brn ~ (p0 r0) & @brn ~ (p1 r1)
 @brn  = ((@brnS (@brnZ r)) r)
 

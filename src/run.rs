@@ -68,6 +68,13 @@ pub struct Ptr(pub Val);
 // An atomic tagged pointer.
 pub struct APtr(pub AVal);
 
+// A target pointer, with implied ownership.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
+pub enum Trg {
+  Dir(Ptr), // we don't own the pointer, so we point to its location
+  Ptr(Ptr), // we own the pointer, so we store it directly
+}
+
 // The global node buffer.
 pub type Data = [(APtr, APtr)];
 
@@ -460,13 +467,29 @@ impl<'a> Net<'a> {
     }
   }
 
-  // Links two pointers, forming a new wire.
-  pub fn link(&mut self, a: Ptr, b: Ptr) {
-    if a.is_pri() && b.is_pri() {
-      return self.redux(a, b);
+  #[inline(always)]
+  pub fn get(&self, a: Trg) -> Ptr {
+    match a {
+      Trg::Dir(dir) => self.get_target(dir),
+      Trg::Ptr(ptr) => ptr,
+    }
+  }
+
+  #[inline(always)]
+  pub fn swap(&mut self, a: Trg, val: Ptr) -> Ptr {
+    match a {
+      Trg::Dir(dir) => self.swap_target(dir, val),
+      Trg::Ptr(ptr) => ptr,
+    }
+  }
+
+  // Links two pointers, forming a new wire. Assumes ownership.
+  pub fn link(&mut self, a_ptr: Ptr, b_ptr: Ptr) {
+    if a_ptr.is_pri() && b_ptr.is_pri() {
+      return self.redux(a_ptr, b_ptr);
     } else {
-      if a.is_var() { self.set_target(a, b); }
-      if b.is_var() { self.set_target(b, a); }
+      self.linker(a_ptr, b_ptr);
+      self.linker(b_ptr, a_ptr);
     }
   }
 
@@ -486,13 +509,22 @@ impl<'a> Net<'a> {
   }
 
   // Given a location, link the pointer stored to another pointer, atomically.
-  pub fn atomic_link_1(&mut self, a_dir: Ptr, b_ptr: Ptr) {
+  pub fn half_atomic_link(&mut self, a_dir: Ptr, b_ptr: Ptr) {
     let a_ptr = self.swap_target(a_dir, LOCK);
-    if a_ptr.is_pri() {
+    if a_ptr.is_pri() && b_ptr.is_pri() {
       self.set_target(a_dir, NULL);
       return self.redux(a_ptr, b_ptr);
     } else {
       self.atomic_linker(a_ptr, a_dir, b_ptr);
+      self.linker(b_ptr, a_ptr);
+    }
+  }
+
+  // When two threads interfere, uses the lock-free link algorithm described on the 'paper/'.
+  #[inline(always)]
+  pub fn linker(&mut self, a_ptr: Ptr, b_ptr: Ptr) {
+    if a_ptr.is_var() {
+      self.set_target(a_ptr, b_ptr);
     }
   }
 
@@ -603,11 +635,22 @@ impl<'a> Net<'a> {
       break;
     }
   }
+
+  // Links two targets, using atomics when necessary, based on implied ownership.
+  #[inline(always)]
+  pub fn safe_link(&mut self, a: Trg, b: Trg) {
+    match (a, b) {
+      (Trg::Dir(a_dir), Trg::Dir(b_dir)) => self.atomic_link(a_dir, b_dir),
+      (Trg::Dir(a_dir), Trg::Ptr(b_ptr)) => self.half_atomic_link(a_dir, b_ptr),
+      (Trg::Ptr(a_ptr), Trg::Dir(b_dir)) => self.half_atomic_link(b_dir, a_ptr),
+      (Trg::Ptr(a_ptr), Trg::Ptr(b_ptr)) => self.link(a_ptr, b_ptr),
+    }
+  }
   
   // Performs an interaction over a redex.
   #[inline(always)]
   pub fn interact(&mut self, book: &Book, a: Ptr, b: Ptr) {
-    //println!("{:08x} {:08x}", a.0, b.0);
+    //println!("{:016x} {:016x}", a.0, b.0);
     match (a.tag(), b.tag()) {
       (REF   , OP2..) => self.call(book, a, b),
       (OP2.. , REF  ) => self.call(book, b, a),
@@ -670,27 +713,27 @@ impl<'a> Net<'a> {
     self.heap.set(loc3, P1, Ptr::new(VR2, loc0));
     self.heap.set(loc3, P2, Ptr::new(VR2, loc1));
     let a1 = Ptr::new(VR1, a.val());
-    self.atomic_link_1(a1, Ptr::new(b.tag(), loc0));
+    self.half_atomic_link(a1, Ptr::new(b.tag(), loc0));
     let b1 = Ptr::new(VR1, b.val());
-    self.atomic_link_1(b1, Ptr::new(a.tag(), loc2));
+    self.half_atomic_link(b1, Ptr::new(a.tag(), loc2));
     let a2 = Ptr::new(VR2, a.val());
-    self.atomic_link_1(a2, Ptr::new(b.tag(), loc1));
+    self.half_atomic_link(a2, Ptr::new(b.tag(), loc1));
     let b2 = Ptr::new(VR2, b.val());
-    self.atomic_link_1(b2, Ptr::new(a.tag(), loc3));
+    self.half_atomic_link(b2, Ptr::new(a.tag(), loc3));
   }
 
   pub fn era2(&mut self, a: Ptr) {
     self.rwts.eras += 1;
     let a1 = Ptr::new(VR1, a.val());
-    self.atomic_link_1(a1, ERAS);
+    self.half_atomic_link(a1, ERAS);
     let a2 = Ptr::new(VR2, a.val());
-    self.atomic_link_1(a2, ERAS);
+    self.half_atomic_link(a2, ERAS);
   }
 
   pub fn era1(&mut self, a: Ptr) {
     self.rwts.eras += 1;
     let a2 = Ptr::new(VR2, a.val());
-    self.atomic_link_1(a2, ERAS);
+    self.half_atomic_link(a2, ERAS);
   }
 
   pub fn pass(&mut self, a: Ptr, b: Ptr) {
@@ -705,19 +748,19 @@ impl<'a> Net<'a> {
     self.heap.set(loc2, P1, self.heap.get(a.val(), P1));
     self.heap.set(loc2, P2, Ptr::new(VR2, loc0));
     let a2 = Ptr::new(VR2, a.val());
-    self.atomic_link_1(a2, Ptr::new(b.tag(), loc0));
+    self.half_atomic_link(a2, Ptr::new(b.tag(), loc0));
     let b1 = Ptr::new(VR1, b.val());
-    self.atomic_link_1(b1, Ptr::new(a.tag(), loc1));
+    self.half_atomic_link(b1, Ptr::new(a.tag(), loc1));
     let b2 = Ptr::new(VR2, b.val());
-    self.atomic_link_1(b2, Ptr::new(a.tag(), loc2));
+    self.half_atomic_link(b2, Ptr::new(a.tag(), loc2));
   }
 
   pub fn copy(&mut self, a: Ptr, b: Ptr) {
     self.rwts.comm += 1;
     let a1 = Ptr::new(VR1, a.val());
-    self.atomic_link_1(a1, b);
+    self.half_atomic_link(a1, b);
     let a2 = Ptr::new(VR2, a.val());
-    self.atomic_link_1(a2, b);
+    self.half_atomic_link(a2, b);
   }
 
   pub fn mtch(&mut self, a: Ptr, b: Ptr) {
@@ -727,23 +770,23 @@ impl<'a> Net<'a> {
     if b.val() == 0 {
       let loc0 = self.alloc(1);
       self.heap.set(loc0, P2, ERAS);
-      self.atomic_link_1(a1, Ptr::new(CT0, loc0));
-      self.atomic_link_1(a2, Ptr::new(VR1, loc0));
+      self.half_atomic_link(a1, Ptr::new(CT0, loc0));
+      self.half_atomic_link(a2, Ptr::new(VR1, loc0));
     } else {
       let loc0 = self.alloc(1);
       let loc1 = self.alloc(1);
       self.heap.set(loc0, P1, ERAS);
       self.heap.set(loc0, P2, Ptr::new(CT0, loc1));
       self.heap.set(loc1, P1, Ptr::new(NUM, b.val() - 1));
-      self.atomic_link_1(a1, Ptr::new(CT0, loc0));
-      self.atomic_link_1(a2, Ptr::new(VR2, loc1));
+      self.half_atomic_link(a1, Ptr::new(CT0, loc0));
+      self.half_atomic_link(a2, Ptr::new(VR2, loc1));
     }
   }
 
   pub fn op2n(&mut self, a: Ptr, b: Ptr) {
     self.rwts.oper += 1;
     let a1 = Ptr::new(VR1, a.val());
-    self.atomic_link_1(a1, Ptr::new(OP1, a.val()));
+    self.half_atomic_link(a1, Ptr::new(OP1, a.val()));
     self.heap.set(a.val(), P1, b);
   }
 
@@ -753,7 +796,7 @@ impl<'a> Net<'a> {
     let v1 = b.val() as Val;
     let v2 = self.op(v0, v1);
     let a2 = Ptr::new(VR2, a.val());
-    self.atomic_link_1(a2, Ptr::new(NUM, v2));
+    self.half_atomic_link(a2, Ptr::new(NUM, v2));
   }
 
   #[inline(always)]
