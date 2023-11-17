@@ -17,7 +17,9 @@ use std::str::Chars;
 #[derive(Clone, Hash, PartialEq, Eq, Debug)]
 pub enum Tree {
   Era,
-  Ctr { lab: u8, lft: Box<Tree>, rgt: Box<Tree> },
+  Con { lft: Box<Tree>, rgt: Box<Tree> },
+  Tup { lft: Box<Tree>, rgt: Box<Tree> },
+  Dup { lab: run::Lab, lft: Box<Tree>, rgt: Box<Tree> },
   Var { nam: String },
   Ref { nam: run::Loc },
   Num { loc: run::Loc },
@@ -120,11 +122,10 @@ pub fn parse_tree(chars: &mut Peekable<Chars>) -> Result<Tree, String> {
     }
     Some('(') => {
       chars.next();
-      let lab = 0;
       let lft = Box::new(parse_tree(chars)?);
       let rgt = Box::new(parse_tree(chars)?);
       consume(chars, ")")?;
-      Ok(Tree::Ctr { lab, lft, rgt })
+      Ok(Tree::Con { lft, rgt })
     }
     Some('[') => {
       chars.next();
@@ -132,15 +133,15 @@ pub fn parse_tree(chars: &mut Peekable<Chars>) -> Result<Tree, String> {
       let lft = Box::new(parse_tree(chars)?);
       let rgt = Box::new(parse_tree(chars)?);
       consume(chars, "]")?;
-      Ok(Tree::Ctr { lab, lft, rgt })
+      Ok(Tree::Tup { lft, rgt })
     }
     Some('{') => {
       chars.next();
-      let lab = parse_decimal(chars)? as u8;
+      let lab = parse_decimal(chars)? as run::Lab;
       let lft = Box::new(parse_tree(chars)?);
       let rgt = Box::new(parse_tree(chars)?);
       consume(chars, "}")?;
-      Ok(Tree::Ctr { lab, lft, rgt })
+      Ok(Tree::Dup { lab, lft, rgt })
     }
     Some('@') => {
       chars.next();
@@ -234,12 +235,14 @@ pub fn show_tree(tree: &Tree) -> String {
     Tree::Era => {
       "*".to_string()
     }
-    Tree::Ctr { lab, lft, rgt } => {
-      match lab {
-        0 => { format!("({} {})", show_tree(&*lft), show_tree(&*rgt)) }
-        1 => { format!("[{} {}]", show_tree(&*lft), show_tree(&*rgt)) }
-        _ => { format!("{{{} {} {}}}", lab, show_tree(&*lft), show_tree(&*rgt)) }
-      } 
+    Tree::Con { lft, rgt } => {
+      format!("({} {})", show_tree(&*lft), show_tree(&*rgt))
+    }
+    Tree::Tup { lft, rgt } => {
+      format!("[{} {}]", show_tree(&*lft), show_tree(&*rgt))
+    }
+    Tree::Dup { lab, lft, rgt } => {
+      format!("{{{} {} {}}}", lab, show_tree(&*lft), show_tree(&*rgt))
     }
     Tree::Var { nam } => {
       nam.clone()
@@ -393,13 +396,29 @@ pub fn tree_to_runtime_go(rt_net: &mut run::Net, tree: &Tree, vars: &mut HashMap
     Tree::Era => {
       run::ERAS
     }
-    Tree::Ctr { lab, lft, rgt } => {
+    Tree::Con { lft, rgt } => {
       let loc = rt_net.alloc(1);
       let p1 = tree_to_runtime_go(rt_net, &*lft, vars, Parent::Node { loc, port: run::P1 });
       rt_net.heap.set(loc, run::P1, p1);
       let p2 = tree_to_runtime_go(rt_net, &*rgt, vars, Parent::Node { loc, port: run::P2 });
       rt_net.heap.set(loc, run::P2, p2);
-      run::Ptr::new(*lab + run::CT0, 0, loc)
+      run::Ptr::new(run::CON, 0, loc)
+    }
+    Tree::Tup { lft, rgt } => {
+      let loc = rt_net.alloc(1);
+      let p1 = tree_to_runtime_go(rt_net, &*lft, vars, Parent::Node { loc, port: run::P1 });
+      rt_net.heap.set(loc, run::P1, p1);
+      let p2 = tree_to_runtime_go(rt_net, &*rgt, vars, Parent::Node { loc, port: run::P2 });
+      rt_net.heap.set(loc, run::P2, p2);
+      run::Ptr::new(run::TUP, 0, loc)
+    }
+    Tree::Dup { lab, lft, rgt } => {
+      let loc = rt_net.alloc(1);
+      let p1 = tree_to_runtime_go(rt_net, &*lft, vars, Parent::Node { loc, port: run::P1 });
+      rt_net.heap.set(loc, run::P1, p1);
+      let p2 = tree_to_runtime_go(rt_net, &*rgt, vars, Parent::Node { loc, port: run::P2 });
+      rt_net.heap.set(loc, run::P2, p2);
+      run::Ptr::new(run::DUP, *lab, loc)
     }
     Tree::Var { nam } => {
       if let Parent::Redex = parent {
@@ -542,16 +561,29 @@ pub fn tree_from_runtime_go(rt_net: &run::Net, ptr: run::Ptr, parent: Parent, va
         Tree::Var { nam }
       }
     }
-    _ => {
+    run::CON => {
       let p1  = rt_net.heap.get(ptr.loc(), run::P1);
       let p2  = rt_net.heap.get(ptr.loc(), run::P2);
       let lft = tree_from_runtime_go(rt_net, p1, Parent::Node { loc: ptr.loc(), port: run::P1 }, vars, fresh);
       let rgt = tree_from_runtime_go(rt_net, p2, Parent::Node { loc: ptr.loc(), port: run::P2 }, vars, fresh);
-      Tree::Ctr {
-        lab: ptr.tag() - run::CT0,
-        lft: Box::new(lft),
-        rgt: Box::new(rgt),
-      }
+      Tree::Con { lft: Box::new(lft), rgt: Box::new(rgt) }
+    }
+    run::TUP => {
+      let p1  = rt_net.heap.get(ptr.loc(), run::P1);
+      let p2  = rt_net.heap.get(ptr.loc(), run::P2);
+      let lft = tree_from_runtime_go(rt_net, p1, Parent::Node { loc: ptr.loc(), port: run::P1 }, vars, fresh);
+      let rgt = tree_from_runtime_go(rt_net, p2, Parent::Node { loc: ptr.loc(), port: run::P2 }, vars, fresh);
+      Tree::Tup { lft: Box::new(lft), rgt: Box::new(rgt) }
+    }
+    run::DUP => {
+      let p1  = rt_net.heap.get(ptr.loc(), run::P1);
+      let p2  = rt_net.heap.get(ptr.loc(), run::P2);
+      let lft = tree_from_runtime_go(rt_net, p1, Parent::Node { loc: ptr.loc(), port: run::P1 }, vars, fresh);
+      let rgt = tree_from_runtime_go(rt_net, p2, Parent::Node { loc: ptr.loc(), port: run::P2 }, vars, fresh);
+      Tree::Dup { lab: ptr.lab(), lft: Box::new(lft), rgt: Box::new(rgt) }
+    }
+    _ => {
+      unreachable!()
     }
   }
 }

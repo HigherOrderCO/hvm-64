@@ -27,9 +27,9 @@ pub const NUM: Tag = 0x6; // Unboxed number
 pub const OP2: Tag = 0x7; // Binary numeric operation
 pub const OP1: Tag = 0x8; // Unary numeric operation
 pub const MAT: Tag = 0x9; // Numeric pattern-matching
-pub const CT0: Tag = 0xA; // Main port of con node, label 0
-pub const CT1: Tag = 0xB; // Main port of con node, label 1
-pub const CT2: Tag = 0xC; // Main port of con node, label 2
+pub const CON: Tag = 0xA; // Main port of con node, label 0
+pub const TUP: Tag = 0xB; // Main port of con node, label 1
+pub const DUP: Tag = 0xC; // Main port of con node, label 2
 pub const END: Tag = 0xE; // Last pointer tag
 
 // Numeric operations.
@@ -169,7 +169,7 @@ impl Ptr {
 
   #[inline(always)]
   pub fn is_ctr(&self) -> bool {
-    return matches!(self.tag(), CT0..=END);
+    return matches!(self.tag(), CON..=END);
   }
 
   #[inline(always)]
@@ -654,15 +654,15 @@ impl<'a> Net<'a> {
     match (a.tag(), b.tag()) {
       (REF   , OP2..) => self.call(book, a, b),
       (OP2.. , REF  ) => self.call(book, b, a),
-      (CT0.. , CT0..) if a.tag() == b.tag() => self.anni(a, b),
-      (CT0.. , CT0..) => self.comm(a, b),
-      (CT0.. , ERA  ) => self.era2(a),
-      (ERA   , CT0..) => self.era2(b),
+      (CON.. , CON..) if a.tag() == b.tag() => self.anni(a, b),
+      (CON.. , CON..) => self.comm(a, b),
+      (CON.. , ERA  ) => self.era2(a),
+      (ERA   , CON..) => self.era2(b),
       (REF   , ERA  ) => self.rwts.eras += 1,
       (ERA   , REF  ) => self.rwts.eras += 1,
       (ERA   , ERA  ) => self.rwts.eras += 1,
-      (CT0.. , NUM  ) => self.copy(a, b),
-      (NUM   , CT0..) => self.copy(b, a),
+      (CON.. , NUM  ) => self.copy(a, b),
+      (NUM   , CON..) => self.copy(b, a),
       (NUM   , ERA  ) => self.rwts.eras += 1,
       (ERA   , NUM  ) => self.rwts.eras += 1,
       (NUM   , NUM  ) => self.rwts.eras += 1,
@@ -670,18 +670,18 @@ impl<'a> Net<'a> {
       (NUM   , OP2  ) => self.op2n(b, a),
       (OP1   , NUM  ) => self.op1n(a, b),
       (NUM   , OP1  ) => self.op1n(b, a),
-      (OP2   , CT0..) => self.comm(a, b),
-      (CT0.. , OP2  ) => self.comm(b, a),
-      (OP1   , CT0..) => self.pass(a, b),
-      (CT0.. , OP1  ) => self.pass(b, a),
+      (OP2   , CON..) => self.comm(a, b),
+      (CON.. , OP2  ) => self.comm(b, a),
+      (OP1   , CON..) => self.pass(a, b),
+      (CON.. , OP1  ) => self.pass(b, a),
       (OP2   , ERA  ) => self.era2(a),
       (ERA   , OP2  ) => self.era2(b),
       (OP1   , ERA  ) => self.era1(a),
       (ERA   , OP1  ) => self.era1(b),
       (MAT   , NUM  ) => self.mtch(a, b),
       (NUM   , MAT  ) => self.mtch(b, a),
-      (MAT   , CT0..) => self.comm(a, b),
-      (CT0.. , MAT  ) => self.comm(b, a),
+      (MAT   , CON..) => self.comm(a, b),
+      (CON.. , MAT  ) => self.comm(b, a),
       (MAT   , ERA  ) => self.era2(a),
       (ERA   , MAT  ) => self.era2(b),
       _               => unreachable!(),
@@ -770,15 +770,15 @@ impl<'a> Net<'a> {
     if b.loc() == 0 {
       let loc0 = self.alloc(1);
       self.heap.set(loc0, P2, ERAS);
-      self.half_atomic_link(a1, Ptr::new(CT0, 0, loc0));
+      self.half_atomic_link(a1, Ptr::new(CON, 0, loc0));
       self.half_atomic_link(a2, Ptr::new(VR1, 0, loc0));
     } else {
       let loc0 = self.alloc(1);
       let loc1 = self.alloc(1);
       self.heap.set(loc0, P1, ERAS);
-      self.heap.set(loc0, P2, Ptr::new(CT0, 0, loc1));
+      self.heap.set(loc0, P2, Ptr::new(CON, 0, loc1));
       self.heap.set(loc1, P1, Ptr::new(NUM, 0, b.loc() - 1));
-      self.half_atomic_link(a1, Ptr::new(CT0, 0, loc0));
+      self.half_atomic_link(a1, Ptr::new(CON, 0, loc0));
       self.half_atomic_link(a2, Ptr::new(VR2, 0, loc1));
     }
   }
