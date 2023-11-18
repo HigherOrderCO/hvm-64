@@ -788,9 +788,12 @@ impl<'a> Net<'a> {
 
   pub fn op2n(&mut self, a: Ptr, b: Ptr) {
     self.rwts.oper += 1;
+    let loc0 = self.alloc(1);
     let a1 = Ptr::new(VR1, 0, a.loc());
-    self.half_atomic_link(a1, Ptr::new(OP1, 0, a.loc()));
-    self.heap.set(a.loc(), P1, b);
+    let a2 = Ptr::new(VR2, 0, a.loc());
+    self.heap.set(loc0, P1, b);
+    self.half_atomic_link(a2, Ptr::new(VR2, 0, loc0));
+    self.half_atomic_link(a1, Ptr::new(OP1, 0, loc0));
   }
 
   pub fn op1n(&mut self, a: Ptr, b: Ptr) {
