@@ -652,7 +652,6 @@ impl<'a> Net<'a> {
   // Performs an interaction over a redex.
   #[inline(always)]
   pub fn interact(&mut self, book: &Book, a: Ptr, b: Ptr) {
-    //println!("{:016x} {:016x}", a.0, b.0);
     match (a.tag(), b.tag()) {
       (REF   , OP2..) => self.call(book, a, b),
       (OP2.. , REF  ) => self.call(book, b, a),
@@ -662,6 +661,8 @@ impl<'a> Net<'a> {
       (ERA   , LAM..) => self.era2(b),
       (REF   , ERA  ) => self.rwts.eras += 1,
       (ERA   , REF  ) => self.rwts.eras += 1,
+      (REF   , NUM  ) => self.rwts.eras += 1,
+      (NUM   , REF  ) => self.rwts.eras += 1,
       (ERA   , ERA  ) => self.rwts.eras += 1,
       (LAM.. , NUM  ) => self.copy(a, b),
       (NUM   , LAM..) => self.copy(b, a),
@@ -686,7 +687,7 @@ impl<'a> Net<'a> {
       (LAM.. , MAT  ) => self.comm(b, a),
       (MAT   , ERA  ) => self.era2(a),
       (ERA   , MAT  ) => self.era2(b),
-      _               => unreachable!(),
+      _               => { println!("{:016x} {:016x}", a.0, b.0); unreachable!() },
     };
   }
 
@@ -877,19 +878,11 @@ impl<'a> Net<'a> {
   // Reduces all redexes.
   #[inline(always)]
   pub fn reduce(&mut self, book: &Book, limit: usize) -> usize {
-    let mut rdex: Vec<(Ptr, Ptr)> = vec![];
-    std::mem::swap(&mut self.rdex, &mut rdex);
-    //println!("[{:04x}] tid reduce", tid);
     let mut count = 0;
-    while rdex.len() > 0 {
-      count += rdex.len();
-      for (a, b) in &rdex {
-        self.interact(book, *a, *b);
-      }
-      rdex.clear();
-      if count < limit {
-        std::mem::swap(&mut self.rdex, &mut rdex);
-      } else {
+    while let Some((a, b)) = self.rdex.pop() {
+      self.interact(book, a, b);
+      count += 1;
+      if count >= limit {
         break;
       }
     }
@@ -953,7 +946,7 @@ impl<'a> Net<'a> {
   pub fn parallel_normal(&mut self, book: &Book) {
 
     const SHARE_LIMIT : usize = 1 << 12; // max share redexes per split 
-    const LOCAL_LIMIT : usize = 1 << 20; // max local rewrites per epoch
+    const LOCAL_LIMIT : usize = 1 << 18; // max local rewrites per epoch
 
     // Local thread context
     struct ThreadContext<'a> {
@@ -1021,7 +1014,8 @@ impl<'a> Net<'a> {
     #[inline(always)]
     fn reduce(ctx: &mut ThreadContext) {
       loop {
-        ctx.net.reduce(ctx.book, LOCAL_LIMIT);
+        let reduced = ctx.net.reduce(ctx.book, LOCAL_LIMIT);
+        //println!("[{:04x}] reduced {}", ctx.tid, reduced);
         if count(ctx) == 0 {
           break;
         }
@@ -1049,32 +1043,47 @@ impl<'a> Net<'a> {
       return ctx.total.load(Ordering::Relaxed);
     }
 
+
     // Share redexes with target thread
     #[inline(always)]
-    fn split(ctx: &mut ThreadContext, para: usize) {
-      let side  = (ctx.tid >> (para - 1 - (ctx.tick % para))) & 1;
-      let shift = (1 << (para - 1)) >> (ctx.tick % para);
-      let b_tid = if side == 1 { ctx.tid - shift } else { ctx.tid + shift };
-      let a_len = ctx.net.rdex.len();
-      let b_len = ctx.rlens[b_tid].load(Ordering::Relaxed);
-      if a_len > b_len {
-        let stolen = std::cmp::min(SHARE_LIMIT, (a_len - b_len) / 2);
-        for i in 0 .. stolen { // TODO: avoid reversing
-          let r = ctx.net.rdex.pop().unwrap();
-          ctx.share[b_tid * SHARE_LIMIT + i].0.store(Ptr(r.0.0));
-          ctx.share[b_tid * SHARE_LIMIT + i].1.store(Ptr(r.1.0));
+    fn split(ctx: &mut ThreadContext, plog2: usize) {
+      unsafe {
+        let side  = (ctx.tid >> (plog2 - 1 - (ctx.tick % plog2))) & 1;
+        let shift = (1 << (plog2 - 1)) >> (ctx.tick % plog2);
+        let a_tid = ctx.tid;
+        let b_tid = if side == 1 { a_tid - shift } else { a_tid + shift };
+        let a_len = ctx.net.rdex.len();
+        let b_len = ctx.rlens[b_tid].load(Ordering::Relaxed);
+        if a_len > b_len {
+          for i in 0 .. a_len - b_len {
+            let min = b_len;
+            let rdx = ctx.net.rdex.get_unchecked_mut(min + i);
+            if i % 2 == 0 {
+              *ctx.net.rdex.get_unchecked_mut(min + i / 2) = *rdx;
+            } else {
+              let send = ctx.share.get_unchecked(b_tid * SHARE_LIMIT + i / 2);
+              send.0.store(rdx.0);
+              send.1.store(rdx.1);
+            }
+          }
+          ctx.net.rdex.truncate((a_len + b_len) / 2 + (a_len + b_len) % 2);
+          //println!("[{:04}] sent {} to {} (I had {}, now I have {})", a_tid, sent, b_tid, a_len, ctx.net.rdex.len());
+          //if ctx.net.rdex.len() != a_len - sent {
+            //panic!();
+          //}
         }
-      }
-      ctx.barry.wait();
-      if b_len > a_len {
-        let stolen = std::cmp::min(SHARE_LIMIT, (b_len - a_len) / 2);
-        for i in 0 .. stolen {
-          let r = &ctx.share[ctx.tid * SHARE_LIMIT + i];
-          let x = r.0.load();
-          let y = r.1.load();
-          ctx.net.rdex.push((x, y));
+        ctx.barry.wait();
+        if b_len > a_len {
+          for i in 0 .. (b_len - a_len) / 2 {
+            let r = ctx.share.get_unchecked(a_tid * SHARE_LIMIT + i);
+            let x = r.0.load();
+            let y = r.1.load();
+            ctx.net.rdex.push((x, y));
+          }
+          //println!("[{:04}] received {} from {} (it had {})", a_tid, (b_len - a_len) / 2, b_tid, b_len);
         }
       }
     }
   }
+
 }
