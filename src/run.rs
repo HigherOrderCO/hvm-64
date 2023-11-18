@@ -322,6 +322,7 @@ impl<'a> Heap<'a> {
     }
   }
 
+  #[inline(always)]
   pub fn swap(&self, index: Loc, port: Port, value: Ptr) -> Ptr {
     unsafe {
       let node = self.data.get_unchecked(index as usize);
@@ -427,12 +428,6 @@ impl<'a> Net<'a> {
     }
   }
 
-  #[inline(always)]
-  pub fn free(&self, index: Loc) {
-    unsafe { self.heap.data.get_unchecked(index as usize) }.0.store(NULL);
-    unsafe { self.heap.data.get_unchecked(index as usize) }.1.store(NULL);
-  }
-
   // Gets a pointer's target.
   #[inline(always)]
   pub fn get_target(&self, ptr: Ptr) -> Ptr {
@@ -483,6 +478,7 @@ impl<'a> Net<'a> {
   }
 
   // Links two pointers, forming a new wire. Assumes ownership.
+  #[inline(always)]
   pub fn link(&mut self, a_ptr: Ptr, b_ptr: Ptr) {
     if a_ptr.is_pri() && b_ptr.is_pri() {
       return self.redux(a_ptr, b_ptr);
@@ -493,6 +489,7 @@ impl<'a> Net<'a> {
   }
 
   // Given two locations, links both stored pointers, atomically.
+  #[inline(always)]
   pub fn atomic_link(&mut self, a_dir: Ptr, b_dir: Ptr) {
     //println!("link {:016x} {:016x}", a_dir.0, b_dir.0);
     let a_ptr = self.swap_target(a_dir, LOCK);
@@ -508,6 +505,7 @@ impl<'a> Net<'a> {
   }
 
   // Given a location, link the pointer stored to another pointer, atomically.
+  #[inline(always)]
   pub fn half_atomic_link(&mut self, a_dir: Ptr, b_ptr: Ptr) {
     let a_ptr = self.swap_target(a_dir, LOCK);
     if a_ptr.is_pri() && b_ptr.is_pri() {
@@ -528,6 +526,7 @@ impl<'a> Net<'a> {
   }
 
   // When two threads interfere, uses the lock-free link algorithm described on the 'paper/'.
+  #[inline(always)]
   pub fn atomic_linker(&mut self, a_ptr: Ptr, a_dir: Ptr, b_ptr: Ptr) {
     // If 'a_ptr' is a var...
     if a_ptr.is_var() {
@@ -862,6 +861,7 @@ impl<'a> Net<'a> {
   }
 
   // Adjusts dereferenced pointer locations.
+  #[inline(always)]
   fn adjust(&self, ptr: Ptr) -> Ptr {
     if ptr.has_loc() {
       return Ptr::new(ptr.tag(), ptr.lab(), *unsafe { self.locs.get_unchecked(ptr.loc() as usize) });
