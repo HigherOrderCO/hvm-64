@@ -46,7 +46,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         //net.reduce(&book);
         //net.expand(&book, run::ROOT);
 
-        //println!("{}", ast::show_runtime_net(&net));
+        println!("{}", ast::show_runtime_net(&net));
         if args.len() >= 4 && args[3] == "-s" {
           print_stats(&net, start_time);
         }

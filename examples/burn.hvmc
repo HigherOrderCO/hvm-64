@@ -1,17 +1,17 @@
 // Decreases a tree of λ-encoded binary counters until they're all 0 (parallel).
 // Takes about ~16s on Apple M1, and ~0.5s on RTX 4090
 
-@c3  = ([[(c b) (b a)] (a R)] (c R))
-@c4  = ([[[(d c) (c b)] (b a)] (a R)] (d R))
-@c6  = ([[[[[(f e) (e d)] (d c)] (c b)] (b a)] (a R)] (f R))
-@c8  = ([[[[[[[(h g) (g f)] (f e)] (e d)] (d c)] (c b)] (b a)] (a R)] (h R))
-@c10 = ([[[[[[[[[(j i) (i h)] (h g)] (g f)] (f e)] (e d)] (d c)] (c b)] (b a)] (a R)] (j R))
-@c12 = ([[[[[[[[[[[(l k) (k j)] (j i)] (i h)] (h g)] (g f)] (f e)] (e d)] (d c)] (c b)] (b a)] (a R)] (l R))
-@c14 = ([[[[[[[[[[[[[(n m) (m l)] (l k)] (k j)] (j i)] (i h)] (h g)] (g f)] (f e)] (e d)] (d c)] (c b)] (b a)] (a R)] (n R))
-@c16 = ([[[[[[[[[[[[[[[(p o) (o n)] (n m)] (m l)] (l k)] (k j)] (j i)] (i h)] (h g)] (g f)] (f e)] (e d)] (d c)] (c b)] (b a)] (a R)] (p R))
-@c20 = ([[[[[[[[[[[[[[[[[[[(t s) (s r)] (r q)] (q p)] (p o)] (o n)] (n m)] (m l)] (l k)] (k j)] (j i)] (i h)] (h g)] (g f)] (f e)] (e d)] (d c)] (c b)] (b a)] (a R)] (t R))
-@c22 = ([[[[[[[[[[[[[[[[[[[[[(v u) (u t)] (t s)] (s r)] (r q)] (q p)] (p o)] (o n)] (n m)] (m l)] (l k)] (k j)] (j i)] (i h)] (h g)] (g f)] (f e)] (e d)] (d c)] (c b)] (b a)] (a R)] (v R))
-@c24 = ([[[[[[[[[[[[[[[[[[[[[[[(x w) (w v)] (v u)] (u t)] (t s)] (s r)] (r q)] (q p)] (p o)] (o n)] (n m)] (m l)] (l k)] (k j)] (j i)] (i h)] (h g)] (g f)] (f e)] (e d)] (d c)] (c b)] (b a)] (a R)] (x R))
+@c3  = ({1 {1 (c b) (b a)} (a R)} (c R))
+@c4  = ({1 {1 {1 (d c) (c b)} (b a)} (a R)} (d R))
+@c6  = ({1 {1 {1 {1 {1 (f e) (e d)} (d c)} (c b)} (b a)} (a R)} (f R))
+@c8  = ({1 {1 {1 {1 {1 {1 {1 (h g) (g f)} (f e)} (e d)} (d c)} (c b)} (b a)} (a R)} (h R))
+@c10 = ({1 {1 {1 {1 {1 {1 {1 {1 {1 (j i) (i h)} (h g)} (g f)} (f e)} (e d)} (d c)} (c b)} (b a)} (a R)} (j R))
+@c12 = ({1 {1 {1 {1 {1 {1 {1 {1 {1 {1 {1 (l k) (k j)} (j i)} (i h)} (h g)} (g f)} (f e)} (e d)} (d c)} (c b)} (b a)} (a R)} (l R))
+@c14 = ({1 {1 {1 {1 {1 {1 {1 {1 {1 {1 {1 {1 {1 (n m) (m l)} (l k)} (k j)} (j i)} (i h)} (h g)} (g f)} (f e)} (e d)} (d c)} (c b)} (b a)} (a R)} (n R))
+@c16 = ({1 {1 {1 {1 {1 {1 {1 {1 {1 {1 {1 {1 {1 {1 {1 (p o) (o n)} (n m)} (m l)} (l k)} (k j)} (j i)} (i h)} (h g)} (g f)} (f e)} (e d)} (d c)} (c b)} (b a)} (a R)} (p R))
+@c20 = ({1 {1 {1 {1 {1 {1 {1 {1 {1 {1 {1 {1 {1 {1 {1 {1 {1 {1 {1 (t s) (s r)} (r q)} (q p)} (p o)} (o n)} (n m)} (m l)} (l k)} (k j)} (j i)} (i h)} (h g)} (g f)} (f e)} (e d)} (d c)} (c b)} (b a)} (a R)} (t R))
+@c22 = ({1 {1 {1 {1 {1 {1 {1 {1 {1 {1 {1 {1 {1 {1 {1 {1 {1 {1 {1 {1 {1 (v u) (u t)} (t s)} (s r)} (r q)} (q p)} (p o)} (o n)} (n m)} (m l)} (l k)} (k j)} (j i)} (i h)} (h g)} (g f)} (f e)} (e d)} (d c)} (c b)} (b a)} (a R)} (v R))
+@c24 = ({1 {1 {1 {1 {1 {1 {1 {1 {1 {1 {1 {1 {1 {1 {1 {1 {1 {1 {1 {1 {1 {1 {1 (x w) (w v)} (v u)} (u t)} (t s)} (s r)} (r q)} (q p)} (p o)} (o n)} (n m)} (m l)} (l k)} (k j)} (j i)} (i h)} (h g)} (g f)} (f e)} (e d)} (d c)} (c b)} (b a)} (a R)} (x R))
 
 @S = (a ((a b) (* b)))
 @Z = (* (a a))
@@ -33,7 +33,7 @@
 @run  = ((@runO (@runI (@E R))) R)
 
 @brnZ = (* R) & @run ~ (val R) & @c20 ~ (@I (@E val))
-@brnS = ([p0 p1] (r0 r1)) & @brn ~ (p0 r0) & @brn ~ (p1 r1)
+@brnS = ({1 p0 p1} (r0 r1)) & @brn ~ (p0 r0) & @brn ~ (p1 r1)
 @brn  = ((@brnS (@brnZ r)) r)
 
 @main

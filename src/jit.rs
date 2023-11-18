@@ -342,7 +342,7 @@ pub fn compile_term(book: &run::Book, tab: usize, fid: run::Loc) -> String {
       code.push_str(&format!("{}let {} = self.alloc(1);\n", ident(tab), lc));
       code.push_str(&make(tab, newx, vars, def, p1, &format!("Trg::Ptr(Ptr::new(VR1, 0, {}))", lc)));
       code.push_str(&make(tab, newx, vars, def, p2, &format!("Trg::Ptr(Ptr::new(VR2, 0, {}))", lc)));
-      code.push_str(&format!("{}self.safe_link(Trg::Ptr(Ptr::new({}, 0, {})), {});\n", ident(tab), tag(ptr.tag()), lc, trg));
+      code.push_str(&format!("{}self.safe_link(Trg::Ptr(Ptr::new({}, {}, {})), {});\n", ident(tab), tag(ptr.tag()), ptr.lab(), lc, trg));
     } else if ptr.is_var() {
       match got(vars, def, ptr) {
         None => {

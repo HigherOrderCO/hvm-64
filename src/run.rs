@@ -653,7 +653,7 @@ impl<'a> Net<'a> {
     match (a.tag(), b.tag()) {
       (REF   , OP2..) => self.call(book, a, b),
       (OP2.. , REF  ) => self.call(book, b, a),
-      (LAM.. , LAM..) if a.tag() == b.tag() => self.anni(a, b),
+      (LAM.. , LAM..) if a.lab() == b.lab() => self.anni(a, b),
       (LAM.. , LAM..) => self.comm(a, b),
       (LAM.. , ERA  ) => self.era2(a),
       (ERA   , LAM..) => self.era2(b),
@@ -864,7 +864,7 @@ impl<'a> Net<'a> {
   // Adjusts dereferenced pointer locations.
   fn adjust(&self, ptr: Ptr) -> Ptr {
     if ptr.has_loc() {
-      return Ptr::new(ptr.tag(), 0, *unsafe { self.locs.get_unchecked(ptr.loc() as usize) });
+      return Ptr::new(ptr.tag(), ptr.lab(), *unsafe { self.locs.get_unchecked(ptr.loc() as usize) });
     } else {
       return ptr;
     }
@@ -872,16 +872,24 @@ impl<'a> Net<'a> {
 
   // Reduces all redexes.
   #[inline(always)]
-  pub fn reduce(&mut self, book: &Book) {
+  pub fn reduce(&mut self, book: &Book, limit: usize) -> usize {
     let mut rdex: Vec<(Ptr, Ptr)> = vec![];
     std::mem::swap(&mut self.rdex, &mut rdex);
+    //println!("[{:04x}] tid reduce", tid);
+    let mut count = 0;
     while rdex.len() > 0 {
+      count += rdex.len();
       for (a, b) in &rdex {
         self.interact(book, *a, *b);
       }
       rdex.clear();
-      std::mem::swap(&mut self.rdex, &mut rdex);
+      if count < limit {
+        std::mem::swap(&mut self.rdex, &mut rdex);
+      } else {
+        break;
+      }
     }
+    return count;
   }
 
   // Expands heads.
@@ -989,7 +997,7 @@ impl<'a> Net<'a> {
             //println!("[{:08x}] reducing {}", tid, child.rdex.len());
 
             // Rewrites current redexes
-            child.reduce(book);
+            child.reduce(book, 1 << 20);
 
             // Expands if redex count is 0
             rlens[tid].store(child.rdex.len(), Ordering::Relaxed);
