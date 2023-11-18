@@ -100,15 +100,20 @@ pub struct AtomicRewrites {
   pub oper: AtomicUsize, // oper rewrites
 }
 
+// An allocation area delimiter
+pub struct Area {
+  pub init: usize, // first allocation index
+  pub size: usize, // total nodes in area
+}
+
 // A interaction combinator net.
 pub struct Net<'a> {
   pub tid : usize, // thread id
-  pub tlen: usize, // thread count
+  pub tids: usize, // thread count
   pub heap: Heap<'a>, // nodes
   pub rdex: Vec<(Ptr,Ptr)>, // redexes
   pub locs: Vec<Loc>,
-  pub init: usize, // allocation area init index
-  pub area: usize, // allocation area size
+  pub area: Area, // allocation area
   pub next: usize, // next allocation index within area
   pub rwts: Rewrites, // rewrite count
 }
@@ -388,12 +393,11 @@ impl<'a> Net<'a> {
   pub fn new(data: &'a Data) -> Self {
     Net {
       tid : 0,
-      tlen: 1,
+      tids: 1,
       heap: Heap { data },
       rdex: vec![],
       locs: vec![0; 1 << 16],
-      init: 0,
-      area: data.len(),
+      area: Area { init: 0, size: data.len() },
       next: 0,
       rwts: Rewrites::new(),
     }
@@ -413,14 +417,14 @@ impl<'a> Net<'a> {
   pub fn alloc(&mut self, size: usize) -> Loc {
     // On the first pass, just alloc without checking.
     // Note: we add 1 to avoid overwritting root.
-    if self.next < self.area - 1 {
+    if self.next < self.area.size - 1 {
       self.next += 1;
-      return self.init as Loc + self.next as Loc;
+      return self.area.init as Loc + self.next as Loc;
     // On later passes, search for an available slot.
     } else {
       loop {
         self.next += 1;
-        let index = (self.init + self.next % self.area) as Loc;
+        let index = (self.area.init + self.next % self.area.size) as Loc;
         if self.heap.get(index, P2).is_nil() {
           return index;
         }
@@ -899,10 +903,10 @@ impl<'a> Net<'a> {
       //println!("[{:04x}] expand dir: {:016x}", net.tid, dir.0);
       let ptr = net.get_target(dir);
       if ptr.is_ctr() {
-        if len >= net.tlen || key % 2 == 0 {
+        if len >= net.tids || key % 2 == 0 {
           go(net, book, Ptr::new(VR1, 0, ptr.loc()), len * 2, key / 2);
         }
-        if len >= net.tlen || key % 2 == 1 {
+        if len >= net.tids || key % 2 == 1 {
           go(net, book, Ptr::new(VR2, 0, ptr.loc()), len * 2, key / 2);
         }
       } else if ptr.is_ref() {
@@ -917,28 +921,27 @@ impl<'a> Net<'a> {
   }
 
   // Reduce a net to normal form.
-  //pub fn normal(&mut self, book: &Book) {
-    //self.expand(book);
-    //while self.rdex.len() > 0 {
-      //self.reduce(book);
-      //self.expand(book);
-    //}
-  //}
+  pub fn normal(&mut self, book: &Book) {
+    self.expand(book);
+    while self.rdex.len() > 0 {
+      self.reduce(book, usize::MAX);
+      self.expand(book);
+    }
+  }
 
-  // Forks into child threads, returning a Net for the (tid/tlen)'th thread.
-  pub fn fork(&self, tid: usize, tlen: usize) -> Self {
+  // Forks into child threads, returning a Net for the (tid/tids)'th thread.
+  pub fn fork(&self, tid: usize, tids: usize) -> Self {
     let mut net = Net::new(self.heap.data);
     net.tid  = tid;
-    net.tlen = tlen;
-    net.init = self.heap.data.len() * tid / tlen;
-    net.area = self.heap.data.len() / tlen;
-    let from = self.rdex.len() * (tid + 0) / tlen;
-    let upto = self.rdex.len() * (tid + 1) / tlen;
+    net.tids = tids;
+    net.area = Area {
+      init: self.heap.data.len() * tid / tids,
+      size: self.heap.data.len() / tids,
+    };
+    let from = self.rdex.len() * (tid + 0) / tids;
+    let upto = self.rdex.len() * (tid + 1) / tids;
     for i in from .. upto {
-      let r = self.rdex[i];
-      let x = r.0;
-      let y = r.1;
-      net.rdex.push((x,y));
+      net.rdex.push((self.rdex[i].0, self.rdex[i].1));
     }
     if tid == 0 {
       net.next = self.next;
@@ -946,115 +949,134 @@ impl<'a> Net<'a> {
     return net;
   }
 
-  pub fn normal(&mut self, book: &Book) {
-    let tlen_l2 = 3;
-    let tlen    = 1 << tlen_l2;
+  // Evaluates a term to normal form in parallel
+  pub fn parallel_normal(&mut self, book: &Book) {
 
-    const STLEN : usize = 65536; // max steal redexes / split 
+    const SHARE_LIMIT : usize = 1 << 12; // max share redexes per split 
+    const LOCAL_LIMIT : usize = 1 << 20; // max local rewrites per epoch
 
-    // Global values
+    // Local thread context
+    struct ThreadContext<'a> {
+      tid: usize, // thread id
+      tids: usize, // thread count
+      tlog2: usize, // log2 of thread count
+      tick: usize, // current tick
+      net: Net<'a>, // thread's own net object
+      book: &'a Book, // definition book
+      delta: &'a AtomicRewrites, // global delta rewrites
+      share: &'a Vec<(APtr, APtr)>, // global share buffer
+      rlens: &'a Vec<AtomicUsize>, // global redex lengths
+      total: &'a AtomicUsize, // total redex length
+      barry: Arc<Barrier>, // synchronization barrier
+    }
+
+    // Initialize global objects
+    let cores = std::thread::available_parallelism().unwrap().get() as usize;
+    let tlog2 = cores.ilog2() as usize;
+    let tids  = 1 << tlog2;
     let delta = AtomicRewrites::new(); // delta rewrite counter
-    let steal = &mut vec![]; // steal buffer for redex exchange
-    let rlens = &mut vec![]; // length of each tid's redex bags
+    let rlens = (0..tids).map(|_| AtomicUsize::new(0)).collect::<Vec<_>>();
+    let share = (0..SHARE_LIMIT*tids).map(|_| (APtr(AtomicU64::new(0)), APtr(AtomicU64::new(0)))).collect::<Vec<_>>();
     let total = AtomicUsize::new(0); // sum of redex bag length
-    let barry = Arc::new(Barrier::new(tlen)); // global barrier
+    let barry = Arc::new(Barrier::new(tids)); // global barrier
 
-    // Initializes the rlens buffer
-    for i in 0 .. tlen {
-      rlens.push(AtomicUsize::new(0x4321_FFFF_FFFF_FFFF));
-    }
-    
-    // Initializes the steal buffer
-    for i in 0 .. STLEN * tlen {
-      steal.push((AtomicU64::new(0x1234_FFFF_FFFF_FFFF), AtomicU64::new(0x1234_FFFF_FFFF_FFFF)));
-    }
-
-    // Creates a thread scope
+    // Perform parallel reductions
     std::thread::scope(|s| {
-
-      // For each thread...
-      for tid in 0 .. tlen {
-
-        // Creates thread local attributes
-        let     delta = &delta;
-        let     steal = &steal;
-        let     rlens = &rlens;
-        let     total = &total;
-        let     barry = Arc::clone(&barry);
-        let mut tick  = 0;
-        //let mut rbuff = vec![];
-        let mut child = self.fork(tid, tlen);
-
-        // Spawns the thread
+      for tid in 0 .. tids {
+        let mut ctx = ThreadContext {
+          tid: tid,
+          tids: tids,
+          tick: 0,
+          net: self.fork(tid, tids),
+          book: &book,
+          tlog2: tlog2,
+          delta: &delta,
+          share: &share,
+          rlens: &rlens,
+          total: &total,
+          barry: Arc::clone(&barry),
+        };
         s.spawn(move || {
-
-          // Parallel reduction loop
-          loop {
-
-            // Synchronizes threads
-            barry.wait();
-
-            //println!("[{:08x}] reducing {}", tid, child.rdex.len());
-
-            // Rewrites current redexes
-            child.reduce(book, 1 << 20);
-
-            // Expands if redex count is 0
-            rlens[tid].store(child.rdex.len(), Ordering::Relaxed);
-            total.fetch_add(child.rdex.len(), Ordering::Relaxed);
-            barry.wait();
-            if total.load(Ordering::Relaxed) == 0 {
-              child.expand(book);
-            }
-            barry.wait();
-            total.store(0, Ordering::Relaxed);
-            barry.wait();
-
-            // Halts if redex count is still 0
-            rlens[tid].store(child.rdex.len(), Ordering::Relaxed);
-            total.fetch_add(child.rdex.len(), Ordering::Relaxed);
-            barry.wait();
-            if total.load(Ordering::Relaxed) == 0 {
-              break;
-            }
-            barry.wait();
-            total.store(0, Ordering::Relaxed);
-
-            // Shares redexes with target thread
-            let side  = (child.tid >> (tlen_l2 - 1 - (tick % tlen_l2))) & 1;
-            let shift = (1 << (tlen_l2 - 1)) >> (tick % tlen_l2);
-            let b_tid = if side == 1 { child.tid - shift } else { child.tid + shift };
-            let a_len = child.rdex.len();
-            let b_len = rlens[b_tid].load(Ordering::Relaxed);
-            if a_len > b_len {
-              for i in 0 .. (a_len - b_len) / 2 { // TODO: avoid reversing
-                let r = child.rdex.pop().unwrap();
-                steal[b_tid * STLEN + i].0.store(r.0.0, Ordering::Relaxed);
-                steal[b_tid * STLEN + i].1.store(r.1.0, Ordering::Relaxed);
-              }
-            }
-            barry.wait();
-            if b_len > a_len {
-              for i in 0 .. (b_len - a_len) / 2 {
-                let r = &steal[tid * STLEN + i];
-                let x = Ptr(r.0.load(Ordering::Relaxed));
-                let y = Ptr(r.1.load(Ordering::Relaxed));
-                child.rdex.push((x, y));
-              }
-            }
-
-            // Incs tick
-            tick += 1;
-          }
-
-          // Adds rewrites to stats
-          child.rwts.add_to(delta);
+          main(&mut ctx)
         });
       }
     });
 
+    // Clear redexes and sum stats
     self.rdex.clear();
     delta.add_to(&mut self.rwts);
+
+    // Main reduction loop
+    #[inline(always)]
+    fn main(ctx: &mut ThreadContext) {
+      loop {
+        reduce(ctx);
+        expand(ctx);
+        if count(ctx) == 0 { break; }
+      }
+      ctx.net.rwts.add_to(ctx.delta);
+    }
+
+    // Reduce redexes locally, then share with target
+    #[inline(always)]
+    fn reduce(ctx: &mut ThreadContext) {
+      loop {
+        ctx.net.reduce(ctx.book, LOCAL_LIMIT);
+        if count(ctx) == 0 {
+          break;
+        }
+        let tlog2 = ctx.tlog2;
+        split(ctx, tlog2);
+        ctx.tick += 1;
+      }
+    }
+
+    // Expand head refs
+    #[inline(always)]
+    fn expand(ctx: &mut ThreadContext) {
+      ctx.net.expand(ctx.book);
+    }
+
+    // Count total redexes (and populate 'rlens')
+    #[inline(always)]
+    fn count(ctx: &mut ThreadContext) -> usize {
+      ctx.barry.wait();
+      ctx.total.store(0, Ordering::Relaxed);
+      ctx.barry.wait();
+      ctx.rlens[ctx.tid].store(ctx.net.rdex.len(), Ordering::Relaxed);
+      ctx.total.fetch_add(ctx.net.rdex.len(), Ordering::Relaxed);
+      ctx.barry.wait();
+      return ctx.total.load(Ordering::Relaxed);
+    }
+
+    // Share redexes with target thread
+    #[inline(always)]
+    fn split(ctx: &mut ThreadContext, para: usize) {
+      let side  = (ctx.tid >> (para - 1 - (ctx.tick % para))) & 1;
+      let shift = (1 << (para - 1)) >> (ctx.tick % para);
+      let b_tid = if side == 1 { ctx.tid - shift } else { ctx.tid + shift };
+      let a_len = ctx.net.rdex.len();
+      let b_len = ctx.rlens[b_tid].load(Ordering::Relaxed);
+      if a_len > b_len {
+        let stolen = std::cmp::min(SHARE_LIMIT, (a_len - b_len) / 2);
+        for i in 0 .. stolen { // TODO: avoid reversing
+          let r = ctx.net.rdex.pop().unwrap();
+          ctx.share[b_tid * SHARE_LIMIT + i].0.store(Ptr(r.0.0));
+          ctx.share[b_tid * SHARE_LIMIT + i].1.store(Ptr(r.1.0));
+        }
+      }
+      ctx.barry.wait();
+      if b_len > a_len {
+        let stolen = std::cmp::min(SHARE_LIMIT, (b_len - a_len) / 2);
+        for i in 0 .. stolen {
+          let r = &ctx.share[ctx.tid * SHARE_LIMIT + i];
+          let x = r.0.load();
+          let y = r.1.load();
+          ctx.net.rdex.push((x, y));
+        }
+      }
+    }
+
 
     println!("ALL DONE");
 
