@@ -768,7 +768,7 @@ impl<'a> Net<'a> {
   pub fn mtch(&mut self, a: Ptr, b: Ptr) {
     self.rwts.oper += 1;
     let a1 = Ptr::new(VR1, 0, a.loc()); // branch
-    let a2 = Ptr::new(VR1, 0, a.loc()); // return
+    let a2 = Ptr::new(VR2, 0, a.loc()); // return
     if b.loc() == 0 {
       let loc0 = self.alloc(1);
       self.heap.set(loc0, P2, ERAS);
@@ -1076,9 +1076,5 @@ impl<'a> Net<'a> {
         }
       }
     }
-
-
-    println!("ALL DONE");
-
   }
 }

@@ -38,6 +38,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let (book, mut net) = load(&data, file_name);
         let start_time = std::time::Instant::now();
         net.parallel_normal(&book);
+        //net.normal(&book);
         println!("{}", ast::show_runtime_net(&net));
         if args.len() >= 4 && args[3] == "-s" {
           print_stats(&net, start_time);
