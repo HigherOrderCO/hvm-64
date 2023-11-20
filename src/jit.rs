@@ -998,6 +998,11 @@ impl FunctionLowering<'_> {
     SET_HEAP (net: types::I64,idx: types::I32, port: types::I32, value: types::I32) -> types::I8
   ]);
 
+  fn get_environment(&mut self) -> Value {
+    let variable = self.variables.get("environment").unwrap();
+    self.builder.use_var(*variable)
+  }
+
   fn lower_prop(&mut self, prop: Prop) -> Value {
     match prop {
       Prop::Anni => todo!(),
@@ -1037,24 +1042,23 @@ impl FunctionLowering<'_> {
         self.IS_SKP(expr)
       }
       Expr::NewPtr { tag, value } => {
-        let net = todo!();
         let tag = self.lower_expr(program, *tag);
         let value = self.lower_expr(program, *value);
         self.NEW_PTR(tag, value)
       }
       Expr::Op { lhs, rhs } => {
-        let net = todo!();
+        let net = self.get_environment();
         let lhs = self.lower_expr(program, *lhs);
         let rhs = self.lower_expr(program, *rhs);
         self.OP(net, lhs, rhs)
       },
       Expr::Alloc { size } => {
-        let net = todo!();
+        let net = self.get_environment();
         let size = self.builder.ins().iconst(types::I64, size as i64);
         self.ALLOC(net, size)
       }
       Expr::GetHeap { idx, port } => {
-        let net = todo!();
+        let net = self.get_environment();
         let idx = self.lower_expr(program, *idx);
         let port = self.lower_expr(program, *port);
         self.GET_HEAP(net, idx, port)

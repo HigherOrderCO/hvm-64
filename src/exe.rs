@@ -38,9 +38,9 @@ pub unsafe extern "C" fn ALLOC(net: Net, size: usize) -> Val {
 }
 
 /// [crate::jit::Expr::Op]
-pub unsafe extern "C" fn OP(net: Net, a: Val, a: Val) -> Val {
+pub unsafe extern "C" fn OP(net: Net, a: Val, b: Val) -> Val {
   let net = &mut *net;
-  net.op(idx, port)
+  net.op(a, b)
 }
 
 /// [crate::jit::Expr::GetHeap]
