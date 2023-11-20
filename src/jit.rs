@@ -898,6 +898,36 @@ impl JitLowering {
     // TODO: Can we move the unsafe into cranelift?
     Ok(unsafe { core::slice::from_raw_parts(buffer.0, buffer.1) })
   }
+
+  fn translate(&mut self, program: &LoweringProgram, function: Function) -> *const u8 {
+    let mut lowering = FunctionLowering {
+      builder: FunctionBuilder::new(&mut self.ctx.func, &mut self.builder_context),
+      variables: HashMap::new(),
+      module: &mut self.module,
+    };
+
+    let entry_block = lowering.builder.create_block();
+    let mut return_value = None;
+    lowering.builder.append_block_params_for_function_params(entry_block);
+    lowering.builder.switch_to_block(entry_block);
+    lowering.builder.seal_block(entry_block);
+    for instr in function.body {
+      return_value = lowering.lower_instr(program, instr);
+    }
+
+    if let Some(return_value) = return_value {
+      lowering.builder.ins().return_(&[return_value]);
+    }
+
+    let function = self
+      .module
+      .declare_function(&function.name, Linkage::Export, &self.ctx.func.signature)
+      .expect("Can't create new function");
+
+    self.module.clear_context(&mut self.ctx);
+    self.module.finalize_definitions().unwrap();
+    self.module.get_finalized_function(function)
+  }
 }
 
 /// The state of the program being lowered.
@@ -908,11 +938,10 @@ struct LoweringProgram {
 impl LoweringProgram {
   pub fn lower_constant(&self, constant: Const) -> i64 {
     match constant {
-      Const::F(name) => self
-        .constants
-        .get(&name)
-        .expect("Can't find value for const")
-        .clone(),
+      Const::F(name) => {
+        let constant = self.constants.get(&name);
+        constant.expect("Can't find value for const").clone()
+      }
       Const::P1 => crate::run::P1 as i64,
       Const::P2 => crate::run::P2 as i64,
       Const::NULL => crate::run::NULL.0 as i64,
@@ -979,7 +1008,6 @@ macro_rules! declare_external_function {
 /// A collection of state used for translating from toy-language AST nodes
 /// into Cranelift IR.
 struct FunctionLowering<'a> {
-  int: types::Type,
   builder: FunctionBuilder<'a>,
   variables: HashMap<String, Variable>,
   module: &'a mut JITModule,
@@ -992,10 +1020,10 @@ impl FunctionLowering<'_> {
     IS_NUM (val: types::I32) -> types::I8,
     IS_SKP (val: types::I32) -> types::I8,
     NEW_PTR (tag: types::I8, value: types::I32) -> types::I32,
-    ALLOC (net: types::I64,size: types::I64) -> types::I32,
+    ALLOC (net: types::I64, size: types::I64) -> types::I32,
     OP (net: types::I64, lhs: types::I32, rhs: types::I32) -> types::I32,
-    GET_HEAP (net: types::I64,idx: types::I32, port: types::I32) -> types::I32,
-    SET_HEAP (net: types::I64,idx: types::I32, port: types::I32, value: types::I32) -> types::I8
+    GET_HEAP (net: types::I64, idx: types::I32, port: types::I32) -> types::I32,
+    SET_HEAP (net: types::I64, idx: types::I32, port: types::I32, value: types::I32) -> types::I8
   ]);
 
   fn get_environment(&mut self) -> Value {
@@ -1011,6 +1039,10 @@ impl FunctionLowering<'_> {
       Prop::Comm => todo!(),
       Prop::Var(_) => todo!(),
     }
+  }
+
+  fn lower_instr(&mut self, program: &LoweringProgram, instr: Instr) -> Option<Value> {
+    None
   }
 
   fn lower_expr(&mut self, program: &LoweringProgram, expr: Expr) -> Value {
@@ -1051,7 +1083,7 @@ impl FunctionLowering<'_> {
         let lhs = self.lower_expr(program, *lhs);
         let rhs = self.lower_expr(program, *rhs);
         self.OP(net, lhs, rhs)
-      },
+      }
       Expr::Alloc { size } => {
         let net = self.get_environment();
         let size = self.builder.ins().iconst(types::I64, size as i64);
