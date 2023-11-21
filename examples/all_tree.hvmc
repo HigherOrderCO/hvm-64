@@ -1,30 +1,23 @@
-@true = (a (* a))
-@fals = (* (a a))
-
+@9 = (a a)
+@A = (a a)
+@B = (* @fals)
+@C = ({2 a b} c)
+& @gen ~ (a d)
+& @node ~ (e (d c))
+& @gen ~ (b e)
+@D = (a (b c))
+& @all ~ (a d)
+& @all ~ (b e)
+& @and ~ (d (e c))
+@E = (a a)
+@all = ((@D (@E a)) a)
+@and = ((@A (@B a)) a)
+@fals = (* @9)
+@gen = (?<(a @C) b> b)
+& @leaf ~ (@true a)
 @leaf = (a (* ((a b) b)))
+@main = a
+& @gen ~ (#22 b)
+& @all ~ (b a)
 @node = (a (b ((a (b c)) (* c))))
-
-@and = ((@andA (@andB a)) a)
-@andA = (a a)
-@andB = (* @fals)
-
-@gen = (?<(a @genC) b> b)
-  & @leaf ~ (@true a)
-
-@genC = ({2 a b} c)
-  & @gen ~ (a d)
-  & @node ~ (e (d c))
-  & @gen ~ (b e)
-
-@all = ((@allA (@allB a)) a)
-
-@allA = (a (b c))
-  & @all ~ (a d)
-  & @all ~ (b e)
-  & @and ~ (d (e c))
-
-@allB = (a a)
-
-@main = R
-  & @gen ~ (#22 b)
-  & @all ~ (b R)
+@true = (a (* a))
