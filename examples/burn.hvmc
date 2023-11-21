@@ -38,7 +38,7 @@
 
 @main
   = R
-  & @c3 ~ (@S (@Z dep))
+  & @c4 ~ (@S (@Z dep))
   & @brn ~ (dep R)
 
 //RWTS   : 10587
