@@ -1,7 +1,7 @@
 @node = (a (b ((a (b c)) (* c))))
 @leaf = (a (* ((a b) b)))
 
-@gen = (? (a @genS) b b)
+@gen = (?<(a @genS) b> b)
   & (#1 a) ~ @leaf
 
 @genS = ({2 a b} c)
@@ -12,9 +12,8 @@
 @sum = ((@sumS (@sumZ a)) a)
 
 @sumS = (a (b c))
-  & <d <e c>> ~ #1
-  & (b e)     ~ @sum
-  & (a d)     ~ @sum
+  & (b e)       ~ @sum
+  & (a <+ e c>) ~ @sum
 
 // FIXME: inlining this causes compiled-mode to fail; investigate
 @sumZ = (x x)

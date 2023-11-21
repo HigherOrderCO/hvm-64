@@ -9,6 +9,7 @@
 
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Barrier};
+use std::sync::Once;
 
 pub type Tag  = u8;
 pub type Lab  = u32;
@@ -1058,26 +1059,26 @@ impl<'a> Net<'a> {
         let a_len = ctx.net.rdex.len();
         let b_len = ctx.rlens[b_tid].load(Ordering::Relaxed);
         if a_len > b_len {
+          let mut sent = 0;
+          let mut next = 0;
           for i in 0 .. a_len - b_len {
             let min = b_len;
             let rdx = ctx.net.rdex.get_unchecked_mut(min + i);
-            if i % 2 == 0 {
-              *ctx.net.rdex.get_unchecked_mut(min + i / 2) = *rdx;
+            if i % 2 == 0 || sent >= SHARE_LIMIT {
+              *ctx.net.rdex.get_unchecked_mut(min + next) = *rdx;
+              next += 1;
             } else {
               let send = ctx.share.get_unchecked(b_tid * SHARE_LIMIT + i / 2);
               send.0.store(rdx.0);
               send.1.store(rdx.1);
+              sent += 1;
             }
           }
-          ctx.net.rdex.truncate((a_len + b_len) / 2 + (a_len + b_len) % 2);
-          //println!("[{:04}] sent {} to {} (I had {}, now I have {})", a_tid, sent, b_tid, a_len, ctx.net.rdex.len());
-          //if ctx.net.rdex.len() != a_len - sent {
-            //panic!();
-          //}
+          ctx.net.rdex.truncate(b_len + next);
         }
         ctx.barry.wait();
         if b_len > a_len {
-          for i in 0 .. (b_len - a_len) / 2 {
+          for i in 0 .. std::cmp::min((b_len - a_len) / 2, SHARE_LIMIT) {
             let r = ctx.share.get_unchecked(a_tid * SHARE_LIMIT + i);
             let x = r.0.load();
             let y = r.1.load();
