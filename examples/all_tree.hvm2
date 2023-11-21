@@ -1,0 +1,19 @@
+node = λa λb λnode λleaf (node a b)
+leaf = λv    λnode λleaf (leaf v)
+
+true  = λt λf t
+false = λt λf f
+
+and = λa (a λb(b) λb(false))
+
+gen = λn match n {
+  0   : (leaf true)
+  1+p : (node (gen p) (gen p))
+}
+
+all = λt
+  let case_node = λa λb (and (all a) (all b))
+  let case_leaf = λv v
+  (t case_node case_leaf)
+
+main = (all (gen 20))
