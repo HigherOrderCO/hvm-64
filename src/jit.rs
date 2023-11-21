@@ -1056,7 +1056,13 @@ impl FunctionLowering<'_> {
       }
       Expr::Prop(prop) => self.lower_prop(prop),
       Expr::Not { expr } => todo!(),
-      Expr::Bin { op, lhs, rhs } => todo!(),
+      Expr::Bin { op, lhs, rhs } => {
+        let _lhs = self.lower_expr(program, *lhs);
+        let _rhs = self.lower_expr(program, *rhs);
+        match op.as_str() {
+          _ => todo!()
+        }
+      },
       Expr::Val { expr } => {
         let expr = self.lower_expr(program, *expr);
         self.VAL(expr)
