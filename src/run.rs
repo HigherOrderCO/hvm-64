@@ -793,7 +793,7 @@ impl<'a> Net<'a> {
     let a2 = Ptr::new(VR2, 0, a.loc());
     self.heap.set(loc0, P1, b);
     self.half_atomic_link(a2, Ptr::new(VR2, 0, loc0));
-    self.half_atomic_link(a1, Ptr::new(OP1, 0, loc0));
+    self.half_atomic_link(a1, Ptr::new(OP1, a.lab(), loc0));
   }
 
   pub fn op1n(&mut self, a: Ptr, b: Ptr) {
