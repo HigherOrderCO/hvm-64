@@ -33,4 +33,4 @@
 (Sum (Leaf x))   = x
 (Sum (Both a b)) = (+ (Sum a) (Sum b))
 
-Main = (Sum (Sort 0 (Rev (Gen 16 0))))
+Main = (Sum (Sort 0 (Rev (Gen 18 0))))

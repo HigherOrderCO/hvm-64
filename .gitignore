@@ -1,3 +1,9 @@
+*
+!*.*
+!*/
+### Above combination will ignore all files without extension ###
+### https://stackoverflow.com/questions/5711120/gitignore-binary-files-that-have-no-extension ###
+
 target/
 tmp/
 .hvm/

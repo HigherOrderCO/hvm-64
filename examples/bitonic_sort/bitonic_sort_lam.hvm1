@@ -52,4 +52,4 @@ Sum = λa
   let a_node = λa0 λa1 (+ ((Sum) a0) ((Sum) a1))
   (a a_leaf a_node)
 
-Main = ((Sum) ((Sort) ((Rev) ((Gen) 16 0)) 0))
+Main = ((Sum) ((Sort) ((Rev) ((Gen) 18 0)) 0))

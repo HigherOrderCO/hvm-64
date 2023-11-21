@@ -54,7 +54,7 @@ sum = λa
   let a_node = λa0 λa1 (+ (sum a0) (sum a1))
   (a a_leaf a_node)
 
-main = (sum (sort (rev (gen 16 0)) 0))
+main = (sum (sort (rev (gen 18 0)) 0))
 
 //Main = (Sum (Sort 0 (Rev (Gen 18 0))))
 

@@ -1,3 +1,5 @@
+// Exponentiation of Church encodings.
+
 @c2  = ({1 {1 (c b) (b a)} (a R)} (c R))
 @c4  = ({1 {1 {1 (d c) (c b)} (b a)} (a R)} (d R))
 @c6  = ({1 {1 {1 {1 {1 (f e) (e d)} (d c)} (c b)} (b a)} (a R)} (f R))
