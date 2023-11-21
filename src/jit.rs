@@ -108,7 +108,7 @@ pub enum Instr {
     name: Prop,
     value: Expr,
   },
-  Instr(Expr),
+  Expr(Expr),
   Free(Expr),
   Return(Expr),
   /// self.heap.set(idx, port, value)
@@ -503,7 +503,7 @@ fn fast_match(lowering: &mut Lowering, def: &Def, ptr: Ptr, target: Expr) -> boo
         let c_s = lowering.declare_fresh(TypeRepr::HvmPtr);
         // FAST MATCH
         // if tag(target) = CT0 && is-num(get-heap(val(target))
-        lowering.stmts.push(Instr::Instr(Expr::If {
+        lowering.stmts.push(Instr::Expr(Expr::If {
           cond: Expr::from(target.clone())
             .eq(Expr::from(Const::CT0))
             .and(
@@ -541,7 +541,7 @@ fn fast_match(lowering: &mut Lowering, def: &Def, ptr: Ptr, target: Expr) -> boo
             //   self.heap.set(target.val(), P1, Ptr::new(NUM, num.val() - 1))
             //   c_z = ERAS
             //   c_s = target
-            lowering.stmts.push(Instr::Instr(Expr::If {
+            lowering.stmts.push(Instr::Expr(Expr::If {
               cond: Expr::from(num.clone()).eq(Expr::Int(0)).into(),
               then: lowering.fork_on(|lowering| {
                 lowering
@@ -634,7 +634,7 @@ fn fast_op(lowering: &mut Lowering, def: &Def, ptr: Ptr, target: Expr) -> bool {
         //   self.link(Ptr::new(VR1, opy), v-y)
         //   self.link(Ptr::new(OP2, opx), target)
         //   nxt = Ptr::new(VR2, opy)
-        lowering.stmts.push(Instr::Instr(Expr::If {
+        lowering.stmts.push(Instr::Expr(Expr::If {
           cond: Expr::from(target.clone())
             .is_num()
             .and(v_x.clone().is_num())
@@ -716,7 +716,7 @@ fn fast_copy(lowering: &mut Lowering, def: &Def, ptr: Ptr, target: Expr) -> bool
     //   x1 = Ptr::new(VR1, lc)
     //   x2 = Ptr::new(VR2, lc)
     //   self.link(Ptr::new(ptr.tag(), lc), target)
-    lowering.stmts.push(Instr::Instr(Expr::If {
+    lowering.stmts.push(Instr::Expr(Expr::If {
       cond: Expr::from(target.clone())
         .tag()
         .eq(Expr::from(Const::NUM))
@@ -770,7 +770,7 @@ fn fast_apply(lowering: &mut Lowering, def: &Def, ptr: Ptr, target: Expr) -> boo
     //   x1 = Ptr::new(VR1, lc)
     //   x2 = Ptr::new(VR2, lc)
     //   self.link(Ptr::new(ptr.tag(), lc), target)
-    lowering.stmts.push(Instr::Instr(Expr::If {
+    lowering.stmts.push(Instr::Expr(Expr::If {
       cond: Expr::from(target.clone())
         .tag()
         .eq(Expr::from(compile_tag(ptr.tag())))
@@ -818,7 +818,7 @@ fn fast_apply(lowering: &mut Lowering, def: &Def, ptr: Ptr, target: Expr) -> boo
 fn fast_erase(lowering: &mut Lowering, def: &Def, ptr: Ptr, target: Expr) -> bool {
   if ptr.is_num() || ptr.is_era() {
     // FAST ERASE
-    lowering.stmts.push(Instr::Instr(Expr::If {
+    lowering.stmts.push(Instr::Expr(Expr::If {
       cond: Expr::from(target.clone()).is_skp().into(),
       then: lowering.fork_on(|lowering| {
         lowering.assign(Prop::Eras, Expr::from(Prop::Eras).add(Expr::Int(1)));
@@ -897,6 +897,7 @@ impl JitLowering {
 
   fn translate(&mut self, program: &LoweringProgram, function: Function) -> *const u8 {
     let mut lowering = FunctionLowering {
+      program,
       builder: FunctionBuilder::new(&mut self.ctx.func, &mut self.builder_context),
       variables: HashMap::new(),
       module: &mut self.module,
@@ -908,7 +909,7 @@ impl JitLowering {
     lowering.builder.switch_to_block(entry_block);
     lowering.builder.seal_block(entry_block);
     for instr in function.body {
-      return_value = lowering.lower_instr(program, instr);
+      return_value = lowering.lower_instr(instr);
     }
 
     if let Some(return_value) = return_value {
@@ -1003,13 +1004,14 @@ macro_rules! declare_external_function {
 
 /// A collection of state used for translating from toy-language AST nodes
 /// into Cranelift IR.
-struct FunctionLowering<'a> {
-  builder: FunctionBuilder<'a>,
+struct FunctionLowering<'program, 'jit> {
+  program: &'program LoweringProgram,
+  builder: FunctionBuilder<'jit>,
   variables: HashMap<String, Variable>,
-  module: &'a mut JITModule,
+  module: &'jit mut JITModule,
 }
 
-impl FunctionLowering<'_> {
+impl FunctionLowering<'_, '_> {
   declare_external_function!([
     VAL (val: types::I32) -> types::I32,
     TAG (val: types::I32) -> types::I32,
@@ -1037,52 +1039,61 @@ impl FunctionLowering<'_> {
     }
   }
 
-  fn lower_instr(&mut self, program: &LoweringProgram, instr: Instr) -> Option<Value> {
-    None
+  fn lower_instr(&mut self, instr: Instr) -> Option<Value> {
+    match instr {
+        Instr::Let { name, value } => todo!(),
+        Instr::Val { name, type_repr } => todo!(),
+        Instr::Assign { name, value } => todo!(),
+        Instr::Expr(expr) => Some(self.lower_expr(expr)),
+        Instr::Free(_) => todo!(),
+        Instr::Return(_) => todo!(),
+        Instr::SetHeap { idx, port, value } => todo!(),
+        Instr::Link { lhs, rhs } => todo!(),
+    }
   }
 
-  fn lower_expr(&mut self, program: &LoweringProgram, expr: Expr) -> Value {
+  fn lower_expr(&mut self, expr: Expr) -> Value {
     match expr {
       Expr::True => self.builder.ins().iconst(types::I8, 1),
       Expr::False => self.builder.ins().iconst(types::I8, 0),
       Expr::Int(v) => self.builder.ins().iconst(types::I32, v as i64),
       Expr::Const(constant) => {
-        let value_constant = program.lower_constant(constant);
+        let value_constant = self.program.lower_constant(constant);
         self.builder.ins().iconst(types::I8, value_constant)
       }
       Expr::Prop(prop) => self.lower_prop(prop),
       Expr::Bin { op, lhs, rhs } => {
-        let _lhs = self.lower_expr(program, *lhs);
-        let _rhs = self.lower_expr(program, *rhs);
+        let _lhs = self.lower_expr(*lhs);
+        let _rhs = self.lower_expr(*rhs);
         match op.as_str() {
           _ => todo!()
         }
       },
       Expr::Val { expr } => {
-        let expr = self.lower_expr(program, *expr);
+        let expr = self.lower_expr(*expr);
         self.VAL(expr)
       }
       Expr::Tag { expr } => {
-        let expr = self.lower_expr(program, *expr);
+        let expr = self.lower_expr(*expr);
         self.TAG(expr)
       }
       Expr::IsNum { expr } => {
-        let expr = self.lower_expr(program, *expr);
+        let expr = self.lower_expr(*expr);
         self.IS_NUM(expr)
       }
       Expr::IsSkp { expr } => {
-        let expr = self.lower_expr(program, *expr);
+        let expr = self.lower_expr(*expr);
         self.IS_SKP(expr)
       }
       Expr::NewPtr { tag, value } => {
-        let tag = self.lower_expr(program, *tag);
-        let value = self.lower_expr(program, *value);
+        let tag = self.lower_expr(*tag);
+        let value = self.lower_expr(*value);
         self.NEW_PTR(tag, value)
       }
       Expr::Op { lhs, rhs } => {
         let net = self.get_environment();
-        let lhs = self.lower_expr(program, *lhs);
-        let rhs = self.lower_expr(program, *rhs);
+        let lhs = self.lower_expr(*lhs);
+        let rhs = self.lower_expr(*rhs);
         self.OP(net, lhs, rhs)
       }
       Expr::Alloc { size } => {
@@ -1092,8 +1103,8 @@ impl FunctionLowering<'_> {
       }
       Expr::GetHeap { idx, port } => {
         let net = self.get_environment();
-        let idx = self.lower_expr(program, *idx);
-        let port = self.lower_expr(program, *port);
+        let idx = self.lower_expr(*idx);
+        let port = self.lower_expr(*port);
         self.GET_HEAP(net, idx, port)
       }
       Expr::If {
@@ -1205,7 +1216,7 @@ mod rust_codegen {
             quote! { #name = #value; }
           }
         },
-        Instr::Instr(instr) => quote! { #instr; },
+        Instr::Expr(instr) => quote! { #instr; },
         Instr::Free(value) => quote! { self.free(#value); },
         Instr::Return(value) => quote! { return #value; },
         Instr::SetHeap { idx, port, value } => quote! { self.heap.set(#idx, #port, #value); },
