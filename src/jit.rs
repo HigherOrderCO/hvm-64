@@ -68,7 +68,7 @@ pub enum Const {
 
 /// Property or variable, it's self.prop, like self.anni, self.oper, etc.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Prop {
+pub enum Var {
   Anni,
   Oper,
   Eras,
@@ -96,16 +96,19 @@ pub struct Function {
 /// Represents a single statement in the IR.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Instr {
+  /// Declares a variable and assigns it's value.
   Let {
     name: String,
     value: Expr,
   },
+  /// Declares a variable without declaring it's value, it's useful for delaying the initialization.
   Val {
     name: String,
     type_repr: TypeRepr,
   },
+  /// Assigns a value to a property.
   Assign {
-    name: Prop,
+    name: Var,
     value: Expr,
   },
   Expr(Expr),
@@ -131,7 +134,7 @@ pub enum Expr {
   False,
   Int(u32),
   Const(Const),
-  Prop(Prop),
+  Var(Var),
 
   /// SPECIAL TERM: Call
   /// if cond then else els
@@ -197,13 +200,13 @@ impl From<Const> for Expr {
 
 impl From<String> for Expr {
   fn from(value: String) -> Self {
-    Expr::Prop(Prop::Var(value))
+    Expr::Var(Var::Var(value))
   }
 }
 
-impl From<Prop> for Expr {
-  fn from(value: Prop) -> Self {
-    Expr::Prop(value)
+impl From<Var> for Expr {
+  fn from(value: Var) -> Self {
+    Expr::Var(value)
   }
 }
 
@@ -314,7 +317,7 @@ impl Lowering<'_> {
   fn fresh(&mut self) -> Expr {
     let name = format!("v{}", self.newx.get());
     self.newx.set(self.newx.get() + 1);
-    Expr::Prop(Prop::Var(name))
+    Expr::Var(Var::Var(name))
   }
 
   /// returns a fresh variable: 'v<NUM>'
@@ -378,7 +381,7 @@ impl Lowering<'_> {
   }
 
   /// Assigns a value to a property
-  fn assign(&mut self, prop: Prop, value: Expr) {
+  fn assign(&mut self, prop: Var, value: Expr) {
     self.stmts.push(Instr::Assign { name: prop, value });
   }
 
@@ -516,10 +519,10 @@ fn fast_match(lowering: &mut Lowering, def: &Def, ptr: Ptr, target: Expr) -> boo
             .into(),
           then: lowering.fork_on(|lowering| {
             // self.anni += 2
-            lowering.assign(Prop::Anni, Expr::from(Prop::Anni).add(Expr::Int(2)));
+            lowering.assign(Var::Anni, Expr::from(Var::Anni).add(Expr::Int(2)));
 
             // self.oper += 1
-            lowering.assign(Prop::Oper, Expr::from(Prop::Anni).add(Expr::Int(1)));
+            lowering.assign(Var::Oper, Expr::from(Var::Anni).add(Expr::Int(1)));
 
             // let num = self.heap.get(target.val(), P1)
             let num = lowering.define_fresh(Expr::GetHeap {
@@ -547,8 +550,8 @@ fn fast_match(lowering: &mut Lowering, def: &Def, ptr: Ptr, target: Expr) -> boo
                 lowering
                   .stmts
                   .push(Instr::Free(Expr::from(target.clone()).val()));
-                lowering.assign(Prop::Var(c_z.clone()), Expr::from(res.clone()));
-                lowering.assign(Prop::Var(c_s.clone()), Expr::from(Const::ERAS));
+                lowering.assign(Var::Var(c_z.clone()), Expr::from(res.clone()));
+                lowering.assign(Var::Var(c_s.clone()), Expr::from(Const::ERAS));
               }),
               otherwise: lowering.fork_on(|lowering| {
                 lowering.stmts.push(Instr::SetHeap {
@@ -557,8 +560,8 @@ fn fast_match(lowering: &mut Lowering, def: &Def, ptr: Ptr, target: Expr) -> boo
                   value: Expr::new_ptr(Expr::from(Const::NUM), Expr::from(num).sub(Expr::Int(1)))
                     .into(),
                 });
-                lowering.assign(Prop::Var(c_z.clone()), Expr::from(Const::ERAS));
-                lowering.assign(Prop::Var(c_s.clone()), Expr::from(target.clone()));
+                lowering.assign(Var::Var(c_z.clone()), Expr::from(Const::ERAS));
+                lowering.assign(Var::Var(c_s.clone()), Expr::from(target.clone()));
               }),
             }))
           }),
@@ -594,11 +597,11 @@ fn fast_match(lowering: &mut Lowering, def: &Def, ptr: Ptr, target: Expr) -> boo
               Expr::new_ptr(Const::CT0, Expr::from(lam.clone())).link(Expr::from(target.clone())),
             );
             lowering.assign(
-              Prop::Var(c_z.clone()),
+              Var::Var(c_z.clone()),
               Expr::new_ptr(Const::VR1, Expr::from(cse.clone())),
             );
             lowering.assign(
-              Prop::Var(c_s.clone()),
+              Var::Var(c_s.clone()),
               Expr::new_ptr(Const::VR2, Expr::from(cse.clone())),
             );
           }),
@@ -641,9 +644,9 @@ fn fast_op(lowering: &mut Lowering, def: &Def, ptr: Ptr, target: Expr) -> bool {
             .and(v_y.clone().is_num())
             .into(),
           then: lowering.fork_on(|lowering| {
-            lowering.assign(Prop::Oper, Expr::from(Prop::Oper).add(Expr::Int(4)));
+            lowering.assign(Var::Oper, Expr::from(Var::Oper).add(Expr::Int(4)));
             lowering.assign(
-              Prop::Var(nxt.clone()),
+              Var::Var(nxt.clone()),
               Expr::new_ptr(Const::NUM, Expr::Op {
                 lhs: Expr::Op {
                   lhs: Expr::from(target.clone()).val().into(),
@@ -682,7 +685,7 @@ fn fast_op(lowering: &mut Lowering, def: &Def, ptr: Ptr, target: Expr) -> bool {
 
             // nxt = Ptr::new(VR2, opy)
             lowering.assign(
-              Prop::Var(nxt.clone()),
+              Var::Var(nxt.clone()),
               Expr::new_ptr(Const::VR2, Expr::from(opy.clone())),
             );
           }),
@@ -722,18 +725,18 @@ fn fast_copy(lowering: &mut Lowering, def: &Def, ptr: Ptr, target: Expr) -> bool
         .eq(Expr::from(Const::NUM))
         .into(),
       then: lowering.fork_on(|lowering| {
-        lowering.assign(Prop::Comm, Expr::from(Prop::Comm).add(Expr::Int(1)));
-        lowering.assign(Prop::Var(x1.clone()), Expr::from(target.clone()));
-        lowering.assign(Prop::Var(x2.clone()), Expr::from(target.clone()));
+        lowering.assign(Var::Comm, Expr::from(Var::Comm).add(Expr::Int(1)));
+        lowering.assign(Var::Var(x1.clone()), Expr::from(target.clone()));
+        lowering.assign(Var::Var(x2.clone()), Expr::from(target.clone()));
       }),
       otherwise: lowering.fork_on(|lowering| {
         let lc = lowering.define_fresh(Expr::Alloc { size: 1 });
         lowering.assign(
-          Prop::Var(x1.clone()),
+          Var::Var(x1.clone()),
           Expr::new_ptr(Const::VR1, lc.clone().into()),
         );
         lowering.assign(
-          Prop::Var(x2.clone()),
+          Var::Var(x2.clone()),
           Expr::new_ptr(Const::VR2, lc.clone().into()),
         );
         lowering
@@ -776,12 +779,12 @@ fn fast_apply(lowering: &mut Lowering, def: &Def, ptr: Ptr, target: Expr) -> boo
         .eq(Expr::from(compile_tag(ptr.tag())))
         .into(),
       then: lowering.fork_on(|lowering| {
-        lowering.assign(Prop::Anni, Expr::from(Prop::Anni).add(Expr::Int(1)));
-        lowering.assign(Prop::Var(x1.clone()), Expr::GetHeap {
+        lowering.assign(Var::Anni, Expr::from(Var::Anni).add(Expr::Int(1)));
+        lowering.assign(Var::Var(x1.clone()), Expr::GetHeap {
           idx: Expr::from(target.clone()).val().into(),
           port: Expr::from(Const::P1).into(),
         });
-        lowering.assign(Prop::Var(x2.clone()), Expr::GetHeap {
+        lowering.assign(Var::Var(x2.clone()), Expr::GetHeap {
           idx: Expr::from(target.clone()).val().into(),
           port: Expr::from(Const::P2).into(),
         });
@@ -792,11 +795,11 @@ fn fast_apply(lowering: &mut Lowering, def: &Def, ptr: Ptr, target: Expr) -> boo
       otherwise: lowering.fork_on(|lowering| {
         let lc = lowering.define_fresh(Expr::Alloc { size: 1 });
         lowering.assign(
-          Prop::Var(x1.clone()),
+          Var::Var(x1.clone()),
           Expr::new_ptr(Const::VR1, lc.clone().into()),
         );
         lowering.assign(
-          Prop::Var(x2.clone()),
+          Var::Var(x2.clone()),
           Expr::new_ptr(Const::VR2, lc.clone().into()),
         );
         lowering
@@ -821,7 +824,7 @@ fn fast_erase(lowering: &mut Lowering, def: &Def, ptr: Ptr, target: Expr) -> boo
     lowering.stmts.push(Instr::Expr(Expr::If {
       cond: Expr::from(target.clone()).is_skp().into(),
       then: lowering.fork_on(|lowering| {
-        lowering.assign(Prop::Eras, Expr::from(Prop::Eras).add(Expr::Int(1)));
+        lowering.assign(Var::Eras, Expr::from(Var::Eras).add(Expr::Int(1)));
       }),
       otherwise: lowering.fork_on(|lowering| {
         lowering.make(def, ptr, target.clone());
@@ -1029,26 +1032,28 @@ impl FunctionLowering<'_, '_> {
     self.builder.use_var(*variable)
   }
 
-  fn lower_prop(&mut self, prop: Prop) -> Value {
+  fn lower_prop(&mut self, prop: Var) -> Value {
     match prop {
-      Prop::Anni => todo!(),
-      Prop::Oper => todo!(),
-      Prop::Eras => todo!(),
-      Prop::Comm => todo!(),
-      Prop::Var(_) => todo!(),
+      Var::Anni => todo!(),
+      Var::Oper => todo!(),
+      Var::Eras => todo!(),
+      Var::Comm => todo!(),
+      Var::Var(_) => todo!(),
     }
   }
 
   fn lower_instr(&mut self, instr: Instr) -> Option<Value> {
     match instr {
+        Instr::Free(_) => todo!(),
+        Instr::SetHeap { idx, port, value } => todo!(),
+        Instr::Link { lhs, rhs } => todo!(),
+
+        // STATEMENTS
         Instr::Let { name, value } => todo!(),
         Instr::Val { name, type_repr } => todo!(),
         Instr::Assign { name, value } => todo!(),
         Instr::Expr(expr) => Some(self.lower_expr(expr)),
-        Instr::Free(_) => todo!(),
         Instr::Return(_) => todo!(),
-        Instr::SetHeap { idx, port, value } => todo!(),
-        Instr::Link { lhs, rhs } => todo!(),
     }
   }
 
@@ -1061,7 +1066,7 @@ impl FunctionLowering<'_, '_> {
         let value_constant = self.program.lower_constant(constant);
         self.builder.ins().iconst(types::I8, value_constant)
       }
-      Expr::Prop(prop) => self.lower_prop(prop),
+      Expr::Var(prop) => self.lower_prop(prop),
       Expr::Bin { op, lhs, rhs } => {
         let _lhs = self.lower_expr(*lhs);
         let _rhs = self.lower_expr(*rhs);
@@ -1207,11 +1212,11 @@ mod rust_codegen {
           quote! { let #name: #type_repr; }
         }
         Instr::Assign { name, value } => match name {
-          Prop::Anni => quote! { self.anni = #value; },
-          Prop::Oper => quote! { self.oper = #value; },
-          Prop::Eras => quote! { self.eras = #value; },
-          Prop::Comm => quote! { self.comm = #value; },
-          Prop::Var(var) => {
+          Var::Anni => quote! { self.anni = #value; },
+          Var::Oper => quote! { self.oper = #value; },
+          Var::Eras => quote! { self.eras = #value; },
+          Var::Comm => quote! { self.comm = #value; },
+          Var::Var(var) => {
             let name = format_ident!("{}", var).to_token_stream();
             quote! { #name = #value; }
           }
@@ -1269,11 +1274,11 @@ mod rust_codegen {
         Expr::Const(Const::NOT) => quote! { crate::run::NOT },
         Expr::Const(Const::RSH) => quote! { crate::run::RSH },
         Expr::Const(Const::LSH) => quote! { crate::run::LSH },
-        Expr::Prop(Prop::Var(name)) => format_ident!("{}", name).into_token_stream(),
-        Expr::Prop(Prop::Anni) => quote! { self.anni },
-        Expr::Prop(Prop::Comm) => quote! { self.comm },
-        Expr::Prop(Prop::Eras) => quote! { self.eras },
-        Expr::Prop(Prop::Oper) => quote! { self.oper },
+        Expr::Var(Var::Var(name)) => format_ident!("{}", name).into_token_stream(),
+        Expr::Var(Var::Anni) => quote! { self.anni },
+        Expr::Var(Var::Comm) => quote! { self.comm },
+        Expr::Var(Var::Eras) => quote! { self.eras },
+        Expr::Var(Var::Oper) => quote! { self.oper },
         Expr::Val { expr: ins } => quote! { #ins.val() },
         Expr::Tag { expr: ins } => quote! { #ins.tag() },
         Expr::IsNum { expr: ins } => quote! { #ins.is_num() },
