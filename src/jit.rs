@@ -140,10 +140,6 @@ pub enum Expr {
     then: Vec<Instr>,
     otherwise: Vec<Instr>,
   },
-  /// !ins
-  Not {
-    expr: Box<Expr>,
-  },
   /// lhs op rhs
   Bin {
     op: String,
@@ -1055,7 +1051,6 @@ impl FunctionLowering<'_> {
         self.builder.ins().iconst(types::I8, value_constant)
       }
       Expr::Prop(prop) => self.lower_prop(prop),
-      Expr::Not { expr } => todo!(),
       Expr::Bin { op, lhs, rhs } => {
         let _lhs = self.lower_expr(program, *lhs);
         let _rhs = self.lower_expr(program, *rhs);
@@ -1268,7 +1263,6 @@ mod rust_codegen {
         Expr::Prop(Prop::Comm) => quote! { self.comm },
         Expr::Prop(Prop::Eras) => quote! { self.eras },
         Expr::Prop(Prop::Oper) => quote! { self.oper },
-        Expr::Not { expr: ins } => quote! { !#ins },
         Expr::Val { expr: ins } => quote! { #ins.val() },
         Expr::Tag { expr: ins } => quote! { #ins.tag() },
         Expr::IsNum { expr: ins } => quote! { #ins.is_num() },
@@ -1334,12 +1328,6 @@ impl Expr {
 
   pub fn tag(self) -> Expr {
     Expr::Tag {
-      expr: Box::new(self),
-    }
-  }
-
-  pub fn not(self) -> Expr {
-    Expr::Not {
       expr: Box::new(self),
     }
   }
