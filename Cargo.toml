@@ -1,6 +1,6 @@
 [package]
 name = "hvm-core"
-version = "0.1.15"
+version = "0.2.0"
 edition = "2021"
 description = "HVM-Core is a massively parallel Interaction Combinator evaluator."
 license = "MIT"
