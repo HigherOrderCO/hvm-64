@@ -16,4 +16,4 @@ all = λt
   let case_leaf = λv v
   (t case_node case_leaf)
 
-main = (all (gen 24))
+main = (all (gen 22))
