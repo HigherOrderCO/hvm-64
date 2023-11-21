@@ -1,8 +1,8 @@
-node = λa λb λnode λleaf (node a b)
-leaf = λv    λnode λleaf (leaf v)
-
 true  = λt λf t
 false = λt λf f
+
+node = λa λb λnode λleaf (node a b)
+leaf = λv    λnode λleaf (leaf v)
 
 and = λa (a λb(b) λb(false))
 
@@ -16,4 +16,4 @@ all = λt
   let case_leaf = λv v
   (t case_node case_leaf)
 
-main = (all (gen 20))
+main = (all (gen 22))
