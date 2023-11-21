@@ -26,5 +26,5 @@
 @allB = (a a)
 
 @main = R
-  & @gen ~ (#22 b)
+  & @gen ~ (#24 b)
   & @all ~ (b R)
