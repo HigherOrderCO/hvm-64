@@ -12,15 +12,22 @@ use hvmc::fns;
 use hvmc::jit;
 use hvmc::run;
 
+use std::collections::HashSet;
+
 #[cfg(not(feature = "hvm_cli_options"))]
 fn main() {
   let args: Vec<String> = env::args().collect();
+  let opts = args.iter().skip(3).map(|s| s.as_str()).collect::<HashSet<_>>();
   let book = run::Book::new();
   let data = run::Heap::init(1 << 28);
   let mut net = run::Net::new(&data);
   net.boot(ast::name_to_val("main") as run::Loc);
   let start_time = std::time::Instant::now();
-  net.parallel_normal(&book);
+  if opts.contains("-1") {
+    net.normal(&book);
+  } else {
+    net.parallel_normal(&book);
+  }
   println!("{}", ast::show_runtime_net(&net));
   print_stats(&net, start_time);
 }
@@ -30,6 +37,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
   let data = run::Heap::init(1 << 28);
   let args: Vec<String> = env::args().collect();
   let help = "help".to_string();
+  let opts = args.iter().skip(3).map(|s| s.as_str()).collect::<HashSet<_>>();
   let action = args.get(1).unwrap_or(&help);
   let f_name = args.get(2);
   match action.as_str() {
@@ -37,10 +45,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
       if let Some(file_name) = f_name {
         let (book, mut net) = load(&data, file_name);
         let start_time = std::time::Instant::now();
-        net.parallel_normal(&book);
-        //net.normal(&book);
+        if opts.contains("-1") {
+          net.normal(&book);
+        } else {
+          net.parallel_normal(&book);
+        }
         println!("{}", ast::show_runtime_net(&net));
-        if args.len() >= 4 && args[3] == "-s" {
+        if opts.contains("-s") {
           print_stats(&net, start_time);
         }
       } else {
@@ -75,6 +86,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
       println!("  gen-cuda-book - Generate a CUDA book from the given file");
       println!("Options:");
       println!("  [-s] Show stats, including rewrite count");
+      println!("  [-1] Single-core mode (no parallelism)");
     }
   }
   Ok(())

@@ -40,38 +40,3 @@
   = R
   & @c4 ~ (@S (@Z dep))
   & @brn ~ (dep R)
-
-//RWTS   : 10587
-//- ANNI : 5586
-//- COMM : 315
-//- ERAS : 1980
-//- DREF : 2706
-//- OPER : 0
-//TIME   : 0.000 s
-
-//RWTS   : 10587
-//- ANNI : 5586
-//- COMM : 315
-//- ERAS : 1980
-//- DREF : 2706
-//- OPER : 0
-//TIME   : 0.002 s
-//RPS    : 5.293 m
-
-//(((a b) (c d)) ((e f) (g h)))
-//& @run ~ (i a)
-//& @c20 ~ (@I (@E i))
-//& @run ~ (j b)
-//& @c20 ~ (@I (@E j))
-//& @run ~ (k c)
-//& @c20 ~ (@I (@E k))
-//& @run ~ (l d)
-//& @c20 ~ (@I (@E l))
-//& @run ~ (m e)
-//& @c20 ~ (@I (@E m))
-//& @run ~ (n f)
-//& @c20 ~ (@I (@E n))
-//& @run ~ (o g)
-//& @c20 ~ (@I (@E o))
-//& @run ~ (p h)
-//& @c20 ~ (@I (@E p))
