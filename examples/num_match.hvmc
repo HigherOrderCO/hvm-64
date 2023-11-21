@@ -1,4 +1,4 @@
-@pred = (? (#0 (x x)) R R)
+@pred = (?<(#0 (x x)) R> R)
 
 @main
   = R

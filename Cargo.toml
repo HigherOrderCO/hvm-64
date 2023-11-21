@@ -29,6 +29,8 @@ hvm_cli_options = []
 
 # Benchmark dependencies
 
+[dependencies]
+
 [dev-dependencies]
 criterion = "0.5.1"
 hvm-lang = { git = "https://github.com/HigherOrderCO/hvm-lang.git" } # allows us to use the hvm-lang syntax for tests/benchmarks

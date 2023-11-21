@@ -16,16 +16,18 @@ use hvmc::run;
 fn main() {
   let args: Vec<String> = env::args().collect();
   let book = run::Book::new();
-  let mut net = run::Net::new(1 << 28);
-  net.boot(ast::name_to_val("main"));
+  let data = run::Heap::init(1 << 28);
+  let mut net = run::Net::new(&data);
+  net.boot(ast::name_to_val("main") as run::Loc);
   let start_time = std::time::Instant::now();
-  net.normal(&book);
+  net.parallel_normal(&book);
   println!("{}", ast::show_runtime_net(&net));
   print_stats(&net, start_time);
 }
 
 #[cfg(feature = "hvm_cli_options")]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+  let data = run::Heap::init(1 << 28);
   let args: Vec<String> = env::args().collect();
   let help = "help".to_string();
   let action = args.get(1).unwrap_or(&help);
@@ -33,9 +35,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
   match action.as_str() {
     "run" => {
       if let Some(file_name) = f_name {
-        let (book, mut net) = load(file_name);
+        let (book, mut net) = load(&data, file_name);
         let start_time = std::time::Instant::now();
-        net.normal(&book);
+        net.parallel_normal(&book);
+        //net.normal(&book);
         println!("{}", ast::show_runtime_net(&net));
         if args.len() >= 4 && args[3] == "-s" {
           print_stats(&net, start_time);
@@ -47,7 +50,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     "compile" => {
       if let Some(file_name) = f_name {
-        let (book, _) = load(file_name);
+        let (book, _) = load(&data, file_name);
         compile_book_to_rust_crate(file_name, &book)?;
         compile_rust_crate_to_executable(file_name)?;
       } else {
@@ -57,7 +60,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     "gen-cuda-book" => {
       if let Some(file_name) = f_name {
-        let book = load(file_name).0;
+        let book = load(&data, file_name).0;
         println!("{}", gen_cuda_book(&book));
       } else {
         println!("Usage: hvmc gen-cuda-book <file.hvmc>");
@@ -78,22 +81,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn print_stats(net: &run::Net, start_time: std::time::Instant) {
-  println!("RWTS   : {}", net.anni + net.comm + net.eras + net.dref + net.oper);
-  println!("- ANNI : {}", net.anni);
-  println!("- COMM : {}", net.comm);
-  println!("- ERAS : {}", net.eras);
-  println!("- DREF : {}", net.dref);
-  println!("- OPER : {}", net.oper);
+  println!("RWTS   : {}", net.rewrites());
+  println!("- ANNI : {}", net.rwts.anni);
+  println!("- COMM : {}", net.rwts.comm);
+  println!("- ERAS : {}", net.rwts.eras);
+  println!("- DREF : {}", net.rwts.dref);
+  println!("- OPER : {}", net.rwts.oper);
   println!("TIME   : {:.3} s", (start_time.elapsed().as_millis() as f64) / 1000.0);
   println!("RPS    : {:.3} m", (net.rewrites() as f64) / (start_time.elapsed().as_millis() as f64) / 1000.0);
 }
 
 // Load file and generate net
-fn load(file: &str) -> (run::Book, run::Net) {
+fn load<'a>(data: &'a run::Data, file: &str) -> (run::Book, run::Net<'a>) {
   let file = fs::read_to_string(file).unwrap();
   let book = ast::book_to_runtime(&ast::do_parse_book(&file));
-  let mut net = run::Net::new(1 << 28);
-  net.boot(ast::name_to_val("main"));
+  let mut net = run::Net::new(&data);
+  net.boot(ast::name_to_val("main") as run::Loc);
   return (book, net);
 }
 
@@ -167,8 +170,8 @@ pub fn gen_cuda_book(book: &run::Book) -> String {
     // .node
     code.push_str("  // .node\n");
     for (i, node) in net.node.iter().enumerate() {
-      code.push_str(&format!("  0x{:08X},", node.0.data()));
-      code.push_str(&format!(" 0x{:08X},", node.1.data()));
+      code.push_str(&format!("  0x{:08X},", node.0.0));
+      code.push_str(&format!(" 0x{:08X},", node.1.0));
       if (i + 1) % 4 == 0 {
         code.push_str("\n");
       }
@@ -180,8 +183,8 @@ pub fn gen_cuda_book(book: &run::Book) -> String {
     // .rdex
     code.push_str("  // .rdex\n");
     for (i, (a, b)) in net.rdex.iter().enumerate() {
-      code.push_str(&format!("  0x{:08X},", a.data()));
-      code.push_str(&format!(" 0x{:08X},", b.data()));
+      code.push_str(&format!("  0x{:08X},", a.0));
+      code.push_str(&format!(" 0x{:08X},", b.0));
       if (i + 1) % 4 == 0 {
         code.push_str("\n");
       }
