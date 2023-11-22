@@ -143,7 +143,11 @@ pub fn compile_rust_crate_to_executable(f_name: &str) -> Result<(), std::io::Err
   if std::path::Path::new(&target).exists() {
     fs::remove_file(&target)?;
   }
+  // TODO: Read executable path from cargo json output
+  #[cfg(not(target_os = "windows"))]
   fs::copy("./.hvm/target/release/hvmc", target)?;
+  #[cfg(target_os = "windows")]
+  fs::copy("./.hvm/target/release/hvmc.exe", target + ".exe")?;
   return Ok(());
 }
 
