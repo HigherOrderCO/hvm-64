@@ -962,7 +962,7 @@ impl<'a> Net<'a> {
   // Evaluates a term to normal form in parallel
   pub fn parallel_normal(&mut self, book: &Book) {
 
-    const SHARE_LIMIT : usize = 1 << 12; // max share redexes per split 
+    const SHARE_LIMIT : usize = 1 << 10; // max share redexes per split 
     const LOCAL_LIMIT : usize = 1 << 18; // max local rewrites per epoch
 
     // Local thread context
@@ -1071,33 +1071,24 @@ impl<'a> Net<'a> {
         let b_tid = if side == 1 { a_tid - shift } else { a_tid + shift };
         let a_len = ctx.net.rdex.len();
         let b_len = ctx.rlens[b_tid].load(Ordering::Relaxed);
-        if a_len > b_len {
-          let mut sent = 0;
-          let mut next = 0;
-          for i in 0 .. a_len - b_len {
-            let min = b_len;
-            let rdx = ctx.net.rdex.get_unchecked_mut(min + i);
-            if i % 2 == 0 || sent >= SHARE_LIMIT {
-              *ctx.net.rdex.get_unchecked_mut(min + next) = *rdx;
-              next += 1;
-            } else {
-              let send = ctx.share.get_unchecked(b_tid * SHARE_LIMIT + i / 2);
-              send.0.store(rdx.0);
-              send.1.store(rdx.1);
-              sent += 1;
-            }
-          }
-          ctx.net.rdex.truncate(b_len + next);
+        let send  = if a_len > b_len { (a_len - b_len) / 2 } else { 0 };
+        let recv  = if b_len > a_len { (b_len - a_len) / 2 } else { 0 };
+        let send  = std::cmp::min(send, SHARE_LIMIT);
+        let recv  = std::cmp::min(recv, SHARE_LIMIT);
+        for i in 0 .. send {
+          let init = a_len - send * 2;
+          let rdx0 = *ctx.net.rdex.get_unchecked(init + i * 2 + 0);
+          let rdx1 = *ctx.net.rdex.get_unchecked(init + i * 2 + 1);
+          let targ = ctx.share.get_unchecked(b_tid * SHARE_LIMIT + i);
+          *ctx.net.rdex.get_unchecked_mut(init + i) = rdx0;
+          targ.0.store(rdx1.0);
+          targ.1.store(rdx1.1);
         }
+        ctx.net.rdex.truncate(a_len - send);
         ctx.barry.wait();
-        if b_len > a_len {
-          for i in 0 .. std::cmp::min((b_len - a_len) / 2, SHARE_LIMIT) {
-            let r = ctx.share.get_unchecked(a_tid * SHARE_LIMIT + i);
-            let x = r.0.load();
-            let y = r.1.load();
-            ctx.net.rdex.push((x, y));
-          }
-          //println!("[{:04}] received {} from {} (it had {})", a_tid, (b_len - a_len) / 2, b_tid, b_len);
+        for i in 0 .. recv {
+          let got = ctx.share.get_unchecked(a_tid * SHARE_LIMIT + i);
+          ctx.net.rdex.push((got.0.load(), got.1.load()));
         }
       }
     }

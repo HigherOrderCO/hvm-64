@@ -19,7 +19,7 @@
 @sumZ = (x x)
 
 @main = R
-  & @gen ~ (#22 tree)
+  & @gen ~ (#24 tree)
   & @sum ~ (tree R)
 
 //#4194304
