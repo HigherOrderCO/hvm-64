@@ -949,7 +949,7 @@ impl<'a> Net<'a> {
   // Evaluates a term to normal form in parallel
   pub fn parallel_normal(&mut self, book: &Book) {
 
-    const SHARE_LIMIT : usize = 1 << 16; // max share redexes per split 
+    const SHARE_LIMIT : usize = 1 << 12; // max share redexes per split 
     const LOCAL_LIMIT : usize = 1 << 18; // max local rewrites per epoch
 
     // Local thread context
