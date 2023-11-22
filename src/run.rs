@@ -7,8 +7,14 @@
 // they interact with nodes, and are cleared when they interact with ERAs, allowing for constant
 // space evaluation of recursive functions on Scott encoded datatypes.
 
+use st3::{lifo::{Stealer, Worker}, StealError};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Barrier};
+use std::thread;
+
+pub const WORKER_QUEUE_CAPACITY : usize = 1 << 16;
+
+type Redex = (Ptr, Ptr);
 
 pub type Tag  = u8;
 pub type Lab  = u32;
@@ -111,7 +117,8 @@ pub struct Net<'a> {
   pub tid : usize, // thread id
   pub tids: usize, // thread count
   pub heap: Heap<'a>, // nodes
-  pub rdex: Vec<(Ptr,Ptr)>, // redexes
+  // pub rdex: Vec<Redex>, // redexes
+  pub rdex: Worker<Redex>, // redexes
   pub locs: Vec<Loc>,
   pub area: Area, // allocation area
   pub next: usize, // next allocation index within area
@@ -122,7 +129,7 @@ pub struct Net<'a> {
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Def {
   pub safe: bool,
-  pub rdex: Vec<(Ptr, Ptr)>,
+  pub rdex: Vec<Redex>,
   pub node: Vec<(Ptr, Ptr)>,
 }
 
@@ -402,7 +409,8 @@ impl<'a> Net<'a> {
       tid : 0,
       tids: 1,
       heap: Heap { data },
-      rdex: vec![],
+      // rdex: vec![],
+      rdex: Worker::new(WORKER_QUEUE_CAPACITY),
       locs: vec![0; 1 << 16],
       area: Area { init: 0, size: data.len() },
       next: 0,
@@ -479,7 +487,7 @@ impl<'a> Net<'a> {
     if Ptr::can_skip(a, b) {
       self.rwts.eras += 1;
     } else {
-      self.rdex.push((a, b));
+      self.rdex.push((a, b)).expect("capacity");
     }
   }
 
@@ -669,7 +677,7 @@ impl<'a> Net<'a> {
       (Trg::Ptr(a_ptr), Trg::Ptr(b_ptr)) => self.link(a_ptr, b_ptr),
     }
   }
-  
+
   // Performs an interaction over a redex.
   #[inline(always)]
   pub fn interact(&mut self, book: &Book, a: Ptr, b: Ptr) {
@@ -882,7 +890,7 @@ impl<'a> Net<'a> {
         for r in &got.rdex {
           let p1 = self.adjust(r.0);
           let p2 = self.adjust(r.1);
-          self.rdex.push((p1, p2));
+          self.rdex.push((p1, p2)).expect("capacity");
         }
         // Load root, adjusted.
         ptr = self.adjust(got.node[0].1);
@@ -944,7 +952,7 @@ impl<'a> Net<'a> {
   // Reduce a net to normal form.
   pub fn normal(&mut self, book: &Book) {
     self.expand(book);
-    while self.rdex.len() > 0 {
+    while !self.rdex.is_empty() {
       self.reduce(book, usize::MAX);
       self.expand(book);
     }
@@ -959,11 +967,11 @@ impl<'a> Net<'a> {
       init: self.heap.data.len() * tid / tids,
       size: self.heap.data.len() / tids,
     };
-    let from = self.rdex.len() * (tid + 0) / tids;
-    let upto = self.rdex.len() * (tid + 1) / tids;
-    for i in from .. upto {
-      net.rdex.push((self.rdex[i].0, self.rdex[i].1));
-    }
+    // let from = self.rdex.len() * (tid + 0) / tids;
+    // let upto = self.rdex.len() * (tid + 1) / tids;
+    // for i in from .. upto {
+    //   net.rdex.push(self.rdex[i]);
+    // }
     if tid == 0 {
       net.next = self.next;
     }
@@ -972,8 +980,7 @@ impl<'a> Net<'a> {
 
   // Evaluates a term to normal form in parallel
   pub fn parallel_normal(&mut self, book: &Book) {
-
-    const SHARE_LIMIT : usize = 1 << 12; // max share redexes per split 
+    const SHARE_LIMIT : usize = 1 << 12; // max share redexes per split
     const LOCAL_LIMIT : usize = 1 << 18; // max local rewrites per epoch
 
     // Local thread context
@@ -988,7 +995,8 @@ impl<'a> Net<'a> {
       share: &'a Vec<(APtr, APtr)>, // global share buffer
       rlens: &'a Vec<AtomicUsize>, // global redex lengths
       total: &'a AtomicUsize, // total redex length
-      barry: Arc<Barrier>, // synchronization barrier
+      barry: &'a Barrier, // synchronization barrier
+      stealers: &'a Vec<&'a Stealer<Redex>>, // stealers
     }
 
     // Initialize global objects
@@ -1001,8 +1009,44 @@ impl<'a> Net<'a> {
     let total = AtomicUsize::new(0); // sum of redex bag length
     let barry = Arc::new(Barrier::new(tids)); // global barrier
 
+    let worker_count = cores;
+    let workers = (0..worker_count).map(|_| Worker::<Redex>::new(WORKER_QUEUE_CAPACITY)).collect::<Vec<_>>();
+    let stealers = workers.iter().map(|w| w.stealer_ref()).collect::<Vec<_>>();
+
+    // Initialize worker queues by distributing redexes evenly
+    let mut workers_iter = workers.iter().cycle();
+    while let Some(redex) = self.rdex.pop() {
+      let worker = workers_iter.next().unwrap();
+      worker.push(redex).expect("capacity");
+    }
+
+    // // Initialize worker queues
+    // let redex_count = self.rdex.len();
+    // println!("redex count: {}", redex_count);
+    // println!("worker count: {}", worker_count);
+    // let redex_count_per_worker = (redex_count + worker_count - 1) / worker_count;
+    // debug_assert!(redex_count_per_worker <= WORKER_QUEUE_CAPACITY, "worker queue capacity too small: {} > {}", redex_count_per_worker, WORKER_QUEUE_CAPACITY);
+    // self.rdex.chunks(redex_count_per_worker).for_each(|chunk| {
+    //   for (i, worker) in workers.iter().enumerate() {
+    //     for redex in chunk {
+    //       worker.push(*redex).expect("capacity");
+    //     }
+    //   }
+    // });
+
+    // println!("redexes: {}", self.rdex.len());
+
     // Perform parallel reductions
     std::thread::scope(|s| {
+      // for (tid, worker) in workers.into_iter().enumerate() {
+      //   let mut net = self.fork(tid, tids);
+      //   s.spawn(move || {
+      //     while let Some(redex) = worker.pop() {
+      //       net.interact(book, redex.0, redex.1);
+      //     }
+      //   });
+      // }
+
       for tid in 0 .. tids {
         let mut ctx = ThreadContext {
           tid: tid,
@@ -1015,8 +1059,11 @@ impl<'a> Net<'a> {
           share: &share,
           rlens: &rlens,
           total: &total,
-          barry: Arc::clone(&barry),
+          barry: &barry,
+          stealers: &stealers,
         };
+        // // print redex count
+        // println!("redexes: {}", ctx.net.rdex.len());
         s.spawn(move || {
           main(&mut ctx)
         });
@@ -1024,7 +1071,7 @@ impl<'a> Net<'a> {
     });
 
     // Clear redexes and sum stats
-    self.rdex.clear();
+    // self.rdex.clear();
     delta.add_to(&mut self.rwts);
 
     // Main reduction loop
@@ -1048,7 +1095,19 @@ impl<'a> Net<'a> {
           break;
         }
         let tlog2 = ctx.tlog2;
-        split(ctx, tlog2);
+
+        // split(ctx, tlog2);
+
+        // TODO: To be more efficient, create a new Rng instance instead of using the thread-local generator:
+        // let mut rng = fastrand::Rng::new();
+        while {
+          let steal_from_worker_i = fastrand::usize(.. ctx.stealers.len());
+          let stealer = &ctx.stealers[steal_from_worker_i];
+          let res = stealer.steal(&ctx.net.rdex, |n| n / 2);
+          matches!(res, Err(StealError::Busy))
+          // TODO: What about StealError::Empty?
+        } {}
+
         ctx.tick += 1;
       }
     }
@@ -1065,51 +1124,52 @@ impl<'a> Net<'a> {
       ctx.barry.wait();
       ctx.total.store(0, Ordering::Relaxed);
       ctx.barry.wait();
-      ctx.rlens[ctx.tid].store(ctx.net.rdex.len(), Ordering::Relaxed);
-      ctx.total.fetch_add(ctx.net.rdex.len(), Ordering::Relaxed);
+      let count = !ctx.net.rdex.is_empty() as _;
+      ctx.rlens[ctx.tid].store(count, Ordering::Relaxed);
+      ctx.total.fetch_add(count, Ordering::Relaxed);
       ctx.barry.wait();
       return ctx.total.load(Ordering::Relaxed);
     }
 
 
-    // Share redexes with target thread
-    #[inline(always)]
-    fn split(ctx: &mut ThreadContext, plog2: usize) {
-      unsafe {
-        let side  = (ctx.tid >> (plog2 - 1 - (ctx.tick % plog2))) & 1;
-        let shift = (1 << (plog2 - 1)) >> (ctx.tick % plog2);
-        let a_tid = ctx.tid;
-        let b_tid = if side == 1 { a_tid - shift } else { a_tid + shift };
-        let a_len = ctx.net.rdex.len();
-        let b_len = ctx.rlens[b_tid].load(Ordering::Relaxed);
-        let send  = if a_len > b_len { (a_len - b_len) / 2 } else { 0 };
-        let recv  = if b_len > a_len { (b_len - a_len) / 2 } else { 0 };
-        let send  = std::cmp::min(send, SHARE_LIMIT);
-        let recv  = std::cmp::min(recv, SHARE_LIMIT);
-        for i in 0 .. send {
-          let init = a_len - send * 2;
-          let rdx0 = *ctx.net.rdex.get_unchecked(init + i * 2 + 0);
-          let rdx1 = *ctx.net.rdex.get_unchecked(init + i * 2 + 1);
-          //let init = 0;
-          //let ref0 = ctx.net.rdex.get_unchecked_mut(init + i * 2 + 0);
-          //let rdx0 = *ref0;
-          //*ref0    = (Ptr(0), Ptr(0));
-          //let ref1 = ctx.net.rdex.get_unchecked_mut(init + i * 2 + 1);
-          //let rdx1 = *ref1;
-          //*ref1    = (Ptr(0), Ptr(0));
-          let targ = ctx.share.get_unchecked(b_tid * SHARE_LIMIT + i);
-          *ctx.net.rdex.get_unchecked_mut(init + i) = rdx0;
-          targ.0.store(rdx1.0);
-          targ.1.store(rdx1.1);
-        }
-        ctx.net.rdex.truncate(a_len - send);
-        ctx.barry.wait();
-        for i in 0 .. recv {
-          let got = ctx.share.get_unchecked(a_tid * SHARE_LIMIT + i);
-          ctx.net.rdex.push((got.0.load(), got.1.load()));
-        }
-      }
-    }
+    // // Share redexes with target thread
+    // #[inline(always)]
+    // fn split(ctx: &mut ThreadContext, plog2: usize) {
+    //   unsafe {
+    //     let side  = (ctx.tid >> (plog2 - 1 - (ctx.tick % plog2))) & 1;
+    //     let shift = (1 << (plog2 - 1)) >> (ctx.tick % plog2);
+    //     let a_tid = ctx.tid;
+    //     let b_tid = if side == 1 { a_tid - shift } else { a_tid + shift };
+    //     let a_len = ctx.net.rdex.len();
+    //     let b_len = ctx.rlens[b_tid].load(Ordering::Relaxed);
+    //     let send  = if a_len > b_len { (a_len - b_len) / 2 } else { 0 };
+    //     let recv  = if b_len > a_len { (b_len - a_len) / 2 } else { 0 };
+    //     let send  = std::cmp::min(send, SHARE_LIMIT);
+    //     let recv  = std::cmp::min(recv, SHARE_LIMIT);
+    //     for i in 0 .. send {
+    //       let init = a_len - send * 2;
+    //       let rdx0 = *ctx.net.rdex.get_unchecked(init + i * 2 + 0);
+    //       let rdx1 = *ctx.net.rdex.get_unchecked(init + i * 2 + 1);
+    //       //let init = 0;
+    //       //let ref0 = ctx.net.rdex.get_unchecked_mut(init + i * 2 + 0);
+    //       //let rdx0 = *ref0;
+    //       //*ref0    = (Ptr(0), Ptr(0));
+    //       //let ref1 = ctx.net.rdex.get_unchecked_mut(init + i * 2 + 1);
+    //       //let rdx1 = *ref1;
+    //       //*ref1    = (Ptr(0), Ptr(0));
+    //       let targ = ctx.share.get_unchecked(b_tid * SHARE_LIMIT + i);
+    //       *ctx.net.rdex.get_unchecked_mut(init + i) = rdx0;
+    //       targ.0.store(rdx1.0);
+    //       targ.1.store(rdx1.1);
+    //     }
+    //     ctx.net.rdex.truncate(a_len - send);
+    //     ctx.barry.wait();
+    //     for i in 0 .. recv {
+    //       let got = ctx.share.get_unchecked(a_tid * SHARE_LIMIT + i);
+    //       ctx.net.rdex.push((got.0.load(), got.1.load()));
+    //     }
+    //   }
+    // }
   }
 
 }

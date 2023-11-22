@@ -30,6 +30,8 @@ hvm_cli_options = []
 # Benchmark dependencies
 
 [dependencies]
+fastrand = "2.0.1"
+st3 = "0.4.1"
 
 [dev-dependencies]
 criterion = "0.5.1"
