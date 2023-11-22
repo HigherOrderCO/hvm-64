@@ -520,5 +520,4 @@ if all test cases pass, if some don't and they need to be changed, you can run
 ## Community
 
 HVM-Core is part of [Higher Order Company](https://HigherOrderCO.com/)'s efforts
-to build the massively parallel future of computer. Join our [Discord
-community](https://discord.HigherOrderCO.com/)!
+to harness massively parallelism. Join our [Discord](https://discord.HigherOrderCO.com/)!
