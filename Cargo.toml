@@ -25,13 +25,13 @@ panic = "abort"
 default = ["hvm_cli_options"]
 hvm_cli_options = []
 
-##--COMPILER-CUTOFF--##
-
-# Benchmark dependencies
-
 [dependencies]
 fastrand = "2.0.1"
 st3 = "0.4.1"
+
+##--COMPILER-CUTOFF--##
+
+# Benchmark dependencies
 
 [dev-dependencies]
 criterion = "0.5.1"
