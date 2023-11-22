@@ -1139,19 +1139,27 @@ impl<'a> Net<'a> {
       ctx.net.expand(ctx.book);
     }
 
+    // // Count total redexes (and populate 'rlens')
+    // #[inline(always)]
+    // fn count(ctx: &mut ThreadContext) -> usize {
+    //   ctx.barry.wait();
+    //   ctx.total.store(0, Ordering::Relaxed);
+    //   ctx.barry.wait();
+    //   let count = !ctx.net.rdex.is_empty() as _;
+    //   ctx.rlens[ctx.tid].store(count, Ordering::Relaxed);
+    //   ctx.total.fetch_add(count, Ordering::Relaxed);
+    //   ctx.barry.wait();
+    //   ctx.total.load(Ordering::Relaxed)
+    // }
+
     // Count total redexes (and populate 'rlens')
-    #[inline(always)]
     fn count(ctx: &mut ThreadContext) -> usize {
-      ctx.barry.wait();
-      ctx.total.store(0, Ordering::Relaxed);
       ctx.barry.wait();
       let count = !ctx.net.rdex.is_empty() as _;
       ctx.rlens[ctx.tid].store(count, Ordering::Relaxed);
-      ctx.total.fetch_add(count, Ordering::Relaxed);
       ctx.barry.wait();
-      return ctx.total.load(Ordering::Relaxed);
+      ctx.rlens.iter().map(|x| x.load(Ordering::Relaxed)).sum()
     }
-
 
     // // Share redexes with target thread
     // #[inline(always)]
