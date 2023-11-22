@@ -9,7 +9,7 @@
 
 use st3::{lifo::{Stealer, Worker}, StealError};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering, AtomicBool};
 use std::sync::{Arc, Barrier};
 use std::thread;
 use crate::u60;
@@ -1015,10 +1015,13 @@ impl<'a> Net<'a> {
       delta: &'a AtomicRewrites, // global delta rewrites
       share: &'a Vec<(APtr, APtr)>, // global share buffer
       rlens: &'a Vec<AtomicUsize>, // global redex lengths
+      // rlens: &'a Vec<AtomicBool>, // global redex lengths
       total: &'a AtomicUsize, // total redex length
+      // total: &'a AtomicBool, // total redex length
       barry: &'a Barrier, // synchronization barrier
       stealers: &'a Vec<&'a Stealer<Redex>>, // stealers
       rng: fastrand::Rng, // thread-local random number generator
+      // not_finished: &'a AtomicBool, // whether there are still redexes
     }
 
     // Initialize global objects
@@ -1027,8 +1030,10 @@ impl<'a> Net<'a> {
     let tids  = 1 << tlog2;
     let delta = AtomicRewrites::new(); // delta rewrite counter
     let rlens = (0..tids).map(|_| AtomicUsize::new(0)).collect::<Vec<_>>();
+    // let rlens = (0..tids).map(|_| AtomicBool::new(false)).collect::<Vec<_>>();
     let share = (0..SHARE_LIMIT*tids).map(|_| (APtr(AtomicU64::new(0)), APtr(AtomicU64::new(0)))).collect::<Vec<_>>();
     let total = AtomicUsize::new(0); // sum of redex bag length
+    // let total = AtomicBool::new(false); // sum of redex bag length
     let barry = Arc::new(Barrier::new(tids)); // global barrier
 
     let worker_count = cores;
@@ -1058,6 +1063,8 @@ impl<'a> Net<'a> {
 
     // println!("redexes: {}", self.rdex.len());
 
+    // let not_finished = AtomicBool::new(true);
+
     // Perform parallel reductions
     std::thread::scope(|s| {
       // for (tid, worker) in workers.into_iter().enumerate() {
@@ -1084,6 +1091,7 @@ impl<'a> Net<'a> {
           barry: &barry,
           stealers: &stealers,
           rng: fastrand::Rng::new(),
+          // not_finished: &not_finished,
         };
         // // print redex count
         // println!("redexes: {}", ctx.net.rdex.len());
@@ -1121,13 +1129,14 @@ impl<'a> Net<'a> {
 
         // split(ctx, tlog2);
 
+        let mut steal_from_worker_i = ctx.rng.usize(.. ctx.stealers.len());
         while {
-          let steal_from_worker_i = ctx.rng.usize(.. ctx.stealers.len());
-          let stealer = &ctx.stealers[steal_from_worker_i];
+          let stealer = unsafe { ctx.stealers.get_unchecked(steal_from_worker_i) };
           let res = stealer.steal(&ctx.net.rdex, |n| n / 2);
           matches!(res, Err(StealError::Busy))
-          // TODO: What about StealError::Empty?
-        } {}
+        } {
+          steal_from_worker_i = (steal_from_worker_i + 1) % ctx.stealers.len();
+        }
 
         ctx.tick += 1;
       }
@@ -1155,11 +1164,29 @@ impl<'a> Net<'a> {
     // Count total redexes (and populate 'rlens')
     fn count(ctx: &mut ThreadContext) -> usize {
       ctx.barry.wait();
-      let count = !ctx.net.rdex.is_empty() as _;
-      ctx.rlens[ctx.tid].store(count, Ordering::Relaxed);
+      ctx.rlens[ctx.tid].store(!ctx.net.rdex.is_empty() as _, Ordering::Relaxed);
       ctx.barry.wait();
       ctx.rlens.iter().map(|x| x.load(Ordering::Relaxed)).sum()
     }
+
+    // // Count total redexes (and populate 'rlens')
+    // fn count(ctx: &mut ThreadContext) -> usize {
+    //   ctx.barry.wait();
+    //   ctx.rlens[ctx.tid].store(!ctx.net.rdex.is_empty(), Ordering::Relaxed);
+    //   ctx.barry.wait();
+    //   ctx.rlens.iter().fold(false, |acc, x| acc || x.load(Ordering::Relaxed)) as _
+    // }
+
+    // // Count total redexes (and populate 'rlens')
+    // fn count(ctx: &mut ThreadContext) -> usize {
+    //   ctx.barry.wait();
+    //   ctx.not_finished.store(false, Ordering::Relaxed);
+    //   ctx.barry.wait();
+    //   let not_finished = !ctx.net.rdex.is_empty() as _;
+    //   ctx.not_finished.fetch_or(not_finished, Ordering::Relaxed);
+    //   ctx.barry.wait();
+    //   ctx.not_finished.load(Ordering::Relaxed) as _
+    // }
 
     // // Share redexes with target thread
     // #[inline(always)]
