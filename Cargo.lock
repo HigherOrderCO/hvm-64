@@ -360,7 +360,7 @@ checksum = "d77f7ec81a6d05a3abb01ab6eb7590f6083d08449fe5a1c8b1e620283546ccb7"
 
 [[package]]
 name = "hvm-core"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "criterion",
  "hvm-lang",

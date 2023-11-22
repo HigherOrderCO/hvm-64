@@ -1,6 +1,0 @@
-sum = λn match n {
-  0   : 1
-  1+p : (+ (sum p) (sum p))
-}
-
-main = (sum 24)

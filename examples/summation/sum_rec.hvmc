@@ -1,8 +1,0 @@
-@sum = (?<(#1 @sumS) a> a)
-
-@sumS = ({2 a b} c)
-  & @sum ~ (a e)
-  & @sum ~ (b <+ e c>)
-
-@main = R
-  & @sum ~ (#22 R)

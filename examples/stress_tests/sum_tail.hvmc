@@ -1,0 +1,9 @@
+@sum = (?<(@sumZ @sumS) a> a)
+
+@sumZ = (a a)
+
+@sumS = ({2 <+ a b> c} (a d))
+  & @sum ~ (c (b d))
+
+@main = a
+  & @sum ~ (#10000000 (#0 a))

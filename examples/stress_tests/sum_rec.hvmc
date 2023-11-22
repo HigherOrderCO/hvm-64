@@ -1,0 +1,11 @@
+@add = (<+ a b> (a b))
+
+@sum = (?<(#1 @sumS) a> a)
+
+@sumS = ({2 a b} c)
+  & @add ~ (e (d c))
+  & @sum ~ (a d)
+  & @sum ~ (b e)
+
+@main = a
+  & @sum ~ (#26 a)

@@ -109,9 +109,26 @@ pub fn compile_term(book: &run::Book, tab: usize, fid: run::Loc) -> String {
     format!("k{}", newx)
   }
 
+  fn call_redex(
+    book : &run::Book,
+    tab  : usize,
+    newx : &mut usize,
+    vars : &mut HashMap<run::Ptr, String>,
+    def  : &run::Def,
+    rdex : (run::Ptr, run::Ptr),
+  ) -> String {
+    let (rf, rx) = adjust_redex(rdex.0, rdex.1);
+    let rf_name  = format!("_{}", fresh(newx));
+    let mut code = String::new();
+    code.push_str(&format!("{}let {} : Trg = Trg::Ptr({});\n", ident(tab), rf_name, &atom(rf)));
+    code.push_str(&burn(book, tab, None, newx, vars, def, rx, &Target { nam: rf_name }));
+    return code;
+  }
+
   fn call(
     book : &run::Book,
     tab  : usize,
+    tail : Option<run::Loc>,
     newx : &mut usize,
     vars : &mut HashMap<run::Ptr, String>,
     fid  : run::Loc,
@@ -119,23 +136,38 @@ pub fn compile_term(book: &run::Book, tab: usize, fid: run::Loc) -> String {
   ) -> String {
     //let newx = &mut 0;
     //let vars = &mut HashMap::new();
-    let def = &book.defs[fid as usize];
-    let mut code = String::new();
-    for (rf, rx) in &def.rdex {
-      let (rf, rx) = adjust_redex(*rf, *rx);
-      let rf_name = format!("_{}", fresh(newx));
-      code.push_str(&format!("{}let {} : Trg = Trg::Ptr({});\n", ident(tab), rf_name, &atom(rf)));
-      code.push_str(&burn(book, tab, newx, vars, def, rx, &Target { nam: rf_name }));
-      //code.push_str(&make(tab, newx, vars, def, rx, &atom(rf)));
-    }
-    code.push_str(&burn(book, tab, newx, vars, def, def.node[0].1, &trg));
 
+    let def = &book.defs[fid as usize];
+
+    // Tail call
+    // TODO: when I manually edited a file to implement tail call, the single-core performance
+    // increased a lot, but it resulted in a single thread withholding all redexes and, thus, 
+    // the program went single-core mode again. I believe a smarter redex sharing structure is
+    // necessary for us to implement tail calls in a way that doesn't sacrify parallelism.
+    //if tail.is_some() && def.rdex.len() > 0 && def.rdex[0].0.is_ref() && def.rdex[0].0.loc() == tail.unwrap() {
+      //println!("tco {}", ast::val_to_name(tail.unwrap() as run::Val));
+      //let mut code = String::new();
+      //for rdex in &def.rdex[1..] {
+        //code.push_str(&call_redex(book, tab, newx, vars, def, *rdex));
+      //}
+      //code.push_str(&burn(book, tab, Some(fid), newx, vars, def, def.node[0].1, &trg));
+      //code.push_str(&call_redex(book, tab, newx, vars, def, def.rdex[0]));
+      //return code;
+    //}
+
+    // Normal call
+    let mut code = String::new();
+    for rdex in &def.rdex {
+      code.push_str(&call_redex(book, tab, newx, vars, def, *rdex));
+    }
+    code.push_str(&burn(book, tab, Some(fid), newx, vars, def, def.node[0].1, &trg));
     return code;
   }
   
   fn burn(
     book : &run::Book,
     tab  : usize,
+    tail : Option<run::Loc>,
     newx : &mut usize,
     vars : &mut HashMap<run::Ptr, String>,
     def  : &run::Def,
@@ -202,8 +234,8 @@ pub fn compile_term(book: &run::Book, tab: usize, fid: run::Loc) -> String {
           code.push_str(&format!("{}{} = Trg::Ptr(Ptr::new(VR1, 0, {}));\n", ident(tab+1), &c_z.show(), cse));
           code.push_str(&format!("{}{} = Trg::Ptr(Ptr::new(VR2, 0, {}));\n", ident(tab+1), &c_s.show(), cse));
           code.push_str(&format!("{}}}\n", ident(tab)));
-          code.push_str(&burn(book, tab, newx, vars, def, ifz, &c_z));
-          code.push_str(&burn(book, tab, newx, vars, def, ifs, &c_s));
+          code.push_str(&burn(book, tab, None, newx, vars, def, ifz, &c_z));
+          code.push_str(&burn(book, tab, tail, newx, vars, def, ifs, &c_s));
           return code;
         }
       }
@@ -232,7 +264,7 @@ pub fn compile_term(book: &run::Book, tab: usize, fid: run::Loc) -> String {
         code.push_str(&format!("{}self.safe_link(Trg::Ptr(Ptr::new(OP2, {}, {})), {});\n", ident(tab+1), ptr.lab(), op2, trg.show()));
         code.push_str(&format!("{}{} = Trg::Ptr(Ptr::new(VR2, 0, {}));\n", ident(tab+1), &nxt.show(), op2));
         code.push_str(&format!("{}}}\n", ident(tab)));
-        code.push_str(&burn(book, tab, newx, vars, def, ret, &nxt));
+        code.push_str(&burn(book, tab, None, newx, vars, def, ret, &nxt));
         return code;
       }
     }
@@ -261,8 +293,8 @@ pub fn compile_term(book: &run::Book, tab: usize, fid: run::Loc) -> String {
       code.push_str(&format!("{}{} = Trg::Ptr(Ptr::new(VR2, 0, {}));\n", ident(tab+1), &x2.show(), lc));
       code.push_str(&format!("{}self.safe_link(Trg::Ptr(Ptr::new({}, {}, {})), {});\n", ident(tab+1), tag(ptr.tag()), ptr.lab(), lc, trg.show()));
       code.push_str(&format!("{}}}\n", ident(tab)));
-      code.push_str(&burn(book, tab, newx, vars, def, p2, &x2));
-      code.push_str(&burn(book, tab, newx, vars, def, p1, &x1));
+      code.push_str(&burn(book, tab, None, newx, vars, def, p2, &x2));
+      code.push_str(&burn(book, tab, None, newx, vars, def, p1, &x1));
       return code;
     }
 
@@ -290,23 +322,23 @@ pub fn compile_term(book: &run::Book, tab: usize, fid: run::Loc) -> String {
       code.push_str(&format!("{}{} = Trg::Ptr(Ptr::new(VR2, 0, {}));\n", ident(tab+1), &x2.show(), lc));
       code.push_str(&format!("{}self.safe_link(Trg::Ptr(Ptr::new({}, 0, {})), {});\n", ident(tab+1), tag(ptr.tag()), lc, trg.show()));
       code.push_str(&format!("{}}}\n", ident(tab)));
-      code.push_str(&burn(book, tab, newx, vars, def, p2, &x2));
-      code.push_str(&burn(book, tab, newx, vars, def, p1, &x1));
+      code.push_str(&burn(book, tab, None, newx, vars, def, p2, &x2));
+      code.push_str(&burn(book, tab, None, newx, vars, def, p1, &x1));
       return code;
     }
 
     // TODO: implement inlining correctly
     // NOTE: enabling this makes dec_bits_tree hang; investigate
-    //if ptr.is_ref() {
-      //code.push_str(&format!("{}// inline @{}\n", ident(tab), ast::val_to_name(ptr.loc())));
-      //code.push_str(&format!("{}if !{}.is_skp() {{\n", ident(tab), x.show()));
-      //code.push_str(&format!("{}self.rwts.dref += 1;\n", ident(tab+1)));
-      //code.push_str(&call(book, tab+1, newx, &mut HashMap::new(), ptr.loc(), x));
-      //code.push_str(&format!("{}}} else {{\n", ident(tab)));
-      //code.push_str(&make(tab+1, newx, vars, def, ptr, &x.show()));
-      //code.push_str(&format!("{}}}\n", ident(tab)));
-      //return code;
-    //}
+    if ptr.is_ref() && tail.is_some() {
+      code.push_str(&format!("{}// inline @{}\n", ident(tab), ast::val_to_name(ptr.loc() as run::Val)));
+      code.push_str(&format!("{}if !{}.is_skp() {{\n", ident(tab), trg.get()));
+      code.push_str(&format!("{}self.rwts.dref += 1;\n", ident(tab+1)));
+      code.push_str(&call(book, tab+1, tail, newx, &mut HashMap::new(), ptr.loc(), trg));
+      code.push_str(&format!("{}}} else {{\n", ident(tab)));
+      code.push_str(&make(tab+1, newx, vars, def, ptr, &trg.show()));
+      code.push_str(&format!("{}}}\n", ident(tab)));
+      return code;
+    }
 
     // ATOM <~ *
     // --------- fast erase
@@ -379,7 +411,7 @@ pub fn compile_term(book: &run::Book, tab: usize, fid: run::Loc) -> String {
 
   let mut code = String::new();
   code.push_str(&format!("{}pub fn F_{}(&mut self, ptr: Ptr, trg: Trg) -> bool {{\n", ident(tab), fun));
-  code.push_str(&call(book, tab+1, &mut 0, &mut HashMap::new(), fid, &Target { nam: "trg".to_string() }));
+  code.push_str(&call(book, tab+1, None, &mut 0, &mut HashMap::new(), fid, &Target { nam: "trg".to_string() }));
   code.push_str(&format!("{}return true;\n", ident(tab+1)));
   code.push_str(&format!("{}}}\n", ident(tab)));
 
@@ -404,3 +436,8 @@ fn adjust_redex(rf: run::Ptr, rx: run::Ptr) -> (run::Ptr, run::Ptr) {
     panic!("Invalid HVMC file.");
   }
 }
+
+
+
+
+

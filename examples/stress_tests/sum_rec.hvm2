@@ -1,0 +1,8 @@
+add = λa λb (+ a b)
+
+sum = λn match n {
+  0   : 1
+  1+p : (add (sum p) (sum p))
+}
+
+main = (sum 26)

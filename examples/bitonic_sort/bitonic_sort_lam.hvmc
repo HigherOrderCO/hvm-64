@@ -1,5 +1,3 @@
-// TODO: manually cleanup this generated file
-
 @D = (a b)
 & @Node ~ (a b)
 @E = (a (b c))

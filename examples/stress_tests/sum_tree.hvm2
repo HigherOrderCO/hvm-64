@@ -1,13 +1,15 @@
 node = λa λb λnode λleaf (node a b)
 leaf = λv    λnode λleaf (leaf v)
 
+add = λa λb (+ a b)
+
 gen = λn match n {
   0   : (leaf 1)
   1+p : (node (gen p) (gen p))
 }
 
 sum = λt
-  let case_node = λa λb (+ (sum a) (sum b))
+  let case_node = λa λb (add (sum a) (sum b))
   let case_leaf = λv v
   (t case_node case_leaf)
 

@@ -55,7 +55,3 @@ sum = λa
   (a a_leaf a_node)
 
 main = (sum (sort (rev (gen 18 0)) 0))
-
-//Main = (Sum (Sort 0 (Rev (Gen 18 0))))
-
-
