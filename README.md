@@ -2,14 +2,13 @@
 
 HVM-Core is a parallel evaluator for extended [Symmetric Interaction Combinators](https://www-lipn.univ-paris13.fr/~mazza/papers/CombSem-MSCS.pdf).
 
-We provide a raw syntax for specifying nets, a reference implementation in Rust,
-and a massively parallel evaluator in CUDA. In our benchmarks, HVMC performs up
-to **6.8 billion interactions** per second in an RTX 4090. When evaluating
-functional programs, it performed 5x faster than the best alternatives, making
-it a great compile target for high-level languages seeking massive parallelism.
+We provide a raw syntax for specifying nets and a Rust implementation that
+achieves up to **10 billion rewrites per second** on Apple M3 Max CPU. HVM's
+optimal evaluation semantics and concurrent model of computation make it a great
+compile target for high-level languages seeking massive parallelism.
 
-HVM-Core will be used as the compile target for [HVM](https://github.com/higherorderco/hvm)
-on its upcoming update.
+HVM-Core will be used as the compile target for
+[HVM](https://github.com/higherorderco/hvm) on its upcoming update.
 
 ## Usage
 
@@ -19,78 +18,75 @@ Install HVM-Core as:
 cargo install hvm-core
 ```
 
-Then, run the reference single-core interpeter as:
+Then, run the interpeter as:
 
 ```
 hvmc run file.hvmc -s
 ```
 
-You can also compile it to a fast executable as:
+Or compile it to a faster executable:
 
 ```
 hvmc compile file.hvmc
 ./file
 ```
 
-If you have a GPU, run it with thousands of threads as:
-
-```
-hvmc bend file.hvmc -s
-```
-
-**Note**: `bend` wasn't implemented yet; if you're here *today* and wants to run
-it on the GPU, you'll need to manually edit `hvm2.cu` using the
-`hvmc gen-cuda-book file.hvmc` command. Compile with `-arch=compute_89`. I'll
-add that to the CLI soon. Accepting PRs though :)
+Both versions will compute the program's normal form using all available cores.
 
 ## Example
 
-HVMC is a low-level compile target for high-level languages. The
-file below performs a simple recursive sum:
+HVMC is a low-level compile target for high-level languages. It provides a raw
+syntax for wiring interaction nets. For example:
 
 ```javascript
-@sum = (? (#1 @sumS) a a)
+@add = (<+ a b> (a b))
+
+@sum = (?<(#1 @sumS) a> a)
 
 @sumS = ({2 a b} c)
-  & @sum ~ (a e)
-  & @sum ~ (b d)
-  & #1   ~ <d <e c>>
+  & @add ~ (e (d c))
+  & @sum ~ (a d)
+  & @sum ~ (b e)
 
-@main = R
-  & @sum ~ (#24 R)
+@main = a
+  & @sum ~ (#24 a)
 ```
 
-If that look alien to you, don't worry; it does to me too. Fortunatelly, we have
+The file above implements a recursive sum. As you can see, its syntax isn't
+meant to be very human readable. Fortunatelly, we have
 `[HVM-Lang](https://github.com/HigherOrderCO/hvm-lang)`, a tool that generates
-`.hvmc` files from a familiar syntax. On HVM-Lang, the program above is just:
+`.hvmc` files from a familiar functional syntax. On HVM-Lang, you can write
+instead:
 
 ```javascript
+add = λa λb (+ a b)
+
 sum = λn match n {
   0   : 1
-  1+p : (+ (sum p) (sum p))
+  1+p : (add (sum p) (sum p))
 }
 
 main = (sum 24)
 ```
 
-If you do want to understand the hardcore syntax, though, keep reading. For more
-examples, see the [`/examples`](/examples) directory.
+Which compiles to the first program via `hvml compile main.hvm`. For more
+examples, see the [`/examples`](/examples) directory. If you do want to
+understand the hardcore syntax, keep reading. 
 
 ## Language
 
-HVM-Core provides a textual syntax that allows us to construct interaction
-combinator nets using a simple AST:
+HVM-Core's textual syntax represents interaction combinators via an AST:
 
 ```
 <TERM> ::=
   <ERA> ::= "*"
   <CON> ::= "(" <TERM> " " <TERM> ")"
-  <DUP> ::= "[" <TERM> " " <TERM> "]"
-  <CTR> ::= "{" <label> " " <TERM> " " <TERM> "}"
+  <TUP> ::= "[" <TERM> " " <TERM> "]"
+  <DUP> ::= "{" <label> " " <TERM> " " <TERM> "}"
   <REF> ::= "@" <name>
-  <U24> ::= "#" <value>
+  <U60> ::= "#" <value>
   <OP2> ::= "<" <TERM> " " <TERM> ">"
-  <MAT> ::= "?" <TERM> <TERM>
+  <MAT> ::= "?" "<" <TERM> <TERM> ">"
   <VAR> ::= <name>
 
 <NET> ::=
@@ -102,19 +98,19 @@ combinator nets using a simple AST:
   <END> ::= <EOF> 
 ```
 
-On top of pure interaction combinators, HVMC includes a minimal set of
-performance-critical features, including top-level definitions (as closed nets),
-unboxed 24-bit numbers, binary numeric operations and if-then-else. Below is a
-complete list of all term variants:
+As you can see, HVMC extends the original system with some performance-relevant
+features, including top-level definitions (closed nets), unboxed 60-bit machine
+integers, numeric operations and numeric pattern-matching.
 
-- `ERA`: an eraser node, as defined on the reference system.
+- `ERA`: an eraser node, as defined on the original paper.
 
-- `CON`: a constructor node, as defined on the reference system.
+- `CON`: a constructor node, as defined on the original paper.
 
-- `DUP`: a duplicator node, as defined on the reference system.
+- `TUP`: a tuple node. Has the same behavior of `CON`.
 
-- `CTR`: an "extra" node, which behaves exactly like CON/DUP nodes, but with a
-  different symbol. When the label is 0/1, it corresponds to a CON/DUP node.
+- `DUP`: a duplicator, or fan node, as defined on the original paper.
+  Additionally, it can include a label. Dups with different labels will commute.
+  This allows for increased expressivity (nested loops).
 
 - `VAR`: a named variable, used to create a wire. Each name must occur twice,
   denoting both endpoints of a wire.
@@ -123,11 +119,11 @@ complete list of all term variants:
   That reference is unrolled lazily, allowing for recursive functions to be
   implemented without the need for Church numerals and the like.
 
-- `U24`: an unboxed 24-bit unsigned integer.
+- `U60`: an unboxed 60-bit unsigned integer.
 
-- `OP2`: a binary operation on u24 operands.
+- `OP2`: a binary operation on u60 operands.
 
-- `MAT`: a pattern-matching operator on u24 values.
+- `MAT`: a pattern-matching operator on u60 values.
 
 Note that terms form a tree-like structure. Yet, interaction combinators are not
 trees, but graphs; terms aren't enough to express all possible nets. To fix
@@ -162,30 +158,32 @@ hierarchy, the wires between aux ports are denoted by named variables, and the
 single wire between main ports is denoted by the `& A ~ B` syntax. Note this
 always represents an active pair (or redex)!
 
-## Evaluator
+## CPU Evaluator
 
-HVMC comes with 2 evaluators: a reference interpreter in Rust, and a massively
-parallel runtime in CUDA. Both evaluators are completely eager, which means they
-will reduce *every* generated active pair (redex) in an ultra-greedy fashion.
-Because of that, to perform recursion, it is advisable to pre-compile the source
-language to a [supercombinator](https://en.wikipedia.org/wiki/Supercombinator)
-formulation, as it allows sub-expressions to be unrolled lazily, preventing HVMC
-from infinitely expanding recursive function bodies. For the same reason, terms
-like the Y-Combinator aren't compatible with current HVMC. A lazy evaluator
-version will be provided in the future.
+HVMC's main evaluator is a Rust package that runs on the CPU, although GPU
+versions are in development (see below). It is completely eager, which means it
+will reduce *every* generated active pair (redex) in an ultra-greedy,
+massively-parallel fashion. 
 
-The eager evaluator works by keeping a vector of current active pairs (redexes)
-and, for-each redex, performing an "interaction", as described below. On the
-single-core version, that "for-each" is done in a sequential loop. On the
-multi-core version, the vector of redexes is actually split into a grid of
-"redex bags", each bag owned by a "rewrite squad", which continuously pops and
-executes a redex in parallel. Since interaction rules are symmetric on the 4
-surrounding ports, we actually use 4 threads to perform an interaction, thus the
-name "squad".
+The evaluator works by keeping a vector of current active pairs (redexes) and,
+for each redex in parallel, performing local "interaction", or "graph rewrite",
+as described below. To distribute work, a simple task stealing queue is used.
 
-For example, on NVidia's RTX 4090, we keep a grid of 128x128 redex bags. Each
-bag is processed by a rewrite squad. There are `16,384` active squads, for a
-total of `65,536` active threads. Below is a visual representation:
+Note that, due to HVM's ultra-strict evaluator, languages targeting it should
+convert top-level definitions to
+[supercombinators](https://en.wikipedia.org/wiki/Supercombinator), which enables
+recursive definitions halt. HVM-Lang performs this transformation before
+converting to HVM-Core.
+
+## GPU Evaluator
+
+The GPU evaluator is similar to the CPU one, except two main differences: "1/4"
+rewrites and a task-sharing grid.  For example, on NVidia's RTX 4090, we keep a
+grid of 128x128 redex bags, where each bag contains redexes to be processed by a
+"squad", which consists of 4 threads, each one performing "1/4" of the rewrite,
+which increases the granularity. This allows us to keep `16,384` active squads,
+for a total of `65,536` active threads, which means the maximum degree of
+parallelism (65k) is achieved at just 16k redexes. Visually:
 
 ```
 REDEX ::= (Ptr32, Ptr32)
@@ -229,22 +227,11 @@ THREAD ::=
     }
 
     atomic_rewrite(A, B):
-      if con-con:
-        thread 0: atomic_subst(A.1, B.1)
-        thread 1: atomic_subst(A.2, B.2)
-        thread 2: atomic_subst(B.1, A.1)
-        thread 3: atomic_subst(B.2, A.2)
-      else if con-dup:
-        ...
-
-    atomic_subst(a, b):
-      a_ok = CAS(a, a.rev(), b)
-      b_ok = CAS(b, b.rev(), a)
-      if not (a_ok and b_ok):
-        atomic_link(a, a.rev(), b)
+      ... match redex type ...
+      ... perform atomic links ...
 
     atomic_link(a, b):
-      see algorith on 'paper/'
+      ... see algorith on 'paper/' ...
 
 RESULT:
 
@@ -259,13 +246,6 @@ OUTPUT:
     A2 <--------------> B2
 ```
 
-With this setup, a program reaches the peak parallelism when there are about 16k
-active redexes, resulting in a maximum theoretical speedup of 65536x. Note that
-even a "maximally sequential" interaction combinator program (i.e., one that, at
-any point of the reduction, always has exactly 1 active pair) still benefits
-from a "4x" degree of parallelism, due to squads having 4 threads; although,
-obviously, at that point a CPU version would be much faster, as CPU cores are
-way faster than 4 GPU cores.
 
 ## Interactions
 
@@ -422,8 +402,8 @@ follow from the ones described above.
 The memory layout is optimized for efficiency, and can be summarized as:
 
 ```rust
-// A pointer is a 32-bit word
-type Ptr = u32;
+// A pointer is a 64-bit word
+type Ptr = u64;
 
 // A node stores its two aux ports
 struct Node {
@@ -472,23 +452,54 @@ CT5 = 0xF; // main port of extra node
 ```
 
 This memory-efficient format allows for a fast implementation in many
-situations. For example, allocation can be performed by a single 64-bit atomic
-CAS, and an annihilation interaction can be done with 2 calls to an
-`atomic_link()` procedure, which, in most cases, only requires 2 atomic reads
-and 2 atomic CAS's.
+situations; for example, an interaction combinator annihilation can be performed
+with just 2 atomic CAS.
 
-We also provide unboxed 24-bit unsigned integers, which allows HVMC to store raw
-data with minimal loss. For example, to store a raw 3 KB buffer, one could use a
-perfect binary tree of CON nodes with a depth of 9, as follows:
+We also provide unboxed 60-bit unsigned integers, which allows HVMC to store raw
+data with minimal loss. For example, to store a raw 3.75 KB buffer, one could
+use a perfect binary tree of CON nodes with a depth of 8, as follows:
 
 ```javascript
-@buff = ((((((((((X0 X1) (X2 X3)) ((X4 X5) (X6 X7))) ...)))))))
+@buff = (((((((((X0 X1) (X2 X3)) ((X4 X5) (X6 X7))) ...)))))))
 ```
 
-This would use a total of 1023 nodes, which takes a space of almost exactly 8 KB
+This would use a total of 511 nodes, which takes a space of almost exactly 8 KB
 on HVMC. As such, while buffers are not part of the spec, we can store raw data
-with a 37.5% efficiency using pure interaction nets, which is a reasonable price
-to pay to gain the ability of computing them with massive parallelism.
+with a ~46% efficiency using interaction-net-based trees. This structure isn't
+as compact as arrays, but it allows us access and transform data in parallel,
+which is a great tradeoff in practice.
+
+## Lock-free Algorithm
+
+At the heart of HVM-Core's massively parallel evaluator lies a lock-free
+algorithm that allows performing interaction combinator rewrites in a concurrent
+environment with minimal contention and completely avoiding locks and backoffs.
+To understand the difference, see the images below:
+
+### Before: using locks
+
+In a lock-based interaction net evaluator, threads must lock the entire
+surrounding region of an active pair (redex) before reducing it. That is a
+source of contention and can results in backoffs, which completely prevents a
+thread from making progress, reducing performance.
+
+![Naive lock-based evaluator](paper/images/lock_based_evaluator.png)
+
+### After: lock-free
+
+The lock-free approach works by attempting to perform the link with a single
+compare-and-swap. When it succeeds, nothing else needs to be done. When it
+fails, we place redirection wires that semantically complete the rewrite without
+any interaction. Then, when a main port is connected to a redirection wire, it
+traverses and consumes the entire path, eaching its target location. If it is an
+auxiliary port, we store with a cas, essentially moving a node to another
+thread. If it is a main port, we create a new redex, which can then be reduced
+in parallel. This essentially results in an "implicit ownership" scheme that
+allows threads to collaborate in a surgically precise contention-avoiding dance.
+
+![HVM-Core's lock-free evaluator](paper/images/lock_free_evaluator.png)
+
+For more information, check the [paper/draft.pdf](paper/draft.pdf).
 
 ## Contributing
 
@@ -501,4 +512,13 @@ git checkout <your-branch>
 cargo bench -- --baseline main      # compare your changes with the "main" branch
 ```
 
-To verify if there's no correctness regression, run `cargo test`. You can add `cargo-insta` with `cargo install cargo-insta` and run `cargo insta test` to see if all test cases pass, if some don't and they need to be changed, you can run `cargo insta review` to review the snapshots and correct them if necessary.
+To verify if there's no correctness regression, run `cargo test`. You can add
+`cargo-insta` with `cargo install cargo-insta` and run `cargo insta test` to see
+if all test cases pass, if some don't and they need to be changed, you can run
+`cargo insta review` to review the snapshots and correct them if necessary.
+
+## Community
+
+HVM-Core is part of [Higher Order Company](https://HigherOrderCO.com/)'s efforts
+to build the massively parallel future of computer. Join our [Discord
+community](https://discord.HigherOrderCO.com/)!
