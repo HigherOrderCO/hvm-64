@@ -220,3 +220,4 @@ pub fn gen_cuda_book(book: &run::Book) -> String {
 
   return code;
 }
+

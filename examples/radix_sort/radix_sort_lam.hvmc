@@ -50,7 +50,7 @@
 @b = (a (* a))
 @gen = (?<(@Sing @H) a> a)
 @main = a
-& @gen ~ (#18 (#0 b))
+& @gen ~ (#20 (#0 b))
 & @rev ~ (b c)
 & @sort ~ (c d)
 & @sum ~ (d a)

@@ -9,7 +9,6 @@
 
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Barrier};
-use std::sync::Once;
 
 pub type Tag  = u8;
 pub type Lab  = u32;
@@ -426,7 +425,7 @@ impl<'a> Net<'a> {
       loop {
         self.next += 1;
         let index = (self.area.init + self.next % self.area.size) as Loc;
-        if self.heap.get(index, P2).is_nil() {
+        if self.heap.get(index, P1).is_nil() && self.heap.get(index, P2).is_nil() {
           return index;
         }
       }
@@ -449,6 +448,17 @@ impl<'a> Net<'a> {
   #[inline(always)]
   pub fn swap_target(&self, ptr: Ptr, value: Ptr) -> Ptr {
     self.heap.swap(ptr.loc(), ptr.0 & 1, value)
+  }
+
+  // Takes a pointer's target.
+  #[inline(always)]
+  pub fn take_target(&self, ptr: Ptr) -> Ptr {
+    loop {
+      let got = self.heap.swap(ptr.loc(), ptr.0 & 1, LOCK);
+      if got != LOCK && got != NULL {
+        return got;
+      }
+    }
   }
 
   // Sets a pointer's target, using CAS.
@@ -497,8 +507,8 @@ impl<'a> Net<'a> {
   #[inline(always)]
   pub fn atomic_link(&mut self, a_dir: Ptr, b_dir: Ptr) {
     //println!("link {:016x} {:016x}", a_dir.0, b_dir.0);
-    let a_ptr = self.swap_target(a_dir, LOCK);
-    let b_ptr = self.swap_target(b_dir, LOCK);
+    let a_ptr = self.take_target(a_dir);
+    let b_ptr = self.take_target(b_dir);
     if a_ptr.is_pri() && b_ptr.is_pri() {
       self.set_target(a_dir, NULL);
       self.set_target(b_dir, NULL);
@@ -512,7 +522,7 @@ impl<'a> Net<'a> {
   // Given a location, link the pointer stored to another pointer, atomically.
   #[inline(always)]
   pub fn half_atomic_link(&mut self, a_dir: Ptr, b_ptr: Ptr) {
-    let a_ptr = self.swap_target(a_dir, LOCK);
+    let a_ptr = self.take_target(a_dir);
     if a_ptr.is_pri() && b_ptr.is_pri() {
       self.set_target(a_dir, NULL);
       return self.redux(a_ptr, b_ptr);
@@ -611,6 +621,9 @@ impl<'a> Net<'a> {
       }
       // If it is taken, we wait.
       if t_ptr == LOCK {
+        continue;
+      }
+      if t_ptr == NULL {
         continue;
       }
       // Shouldn't be reached.
