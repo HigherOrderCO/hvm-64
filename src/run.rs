@@ -177,6 +177,11 @@ impl Ptr {
   }
 
   #[inline(always)]
+  pub fn is_dup(&self) -> bool {
+    return matches!(self.tag(), DUP);
+  }
+
+  #[inline(always)]
   pub fn is_ref(&self) -> bool {
     return matches!(self.tag(), REF);
   }
@@ -897,11 +902,13 @@ impl<'a> Net<'a> {
   pub fn reduce(&mut self, book: &Book, limit: usize) -> usize {
     let mut count = 0;
     while let Some((a, b)) = self.rdex.pop() {
-      self.interact(book, a, b);
-      count += 1;
-      if count >= limit {
-        break;
-      }
+      //if !a.is_nil() && !b.is_nil() {
+        self.interact(book, a, b);
+        count += 1;
+        if count >= limit {
+          break;
+        }
+      //}
     }
     return count;
   }
@@ -962,7 +969,7 @@ impl<'a> Net<'a> {
   // Evaluates a term to normal form in parallel
   pub fn parallel_normal(&mut self, book: &Book) {
 
-    const SHARE_LIMIT : usize = 1 << 10; // max share redexes per split 
+    const SHARE_LIMIT : usize = 1 << 12; // max share redexes per split 
     const LOCAL_LIMIT : usize = 1 << 18; // max local rewrites per epoch
 
     // Local thread context
@@ -1079,6 +1086,13 @@ impl<'a> Net<'a> {
           let init = a_len - send * 2;
           let rdx0 = *ctx.net.rdex.get_unchecked(init + i * 2 + 0);
           let rdx1 = *ctx.net.rdex.get_unchecked(init + i * 2 + 1);
+          //let init = 0;
+          //let ref0 = ctx.net.rdex.get_unchecked_mut(init + i * 2 + 0);
+          //let rdx0 = *ref0;
+          //*ref0    = (Ptr(0), Ptr(0));
+          //let ref1 = ctx.net.rdex.get_unchecked_mut(init + i * 2 + 1);
+          //let rdx1 = *ref1;
+          //*ref1    = (Ptr(0), Ptr(0));
           let targ = ctx.share.get_unchecked(b_tid * SHARE_LIMIT + i);
           *ctx.net.rdex.get_unchecked_mut(init + i) = rdx0;
           targ.0.store(rdx1.0);
