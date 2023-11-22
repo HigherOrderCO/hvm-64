@@ -997,6 +997,7 @@ impl<'a> Net<'a> {
       total: &'a AtomicUsize, // total redex length
       barry: &'a Barrier, // synchronization barrier
       stealers: &'a Vec<&'a Stealer<Redex>>, // stealers
+      rng: fastrand::Rng, // thread-local random number generator
     }
 
     // Initialize global objects
@@ -1061,6 +1062,7 @@ impl<'a> Net<'a> {
           total: &total,
           barry: &barry,
           stealers: &stealers,
+          rng: fastrand::Rng::new(),
         };
         // // print redex count
         // println!("redexes: {}", ctx.net.rdex.len());
@@ -1098,10 +1100,8 @@ impl<'a> Net<'a> {
 
         // split(ctx, tlog2);
 
-        // TODO: To be more efficient, create a new Rng instance instead of using the thread-local generator:
-        // let mut rng = fastrand::Rng::new();
         while {
-          let steal_from_worker_i = fastrand::usize(.. ctx.stealers.len());
+          let steal_from_worker_i = ctx.rng.usize(.. ctx.stealers.len());
           let stealer = &ctx.stealers[steal_from_worker_i];
           let res = stealer.steal(&ctx.net.rdex, |n| n / 2);
           matches!(res, Err(StealError::Busy))
