@@ -8,3 +8,4 @@ target/
 tmp/
 .hvm/
 .hvmx/
+.DS_store/

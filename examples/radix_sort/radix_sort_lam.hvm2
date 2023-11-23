@@ -99,4 +99,4 @@ swap = λn match n {
 }
 
 // main : u32
-main = (sum (sort (rev (gen 20 0))))
+main = (sum (sort (rev (gen 22 0))))

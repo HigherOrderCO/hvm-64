@@ -327,18 +327,18 @@ pub fn compile_term(book: &run::Book, tab: usize, fid: run::Loc) -> String {
       return code;
     }
 
-    // TODO: implement inlining correctly
-    // NOTE: enabling this makes dec_bits_tree hang; investigate
-    if ptr.is_ref() && tail.is_some() {
-      code.push_str(&format!("{}// inline @{}\n", ident(tab), ast::val_to_name(ptr.loc() as run::Val)));
-      code.push_str(&format!("{}if !{}.is_skp() {{\n", ident(tab), trg.get()));
-      code.push_str(&format!("{}self.rwts.dref += 1;\n", ident(tab+1)));
-      code.push_str(&call(book, tab+1, tail, newx, &mut HashMap::new(), ptr.loc(), trg));
-      code.push_str(&format!("{}}} else {{\n", ident(tab)));
-      code.push_str(&make(tab+1, newx, vars, def, ptr, &trg.show()));
-      code.push_str(&format!("{}}}\n", ident(tab)));
-      return code;
-    }
+    //// TODO: implement inlining correctly
+    //// NOTE: enabling this makes dec_bits_tree hang; investigate
+    //if ptr.is_ref() && tail.is_some() {
+      //code.push_str(&format!("{}// inline @{}\n", ident(tab), ast::val_to_name(ptr.loc() as run::Val)));
+      //code.push_str(&format!("{}if !{}.is_skp() {{\n", ident(tab), trg.get()));
+      //code.push_str(&format!("{}self.rwts.dref += 1;\n", ident(tab+1)));
+      //code.push_str(&call(book, tab+1, tail, newx, &mut HashMap::new(), ptr.loc(), trg));
+      //code.push_str(&format!("{}}} else {{\n", ident(tab)));
+      //code.push_str(&make(tab+1, newx, vars, def, ptr, &trg.show()));
+      //code.push_str(&format!("{}}}\n", ident(tab)));
+      //return code;
+    //}
 
     // ATOM <~ *
     // --------- fast erase

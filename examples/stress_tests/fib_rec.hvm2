@@ -1,0 +1,11 @@
+add = λa λb (+ a b)
+
+fib = λx match x {
+  0: 1
+  1+y: match y {
+    0: 1
+    1+z: (+ (fib y) (fib z))
+  }
+}
+
+main = (fib 30)
