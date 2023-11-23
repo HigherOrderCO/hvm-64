@@ -12,4 +12,4 @@ sum = λt
   let case_node = λx0 λx1 (add (sum x0) (sum x1))
   (t case_leaf case_node)
 
-main = (sum (gen 26))
+main = (sum (gen 24))
