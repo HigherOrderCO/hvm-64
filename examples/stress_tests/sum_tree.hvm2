@@ -1,4 +1,4 @@
-data Tree = (Node x y) | (Leaf v)
+data Tree = (Leaf x) | (Node x0 x1)
 
 add = λa λb (+ a b)
 
@@ -8,8 +8,8 @@ gen = λn match n {
 }
 
 sum = λt
-  let case_node = λa λb (add (sum a) (sum b))
-  let case_leaf = λv v
-  (t case_node case_leaf)
+  let case_leaf = λx x
+  let case_node = λx0 λx1 (add (sum x0) (sum x1))
+  (t case_leaf case_node)
 
 main = (sum (gen 26))
