@@ -121,6 +121,7 @@ pub struct Net<'a> {
 // A compact closed net, used for dereferences.
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Def {
+  pub safe: bool,
   pub rdex: Vec<(Ptr, Ptr)>,
   pub node: Vec<(Ptr, Ptr)>,
 }
@@ -279,6 +280,7 @@ impl Book {
 impl Def {
   pub fn new() -> Self {
     Def {
+      safe: true,
       rdex: vec![],
       node: vec![],
     }
@@ -490,7 +492,7 @@ impl<'a> Net<'a> {
   }
 
   #[inline(always)]
-  pub fn swap(&mut self, a: Trg, val: Ptr) -> Ptr {
+  pub fn swap(&self, a: Trg, val: Ptr) -> Ptr {
     match a {
       Trg::Dir(dir) => self.swap_target(dir, val),
       Trg::Ptr(ptr) => ptr,
@@ -849,18 +851,20 @@ impl<'a> Net<'a> {
 
   // Expands a closed net.
   #[inline(always)]
-  pub fn call(&mut self, book: &Book, ptr: Ptr, par: Ptr) {
+  pub fn call(&mut self, book: &Book, ptr: Ptr, trg: Ptr) {
     self.rwts.dref += 1;
     let mut ptr = ptr;
     // FIXME: change "while" to "if" once lang prevents refs from returning refs
     if ptr.is_ref() {
       // Intercepts with a native function, if available.
-      if self.call_native(book, ptr, par) {
+      if self.call_native(book, ptr, trg) {
         return;
       }
       // Load the closed net.
       let got = unsafe { book.defs.get_unchecked((ptr.loc() as usize) & 0xFFFFFF) };
-      if got.node.len() > 0 {
+      if got.safe && trg.is_dup() {
+        return self.copy(trg, ptr);
+      } else if got.node.len() > 0 {
         let len = got.node.len() - 1;
         // Allocate space.
         for i in 0 .. len {
@@ -884,7 +888,7 @@ impl<'a> Net<'a> {
         ptr = self.adjust(got.node[0].1);
       }
     }
-    self.link(ptr, par);
+    self.link(ptr, trg);
   }
 
   // Adjusts dereferenced pointer locations.

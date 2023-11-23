@@ -408,9 +408,16 @@ pub fn compile_term(book: &run::Book, tab: usize, fid: run::Loc) -> String {
   }
 
   let fun = ast::val_to_name(fid as run::Val);
+  let def = &book.defs[fid as usize];
 
   let mut code = String::new();
   code.push_str(&format!("{}pub fn F_{}(&mut self, ptr: Ptr, trg: Trg) -> bool {{\n", ident(tab), fun));
+  if def.safe {
+    code.push_str(&format!("{}if self.get(trg).is_dup() {{\n", ident(tab+1)));
+    code.push_str(&format!("{}self.copy(self.swap(trg, NULL), ptr);\n", ident(tab+2)));
+    code.push_str(&format!("{}return true;\n", ident(tab+2)));
+    code.push_str(&format!("{}}}\n", ident(tab+1)));
+  }
   code.push_str(&call(book, tab+1, None, &mut 0, &mut HashMap::new(), fid, &Target { nam: "trg".to_string() }));
   code.push_str(&format!("{}return true;\n", ident(tab+1)));
   code.push_str(&format!("{}}}\n", ident(tab)));

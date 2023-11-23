@@ -543,6 +543,7 @@ pub fn book_to_runtime(book: &Book) -> run::Book {
 pub fn runtime_net_to_runtime_def(net: &run::Net) -> run::Def {
   let mut node = vec![];
   let mut rdex = vec![];
+  let mut safe = true;
   for i in 0 .. net.heap.data.len() {
     let p1 = net.heap.get(node.len() as run::Loc, run::P1);
     let p2 = net.heap.get(node.len() as run::Loc, run::P2);
@@ -551,13 +552,19 @@ pub fn runtime_net_to_runtime_def(net: &run::Net) -> run::Def {
     } else {
       break;
     }
+    if p1.is_dup() || p2.is_dup() {
+      safe = false;
+    }
   }
   for i in 0 .. net.rdex.len() {
     let p1 = net.rdex[i].0;
     let p2 = net.rdex[i].1;
+    if p1.is_dup() || p2.is_dup() {
+      safe = false;
+    }
     rdex.push((p1, p2));
   }
-  return run::Def { rdex, node };
+  return run::Def { safe, rdex, node };
 }
 
 // Reads back from a def.
