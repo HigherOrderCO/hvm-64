@@ -21,6 +21,7 @@ pub enum TypeRepr {
   U8,
   U32,
   Bool,
+  Unit,
 }
 
 /// Constant values
@@ -904,6 +905,7 @@ impl JitLowering {
       builder: FunctionBuilder::new(&mut self.ctx.func, &mut self.builder_context),
       variables: HashMap::new(),
       module: &mut self.module,
+      index: 0,
     };
 
     let entry_block = lowering.builder.create_block();
@@ -1014,6 +1016,7 @@ struct FunctionLowering<'program, 'jit> {
   builder: FunctionBuilder<'jit>,
   variables: HashMap<String, Variable>,
   module: &'jit mut JITModule,
+  index: usize,
 }
 
 impl FunctionLowering<'_, '_> {
@@ -1039,19 +1042,32 @@ impl FunctionLowering<'_, '_> {
     SET_COMM (net: types::I64, val: types::I64) -> types::I64
   ]);
 
+  fn declare_variable(&mut self, int: types::Type, name: &str) -> Variable {
+    let var = Variable::new(self.index);
+    if !self.variables.contains_key(name) {
+      self.variables.insert(name.into(), var);
+      self.builder.declare_var(var, int);
+      self.index += 1;
+    }
+    var
+  }
+
   fn get_environment(&mut self) -> Value {
     let variable = self.variables.get("environment").unwrap();
     self.builder.use_var(*variable)
   }
 
-  fn lower_prop(&mut self, prop: Var) -> Value {
+  fn lower_var(&mut self, prop: Var) -> Value {
     let environment = self.get_environment();
     match prop {
       Var::Anni => self.GET_ANNI(environment),
       Var::Oper => self.GET_OPER(environment),
       Var::Eras => self.GET_ERAS(environment),
       Var::Comm => self.GET_COMM(environment),
-      Var::Var(_) => todo!(),
+      Var::Var(var) => {
+        let variable = self.variables.get(&var).unwrap();
+        self.builder.use_var(*variable)
+      }
     }
   }
 
@@ -1077,8 +1093,16 @@ impl FunctionLowering<'_, '_> {
       }
 
       // STATEMENTS
-      Instr::Let { name, value } => todo!(),
-      Instr::Val { name, type_repr } => todo!(),
+      Instr::Let { name, value } => {
+        let value = self.lower_expr(value);
+        let variable = self.declare_variable(types::I32, &name);
+        self.builder.def_var(variable, value);
+        self.variables.insert(name, variable);
+      }
+      Instr::Val { name, .. } => {
+        let variable = self.declare_variable(types::I32, &name);
+        self.variables.insert(name, variable);
+      }
       Instr::Assign { name, value } => {
         let value = self.lower_expr(value);
         let environment = self.get_environment();
@@ -1087,7 +1111,11 @@ impl FunctionLowering<'_, '_> {
           Var::Oper => self.SET_OPER(environment, value),
           Var::Eras => self.SET_ERAS(environment, value),
           Var::Comm => self.SET_COMM(environment, value),
-          Var::Var(_) => todo!(),
+          Var::Var(name) => {
+            let variable = self.variables.get(&name).unwrap();
+            self.builder.def_var(*variable, value);
+            return None;
+          }
         };
       }
       Instr::Expr(expr) => return Some(self.lower_expr(expr)),
@@ -1108,7 +1136,7 @@ impl FunctionLowering<'_, '_> {
         let value_constant = self.program.lower_constant(constant);
         self.builder.ins().iconst(types::I8, value_constant)
       }
-      Expr::Var(prop) => self.lower_prop(prop),
+      Expr::Var(prop) => self.lower_var(prop),
       Expr::Bin { op, lhs, rhs } => {
         let _lhs = self.lower_expr(*lhs);
         let _rhs = self.lower_expr(*rhs);
@@ -1185,7 +1213,6 @@ impl FunctionLowering<'_, '_> {
           }
         }
         self.builder.ins().jump(merge_block, &[then_value]);
-
 
         self.builder.switch_to_block(otherwise_bb);
         let mut otherwise_value = self.builder.ins().iconst(types::I64, 0);
@@ -1279,6 +1306,7 @@ mod rust_codegen {
         TypeRepr::U8 => quote! { u8 },
         TypeRepr::U32 => quote! { u32 },
         TypeRepr::Bool => quote! { bool },
+        TypeRepr::Unit => quote! { () },
       })
     }
   }
