@@ -48,9 +48,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let (book, mut net) = load(file_name);
         let start_time = std::time::Instant::now();
         let fns = hvmc::jit::compile_book(&book);
-        for function in fns.functions.iter() {
-          fns.compile_function(function.clone());
-        }
+        net.call_native = fns.compile_program();
         net.normal(&book);
         println!("{}", ast::show_runtime_net(&net));
         if args.len() >= 4 && args[3] == "-s" {

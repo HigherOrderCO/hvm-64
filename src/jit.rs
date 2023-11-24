@@ -4,6 +4,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::str::FromStr;
+use std::sync::Arc;
 
 use cranelift::prelude::*;
 use cranelift_jit::{JITBuilder, JITModule};
@@ -11,7 +12,7 @@ use cranelift_module::{DataDescription, Linkage, Module};
 use Instr::SetHeap;
 
 use crate::ast;
-use crate::run::{self, Book, Def, Ptr, Val};
+use crate::run::{self, Book, Def, Ptr, Val, CallNative};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TypeRepr {
@@ -880,7 +881,7 @@ impl Default for JitLowering {
 type JitNet = u64;
 type JitBook = u64;
 type JitPtr = u32;
-type JitFunction = unsafe extern "C" fn(JitNet, JitBook, JitPtr, JitPtr) -> JitPtr;
+type JitFunction = unsafe extern "C" fn(JitNet, JitBook, JitPtr, JitPtr) -> u8;
 
 impl Program {
   /// Compile the program into a JIT function.
@@ -888,6 +889,31 @@ impl Program {
     let mut lowering = JitLowering::default();
     let function = lowering.translate(self, function);
     unsafe { std::mem::transmute(function) }
+  }
+
+  pub fn compile_program(&self) -> CallNative {
+    let mut functions = HashMap::new();
+
+    for function in &self.functions {
+      let Some(value) = self.values.iter().find(|i| i.name == function.name) else {
+        panic!("Can't find value for function");
+      };
+
+      functions.insert(value.value, self.compile_function(function.clone()));
+    }
+
+    Arc::new(move |net, book, ptr, x| {
+      match functions.get(&ptr.val()) {
+        Some(function) => unsafe {
+          let net: u64 = std::mem::transmute(net);
+          let book: u64 = std::mem::transmute(book);
+          let ptr: u32 = std::mem::transmute(ptr);
+          let x: u32 = std::mem::transmute(x);
+          (function)(net, book, ptr, x) == 1
+        },
+        None => false,
+      }
+    })
   }
 }
 
