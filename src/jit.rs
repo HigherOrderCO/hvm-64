@@ -977,10 +977,14 @@ impl JitLowering {
       lowering.builder.ins().return_(&[return_value]);
     }
 
+    lowering.builder.finalize();
+
     let function = self
       .module
       .declare_function(&function.name, Linkage::Export, &self.ctx.func.signature)
       .expect("Can't create new function");
+
+    self.module.define_function(function, &mut self.ctx).unwrap();
 
     self.module.clear_context(&mut self.ctx);
     self.module.finalize_definitions().unwrap();
@@ -1265,6 +1269,7 @@ impl FunctionLowering<'_, '_> {
           .brif(cond, then_bb, &[], otherwise_bb, &[]);
 
         self.builder.switch_to_block(then_bb);
+        self.builder.seal_block(then_bb);
         let mut then_value = self.builder.ins().iconst(types::I64, 0);
         for instr in then {
           if let Some(value) = self.lower_instr(instr) {
@@ -1274,6 +1279,7 @@ impl FunctionLowering<'_, '_> {
         self.builder.ins().jump(merge_block, &[then_value]);
 
         self.builder.switch_to_block(otherwise_bb);
+        self.builder.seal_block(otherwise_bb);
         let mut otherwise_value = self.builder.ins().iconst(types::I64, 0);
         for instr in otherwise {
           if let Some(value) = self.lower_instr(instr) {
