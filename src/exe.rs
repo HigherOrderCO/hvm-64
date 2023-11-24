@@ -55,3 +55,9 @@ pub unsafe extern "C" fn SET_HEAP(net: Net, idx: Val, port: Port, val: Ptr) {
   let net = &mut *net;
   net.heap.set(idx, port, val);
 }
+
+/// [crate::jit::Instr::Link]
+pub unsafe extern "C" fn LINK(net: Net, a: Ptr, b: Ptr) {
+  let net = &mut *net;
+  net.link(a, b)
+}

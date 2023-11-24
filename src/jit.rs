@@ -1023,6 +1023,7 @@ impl FunctionLowering<'_, '_> {
     NEW_PTR (tag: types::I8, value: types::I32) -> types::I32,
     ALLOC (net: types::I64, size: types::I64) -> types::I32,
     OP (net: types::I64, lhs: types::I32, rhs: types::I32) -> types::I32,
+    LINK (net: types::I64, lhs: types::I32, rhs: types::I32) -> types::I8,
     GET_HEAP (net: types::I64, idx: types::I32, port: types::I32) -> types::I32,
     SET_HEAP (net: types::I64, idx: types::I32, port: types::I32, value: types::I32) -> types::I8
   ]);
@@ -1046,7 +1047,13 @@ impl FunctionLowering<'_, '_> {
     match instr {
         Instr::Free(_) => todo!(),
         Instr::SetHeap { idx, port, value } => todo!(),
-        Instr::Link { lhs, rhs } => todo!(),
+        Instr::Link { lhs, rhs } => {
+          let net = self.get_environment();
+          let lhs = self.lower_expr(lhs);
+          let rhs = self.lower_expr(rhs);
+          self.LINK(net, lhs, rhs);
+          return None
+        },
 
         // STATEMENTS
         Instr::Let { name, value } => todo!(),
