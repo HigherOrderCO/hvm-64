@@ -12,7 +12,7 @@ use cranelift_module::{DataDescription, Linkage, Module};
 use Instr::SetHeap;
 
 use crate::ast;
-use crate::run::{self, Book, Def, Ptr, Val, CallNative};
+use crate::run::{self, Book, CallNative, Def, Ptr, Val};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TypeRepr {
@@ -902,17 +902,15 @@ impl Program {
       functions.insert(value.value, self.compile_function(function.clone()));
     }
 
-    Arc::new(move |net, book, ptr, x| {
-      match functions.get(&ptr.val()) {
-        Some(function) => unsafe {
-          let net: u64 = std::mem::transmute(net);
-          let book: u64 = std::mem::transmute(book);
-          let ptr: u32 = std::mem::transmute(ptr);
-          let x: u32 = std::mem::transmute(x);
-          (function)(net, book, ptr, x) == 1
-        },
-        None => false,
-      }
+    Arc::new(move |net, book, ptr, x| match functions.get(&ptr.val()) {
+      Some(function) => unsafe {
+        let net: u64 = std::mem::transmute(net);
+        let book: u64 = std::mem::transmute(book);
+        let ptr: u32 = std::mem::transmute(ptr);
+        let x: u32 = std::mem::transmute(x);
+        (function)(net, book, ptr, x) == 1
+      },
+      None => false,
     })
   }
 }
@@ -940,6 +938,12 @@ impl JitLowering {
   }
 
   fn translate(&mut self, program: &Program, function: Function) -> *const u8 {
+    let signature = &mut self.ctx.func.signature;
+    signature.params.push(AbiParam::new(types::I64)); // net
+    signature.params.push(AbiParam::new(types::I64)); // book
+    signature.params.push(AbiParam::new(types::I32)); // ptr
+    signature.params.push(AbiParam::new(types::I32)); // argument
+
     let mut lowering = FunctionLowering {
       program,
       builder: FunctionBuilder::new(&mut self.ctx.func, &mut self.builder_context),
@@ -947,6 +951,16 @@ impl JitLowering {
       module: &mut self.module,
       index: 0,
     };
+
+    let environment = lowering.declare_variable(types::I64, "environment");
+    let book = lowering.declare_variable(types::I64, "book");
+    let ptr = lowering.declare_variable(types::I32, "ptr");
+    let argument = lowering.declare_variable(types::I32, "argument");
+
+    lowering.variables.insert("environment".into(), environment);
+    lowering.variables.insert("book".into(), book);
+    lowering.variables.insert("ptr".into(), ptr);
+    lowering.variables.insert("argument".into(), argument);
 
     let entry_block = lowering.builder.create_block();
     let mut return_value = None;
