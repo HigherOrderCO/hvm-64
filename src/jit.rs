@@ -943,6 +943,7 @@ impl JitLowering {
     signature.params.push(AbiParam::new(types::I64)); // book
     signature.params.push(AbiParam::new(types::I32)); // ptr
     signature.params.push(AbiParam::new(types::I32)); // argument
+    signature.returns.push(AbiParam::new(types::I32));
 
     let mut lowering = FunctionLowering {
       program,
