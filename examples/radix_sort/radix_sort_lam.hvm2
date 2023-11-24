@@ -1,5 +1,12 @@
-data Arr = Empty | (Single x) | (Concat x0 x1)
-data Map = Free | Used | (Node x0 x1)
+// data Arr = Empty | (Single x) | (Concat x0 x1)
+Empty  =         λempty λsingle λconcat empty
+Single = λx      λempty λsingle λconcat (single x)
+Concat = λx0 λx1 λempty λsingle λconcat (concat x0 x1)
+
+// data Map = Free | Used | (Node x0 x1)
+Free =         λfree λused λnode free
+Used =         λfree λused λnode used
+Node = λx0 λx1 λfree λused λnode (node x0 x1)
 
 // gen : u32 -> Arr
 gen = λn match n {
@@ -92,11 +99,11 @@ radix = λn
   let r = (swap (& n 8388608) r Free)
   r
 
-// swap : u32 -> Arr -> Arr -> Arr
+// swap : u32 -> Map -> Map -> Map
 swap = λn match n {
-  0:   λx0 λx1 (Concat x0 x1)
-  1+p: λx0 λx1 (Concat x1 x0)
+  0:   λx0 λx1 (Node x0 x1)
+  1+p: λx0 λx1 (Node x1 x0)
 }
 
 // main : u32
-main = (sum (sort (rev (gen 20 0))))
+main = (sum (sort (rev (gen 22 0))))
