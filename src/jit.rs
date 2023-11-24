@@ -908,7 +908,9 @@ impl JitLowering {
 
     let entry_block = lowering.builder.create_block();
     let mut return_value = None;
-    lowering.builder.append_block_params_for_function_params(entry_block);
+    lowering
+      .builder
+      .append_block_params_for_function_params(entry_block);
     lowering.builder.switch_to_block(entry_block);
     lowering.builder.seal_block(entry_block);
     for instr in function.body {
@@ -1024,6 +1026,7 @@ impl FunctionLowering<'_, '_> {
     ALLOC (net: types::I64, size: types::I64) -> types::I32,
     OP (net: types::I64, lhs: types::I32, rhs: types::I32) -> types::I32,
     LINK (net: types::I64, lhs: types::I32, rhs: types::I32) -> types::I8,
+    FREE (net: types::I64, idx: types::I32) -> types::I8,
     GET_HEAP (net: types::I64, idx: types::I32, port: types::I32) -> types::I32,
     SET_HEAP (net: types::I64, idx: types::I32, port: types::I32, value: types::I32) -> types::I8
   ]);
@@ -1045,22 +1048,34 @@ impl FunctionLowering<'_, '_> {
 
   fn lower_instr(&mut self, instr: Instr) -> Option<Value> {
     match instr {
-        Instr::Free(_) => todo!(),
-        Instr::SetHeap { idx, port, value } => todo!(),
-        Instr::Link { lhs, rhs } => {
-          let net = self.get_environment();
-          let lhs = self.lower_expr(lhs);
-          let rhs = self.lower_expr(rhs);
-          self.LINK(net, lhs, rhs);
-          return None
-        },
+      Instr::Free(target) => {
+        let net = self.get_environment();
+        let target = self.lower_expr(target);
+        self.FREE(net, target);
+        return None;
+      }
+      Instr::SetHeap { idx, port, value } => {
+        let net = self.get_environment();
+        let idx = self.lower_expr(idx);
+        let port = self.lower_expr(port);
+        let value = self.lower_expr(value);
+        self.SET_HEAP(net, idx, port, value);
+        return None;
+      }
+      Instr::Link { lhs, rhs } => {
+        let net = self.get_environment();
+        let lhs = self.lower_expr(lhs);
+        let rhs = self.lower_expr(rhs);
+        self.LINK(net, lhs, rhs);
+        return None;
+      }
 
-        // STATEMENTS
-        Instr::Let { name, value } => todo!(),
-        Instr::Val { name, type_repr } => todo!(),
-        Instr::Assign { name, value } => todo!(),
-        Instr::Expr(expr) => Some(self.lower_expr(expr)),
-        Instr::Return(_) => todo!(),
+      // STATEMENTS
+      Instr::Let { name, value } => todo!(),
+      Instr::Val { name, type_repr } => todo!(),
+      Instr::Assign { name, value } => todo!(),
+      Instr::Expr(expr) => Some(self.lower_expr(expr)),
+      Instr::Return(_) => todo!(),
     }
   }
 
@@ -1078,9 +1093,9 @@ impl FunctionLowering<'_, '_> {
         let _lhs = self.lower_expr(*lhs);
         let _rhs = self.lower_expr(*rhs);
         match op.as_str() {
-          _ => todo!()
+          _ => todo!(),
         }
-      },
+      }
       Expr::Val { expr } => {
         let expr = self.lower_expr(*expr);
         self.VAL(expr)

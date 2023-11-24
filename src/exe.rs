@@ -61,3 +61,9 @@ pub unsafe extern "C" fn LINK(net: Net, a: Ptr, b: Ptr) {
   let net = &mut *net;
   net.link(a, b)
 }
+
+/// [crate::jit::Instr::Free]
+pub unsafe extern "C" fn FREE(net: Net, val: Val) {
+  let net = &mut *net;
+  net.free(val)
+}
