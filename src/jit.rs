@@ -1061,7 +1061,6 @@ impl FunctionLowering<'_, '_> {
         let net = self.get_environment();
         let target = self.lower_expr(target);
         self.FREE(net, target);
-        return None;
       }
       Instr::SetHeap { idx, port, value } => {
         let net = self.get_environment();
@@ -1069,14 +1068,12 @@ impl FunctionLowering<'_, '_> {
         let port = self.lower_expr(port);
         let value = self.lower_expr(value);
         self.SET_HEAP(net, idx, port, value);
-        return None;
       }
       Instr::Link { lhs, rhs } => {
         let net = self.get_environment();
         let lhs = self.lower_expr(lhs);
         let rhs = self.lower_expr(rhs);
         self.LINK(net, lhs, rhs);
-        return None;
       }
 
       // STATEMENTS
@@ -1092,11 +1089,14 @@ impl FunctionLowering<'_, '_> {
           Var::Comm => self.SET_COMM(environment, value),
           Var::Var(_) => todo!(),
         };
-        return None;
       },
-      Instr::Expr(expr) => Some(self.lower_expr(expr)),
-      Instr::Return(_) => todo!(),
+      Instr::Expr(expr) => return Some(self.lower_expr(expr)),
+      Instr::Return(expr) => {
+        let value = self.lower_expr(expr);
+        self.builder.ins().return_(&[value]);
+      },
     }
+    None
   }
 
   fn lower_expr(&mut self, expr: Expr) -> Value {
