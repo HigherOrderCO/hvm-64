@@ -1089,12 +1089,12 @@ impl FunctionLowering<'_, '_> {
           Var::Comm => self.SET_COMM(environment, value),
           Var::Var(_) => todo!(),
         };
-      },
+      }
       Instr::Expr(expr) => return Some(self.lower_expr(expr)),
       Instr::Return(expr) => {
         let value = self.lower_expr(expr);
         self.builder.ins().return_(&[value]);
-      },
+      }
     }
     None
   }
@@ -1158,7 +1158,48 @@ impl FunctionLowering<'_, '_> {
         cond,
         then,
         otherwise,
-      } => todo!(),
+      } => {
+        let cond = self.lower_expr(*cond);
+
+        let then_bb = self.builder.create_block();
+        let otherwise_bb = self.builder.create_block();
+        let merge_block = self.builder.create_block();
+
+        // If-else constructs in the language have a return value.
+        //
+        // In traditional SSA form, this would produce a PHI between
+        // the then and else bodies. Cranelift uses block parameters,
+        // so set up a parameter in the merge block, and we'll pass
+        // the return values to it from the branches.
+        self.builder.append_block_param(merge_block, types::I64);
+        self
+          .builder
+          .ins()
+          .brif(cond, then_bb, &[], otherwise_bb, &[]);
+
+        self.builder.switch_to_block(then_bb);
+        let mut then_value = self.builder.ins().iconst(types::I64, 0);
+        for instr in then {
+          if let Some(value) = self.lower_instr(instr) {
+            then_value = value;
+          }
+        }
+        self.builder.ins().jump(merge_block, &[then_value]);
+
+
+        self.builder.switch_to_block(otherwise_bb);
+        let mut otherwise_value = self.builder.ins().iconst(types::I64, 0);
+        for instr in otherwise {
+          if let Some(value) = self.lower_instr(instr) {
+            otherwise_value = value;
+          }
+        }
+        self.builder.ins().jump(merge_block, &[otherwise_value]);
+
+        self.builder.switch_to_block(merge_block);
+        self.builder.seal_block(merge_block);
+        self.builder.block_params(merge_block)[0]
+      }
     }
   }
 }
