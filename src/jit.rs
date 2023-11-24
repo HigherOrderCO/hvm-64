@@ -877,6 +877,20 @@ impl Default for JitLowering {
   }
 }
 
+type JitNet = u64;
+type JitBook = u64;
+type JitPtr = u32;
+type JitFunction = unsafe extern "C" fn(JitNet, JitBook, JitPtr, JitPtr) -> JitPtr;
+
+impl Program {
+  /// Compile the program into a JIT function.
+  pub fn compile_function(&self, function: Function) -> JitFunction {
+    let mut lowering = JitLowering::default();
+    let function = lowering.translate(self, function);
+    unsafe { std::mem::transmute(function) }
+  }
+}
+
 impl JitLowering {
   /// Create a zero-initialized data section.
   fn create_data(&mut self, name: &str, contents: Vec<u8>) -> Result<&[u8], String> {
@@ -899,7 +913,7 @@ impl JitLowering {
     Ok(unsafe { core::slice::from_raw_parts(buffer.0, buffer.1) })
   }
 
-  fn translate(&mut self, program: &LoweringProgram, function: Function) -> *const u8 {
+  fn translate(&mut self, program: &Program, function: Function) -> *const u8 {
     let mut lowering = FunctionLowering {
       program,
       builder: FunctionBuilder::new(&mut self.ctx.func, &mut self.builder_context),
@@ -934,17 +948,12 @@ impl JitLowering {
   }
 }
 
-/// The state of the program being lowered.
-struct LoweringProgram {
-  constants: HashMap<String, i64>,
-}
-
-impl LoweringProgram {
+impl Program {
   pub fn lower_constant(&self, constant: Const) -> i64 {
     match constant {
       Const::F(name) => {
-        let constant = self.constants.get(&name);
-        constant.expect("Can't find value for const").clone()
+        let constant = self.values.iter().find(|i| i.name == name);
+        constant.expect("Can't find value for const").value as i64
       }
       Const::P1 => crate::run::P1 as i64,
       Const::P2 => crate::run::P2 as i64,
@@ -1012,7 +1021,7 @@ macro_rules! declare_external_function {
 /// A collection of state used for translating from toy-language AST nodes
 /// into Cranelift IR.
 struct FunctionLowering<'program, 'jit> {
-  program: &'program LoweringProgram,
+  program: &'program Program,
   builder: FunctionBuilder<'jit>,
   variables: HashMap<String, Variable>,
   module: &'jit mut JITModule,

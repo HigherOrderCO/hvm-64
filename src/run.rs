@@ -83,6 +83,7 @@ pub struct Net {
   pub eras: usize, // eras rewrites
   pub dref: usize, // dref rewrites
   pub oper: usize, // oper rewrites
+  pub call_native: CallNative,
 }
 
 // A compact closed net, used for dereferences.
@@ -97,7 +98,6 @@ pub type CallNative = Arc<dyn Fn(&Net, &Book, Ptr, Ptr) -> bool>;
 // A map of id to definitions (closed nets).
 pub struct Book {
   pub defs: Vec<Def>,
-  pub call_native: CallNative,
 }
 
 pub fn call_native() -> CallNative {
@@ -222,7 +222,6 @@ impl Book {
   pub fn new() -> Self {
     Book {
       defs: vec![Def::new(); 1 << 24],
-      call_native: call_native(),
     }
   }
 
@@ -313,6 +312,7 @@ impl Net {
       eras: 0,
       dref: 0,
       oper: 0,
+      call_native: call_native(),
     }
   }
 

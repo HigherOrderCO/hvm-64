@@ -43,6 +43,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::process::exit(1);
       }
     }
+    "eval" => {
+      if let Some(file_name) = f_name {
+        let (book, mut net) = load(file_name);
+        let start_time = std::time::Instant::now();
+        let fns = hvmc::jit::compile_book(&book);
+        for function in fns.functions.iter() {
+          fns.compile_function(function.clone());
+        }
+        net.normal(&book);
+        println!("{}", ast::show_runtime_net(&net));
+        if args.len() >= 4 && args[3] == "-s" {
+          print_stats(&net, start_time);
+        }
+      } else {
+        println!("Usage: hvmc eval <file.hvmc> [-s]");
+        std::process::exit(1);
+      }
+    }
     "compile" => {
       if let Some(file_name) = f_name {
         let (book, _) = load(file_name);
@@ -89,7 +107,7 @@ fn print_stats(net: &run::Net, start_time: std::time::Instant) {
 // Load file and generate net
 fn load(file: &str) -> (run::Book, run::Net) {
   let file = fs::read_to_string(file).unwrap();
-  let book = ast::book_to_runtime(&ast::do_parse_book(&file), run::call_native());
+  let book = ast::book_to_runtime(&ast::do_parse_book(&file));
   let mut net = run::Net::new(1 << 28);
   net.boot(ast::name_to_val("main"));
   return (book, net);
