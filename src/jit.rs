@@ -1028,7 +1028,15 @@ impl FunctionLowering<'_, '_> {
     LINK (net: types::I64, lhs: types::I32, rhs: types::I32) -> types::I8,
     FREE (net: types::I64, idx: types::I32) -> types::I8,
     GET_HEAP (net: types::I64, idx: types::I32, port: types::I32) -> types::I32,
-    SET_HEAP (net: types::I64, idx: types::I32, port: types::I32, value: types::I32) -> types::I8
+    SET_HEAP (net: types::I64, idx: types::I32, port: types::I32, value: types::I32) -> types::I8,
+    GET_ANNI (net: types::I64) -> types::I64,
+    SET_ANNI (net: types::I64, val: types::I64) -> types::I64,
+    GET_OPER (net: types::I64) -> types::I64,
+    SET_OPER (net: types::I64, val: types::I64) -> types::I64,
+    GET_ERAS (net: types::I64) -> types::I64,
+    SET_ERAS (net: types::I64, val: types::I64) -> types::I64,
+    GET_COMM (net: types::I64) -> types::I64,
+    SET_COMM (net: types::I64, val: types::I64) -> types::I64
   ]);
 
   fn get_environment(&mut self) -> Value {
@@ -1037,11 +1045,12 @@ impl FunctionLowering<'_, '_> {
   }
 
   fn lower_prop(&mut self, prop: Var) -> Value {
+    let environment = self.get_environment();
     match prop {
-      Var::Anni => todo!(),
-      Var::Oper => todo!(),
-      Var::Eras => todo!(),
-      Var::Comm => todo!(),
+      Var::Anni => self.GET_ANNI(environment),
+      Var::Oper => self.GET_OPER(environment),
+      Var::Eras => self.GET_ERAS(environment),
+      Var::Comm => self.GET_COMM(environment),
       Var::Var(_) => todo!(),
     }
   }
@@ -1073,7 +1082,18 @@ impl FunctionLowering<'_, '_> {
       // STATEMENTS
       Instr::Let { name, value } => todo!(),
       Instr::Val { name, type_repr } => todo!(),
-      Instr::Assign { name, value } => todo!(),
+      Instr::Assign { name, value } => {
+        let value = self.lower_expr(value);
+        let environment = self.get_environment();
+        match name {
+          Var::Anni => self.SET_ANNI(environment, value),
+          Var::Oper => self.SET_OPER(environment, value),
+          Var::Eras => self.SET_ERAS(environment, value),
+          Var::Comm => self.SET_COMM(environment, value),
+          Var::Var(_) => todo!(),
+        };
+        return None;
+      },
       Instr::Expr(expr) => Some(self.lower_expr(expr)),
       Instr::Return(_) => todo!(),
     }

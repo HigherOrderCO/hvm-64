@@ -67,3 +67,47 @@ pub unsafe extern "C" fn FREE(net: Net, val: Val) {
   let net = &mut *net;
   net.free(val)
 }
+
+pub unsafe extern "C" fn GET_ANNI(net: Net) -> usize {
+  let net = &mut *net;
+  net.anni
+}
+
+pub unsafe extern "C" fn SET_ANNI(net: Net, val: usize) -> usize {
+  let net = &mut *net;
+  net.anni = val;
+  val
+}
+
+pub unsafe extern "C" fn GET_OPER(net: Net) -> usize {
+  let net = &mut *net;
+  net.oper
+}
+
+pub unsafe extern "C" fn SET_OPER(net: Net, val: usize) -> usize {
+  let net = &mut *net;
+  net.oper = val;
+  val
+}
+
+pub unsafe extern "C" fn GET_ERAS(net: Net) -> usize {
+  let net = &mut *net;
+  net.eras
+}
+
+pub unsafe extern "C" fn SET_ERAS(net: Net, val: usize) -> usize {
+  let net = &mut *net;
+  net.eras = val;
+  val
+}
+
+pub unsafe extern "C" fn GET_COMM(net: Net) -> usize {
+  let net = &mut *net;
+  net.comm
+}
+
+pub unsafe extern "C" fn SET_COMM(net: Net, val: usize) -> usize {
+  let net = &mut *net;
+  net.comm = val;
+  val
+}
