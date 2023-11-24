@@ -1076,23 +1076,23 @@ impl FunctionLowering<'_, '_> {
   declare_external_function!([
     VAL (val: types::I32) -> types::I32,
     TAG (val: types::I32) -> types::I32,
-    IS_NUM (val: types::I32) -> types::I8,
-    IS_SKP (val: types::I32) -> types::I8,
-    NEW_PTR (tag: types::I8, value: types::I32) -> types::I32,
+    IS_NUM (val: types::I32) -> types::I32,
+    IS_SKP (val: types::I32) -> types::I32,
+    NEW_PTR (tag: types::I32, value: types::I32) -> types::I32,
     ALLOC (net: types::I64, size: types::I64) -> types::I32,
     OP (net: types::I64, lhs: types::I32, rhs: types::I32) -> types::I32,
-    LINK (net: types::I64, lhs: types::I32, rhs: types::I32) -> types::I8,
-    FREE (net: types::I64, idx: types::I32) -> types::I8,
+    LINK (net: types::I64, lhs: types::I32, rhs: types::I32) -> types::I32, // void
+    FREE (net: types::I64, idx: types::I32) -> types::I32, // void
     GET_HEAP (net: types::I64, idx: types::I32, port: types::I32) -> types::I32,
-    SET_HEAP (net: types::I64, idx: types::I32, port: types::I32, value: types::I32) -> types::I8,
-    GET_ANNI (net: types::I64) -> types::I64,
-    SET_ANNI (net: types::I64, val: types::I64) -> types::I64,
-    GET_OPER (net: types::I64) -> types::I64,
-    SET_OPER (net: types::I64, val: types::I64) -> types::I64,
-    GET_ERAS (net: types::I64) -> types::I64,
-    SET_ERAS (net: types::I64, val: types::I64) -> types::I64,
-    GET_COMM (net: types::I64) -> types::I64,
-    SET_COMM (net: types::I64, val: types::I64) -> types::I64
+    SET_HEAP (net: types::I64, idx: types::I32, port: types::I32, value: types::I32) -> types::I32, // void
+    GET_ANNI (net: types::I64) -> types::I32,
+    SET_ANNI (net: types::I64, val: types::I32) -> types::I32,
+    GET_OPER (net: types::I64) -> types::I32,
+    SET_OPER (net: types::I64, val: types::I32) -> types::I32,
+    GET_ERAS (net: types::I64) -> types::I32,
+    SET_ERAS (net: types::I64, val: types::I32) -> types::I32,
+    GET_COMM (net: types::I64) -> types::I32,
+    SET_COMM (net: types::I64, val: types::I32) -> types::I32
   ]);
 
   fn declare_variable(&mut self, int: types::Type, name: &str) -> Variable {
@@ -1182,12 +1182,12 @@ impl FunctionLowering<'_, '_> {
 
   fn lower_expr(&mut self, expr: Expr) -> Value {
     match expr {
-      Expr::True => self.builder.ins().iconst(types::I8, 1),
-      Expr::False => self.builder.ins().iconst(types::I8, 0),
+      Expr::True => self.builder.ins().iconst(types::I32, 1),
+      Expr::False => self.builder.ins().iconst(types::I32, 0),
       Expr::Int(v) => self.builder.ins().iconst(types::I32, v as i64),
       Expr::Const(constant) => {
         let value_constant = self.program.lower_constant(constant);
-        self.builder.ins().iconst(types::I8, value_constant)
+        self.builder.ins().iconst(types::I32, value_constant)
       }
       Expr::Var(prop) => self.lower_var(prop),
       Expr::Bin { op, lhs, rhs } => {

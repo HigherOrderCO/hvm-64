@@ -12,18 +12,26 @@ pub unsafe extern "C" fn VAL(ptr: Ptr) -> Val {
 }
 
 /// [crate::jit::Expr::Tag]
-pub unsafe extern "C" fn TAG(ptr: Ptr) -> Tag {
-  ptr.tag()
+pub unsafe extern "C" fn TAG(ptr: Ptr) -> u32 {
+  ptr.tag() as u32
 }
 
 /// [crate::jit::Expr::IsNum]
-pub unsafe extern "C" fn IS_NUM(ptr: Ptr) -> bool {
-  ptr.is_num()
+pub unsafe extern "C" fn IS_NUM(ptr: Ptr) -> u32 {
+  if ptr.is_num() {
+    1
+  } else {
+    0
+  }
 }
 
 /// [crate::jit::Expr::IsSkp]
-pub unsafe extern "C" fn IS_SKP(ptr: Ptr) -> bool {
-  ptr.is_skp()
+pub unsafe extern "C" fn IS_SKP(ptr: Ptr) -> u32 {
+  if ptr.is_skp() {
+    1
+  } else {
+    0
+  }
 }
 
 /// [crate::jit::Expr::NewPtr]
