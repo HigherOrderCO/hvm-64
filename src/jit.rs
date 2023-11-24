@@ -1187,10 +1187,20 @@ impl FunctionLowering<'_, '_> {
       }
       Expr::Var(prop) => self.lower_var(prop),
       Expr::Bin { op, lhs, rhs } => {
-        let _lhs = self.lower_expr(*lhs);
-        let _rhs = self.lower_expr(*rhs);
+        let lhs = self.lower_expr(*lhs);
+        let rhs = self.lower_expr(*rhs);
         match op.as_str() {
-          _ => todo!(),
+          "+" => self.builder.ins().iadd(lhs, rhs),
+          "-" => self.builder.ins().isub(lhs, rhs),
+          "*" => self.builder.ins().imul(lhs, rhs),
+          "/" => self.builder.ins().sdiv(lhs, rhs),
+          "==" => self.builder.ins().icmp(IntCC::Equal, lhs, rhs),
+          "!=" => self.builder.ins().icmp(IntCC::NotEqual, lhs, rhs),
+          "<" => self.builder.ins().icmp(IntCC::SignedLessThan, lhs, rhs),
+          ">" => self.builder.ins().icmp(IntCC::SignedGreaterThan, lhs, rhs),
+          "&&" => self.builder.ins().band(lhs, rhs),
+          "||" => self.builder.ins().bor(lhs, rhs),
+          _ => panic!("Unknown operator {}", op),
         }
       }
       Expr::Val { expr } => {
