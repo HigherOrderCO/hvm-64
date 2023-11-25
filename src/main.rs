@@ -4,18 +4,17 @@
 #![allow(unused_imports)]
 #![allow(unused_variables)]
 
+use std::collections::HashSet;
 use std::env;
 use std::fs;
 use std::sync::Arc;
-use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::AtomicIsize;
 
 use hvmc::ast;
 use hvmc::fns;
 use hvmc::jit;
 use hvmc::run;
 use hvmc::u60;
-
-use std::collections::HashSet;
 
 #[cfg(not(feature = "hvm_cli_options"))]
 fn main() {
@@ -113,8 +112,8 @@ fn load<'a>(data: &'a run::Data, file: &str) -> (run::Book, run::Net<'a>) {
         std::process::exit(1);
     };
   let book = ast::book_to_runtime(&ast::do_parse_book(&file));
-  let mut net = run::Net::new(&data, Arc::new(AtomicUsize::new(0)));
-  net.boot(ast::name_to_val("main"));
+  let mut net = run::Net::new(&data, Arc::new(AtomicIsize::new(0)));
+  net.boot(ast::name_to_val("main") as run::Loc);
   return (book, net);
 }
 

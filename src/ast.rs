@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use std::iter::Peekable;
 use std::str::Chars;
 use std::sync::Arc;
-use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::AtomicIsize;
 
 // AST
 // ---
@@ -549,7 +549,7 @@ pub fn book_to_runtime(book: &Book) -> run::Book {
   for (name, net) in book {
     let fid = name_to_val(name);
     let data = run::Heap::init(1 << 16);
-    let mut rt = run::Net::new(&data, Arc::new(AtomicUsize::new(0)));
+    let mut rt = run::Net::new(&data, Arc::new(AtomicIsize::new(0)));
     net_to_runtime(&mut rt, net);
     rt_book.def(fid, runtime_net_to_runtime_def(&rt));
   }
@@ -592,7 +592,7 @@ pub fn runtime_net_to_runtime_def(net: &run::Net) -> run::Def {
 
 // Reads back from a def.
 pub fn runtime_def_to_runtime_net<'a>(data: &'a run::Data, def: &run::Def) -> run::Net<'a> {
-    let mut net = run::Net::new(&data, Arc::new(AtomicUsize::new(0)));
+    let mut net = run::Net::new(&data, Arc::new(AtomicIsize::new(0)));
   for (i, &(p1, p2)) in def.node.iter().enumerate() {
     net.heap.set(i as run::Loc, run::P1, p1);
     net.heap.set(i as run::Loc, run::P2, p2);
