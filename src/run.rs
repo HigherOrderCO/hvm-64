@@ -14,7 +14,7 @@ use std::sync::{Arc, Barrier};
 use std::thread;
 use crate::u60;
 
-pub const WORKER_QUEUE_CAPACITY : usize = 1 << 16;
+pub const WORKER_QUEUE_CAPACITY : usize = 1 << 22;
 
 type Redex = (Ptr, Ptr);
 
