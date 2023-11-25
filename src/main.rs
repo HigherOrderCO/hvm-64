@@ -105,7 +105,10 @@ fn print_stats(net: &run::Net, start_time: std::time::Instant) {
 
 // Load file and generate net
 fn load<'a>(data: &'a run::Data, file: &str) -> (run::Book, run::Net<'a>) {
-  let file = fs::read_to_string(file).unwrap();
+    let Ok(file) = fs::read_to_string(file) else {
+        eprintln!("Input file not found");
+        std::process::exit(1);
+    };
   let book = ast::book_to_runtime(&ast::do_parse_book(&file));
   let mut net = run::Net::new(&data);
   net.boot(ast::name_to_val("main") as run::Loc);
