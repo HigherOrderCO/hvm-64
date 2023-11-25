@@ -1106,7 +1106,6 @@ impl<'a> Net<'a> {
     // Count total redexes (and populate 'rlens')
     #[inline(always)]
     fn count(ctx: &mut ThreadContext) -> usize {
-      // RPS    : 313.060 m
       // ctx.barry.wait();
       // ctx.workers_with_non_empty_queues.store(0, Ordering::Relaxed);
       // ctx.barry.wait();
@@ -1116,13 +1115,11 @@ impl<'a> Net<'a> {
       // ctx.barry.wait();
       // ctx.workers_with_non_empty_queues.load(Ordering::Relaxed) as usize
 
-      // RPS    : 315.435 m
       // ctx.barry.wait();
       // ctx.rlens[ctx.tid].store(!ctx.net.rdex.is_empty() as _, Ordering::Relaxed);
       // ctx.barry.wait();
       // ctx.rlens.iter().map(|x| x.load(Ordering::Relaxed)).sum()
 
-      // RPS    : 318.257 m
       let cur_frame_val = !ctx.net.rdex.is_empty();
       let difference = (cur_frame_val as isize) - (ctx.last_frame_is_not_empty as isize);
       ctx.last_frame_is_not_empty = cur_frame_val;
@@ -1130,15 +1127,6 @@ impl<'a> Net<'a> {
       ctx.workers_with_non_empty_queues.fetch_add(difference, Ordering::Relaxed);
       ctx.barry.wait();
       ctx.workers_with_non_empty_queues.load(Ordering::Relaxed) as usize
-
-      // RPS    : 313.792 m
-      // ctx.barry.wait();
-      // ctx.workers_with_non_empty_queues.store(0, Ordering::Relaxed);
-      // ctx.barry.wait();
-      // let cur_frame_val = !ctx.net.rdex.is_empty();
-      // ctx.workers_with_non_empty_queues.fetch_add(cur_frame_val as _, Ordering::Relaxed);
-      // ctx.barry.wait();
-      // ctx.workers_with_non_empty_queues.load(Ordering::Relaxed) as usize
     }
   }
 }
