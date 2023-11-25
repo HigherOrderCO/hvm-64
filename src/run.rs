@@ -118,7 +118,7 @@ pub struct Net<'a> {
   pub tids: usize, // thread count
   pub heap: Heap<'a>, // nodes
   pub rdex: Worker<Redex>, // redexes
-  pub redex_count: Arc<AtomicIsize>, // Len of `rdex`
+  pub redex_count: isize, // Len of `rdex`
   pub locs: Vec<Loc>,
   pub area: Area, // allocation area
   pub next: usize, // next allocation index within area
@@ -404,13 +404,13 @@ impl AtomicRewrites {
 
 impl<'a> Net<'a> {
   // Creates an empty net with given size.
-  pub fn new(data: &'a Data, redex_count: Arc<AtomicIsize>) -> Self {
+  pub fn new(data: &'a Data) -> Self {
     Net {
       tid : 0,
       tids: 1,
       heap: Heap { data },
       rdex: Worker::new(WORKER_QUEUE_CAPACITY),
-      redex_count,
+      redex_count: 0,
       locs: vec![0; 1 << 16],
       area: Area { init: 0, size: data.len() },
       next: 0,
@@ -488,7 +488,7 @@ impl<'a> Net<'a> {
       self.rwts.eras += 1;
     } else {
       self.rdex.push((a, b)).expect("capacity");
-      self.redex_count.fetch_add(1, REDEX_COUNT_ORDERING);
+      self.redex_count += 1;
     }
   }
 
@@ -892,7 +892,7 @@ impl<'a> Net<'a> {
           let p1 = self.adjust(r.0);
           let p2 = self.adjust(r.1);
           self.rdex.push((p1, p2)).expect("capacity");
-          self.redex_count.fetch_add(1, REDEX_COUNT_ORDERING);
+          self.redex_count += 1;
         }
         // Load root, adjusted.
         ptr = self.adjust(got.node[0].1);
@@ -916,12 +916,10 @@ impl<'a> Net<'a> {
   pub fn reduce(&mut self, book: &Book, limit: usize) -> usize {
     let mut count = 0;
     while let Some((a, b)) = self.rdex.pop() {
+      self.redex_count -= 1;
+
       //if !a.is_nil() && !b.is_nil() {
         self.interact(book, a, b);
-
-        // Subtract afterwards to avoid the situation where it's temporarily zero,
-        // but this rewrite creates new redexes. We don't want to exit in that case.
-        self.redex_count.fetch_sub(1, REDEX_COUNT_ORDERING);
 
         count += 1;
         if count >= limit {
@@ -966,8 +964,9 @@ impl<'a> Net<'a> {
   }
 
   // Forks into child threads, returning a Net for the (tid/tids)'th thread.
-  pub fn fork(&self, tid: usize, tids: usize, worker_redex_counts: &[Arc<AtomicIsize>]) -> Self {
-    let mut net = Net::new(&self.heap.data, worker_redex_counts[tid].clone());
+  pub fn fork(&self, tid: usize, tids: usize, worker_net_redex_count: isize) -> Self {
+    let mut net = Net::new(&self.heap.data);
+    net.redex_count = worker_net_redex_count;
     net.tid  = tid;
     net.tids = tids;
     net.area = Area {
@@ -998,9 +997,8 @@ impl<'a> Net<'a> {
       rlens: &'a Vec<AtomicUsize>, // global redex lengths
       total: &'a AtomicIsize, // total redex length
       barry: &'a Barrier, // synchronization barrier
-      stealers: Vec<(usize, &'a Stealer<Redex>)>, // stealers
+      stealers: Vec<&'a Stealer<Redex>>, // stealers
       next_stealer_idx: usize, // next stealer to try
-      worker_redex_counts: &'a Vec<Arc<AtomicIsize>>, // redex counts of each worker
       last_frame_redex_count: isize, // redex count of this worker, the last time count() was called
     }
 
@@ -1015,21 +1013,21 @@ impl<'a> Net<'a> {
     let barry = Arc::new(Barrier::new(tids)); // global barrier
 
     let worker_count = cores;
-    let workers = (0 .. worker_count).map(|i| (i, Worker::<Redex>::new(WORKER_QUEUE_CAPACITY))).collect::<Vec<_>>();
-    let stealers = workers.iter().map(|(i, w)| (*i, w.stealer_ref())).collect::<Vec<_>>();
+    let workers = (0 .. worker_count).map(|_| Worker::<Redex>::new(WORKER_QUEUE_CAPACITY)).collect::<Vec<_>>();
+    let stealers = workers.iter().map(|w| w.stealer_ref()).collect::<Vec<_>>();
 
-    let worker_redex_counts = (0 .. worker_count).map(|_| Arc::new(AtomicIsize::new(0))).collect::<Vec<_>>();
+    let worker_redex_counts = (0 .. worker_count).map(|_| std::cell::Cell::new(0)).collect::<Vec<_>>();
 
     // Initialize worker queues by distributing redexes evenly
     let mut workers_iter = workers.iter().zip(&worker_redex_counts).cycle();
-    self.redex_count.store(0, REDEX_COUNT_ORDERING); // reset total redex count
+    self.redex_count = 0; // reset total redex count
     while let Some(redex) = self.rdex.pop() {
-      let ((_, worker), worker_redex_count) = workers_iter.next().unwrap();
+      let (worker, worker_redex_count) = workers_iter.next().unwrap();
 
       worker.push(redex).expect("capacity");
-      worker_redex_count.fetch_add(1, Ordering::Relaxed);
+      worker_redex_count.set(worker_redex_count.get() + 1); // increment worker redex count
 
-      self.redex_count.fetch_add(1, REDEX_COUNT_ORDERING); // increment total redex count
+      self.redex_count += 1; // increment total redex count
       total.fetch_add(1, REDEX_COUNT_ORDERING); // increment total redex count
     }
     // Now, each worker's `redex_count` contains the number of redexes it owns.
@@ -1038,17 +1036,18 @@ impl<'a> Net<'a> {
     // Each worker keeps track of the difference between the last time `count()` was called,
     // and the current value of `redex_count`. This difference is added to `total` in `count()`.
     // This way, we can avoid having to sum the `redex_count` of each worker in `count()`
-    // which makes it more cache-efficient because for each rewrite, each worker updates only
-    // its own counter, which is in that core's cache.
+    // which makes it more cache-efficient, because for each rewrite, each worker updates only
+    // its own counter, so these counters don't bounce around between caches of different cores.
 
     // Perform parallel reductions
     std::thread::scope(|s| {
       for tid in 0 .. tids {
+        let worker_net_redex_count = worker_redex_counts[tid].get();
         let mut ctx = ThreadContext {
           tid: tid,
           tids: tids,
           tick: 0,
-          net: self.fork(tid, tids, &worker_redex_counts),
+          net: self.fork(tid, tids, worker_net_redex_count),
           book: &book,
           tlog2: tlog2,
           delta: &delta,
@@ -1067,8 +1066,7 @@ impl<'a> Net<'a> {
             stealers
           },
           next_stealer_idx: 0,
-          worker_redex_counts: &worker_redex_counts,
-          last_frame_redex_count: worker_redex_counts[tid].load(REDEX_COUNT_ORDERING),
+          last_frame_redex_count: worker_net_redex_count,
         };
         s.spawn(move || {
           main(&mut ctx);
@@ -1076,7 +1074,7 @@ impl<'a> Net<'a> {
       }
     });
 
-    self.redex_count.store(0, REDEX_COUNT_ORDERING); // reset total redex count
+    self.redex_count = 0; // reset total redex count
 
     // Sum stats
     delta.add_to(&mut self.rwts);
@@ -1103,25 +1101,11 @@ impl<'a> Net<'a> {
         }
 
         // Steal redexes from other workers
-        // Note: The total number of redexes (`ctx.total`) doesn't change
         while {
-          let (idx_of_worker_stolen_from, stealer) = unsafe { ctx.stealers.get_unchecked(ctx.next_stealer_idx) };
-          let res = stealer.steal(&ctx.net.rdex, |n| n / 2);
-          let cont = matches!(res, Err(StealError::Busy));
-          // let cont = match res {
-          //   Ok(stolen_redex_count) => {
-          //     // Account for the stolen redexes. Prevent temporary zero value by adding before subtracting
-          //     ctx.net.redex_count.fetch_add(stolen_redex_count, REDEX_COUNT_ORDERING);
-          //     // TODO: get_unchecked, or:
-          //     // TODO: Avoid lookup indirection, access counter directly: `stealers: Vec<(Arc<AtomicUsize>, &'a Stealer<Redex>)>`
-          //     ctx.worker_redex_counts[*idx_of_worker_stolen_from].fetch_sub(stolen_redex_count, REDEX_COUNT_ORDERING);
-          //     false
-          //   }
-          //   Err(StealError::Busy) => true,
-          //   Err(StealError::Empty) => false,
-          // };
+          let stealer = unsafe { ctx.stealers.get_unchecked(ctx.next_stealer_idx) };
           ctx.next_stealer_idx = (ctx.next_stealer_idx + 1) % ctx.stealers.len();
-          cont
+          let res = stealer.steal(&ctx.net.rdex, |n| n / 2);
+          matches!(res, Err(StealError::Busy))
         } {}
 
         ctx.tick += 1;
@@ -1143,7 +1127,9 @@ impl<'a> Net<'a> {
       // ctx.rlens.iter().map(|x| x.load(Ordering::Relaxed)).sum()
 
       let before = ctx.last_frame_redex_count;
-      let after = ctx.net.redex_count.load(REDEX_COUNT_ORDERING);
+      let after = ctx.net.redex_count;
+      // let redex_count = (ctx.net.rdex.capacity() - ctx.net.rdex.spare_capacity()) as isize;
+      // let after = redex_count;
       let difference = after - before;
       ctx.last_frame_redex_count = after;
 

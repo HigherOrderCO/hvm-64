@@ -537,7 +537,7 @@ pub fn book_to_runtime(book: &Book) -> run::Book {
   for (name, net) in book {
     let id = name_to_val(name) as run::Loc;
     let data = run::Heap::init(1 << 16);
-    let mut rt = run::Net::new(&data, Arc::new(AtomicIsize::new(0)));
+    let mut rt = run::Net::new(&data);
     net_to_runtime(&mut rt, net);
     rt_book.def(id, runtime_net_to_runtime_def(&rt));
   }
@@ -572,7 +572,7 @@ pub fn runtime_net_to_runtime_def(net: &run::Net) -> run::Def {
 
 // Reads back from a def.
 pub fn runtime_def_to_runtime_net<'a>(data: &'a run::Data, def: &run::Def) -> run::Net<'a> {
-    let mut net = run::Net::new(&data, Arc::new(AtomicIsize::new(0)));
+    let mut net = run::Net::new(&data);
   for (i, &(p1, p2)) in def.node.iter().enumerate() {
     net.heap.set(i as run::Loc, run::P1, p1);
     net.heap.set(i as run::Loc, run::P2, p2);

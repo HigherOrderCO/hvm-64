@@ -108,7 +108,7 @@ fn print_stats(net: &run::Net, start_time: std::time::Instant) {
 fn load<'a>(data: &'a run::Data, file: &str) -> (run::Book, run::Net<'a>) {
   let file = fs::read_to_string(file).unwrap();
   let book = ast::book_to_runtime(&ast::do_parse_book(&file));
-  let mut net = run::Net::new(&data, Arc::new(AtomicIsize::new(0)));
+  let mut net = run::Net::new(&data);
   net.boot(ast::name_to_val("main") as run::Loc);
   return (book, net);
 }
