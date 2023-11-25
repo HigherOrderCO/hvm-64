@@ -54,7 +54,7 @@ syntax for wiring interaction nets. For example:
 
 The file above implements a recursive sum. As you can see, its syntax isn't
 meant to be very human readable. Fortunatelly, we have
-`[HVM-Lang](https://github.com/HigherOrderCO/hvm-lang)`, a tool that generates
+[HVM-Lang](https://github.com/HigherOrderCO/hvm-lang), a tool that generates
 `.hvmc` files from a familiar functional syntax. On HVM-Lang, you can write
 instead:
 
@@ -181,7 +181,7 @@ The GPU evaluator is similar to the CPU one, except two main differences: "1/4"
 rewrites and a task-sharing grid.  For example, on NVidia's RTX 4090, we keep a
 grid of 128x128 redex bags, where each bag contains redexes to be processed by a
 "squad", which consists of 4 threads, each one performing "1/4" of the rewrite,
-which increases the granularity. This allows us to keep `16,384` active squads,
+which increases the granularity. This allows us to keep `16,384` active sqxuads,
 for a total of `65,536` active threads, which means the maximum degree of
 parallelism (65k) is achieved at just 16k redexes. Visually:
 
