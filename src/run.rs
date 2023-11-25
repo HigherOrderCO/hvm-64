@@ -8,7 +8,7 @@
 // space evaluation of recursive functions on Scott encoded datatypes.
 
 use st3::{lifo::{Stealer, Worker}, StealError};
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering, AtomicBool};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering, AtomicBool, AtomicIsize};
 use std::sync::{Arc, Barrier};
 use std::thread;
 
@@ -118,7 +118,7 @@ pub struct Net<'a> {
   pub tids: usize, // thread count
   pub heap: Heap<'a>, // nodes
   pub rdex: Worker<Redex>, // redexes
-  pub redex_count: Arc<AtomicUsize>, // Len of `rdex`
+  pub redex_count: Arc<AtomicIsize>, // Len of `rdex`
   pub locs: Vec<Loc>,
   pub area: Area, // allocation area
   pub next: usize, // next allocation index within area
@@ -404,7 +404,7 @@ impl AtomicRewrites {
 
 impl<'a> Net<'a> {
   // Creates an empty net with given size.
-  pub fn new(data: &'a Data, redex_count: Arc<AtomicUsize>) -> Self {
+  pub fn new(data: &'a Data, redex_count: Arc<AtomicIsize>) -> Self {
     Net {
       tid : 0,
       tids: 1,
@@ -966,7 +966,7 @@ impl<'a> Net<'a> {
   }
 
   // Forks into child threads, returning a Net for the (tid/tids)'th thread.
-  pub fn fork(&self, tid: usize, tids: usize, worker_redex_counts: &[Arc<AtomicUsize>]) -> Self {
+  pub fn fork(&self, tid: usize, tids: usize, worker_redex_counts: &[Arc<AtomicIsize>]) -> Self {
     let mut net = Net::new(&self.heap.data, worker_redex_counts[tid].clone());
     net.tid  = tid;
     net.tids = tids;
@@ -996,12 +996,12 @@ impl<'a> Net<'a> {
       delta: &'a AtomicRewrites, // global delta rewrites
       share: &'a Vec<(APtr, APtr)>, // global share buffer
       rlens: &'a Vec<AtomicUsize>, // global redex lengths
-      total: &'a AtomicUsize, // total redex length
+      total: &'a AtomicIsize, // total redex length
       barry: &'a Barrier, // synchronization barrier
       stealers: Vec<(usize, &'a Stealer<Redex>)>, // stealers
       next_stealer_idx: usize, // next stealer to try
-      worker_redex_counts: &'a Vec<Arc<AtomicUsize>>, // redex counts of each worker
-      last_frame_redex_count: usize, // redex count of this worker, the last time count() was called
+      worker_redex_counts: &'a Vec<Arc<AtomicIsize>>, // redex counts of each worker
+      last_frame_redex_count: isize, // redex count of this worker, the last time count() was called
     }
 
     // Initialize global objects
@@ -1011,14 +1011,14 @@ impl<'a> Net<'a> {
     let delta = AtomicRewrites::new(); // delta rewrite counter
     let rlens = (0..tids).map(|_| AtomicUsize::new(0)).collect::<Vec<_>>();
     let share = (0..SHARE_LIMIT*tids).map(|_| (APtr(AtomicU64::new(0)), APtr(AtomicU64::new(0)))).collect::<Vec<_>>();
-    let total = AtomicUsize::new(0); // sum of redex bag length
+    let total = AtomicIsize::new(0); // sum of redex bag length
     let barry = Arc::new(Barrier::new(tids)); // global barrier
 
     let worker_count = cores;
     let workers = (0 .. worker_count).map(|i| (i, Worker::<Redex>::new(WORKER_QUEUE_CAPACITY))).collect::<Vec<_>>();
     let stealers = workers.iter().map(|(i, w)| (*i, w.stealer_ref())).collect::<Vec<_>>();
 
-    let worker_redex_counts = (0 .. worker_count).map(|_| Arc::new(AtomicUsize::new(0))).collect::<Vec<_>>();
+    let worker_redex_counts = (0 .. worker_count).map(|_| Arc::new(AtomicIsize::new(0))).collect::<Vec<_>>();
 
     // Initialize worker queues by distributing redexes evenly
     let mut workers_iter = workers.iter().zip(&worker_redex_counts).cycle();
@@ -1107,18 +1107,19 @@ impl<'a> Net<'a> {
         while {
           let (idx_of_worker_stolen_from, stealer) = unsafe { ctx.stealers.get_unchecked(ctx.next_stealer_idx) };
           let res = stealer.steal(&ctx.net.rdex, |n| n / 2);
-          let cont = match res {
-            Ok(stolen_redex_count) => {
-              // Account for the stolen redexes. Prevent temporary zero value by adding before subtracting
-              ctx.net.redex_count.fetch_add(stolen_redex_count, REDEX_COUNT_ORDERING);
-              // TODO: get_unchecked, or:
-              // TODO: Avoid lookup indirection, access counter directly: `stealers: Vec<(Arc<AtomicUsize>, &'a Stealer<Redex>)>`
-              ctx.worker_redex_counts[*idx_of_worker_stolen_from].fetch_sub(stolen_redex_count, REDEX_COUNT_ORDERING);
-              false
-            }
-            Err(StealError::Busy) => true,
-            Err(StealError::Empty) => false,
-          };
+          let cont = matches!(res, Err(StealError::Busy));
+          // let cont = match res {
+          //   Ok(stolen_redex_count) => {
+          //     // Account for the stolen redexes. Prevent temporary zero value by adding before subtracting
+          //     ctx.net.redex_count.fetch_add(stolen_redex_count, REDEX_COUNT_ORDERING);
+          //     // TODO: get_unchecked, or:
+          //     // TODO: Avoid lookup indirection, access counter directly: `stealers: Vec<(Arc<AtomicUsize>, &'a Stealer<Redex>)>`
+          //     ctx.worker_redex_counts[*idx_of_worker_stolen_from].fetch_sub(stolen_redex_count, REDEX_COUNT_ORDERING);
+          //     false
+          //   }
+          //   Err(StealError::Busy) => true,
+          //   Err(StealError::Empty) => false,
+          // };
           ctx.next_stealer_idx = (ctx.next_stealer_idx + 1) % ctx.stealers.len();
           cont
         } {}
@@ -1143,20 +1144,12 @@ impl<'a> Net<'a> {
 
       let before = ctx.last_frame_redex_count;
       let after = ctx.net.redex_count.load(REDEX_COUNT_ORDERING);
-      let difference = (after as isize) - (before as isize);
+      let difference = after - before;
       ctx.last_frame_redex_count = after;
 
-      // TODO: Use AtomicIsize and just add the difference
-      let r = if difference < 0 {
-        ctx.total.fetch_sub(-difference as usize, REDEX_COUNT_ORDERING) - (-difference as usize)
-      } else {
-        ctx.total.fetch_add(difference as usize, REDEX_COUNT_ORDERING) + difference as usize
-      };
-      // println!("[{:04}] count(): before: {}, after: {}, total: {}", ctx.tid, before, after, r);
-      // r
-
+      ctx.total.fetch_add(difference, REDEX_COUNT_ORDERING);
       ctx.barry.wait();
-      ctx.total.load(Ordering::Relaxed)
+      ctx.total.load(Ordering::Relaxed) as usize
     }
   }
 }
