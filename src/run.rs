@@ -1012,8 +1012,8 @@ impl<'a> Net<'a> {
       rlens: &'a Vec<AtomicUsize>, // global redex lengths
       total: &'a AtomicUsize, // total redex length
       barry: &'a Barrier, // synchronization barrier
-      stealers: &'a Vec<&'a Stealer<Redex>>, // stealers
-      rng: fastrand::Rng, // thread-local random number generator
+      stealers: Vec<&'a Stealer<Redex>>, // stealers
+      next_stealer_idx: usize, // next stealer to try
     }
 
     // Initialize global objects
@@ -1052,8 +1052,15 @@ impl<'a> Net<'a> {
           rlens: &rlens,
           total: &total,
           barry: &barry,
-          stealers: &stealers,
-          rng: fastrand::Rng::new(),
+          stealers: {
+            let mut stealers = stealers.clone();
+            // We never want to steal from ourselves
+            stealers.remove(tid);
+            // Every worker gets a randomized permutation of the stealers
+            fastrand::shuffle(&mut stealers);
+            stealers
+          },
+          next_stealer_idx: 0,
         };
         s.spawn(move || {
           main(&mut ctx)
@@ -1087,14 +1094,12 @@ impl<'a> Net<'a> {
         let tlog2 = ctx.tlog2;
 
         // Steal redexes from other workers
-        let mut steal_from_worker_i = ctx.rng.usize(.. ctx.stealers.len());
         while {
-          let stealer = unsafe { ctx.stealers.get_unchecked(steal_from_worker_i) };
+          let stealer = unsafe { ctx.stealers.get_unchecked(ctx.next_stealer_idx) };
+          ctx.next_stealer_idx = (ctx.next_stealer_idx + 1) % ctx.stealers.len();
           let res = stealer.steal(&ctx.net.rdex, |n| n / 2);
           matches!(res, Err(StealError::Busy))
-        } {
-          steal_from_worker_i = (steal_from_worker_i + 1) % ctx.stealers.len();
-        }
+        } {}
 
         ctx.tick += 1;
       }
