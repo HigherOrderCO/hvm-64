@@ -427,7 +427,7 @@ impl<'a> Net<'a> {
   }
 
   #[inline(always)]
-  pub fn alloc(&mut self, size: usize) -> Loc {
+  pub fn alloc(&mut self, _size: usize) -> Loc {
     // On the first pass, just alloc without checking.
     // Note: we add 1 to avoid overwritting root.
     if self.next < self.area.size - 1 {
@@ -646,7 +646,7 @@ impl<'a> Net<'a> {
   }
 
   // Atomic linker for when 'b_ptr' is an aux port.
-  pub fn atomic_linker_var(&mut self, a_ptr: Ptr, a_dir: Ptr, b_ptr: Ptr) {
+  pub fn atomic_linker_var(&mut self, _a_ptr: Ptr, _a_dir: Ptr, b_ptr: Ptr) {
     loop {
       let ste_dir = b_ptr;
       let ste_ptr = self.get_target(ste_dir);
@@ -958,7 +958,7 @@ impl<'a> Net<'a> {
   }
 
   // Forks into child threads, returning a Net for the (tid/tids)'th thread.
-  pub fn fork(&self, tid: usize, tids: usize, worker_net_redex_count: isize) -> Self {
+  pub fn fork(&self, tid: usize, tids: usize) -> Self {
     let mut net = Net::new(&self.heap.data);
     net.tid  = tid;
     net.tids = tids;
@@ -974,22 +974,17 @@ impl<'a> Net<'a> {
 
   // Evaluates a term to normal form in parallel
   pub fn parallel_normal(&mut self, book: &Book) {
-    const SHARE_LIMIT : usize = 1 << 12; // max share redexes per split
     const LOCAL_LIMIT : usize = 1 << 18; // max local rewrites per epoch
 
     // Local thread context
     struct ThreadContext<'a> {
       tid: usize, // thread id
       tids: usize, // thread count
-      tlog2: usize, // log2 of thread count
-      tick: usize, // current tick
       net: Net<'a>, // thread's own net object
       book: &'a Book, // definition book
       delta: &'a AtomicRewrites, // global delta rewrites
-      share: &'a Vec<(APtr, APtr)>, // global share buffer
-      rlens: &'a Vec<AtomicUsize>, // global redex lengths
       workers_with_non_empty_queues: &'a AtomicIsize, // How many workers have non-empty queues
-      barry: &'a Barrier, // synchronization barrier
+      barrier: &'a Barrier, // synchronization barrier
       stealers: Vec<&'a Stealer<Redex>>, // stealers
       next_stealer_idx: usize, // next stealer to try
       last_frame_is_not_empty: bool, // redex count of this worker, the last time count() was called
@@ -1000,10 +995,8 @@ impl<'a> Net<'a> {
     let tlog2 = cores.ilog2() as usize;
     let tids  = 1 << tlog2;
     let delta = AtomicRewrites::new(); // delta rewrite counter
-    let rlens = (0..tids).map(|_| AtomicUsize::new(0)).collect::<Vec<_>>();
-    let share = (0..SHARE_LIMIT*tids).map(|_| (APtr(AtomicU64::new(0)), APtr(AtomicU64::new(0)))).collect::<Vec<_>>();
     let workers_with_non_empty_queues = AtomicIsize::new(0);
-    let barry = Arc::new(Barrier::new(tids)); // global barrier
+    let barrier = Arc::new(Barrier::new(tids)); // global barrier
 
     let worker_count = cores;
     let workers = (0 .. worker_count).map(|_| Worker::<Redex>::new(WORKER_QUEUE_CAPACITY)).collect::<Vec<_>>();
@@ -1029,19 +1022,14 @@ impl<'a> Net<'a> {
     // Perform parallel reductions
     std::thread::scope(|s| {
       for tid in 0 .. tids {
-        let worker_net_redex_count = worker_redex_counts[tid].get();
         let mut ctx = ThreadContext {
           tid: tid,
           tids: tids,
-          tick: 0,
-          net: self.fork(tid, tids, worker_net_redex_count),
+          net: self.fork(tid, tids),
           book: &book,
-          tlog2: tlog2,
           delta: &delta,
-          share: &share,
-          rlens: &rlens,
           workers_with_non_empty_queues: &workers_with_non_empty_queues,
-          barry: &barry,
+          barrier: &barrier,
           stealers: {
             // TODO: Don't clone?
             // https://lemire.me/blog/2017/09/18/visiting-all-values-in-an-array-exactly-once-in-random-order
@@ -1053,7 +1041,7 @@ impl<'a> Net<'a> {
             stealers
           },
           next_stealer_idx: 0,
-          last_frame_is_not_empty: worker_net_redex_count > 0,
+          last_frame_is_not_empty: worker_redex_counts[tid].get() > 0,
         };
         s.spawn(move || {
           main(&mut ctx);
@@ -1079,7 +1067,7 @@ impl<'a> Net<'a> {
     #[inline(always)]
     fn reduce(ctx: &mut ThreadContext) {
       loop {
-        let reduced = ctx.net.reduce(ctx.book, LOCAL_LIMIT);
+        let _reduced = ctx.net.reduce(ctx.book, LOCAL_LIMIT);
         //println!("[{:04x}] reduced {}", ctx.tid, reduced);
         if count(ctx) == 0 {
           break;
@@ -1092,8 +1080,6 @@ impl<'a> Net<'a> {
           let res = stealer.steal(&ctx.net.rdex, |n| n / 2);
           matches!(res, Err(StealError::Busy))
         } {}
-
-        ctx.tick += 1;
       }
     }
 
@@ -1123,9 +1109,9 @@ impl<'a> Net<'a> {
       let cur_frame_val = !ctx.net.rdex.is_empty();
       let difference = (cur_frame_val as isize) - (ctx.last_frame_is_not_empty as isize);
       ctx.last_frame_is_not_empty = cur_frame_val;
-      ctx.barry.wait(); // Important
+      ctx.barrier.wait(); // Important
       ctx.workers_with_non_empty_queues.fetch_add(difference, Ordering::Relaxed);
-      ctx.barry.wait();
+      ctx.barrier.wait();
       ctx.workers_with_non_empty_queues.load(Ordering::Relaxed) as usize
     }
   }
