@@ -988,11 +988,6 @@ impl<'a> Net<'a> {
       init: self.heap.data.len() * tid / tids,
       size: self.heap.data.len() / tids,
     };
-    // let from = self.rdex.len() * (tid + 0) / tids;
-    // let upto = self.rdex.len() * (tid + 1) / tids;
-    // for i in from .. upto {
-    //   net.rdex.push(self.rdex[i]);
-    // }
     if tid == 0 {
       net.next = self.next;
     }
@@ -1015,13 +1010,10 @@ impl<'a> Net<'a> {
       delta: &'a AtomicRewrites, // global delta rewrites
       share: &'a Vec<(APtr, APtr)>, // global share buffer
       rlens: &'a Vec<AtomicUsize>, // global redex lengths
-      // rlens: &'a Vec<AtomicBool>, // global redex lengths
       total: &'a AtomicUsize, // total redex length
-      // total: &'a AtomicBool, // total redex length
       barry: &'a Barrier, // synchronization barrier
       stealers: &'a Vec<&'a Stealer<Redex>>, // stealers
       rng: fastrand::Rng, // thread-local random number generator
-      // not_finished: &'a AtomicBool, // whether there are still redexes
     }
 
     // Initialize global objects
@@ -1030,10 +1022,8 @@ impl<'a> Net<'a> {
     let tids  = 1 << tlog2;
     let delta = AtomicRewrites::new(); // delta rewrite counter
     let rlens = (0..tids).map(|_| AtomicUsize::new(0)).collect::<Vec<_>>();
-    // let rlens = (0..tids).map(|_| AtomicBool::new(false)).collect::<Vec<_>>();
     let share = (0..SHARE_LIMIT*tids).map(|_| (APtr(AtomicU64::new(0)), APtr(AtomicU64::new(0)))).collect::<Vec<_>>();
     let total = AtomicUsize::new(0); // sum of redex bag length
-    // let total = AtomicBool::new(false); // sum of redex bag length
     let barry = Arc::new(Barrier::new(tids)); // global barrier
 
     let worker_count = cores;
@@ -1047,35 +1037,8 @@ impl<'a> Net<'a> {
       worker.push(redex).expect("capacity");
     }
 
-    // // Initialize worker queues
-    // let redex_count = self.rdex.len();
-    // println!("redex count: {}", redex_count);
-    // println!("worker count: {}", worker_count);
-    // let redex_count_per_worker = (redex_count + worker_count - 1) / worker_count;
-    // debug_assert!(redex_count_per_worker <= WORKER_QUEUE_CAPACITY, "worker queue capacity too small: {} > {}", redex_count_per_worker, WORKER_QUEUE_CAPACITY);
-    // self.rdex.chunks(redex_count_per_worker).for_each(|chunk| {
-    //   for (i, worker) in workers.iter().enumerate() {
-    //     for redex in chunk {
-    //       worker.push(*redex).expect("capacity");
-    //     }
-    //   }
-    // });
-
-    // println!("redexes: {}", self.rdex.len());
-
-    // let not_finished = AtomicBool::new(true);
-
     // Perform parallel reductions
     std::thread::scope(|s| {
-      // for (tid, worker) in workers.into_iter().enumerate() {
-      //   let mut net = self.fork(tid, tids);
-      //   s.spawn(move || {
-      //     while let Some(redex) = worker.pop() {
-      //       net.interact(book, redex.0, redex.1);
-      //     }
-      //   });
-      // }
-
       for tid in 0 .. tids {
         let mut ctx = ThreadContext {
           tid: tid,
@@ -1091,18 +1054,14 @@ impl<'a> Net<'a> {
           barry: &barry,
           stealers: &stealers,
           rng: fastrand::Rng::new(),
-          // not_finished: &not_finished,
         };
-        // // print redex count
-        // println!("redexes: {}", ctx.net.rdex.len());
         s.spawn(move || {
           main(&mut ctx)
         });
       }
     });
 
-    // Clear redexes and sum stats
-    // self.rdex.clear();
+    // Sum stats
     delta.add_to(&mut self.rwts);
 
     // Main reduction loop
@@ -1127,8 +1086,7 @@ impl<'a> Net<'a> {
         }
         let tlog2 = ctx.tlog2;
 
-        // split(ctx, tlog2);
-
+        // Steal redexes from other workers
         let mut steal_from_worker_i = ctx.rng.usize(.. ctx.stealers.len());
         while {
           let stealer = unsafe { ctx.stealers.get_unchecked(steal_from_worker_i) };
@@ -1148,19 +1106,6 @@ impl<'a> Net<'a> {
       ctx.net.expand(ctx.book);
     }
 
-    // // Count total redexes (and populate 'rlens')
-    // #[inline(always)]
-    // fn count(ctx: &mut ThreadContext) -> usize {
-    //   ctx.barry.wait();
-    //   ctx.total.store(0, Ordering::Relaxed);
-    //   ctx.barry.wait();
-    //   let count = !ctx.net.rdex.is_empty() as _;
-    //   ctx.rlens[ctx.tid].store(count, Ordering::Relaxed);
-    //   ctx.total.fetch_add(count, Ordering::Relaxed);
-    //   ctx.barry.wait();
-    //   ctx.total.load(Ordering::Relaxed)
-    // }
-
     // Count total redexes (and populate 'rlens')
     #[inline(always)]
     fn count(ctx: &mut ThreadContext) -> usize {
@@ -1169,64 +1114,5 @@ impl<'a> Net<'a> {
       ctx.barry.wait();
       ctx.rlens.iter().map(|x| x.load(Ordering::Relaxed)).sum()
     }
-
-    // // Count total redexes (and populate 'rlens')
-    // fn count(ctx: &mut ThreadContext) -> usize {
-    //   ctx.barry.wait();
-    //   ctx.rlens[ctx.tid].store(!ctx.net.rdex.is_empty(), Ordering::Relaxed);
-    //   ctx.barry.wait();
-    //   ctx.rlens.iter().fold(false, |acc, x| acc || x.load(Ordering::Relaxed)) as _
-    // }
-
-    // // Count total redexes (and populate 'rlens')
-    // fn count(ctx: &mut ThreadContext) -> usize {
-    //   ctx.barry.wait();
-    //   ctx.not_finished.store(false, Ordering::Relaxed);
-    //   ctx.barry.wait();
-    //   let not_finished = !ctx.net.rdex.is_empty() as _;
-    //   ctx.not_finished.fetch_or(not_finished, Ordering::Relaxed);
-    //   ctx.barry.wait();
-    //   ctx.not_finished.load(Ordering::Relaxed) as _
-    // }
-
-    // // Share redexes with target thread
-    // #[inline(always)]
-    // fn split(ctx: &mut ThreadContext, plog2: usize) {
-    //   unsafe {
-    //     let side  = (ctx.tid >> (plog2 - 1 - (ctx.tick % plog2))) & 1;
-    //     let shift = (1 << (plog2 - 1)) >> (ctx.tick % plog2);
-    //     let a_tid = ctx.tid;
-    //     let b_tid = if side == 1 { a_tid - shift } else { a_tid + shift };
-    //     let a_len = ctx.net.rdex.len();
-    //     let b_len = ctx.rlens[b_tid].load(Ordering::Relaxed);
-    //     let send  = if a_len > b_len { (a_len - b_len) / 2 } else { 0 };
-    //     let recv  = if b_len > a_len { (b_len - a_len) / 2 } else { 0 };
-    //     let send  = std::cmp::min(send, SHARE_LIMIT);
-    //     let recv  = std::cmp::min(recv, SHARE_LIMIT);
-    //     for i in 0 .. send {
-    //       let init = a_len - send * 2;
-    //       let rdx0 = *ctx.net.rdex.get_unchecked(init + i * 2 + 0);
-    //       let rdx1 = *ctx.net.rdex.get_unchecked(init + i * 2 + 1);
-    //       //let init = 0;
-    //       //let ref0 = ctx.net.rdex.get_unchecked_mut(init + i * 2 + 0);
-    //       //let rdx0 = *ref0;
-    //       //*ref0    = (Ptr(0), Ptr(0));
-    //       //let ref1 = ctx.net.rdex.get_unchecked_mut(init + i * 2 + 1);
-    //       //let rdx1 = *ref1;
-    //       //*ref1    = (Ptr(0), Ptr(0));
-    //       let targ = ctx.share.get_unchecked(b_tid * SHARE_LIMIT + i);
-    //       *ctx.net.rdex.get_unchecked_mut(init + i) = rdx0;
-    //       targ.0.store(rdx1.0);
-    //       targ.1.store(rdx1.1);
-    //     }
-    //     ctx.net.rdex.truncate(a_len - send);
-    //     ctx.barry.wait();
-    //     for i in 0 .. recv {
-    //       let got = ctx.share.get_unchecked(a_tid * SHARE_LIMIT + i);
-    //       ctx.net.rdex.push((got.0.load(), got.1.load()));
-    //     }
-    //   }
-    // }
   }
-
 }
