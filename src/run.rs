@@ -1141,6 +1141,7 @@ impl<'a> Net<'a> {
     // }
 
     // Count total redexes (and populate 'rlens')
+    #[inline(always)]
     fn count(ctx: &mut ThreadContext) -> usize {
       ctx.barry.wait();
       ctx.rlens[ctx.tid].store(!ctx.net.rdex.is_empty() as _, Ordering::Relaxed);
