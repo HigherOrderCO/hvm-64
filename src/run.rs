@@ -983,7 +983,7 @@ impl<'a> Net<'a> {
       net: Net<'a>, // thread's own net object
       book: &'a Book, // definition book
       delta: &'a AtomicRewrites, // global delta rewrites
-      workers_with_non_empty_queues: &'a AtomicIsize, // How many workers have non-empty queues
+      workers_with_non_empty_queues: &'a AtomicIsize, // how many workers have non-empty queues
       barrier: &'a Barrier, // synchronization barrier
       stealers: Vec<&'a Stealer<Redex>>, // stealers
       next_stealer_idx: usize, // next stealer to try
@@ -1089,9 +1089,10 @@ impl<'a> Net<'a> {
       ctx.net.expand(ctx.book);
     }
 
-    // Count total redexes (and populate 'rlens')
+    // Count how many workers have non-empty queues
     #[inline(always)]
     fn count(ctx: &mut ThreadContext) -> usize {
+      // // This was the original code, but it's not as fast as the code below.
       // ctx.barry.wait();
       // ctx.workers_with_non_empty_queues.store(0, Ordering::Relaxed);
       // ctx.barry.wait();
@@ -1101,15 +1102,18 @@ impl<'a> Net<'a> {
       // ctx.barry.wait();
       // ctx.workers_with_non_empty_queues.load(Ordering::Relaxed) as usize
 
+      // // This is a bit faster (2 barriers instead of 3), but we're iterating
+      // // over the entire array of `rlens``, which could be slow on a manycore CPU.
       // ctx.barry.wait();
       // ctx.rlens[ctx.tid].store(!ctx.net.rdex.is_empty() as _, Ordering::Relaxed);
       // ctx.barry.wait();
       // ctx.rlens.iter().map(|x| x.load(Ordering::Relaxed)).sum()
 
+      // This is the fastest approach (2 barriers instead of 3), and without iteration
       let cur_frame_val = !ctx.net.rdex.is_empty();
       let difference = (cur_frame_val as isize) - (ctx.last_frame_is_not_empty as isize);
       ctx.last_frame_is_not_empty = cur_frame_val;
-      ctx.barrier.wait(); // Important
+      ctx.barrier.wait();
       ctx.workers_with_non_empty_queues.fetch_add(difference, Ordering::Relaxed);
       ctx.barrier.wait();
       ctx.workers_with_non_empty_queues.load(Ordering::Relaxed) as usize
