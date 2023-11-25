@@ -113,7 +113,7 @@ fn load<'a>(data: &'a run::Data, file: &str) -> (run::Book, run::Net<'a>) {
     };
   let book = ast::book_to_runtime(&ast::do_parse_book(&file));
   let mut net = run::Net::new(&data);
-  net.boot(ast::name_to_val("main") as run::Loc);
+  net.boot(ast::name_to_val("main"));
   return (book, net);
 }
 
