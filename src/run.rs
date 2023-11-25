@@ -122,7 +122,6 @@ pub struct Net<'a> {
   pub tids: usize, // thread count
   pub heap: Heap<'a>, // nodes
   pub rdex: Worker<Redex>, // redexes
-  pub redex_count: isize, // Len of `rdex`
   pub locs: Vec<Loc>,
   pub area: Area, // allocation area
   pub next: usize, // next allocation index within area
@@ -424,7 +423,6 @@ impl<'a> Net<'a> {
       tids: 1,
       heap: Heap { data },
       rdex: Worker::new(WORKER_QUEUE_CAPACITY),
-      redex_count: 0,
       locs: vec![0; 1 << 16],
       area: Area { init: 0, size: data.len() },
       next: 0,
@@ -505,7 +503,6 @@ impl<'a> Net<'a> {
       self.rwts.eras += 1;
     } else {
       self.rdex.push((a, b)).expect("capacity");
-      self.redex_count += 1;
     }
   }
 
@@ -913,7 +910,6 @@ impl<'a> Net<'a> {
           let p1 = self.adjust(r.0);
           let p2 = self.adjust(r.1);
           self.rdex.push((p1, p2)).expect("capacity");
-          self.redex_count += 1;
         }
         // Load root, adjusted.
         ptr = self.adjust(got.node[0].1);
@@ -937,8 +933,6 @@ impl<'a> Net<'a> {
   pub fn reduce(&mut self, book: &Book, limit: usize) -> usize {
     let mut count = 0;
     while let Some((a, b)) = self.rdex.pop() {
-      self.redex_count -= 1;
-
       //if !a.is_nil() && !b.is_nil() {
         self.interact(book, a, b);
 
@@ -987,7 +981,6 @@ impl<'a> Net<'a> {
   // Forks into child threads, returning a Net for the (tid/tids)'th thread.
   pub fn fork(&self, tid: usize, tids: usize, worker_net_redex_count: isize) -> Self {
     let mut net = Net::new(&self.heap.data);
-    net.redex_count = worker_net_redex_count;
     net.tid  = tid;
     net.tids = tids;
     net.area = Area {
@@ -1041,14 +1034,12 @@ impl<'a> Net<'a> {
 
     // Initialize worker queues by distributing redexes evenly
     let mut workers_iter = workers.iter().zip(&worker_redex_counts).cycle();
-    self.redex_count = 0; // reset total redex count
     while let Some(redex) = self.rdex.pop() {
       let (worker, worker_redex_count) = workers_iter.next().unwrap();
 
       worker.push(redex).expect("capacity");
       worker_redex_count.set(worker_redex_count.get() + 1); // increment worker redex count
 
-      self.redex_count += 1; // increment total redex count
       total.fetch_add(1, REDEX_COUNT_ORDERING); // increment total redex count
     }
     // Now, each worker's `redex_count` contains the number of redexes it owns.
@@ -1094,8 +1085,6 @@ impl<'a> Net<'a> {
         });
       }
     });
-
-    self.redex_count = 0; // reset total redex count
 
     // Sum stats
     delta.add_to(&mut self.rwts);
@@ -1147,12 +1136,12 @@ impl<'a> Net<'a> {
       // ctx.barry.wait();
       // ctx.rlens.iter().map(|x| x.load(Ordering::Relaxed)).sum()
 
-      let before = ctx.last_frame_redex_count;
-      let after = ctx.net.redex_count;
+      // Note that that `spare_capacity` may be underestimated due to concurrent stealing operations.
+      // So `redex_count` may be overestimated, but that's fine.
       // let redex_count = (ctx.net.rdex.capacity() - ctx.net.rdex.spare_capacity()) as isize;
-      // let after = redex_count;
-      let difference = after - before;
-      ctx.last_frame_redex_count = after;
+      let redex_count = (WORKER_QUEUE_CAPACITY - ctx.net.rdex.spare_capacity()) as isize;
+      let difference = redex_count - ctx.last_frame_redex_count;
+      ctx.last_frame_redex_count = redex_count;
 
       ctx.total.fetch_add(difference, REDEX_COUNT_ORDERING);
       ctx.barry.wait();
