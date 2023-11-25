@@ -1009,11 +1009,11 @@ impl<'a> Net<'a> {
       delta: &'a AtomicRewrites, // global delta rewrites
       share: &'a Vec<(APtr, APtr)>, // global share buffer
       rlens: &'a Vec<AtomicUsize>, // global redex lengths
-      total: &'a AtomicIsize, // total redex length
+      workers_with_non_empty_queues: &'a AtomicIsize, // How many workers have non-empty queues
       barry: &'a Barrier, // synchronization barrier
       stealers: Vec<&'a Stealer<Redex>>, // stealers
       next_stealer_idx: usize, // next stealer to try
-      last_frame_redex_count: isize, // redex count of this worker, the last time count() was called
+      last_frame_is_not_empty: bool, // redex count of this worker, the last time count() was called
     }
 
     // Initialize global objects
@@ -1023,7 +1023,7 @@ impl<'a> Net<'a> {
     let delta = AtomicRewrites::new(); // delta rewrite counter
     let rlens = (0..tids).map(|_| AtomicUsize::new(0)).collect::<Vec<_>>();
     let share = (0..SHARE_LIMIT*tids).map(|_| (APtr(AtomicU64::new(0)), APtr(AtomicU64::new(0)))).collect::<Vec<_>>();
-    let total = AtomicIsize::new(0); // sum of redex bag length
+    let workers_with_non_empty_queues = AtomicIsize::new(0);
     let barry = Arc::new(Barrier::new(tids)); // global barrier
 
     let worker_count = cores;
@@ -1039,17 +1039,13 @@ impl<'a> Net<'a> {
 
       worker.push(redex).expect("capacity");
       worker_redex_count.set(worker_redex_count.get() + 1); // increment worker redex count
-
-      total.fetch_add(1, REDEX_COUNT_ORDERING); // increment total redex count
     }
-    // Now, each worker's `redex_count` contains the number of redexes it owns.
-    // We update this counter whenever we push/pop a redex,
-    // and use this value to determine when to stop the workers in `count()`.
-    // Each worker keeps track of the difference between the last time `count()` was called,
-    // and the current value of `redex_count`. This difference is added to `total` in `count()`.
-    // This way, we can avoid having to sum the `redex_count` of each worker in `count()`
-    // which makes it more cache-efficient, because for each rewrite, each worker updates only
-    // its own counter, so these counters don't bounce around between caches of different cores.
+
+    // Set `workers_with_non_empty_queues` to the number of workers with non-empty queues
+    for worker in &workers {
+      let val = !worker.is_empty() as isize;
+      workers_with_non_empty_queues.fetch_add(val, Ordering::Relaxed);
+    }
 
     // Perform parallel reductions
     std::thread::scope(|s| {
@@ -1065,7 +1061,7 @@ impl<'a> Net<'a> {
           delta: &delta,
           share: &share,
           rlens: &rlens,
-          total: &total,
+          workers_with_non_empty_queues: &workers_with_non_empty_queues,
           barry: &barry,
           stealers: {
             // TODO: Don't clone?
@@ -1078,7 +1074,7 @@ impl<'a> Net<'a> {
             stealers
           },
           next_stealer_idx: 0,
-          last_frame_redex_count: worker_net_redex_count,
+          last_frame_is_not_empty: worker_net_redex_count > 0,
         };
         s.spawn(move || {
           main(&mut ctx);
@@ -1131,23 +1127,39 @@ impl<'a> Net<'a> {
     // Count total redexes (and populate 'rlens')
     #[inline(always)]
     fn count(ctx: &mut ThreadContext) -> usize {
+      // RPS    : 313.060 m
+      // ctx.barry.wait();
+      // ctx.workers_with_non_empty_queues.store(0, Ordering::Relaxed);
+      // ctx.barry.wait();
+      // let cur_frame_val = !ctx.net.rdex.is_empty() as isize;
+      // ctx.rlens[ctx.tid].store(cur_frame_val as _, Ordering::Relaxed);
+      // ctx.workers_with_non_empty_queues.fetch_add(cur_frame_val, Ordering::Relaxed);
+      // ctx.barry.wait();
+      // ctx.workers_with_non_empty_queues.load(Ordering::Relaxed) as usize
+
+      // RPS    : 315.435 m
       // ctx.barry.wait();
       // ctx.rlens[ctx.tid].store(!ctx.net.rdex.is_empty() as _, Ordering::Relaxed);
       // ctx.barry.wait();
       // ctx.rlens.iter().map(|x| x.load(Ordering::Relaxed)).sum()
 
-      // Note that that `spare_capacity` may be underestimated due to concurrent stealing operations.
-      // So `redex_count` may be overestimated, but that's fine.
-      // let redex_count = (ctx.net.rdex.capacity() - ctx.net.rdex.spare_capacity()) as isize;
-      let redex_count = (WORKER_QUEUE_CAPACITY - ctx.net.rdex.spare_capacity()) as isize;
-      let difference = redex_count - ctx.last_frame_redex_count;
-      ctx.last_frame_redex_count = redex_count;
-
-      ctx.total.fetch_add(difference, REDEX_COUNT_ORDERING);
+      // RPS    : 318.257 m
+      let cur_frame_val = !ctx.net.rdex.is_empty();
+      let difference = (cur_frame_val as isize) - (ctx.last_frame_is_not_empty as isize);
+      ctx.last_frame_is_not_empty = cur_frame_val;
+      ctx.barry.wait(); // Important
+      ctx.workers_with_non_empty_queues.fetch_add(difference, Ordering::Relaxed);
       ctx.barry.wait();
-      ctx.total.load(Ordering::Relaxed) as usize
+      ctx.workers_with_non_empty_queues.load(Ordering::Relaxed) as usize
+
+      // RPS    : 313.792 m
+      // ctx.barry.wait();
+      // ctx.workers_with_non_empty_queues.store(0, Ordering::Relaxed);
+      // ctx.barry.wait();
+      // let cur_frame_val = !ctx.net.rdex.is_empty();
+      // ctx.workers_with_non_empty_queues.fetch_add(cur_frame_val as _, Ordering::Relaxed);
+      // ctx.barry.wait();
+      // ctx.workers_with_non_empty_queues.load(Ordering::Relaxed) as usize
     }
   }
 }
-
-const REDEX_COUNT_ORDERING: Ordering = Ordering::Relaxed;
