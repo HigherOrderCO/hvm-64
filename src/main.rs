@@ -6,6 +6,8 @@
 
 use std::env;
 use std::fs;
+use std::sync::Arc;
+use std::sync::atomic::AtomicUsize;
 
 use hvmc::ast;
 use hvmc::fns;
@@ -107,7 +109,7 @@ fn print_stats(net: &run::Net, start_time: std::time::Instant) {
 fn load<'a>(data: &'a run::Data, file: &str) -> (run::Book, run::Net<'a>) {
   let file = fs::read_to_string(file).unwrap();
   let book = ast::book_to_runtime(&ast::do_parse_book(&file));
-  let mut net = run::Net::new(&data);
+  let mut net = run::Net::new(&data, Arc::new(AtomicUsize::new(0)));
   net.boot(ast::name_to_val("main") as run::Loc);
   return (book, net);
 }
