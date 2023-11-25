@@ -1078,6 +1078,8 @@ impl<'a> Net<'a> {
           total: &total,
           barry: &barry,
           stealers: {
+            // TODO: Don't clone?
+            // https://lemire.me/blog/2017/09/18/visiting-all-values-in-an-array-exactly-once-in-random-order
             let mut stealers = stealers.clone();
             // We never want to steal from ourselves
             stealers.remove(tid);
@@ -1172,7 +1174,10 @@ impl<'a> Net<'a> {
         ctx.total.fetch_add(difference as usize, REDEX_COUNT_ORDERING) + difference as usize
       };
       // println!("[{:04}] count(): before: {}, after: {}, total: {}", ctx.tid, before, after, r);
-      r
+      // r
+
+      ctx.barry.wait();
+      ctx.total.load(Ordering::Relaxed)
     }
   }
 }
