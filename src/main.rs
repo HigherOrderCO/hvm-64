@@ -6,6 +6,8 @@
 
 use std::env;
 use std::fs;
+use std::sync::Arc;
+use std::sync::atomic::AtomicUsize;
 
 use hvmc::ast;
 use hvmc::fns;
@@ -111,7 +113,7 @@ fn load<'a>(data: &'a run::Data, file: &str) -> (run::Book, run::Net<'a>) {
         std::process::exit(1);
     };
   let book = ast::book_to_runtime(&ast::do_parse_book(&file));
-  let mut net = run::Net::new(&data);
+  let mut net = run::Net::new(&data, Arc::new(AtomicUsize::new(0)));
   net.boot(ast::name_to_val("main"));
   return (book, net);
 }
@@ -229,4 +231,3 @@ pub fn gen_cuda_book(book: &run::Book) -> String {
 
   return code;
 }
-
