@@ -234,7 +234,7 @@ fn do_parse<T>(code: &str, parse_fn: impl Fn(&mut Peekable<Chars>) -> Result<T, 
   let chars = &mut code.chars().peekable();
   match parse_fn(chars) {
     Ok(result) => {
-      if let None = chars.next() {
+      if chars.next().is_none() {
         result
       } else {
         eprintln!("Unable to parse the whole input. Is this not an hvmc file?");
