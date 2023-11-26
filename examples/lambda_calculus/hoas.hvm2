@@ -1,0 +1,41 @@
+// Example HOAS evaluator for the λ-Calculus on HVM-Lang
+// Can be used as a template to bootstrap interpreters
+
+Lam =      λbod λlam λapp λsub (lam bod)
+App = λfun λarg λlam λapp λsub (app fun arg)
+Sub = λexp      λlam λapp λsub (sub exp)
+
+Reduce = λterm
+  let clam = λbod (Lam bod)
+  let capp = λfun λarg (Reduce.app (Reduce fun) arg)
+  let csub = λexp (Sub exp)
+  (term clam capp csub)
+
+Reduce.app = λfun
+  let clam = λfbod       λx (Reduce (fbod x))
+  let capp = λffun λfarg λx (App (App ffun farg) x)
+  let csub = λfexp       λx (App (Sub fexp) x)
+  (fun clam capp csub)
+
+Normal.go = λterm
+  let clam = λbod (Lam λx (Normal (bod (Sub x))))
+  let capp = λfun λarg (App (Normal fun) (Normal arg))
+  let csub = λexp exp
+  (term clam capp csub)
+
+Normal = λterm
+  (Normal.go (Reduce term))
+
+ID    = (Lam λx x)
+C0    = (Lam λf (Lam λx x))
+C1    = (Lam λf (Lam λx (App f x)))
+C2    = (Lam λf (Lam λx (App f (App f x))))
+C3    = (Lam λf (Lam λx (App f (App f (App f x)))))
+C4    = (Lam λf (Lam λx (App f (App f (App f (App f x))))))
+C8    = (Lam λf (Lam λx (App f (App f (App f (App f (App f (App f (App f x)))))))))
+False = (Lam λt (Lam λf f))
+True  = (Lam λt (Lam λf t))
+Not   = (Lam λb (App (App b False) True))
+
+Main =
+  (Normal (App (App (App C8 C8) Not) True))
