@@ -231,8 +231,16 @@ pub fn parse_book(chars: &mut Peekable<Chars>) -> Result<Book, String> {
 }
 
 fn do_parse<T>(code: &str, parse_fn: impl Fn(&mut Peekable<Chars>) -> Result<T, String>) -> T {
-  match parse_fn(&mut code.chars().peekable()) {
-    Ok(result) => result,
+  let chars = &mut code.chars().peekable();
+  match parse_fn(chars) {
+    Ok(result) => {
+      if chars.next().is_none() {
+        result
+      } else {
+        eprintln!("Unable to parse the whole input. Is this not an hvmc file?");
+        std::process::exit(1);
+      }
+    }
     Err(err) => {
       eprintln!("{}", err);
       std::process::exit(1);
