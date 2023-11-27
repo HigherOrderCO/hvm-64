@@ -549,6 +549,11 @@ pub fn book_to_runtime(book: &Book) -> run::Book {
 
 // Converts to a def.
 pub fn runtime_net_to_runtime_def(net: &run::Net) -> run::Def {
+  // Checks if a ptr blocks the fast dup-ref optimization
+  // FIXME: this is too restrictive; make more flexible
+  fn is_unsafe(ptr: run::Ptr) -> bool {
+    return ptr.is_dup() || ptr.is_ref();
+  }
   let mut node = vec![];
   let mut rdex = vec![];
   let mut safe = true;
@@ -560,14 +565,15 @@ pub fn runtime_net_to_runtime_def(net: &run::Net) -> run::Def {
     } else {
       break;
     }
-    if p1.is_dup() || p2.is_dup() {
+    // TODO: this is too restrictive and should be 
+    if is_unsafe(p1) || is_unsafe(p2) {
       safe = false;
     }
   }
   for i in 0 .. net.rdex.len() {
     let p1 = net.rdex[i].0;
     let p2 = net.rdex[i].1;
-    if p1.is_dup() || p2.is_dup() {
+    if is_unsafe(p1) || is_unsafe(p2) {
       safe = false;
     }
     rdex.push((p1, p2));
