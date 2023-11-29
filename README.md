@@ -429,7 +429,7 @@ As you can see, the memory layout resembles the textual syntax, with nets being
 represented as a vector of trees, with the 'redex' buffer storing the tree roots
 (as active pairs), and the 'nodes' buffer storing all the nodes. Each node has
 two 32-bit pointers and, thus, uses exactly 64 bits. Pointers include a 4-bit
-tag and a 28-bit value, which allows addressing a 2 GB space per instance. There
+tag and a 32-bit addr, which allows addressing a 2 GB space per instance. There
 are 16 pointer types:
 
 ```rust
