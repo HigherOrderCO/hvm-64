@@ -214,7 +214,7 @@ pub fn compile_term(book: &run::Book, tab: usize, fid: run::Val) -> String {
           code.push_str(&format!("{}let got = {};\n", ident(tab+1), trg.take()));
           code.push_str(&format!("{}let {} = Trg::Dir(Ptr::new(VR1, 0, got.loc()));\n", ident(tab+1), num.show()));
           code.push_str(&format!("{}let {} = Trg::Dir(Ptr::new(VR2, 0, got.loc()));\n", ident(tab+1), res.show()));
-          code.push_str(&format!("{}if {}.loc() == 0 {{\n", ident(tab+1), num.get()));
+          code.push_str(&format!("{}if {}.val() == 0 {{\n", ident(tab+1), num.get()));
           code.push_str(&format!("{}{};\n", ident(tab+2), num.take()));
           code.push_str(&format!("{}{} = {};\n", ident(tab+2), &c_z.show(), res.show()));
           code.push_str(&format!("{}{} = Trg::Ptr({});\n", ident(tab+2), &c_s.show(), "ERAS"));
