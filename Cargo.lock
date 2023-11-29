@@ -360,17 +360,18 @@ checksum = "d77f7ec81a6d05a3abb01ab6eb7590f6083d08449fe5a1c8b1e620283546ccb7"
 
 [[package]]
 name = "hvm-core"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "criterion",
  "hvm-lang",
  "insta",
+ "nohash-hasher",
 ]
 
 [[package]]
 name = "hvm-lang"
 version = "0.1.0"
-source = "git+https://github.com/HigherOrderCO/hvm-lang.git#74f29c149e05c28eaa5f249b2533481994aef1d8"
+source = "git+https://github.com/HigherOrderCO/hvm-lang.git#8aba2aad9816a81712349cbcb3056a64f1187fe2"
 dependencies = [
  "chumsky",
  "clap",
@@ -533,6 +534,12 @@ checksum = "5a634b1c61a95585bd15607c6ab0c4e5b226e695ff2800ba0cdccddf208c406c"
 dependencies = [
  "autocfg",
 ]
+
+[[package]]
+name = "nohash-hasher"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2bf50223579dc7cdcfb3bfcacf7069ff68243f8c363f62ffa99cf000a6b9c451"
 
 [[package]]
 name = "num-traits"

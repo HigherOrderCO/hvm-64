@@ -1,6 +1,6 @@
 [package]
 name = "hvm-core"
-version = "0.2.8"
+version = "0.2.9"
 edition = "2021"
 description = "HVM-Core is a massively parallel Interaction Combinator evaluator."
 license = "MIT"
@@ -25,11 +25,10 @@ panic = "abort"
 default = ["hvm_cli_options"]
 hvm_cli_options = []
 
-##--COMPILER-CUTOFF--##
-
-# Benchmark dependencies
-
 [dependencies]
+nohash-hasher = "0.2.0"
+
+##--COMPILER-CUTOFF--##
 
 [dev-dependencies]
 criterion = "0.5.1"

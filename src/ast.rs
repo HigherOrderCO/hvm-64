@@ -21,8 +21,8 @@ pub enum Tree {
   Tup { lft: Box<Tree>, rgt: Box<Tree> },
   Dup { lab: run::Lab, lft: Box<Tree>, rgt: Box<Tree> },
   Var { nam: String },
-  Ref { nam: run::Loc },
-  Num { loc: run::Loc },
+  Ref { nam: run::Val },
+  Num { val: run::Val },
   Op2 { opr: run::Lab, lft: Box<Tree>, rgt: Box<Tree> },
   Mat { sel: Box<Tree>, ret: Box<Tree> },
 }
@@ -68,8 +68,8 @@ pub fn consume(chars: &mut Peekable<Chars>, text: &str) -> Result<(), String> {
   return Ok(());
 }
 
-pub fn parse_decimal(chars: &mut Peekable<Chars>) -> Result<u32, String> {
-  let mut num: u32 = 0;
+pub fn parse_decimal(chars: &mut Peekable<Chars>) -> Result<u64, String> {
+  let mut num: u64 = 0;
   skip(chars);
   if !chars.peek().map_or(false, |c| c.is_digit(10)) {
     return Err(format!("Expected a decimal number, found {:?}", chars.peek()));
@@ -78,7 +78,7 @@ pub fn parse_decimal(chars: &mut Peekable<Chars>) -> Result<u32, String> {
     if !c.is_digit(10) {
       break;
     }
-    num = num * 10 + c.to_digit(10).unwrap() as u32;
+    num = num * 10 + c.to_digit(10).unwrap() as u64;
     chars.next();
   }
   Ok(num)
@@ -125,6 +125,8 @@ fn parse_opr(chars: &mut Peekable<Chars>) -> Result<run::Lab, String> {
     "!=" => Ok(run::NE),
     "<"  => Ok(run::LT),
     ">"  => Ok(run::GT),
+    "<=" => Ok(run::LTE),
+    ">=" => Ok(run::GTE),
     "&&" => Ok(run::AND),
     "||" => Ok(run::OR),
     "^"  => Ok(run::XOR),
@@ -169,11 +171,11 @@ pub fn parse_tree(chars: &mut Peekable<Chars>) -> Result<Tree, String> {
       chars.next();
       skip(chars);
       let name = parse_name(chars)?;
-      Ok(Tree::Ref { nam: name_to_val(&name) as run::Loc })
+      Ok(Tree::Ref { nam: name_to_val(&name) })
     }
     Some('#') => {
       chars.next();
-      Ok(Tree::Num { loc: parse_decimal(chars)? as run::Loc })
+      Ok(Tree::Num { val: parse_decimal(chars)? })
     }
     Some('<') => {
       chars.next();
@@ -274,6 +276,8 @@ fn show_opr(opr: run::Lab) -> String {
     run::NE  => "!=".to_string(),
     run::LT  => "<".to_string(),
     run::GT  => ">".to_string(),
+    run::LTE => "<=".to_string(),
+    run::GTE => ">=".to_string(),
     run::AND => "&&".to_string(),
     run::OR  => "||".to_string(),
     run::XOR => "^".to_string(),
@@ -302,10 +306,10 @@ pub fn show_tree(tree: &Tree) -> String {
       nam.clone()
     }
     Tree::Ref { nam } => {
-      format!("@{}", val_to_name(*nam as run::Val))
+      format!("@{}", val_to_name(*nam))
     }
-    Tree::Num { loc } => {
-      format!("#{}", (*loc).to_string())
+    Tree::Num { val } => {
+      format!("#{}", (*val).to_string())
     }
     Tree::Op2 { opr, lft, rgt } => {
       format!("<{} {} {}>", show_opr(*opr), show_tree(&*lft), show_tree(&*rgt))
@@ -496,10 +500,10 @@ pub fn tree_to_runtime_go(rt_net: &mut run::Net, tree: &Tree, vars: &mut HashMap
       }
     }
     Tree::Ref { nam } => {
-      run::Ptr::new(run::REF, 0, *nam)
+      run::Ptr::big(run::REF, *nam)
     }
-    Tree::Num { loc } => {
-      run::Ptr::new(run::NUM, 0, *loc as run::Loc)
+    Tree::Num { val } => {
+      run::Ptr::big(run::NUM, *val)
     }
     Tree::Op2 { opr, lft, rgt } => {
       let loc = rt_net.alloc(1);
@@ -538,11 +542,11 @@ pub fn net_to_runtime(rt_net: &mut run::Net, net: &Net) {
 pub fn book_to_runtime(book: &Book) -> run::Book {
   let mut rt_book = run::Book::new();
   for (name, net) in book {
-    let id = name_to_val(name) as run::Loc;
+    let fid = name_to_val(name);
     let data = run::Heap::init(1 << 16);
     let mut rt = run::Net::new(&data);
     net_to_runtime(&mut rt, net);
-    rt_book.def(id, runtime_net_to_runtime_def(&rt));
+    rt_book.def(fid, runtime_net_to_runtime_def(&rt));
   }
   rt_book
 }
@@ -598,10 +602,10 @@ pub fn tree_from_runtime_go(rt_net: &run::Net, ptr: run::Ptr, parent: Parent, va
       Tree::Era
     }
     run::REF => {
-      Tree::Ref { nam: ptr.loc() }
+      Tree::Ref { nam: ptr.val() }
     }
     run::NUM => {
-      Tree::Num { loc: ptr.loc() as run::Loc }
+      Tree::Num { val: ptr.val() }
     }
     run::OP1 | run::OP2 => {
       let opr = ptr.lab();
@@ -677,10 +681,9 @@ pub fn net_from_runtime(rt_net: &run::Net) -> Net {
 
 pub fn book_from_runtime(rt_book: &run::Book) -> Book {
   let mut book = BTreeMap::new();
-  for id in 0 .. rt_book.defs.len() {
-    let def = &rt_book.defs[id];
+  for (fid, def) in rt_book.defs.iter() {
     if def.node.len() > 0 {
-      let name = val_to_name(id as run::Val);
+      let name = val_to_name(*fid);
       let data = run::Heap::init(def.node.len());
       let net  = net_from_runtime(&runtime_def_to_runtime_net(&data, &def));
       book.insert(name, net);

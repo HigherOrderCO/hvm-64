@@ -11,6 +11,7 @@ use hvmc::ast;
 use hvmc::fns;
 use hvmc::jit;
 use hvmc::run;
+use hvmc::u60;
 
 use std::collections::HashSet;
 
@@ -21,7 +22,7 @@ fn main() {
   let book = run::Book::new();
   let data = run::Heap::init(1 << 28);
   let mut net = run::Net::new(&data);
-  net.boot(ast::name_to_val("main") as run::Loc);
+  net.boot(ast::name_to_val("main"));
   let start_time = std::time::Instant::now();
   if opts.contains("-1") {
     net.normal(&book);
@@ -111,7 +112,7 @@ fn load<'a>(data: &'a run::Data, file: &str) -> (run::Book, run::Net<'a>) {
     };
   let book = ast::book_to_runtime(&ast::do_parse_book(&file));
   let mut net = run::Net::new(&data);
-  net.boot(ast::name_to_val("main") as run::Loc);
+  net.boot(ast::name_to_val("main"));
   return (book, net);
 }
 
@@ -131,6 +132,7 @@ pub fn compile_book_to_rust_crate(f_name: &str, book: &run::Book) -> Result<(), 
   fs::write(".hvm/src/lib.rs", include_str!("../src/lib.rs"))?;
   fs::write(".hvm/src/main.rs", include_str!("../src/main.rs"))?;
   fs::write(".hvm/src/run.rs", include_str!("../src/run.rs"))?;
+  fs::write(".hvm/src/u60.rs", include_str!("../src/u60.rs"))?;
   fs::write(".hvm/src/fns.rs", fns_rs)?;
   return Ok(());
 }
@@ -151,9 +153,9 @@ pub fn gen_cuda_book(book: &run::Book) -> String {
 
   // Sort the book.defs by key
   let mut defs = BTreeMap::new();
-  for i in 0 .. book.defs.len() {
-    if book.defs[i].node.len() > 0 {
-      defs.insert(i as run::Val, book.defs[i].clone());
+  for (fid, def) in book.defs.iter() {
+    if def.node.len() > 0 {
+      defs.insert(fid, def.clone());
     }
   }
 
@@ -162,7 +164,7 @@ pub fn gen_cuda_book(book: &run::Book) -> String {
 
   // Generate function ids
   for (i, id) in defs.keys().enumerate() {
-    code.push_str(&format!("const u32 F_{} = 0x{:x};\n", crate::ast::val_to_name(*id), id));
+    code.push_str(&format!("const u32 F_{} = 0x{:x};\n", crate::ast::val_to_name(**id), id));
   }
   code.push_str("\n");
 
@@ -174,7 +176,7 @@ pub fn gen_cuda_book(book: &run::Book) -> String {
     let node_len = net.node.len();
     let rdex_len = net.rdex.len();
 
-    code.push_str(&format!("  // @{}\n", crate::ast::val_to_name(*id)));
+    code.push_str(&format!("  // @{}\n", crate::ast::val_to_name(**id)));
 
     // Collect all pointers from root, nodes and rdex into a single buffer
     code.push_str(&format!("  // .nlen\n"));
@@ -214,9 +216,9 @@ pub fn gen_cuda_book(book: &run::Book) -> String {
   code.push_str("u32 JUMP_DATA[] = {\n");
 
   let mut index = 0;
-  for (i, id) in defs.keys().enumerate() {
-    code.push_str(&format!("  0x{:08X}, 0x{:08X}, // @{}\n", id, index, crate::ast::val_to_name(*id)));
-    index += 2 + 2 * defs[id].node.len() as u32 + 2 * defs[id].rdex.len() as u32;
+  for (i, fid) in defs.keys().enumerate() {
+    code.push_str(&format!("  0x{:08X}, 0x{:08X}, // @{}\n", fid, index, crate::ast::val_to_name(**fid)));
+    index += 2 + 2 * defs[fid].node.len() as u32 + 2 * defs[fid].rdex.len() as u32;
   }
 
   code.push_str("};");

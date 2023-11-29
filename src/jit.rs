@@ -11,22 +11,23 @@ pub fn compile_book(book: &run::Book) -> String {
   code.push_str(&format!("use crate::run::{{*}};\n"));
   code.push_str(&format!("\n"));
 
-  for fid in 0 .. book.defs.len() as run::Val {
-    if book.defs[fid as usize].node.len() > 0 {
-      let name = &ast::val_to_name(fid as run::Val);
-      code.push_str(&format!("pub const F_{:4} : Loc = 0x{:06x};\n", name, fid));
+  for (fid, def) in book.defs.iter() {
+    if def.node.len() > 0 {
+      let name = &ast::val_to_name(*fid as run::Val);
+      code.push_str(&format!("pub const F_{:4} : Val = 0x{:06x};\n", name, fid));
     }
   }
+
   code.push_str(&format!("\n"));
 
   code.push_str(&format!("impl<'a> Net<'a> {{\n"));
   code.push_str(&format!("\n"));
 
   code.push_str(&format!("{}pub fn call_native(&mut self, book: &Book, ptr: Ptr, x: Ptr) -> bool {{\n", ident(1)));
-  code.push_str(&format!("{}match ptr.loc() {{\n", ident(2)));
-  for fid in 0 .. book.defs.len() as run::Val {
-    if book.defs[fid as usize].node.len() > 0 {
-      let fun = ast::val_to_name(fid);
+  code.push_str(&format!("{}match ptr.val() {{\n", ident(2)));
+  for (fid, def) in book.defs.iter() {
+    if def.node.len() > 0 {
+      let fun = ast::val_to_name(*fid);
       code.push_str(&format!("{}F_{} => {{ return self.F_{}(ptr, Trg::Ptr(x)); }}\n", ident(3), fun, fun));
     }
   }
@@ -35,9 +36,9 @@ pub fn compile_book(book: &run::Book) -> String {
   code.push_str(&format!("{}}}\n", ident(1)));
   code.push_str(&format!("\n"));
 
-  for fid in 0 .. book.defs.len() as run::Loc {
-    if book.defs[fid as usize].node.len() > 0 {
-      code.push_str(&compile_term(&book, 1, fid));
+  for (fid, def) in book.defs.iter() {
+    if def.node.len() > 0 {
+      code.push_str(&compile_term(&book, 1, *fid));
       code.push_str(&format!("\n"));
     }
   }
@@ -73,9 +74,9 @@ pub fn tag(tag: run::Tag) -> &'static str {
 
 pub fn atom(ptr: run::Ptr) -> String {
   if ptr.is_ref() {
-    return format!("Ptr::new(REF, 0, F_{})", ast::val_to_name(ptr.loc() as run::Val));
+    return format!("Ptr::big(REF, F_{})", ast::val_to_name(ptr.val()));
   } else {
-    return format!("Ptr::new({}, 0, 0x{:x})", tag(ptr.tag()), ptr.loc());
+    return format!("Ptr::new({}, 0x{:x}, 0x{:x})", tag(ptr.tag()), ptr.lab(), ptr.loc());
   }
 }
 
@@ -101,7 +102,7 @@ impl Target {
   }
 }
 
-pub fn compile_term(book: &run::Book, tab: usize, fid: run::Loc) -> String {
+pub fn compile_term(book: &run::Book, tab: usize, fid: run::Val) -> String {
 
   // returns a fresh variable: 'v<NUM>'
   fn fresh(newx: &mut usize) -> String {
@@ -128,16 +129,16 @@ pub fn compile_term(book: &run::Book, tab: usize, fid: run::Loc) -> String {
   fn call(
     book : &run::Book,
     tab  : usize,
-    tail : Option<run::Loc>,
+    tail : Option<run::Val>,
     newx : &mut usize,
     vars : &mut HashMap<run::Ptr, String>,
-    fid  : run::Loc,
+    fid  : run::Val,
     trg  : &Target,
   ) -> String {
     //let newx = &mut 0;
     //let vars = &mut HashMap::new();
 
-    let def = &book.defs[fid as usize];
+    let def = &book.get(fid).unwrap();
 
     // Tail call
     // TODO: when I manually edited a file to implement tail call, the single-core performance
@@ -167,7 +168,7 @@ pub fn compile_term(book: &run::Book, tab: usize, fid: run::Loc) -> String {
   fn burn(
     book : &run::Book,
     tab  : usize,
-    tail : Option<run::Loc>,
+    tail : Option<run::Val>,
     newx : &mut usize,
     vars : &mut HashMap<run::Ptr, String>,
     def  : &run::Def,
@@ -218,7 +219,7 @@ pub fn compile_term(book: &run::Book, tab: usize, fid: run::Loc) -> String {
           code.push_str(&format!("{}{} = {};\n", ident(tab+2), &c_z.show(), res.show()));
           code.push_str(&format!("{}{} = Trg::Ptr({});\n", ident(tab+2), &c_s.show(), "ERAS"));
           code.push_str(&format!("{}}} else {{\n", ident(tab+1)));
-          code.push_str(&format!("{}{};\n", ident(tab+2), num.swap(&format!("Ptr::new(NUM, 0, {}.loc() - 1)", num.get()))));
+          code.push_str(&format!("{}{};\n", ident(tab+2), num.swap(&format!("Ptr::big(NUM, {}.val() - 1)", num.get()))));
           code.push_str(&format!("{}{} = Trg::Ptr({});\n", ident(tab+2), &c_z.show(), "ERAS"));
           code.push_str(&format!("{}{} = {};\n", ident(tab+2), &c_s.show(), trg.show()));
           code.push_str(&format!("{}}}\n", ident(tab+1)));
@@ -257,7 +258,7 @@ pub fn compile_term(book: &run::Book, tab: usize, fid: run::Loc) -> String {
         code.push_str(&format!("{}self.rwts.oper += 2;\n", ident(tab+1))); // OP2 + OP1
         code.push_str(&format!("{}let vx = {};\n", ident(tab+1), trg.take()));
         code.push_str(&format!("{}let vy = {};\n", ident(tab+1), val.take()));
-        code.push_str(&format!("{}{} = Trg::Ptr(Ptr::new(NUM, 0, self.op({},vx.loc(),vy.loc())));\n", ident(tab+1), &nxt.show(), ptr.lab()));
+        code.push_str(&format!("{}{} = Trg::Ptr(Ptr::big(NUM, self.op({},vx.val(),vy.val())));\n", ident(tab+1), &nxt.show(), ptr.lab()));
         code.push_str(&format!("{}}} else {{\n", ident(tab)));
         code.push_str(&format!("{}let {} = self.alloc(1);\n", ident(tab+1), op2));
         code.push_str(&format!("{}self.safe_link(Trg::Ptr(Ptr::new(VR1, 0, {})), {});\n", ident(tab+1), op2, val.show()));
@@ -407,8 +408,8 @@ pub fn compile_term(book: &run::Book, tab: usize, fid: run::Loc) -> String {
     }
   }
 
-  let fun = ast::val_to_name(fid as run::Val);
-  let def = &book.defs[fid as usize];
+  let fun = ast::val_to_name(fid);
+  let def = &book.get(fid).unwrap();
 
   let mut code = String::new();
   code.push_str(&format!("{}pub fn F_{}(&mut self, ptr: Ptr, trg: Trg) -> bool {{\n", ident(tab), fun));
@@ -443,8 +444,3 @@ fn adjust_redex(rf: run::Ptr, rx: run::Ptr) -> (run::Ptr, run::Ptr) {
     panic!("Invalid HVMC file.");
   }
 }
-
-
-
-
-

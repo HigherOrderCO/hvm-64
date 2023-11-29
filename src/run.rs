@@ -9,6 +9,8 @@
 
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Barrier};
+use std::collections::HashMap;
+use crate::u60;
 
 pub type Tag  = u8;
 pub type Lab  = u32;
@@ -33,21 +35,23 @@ pub const DUP: Tag = 0xC; // Main port of dup node
 pub const END: Tag = 0xE; // Last pointer tag
 
 // Numeric operations.
-pub const ADD: Lab = 0x0; // addition
-pub const SUB: Lab = 0x1; // subtraction
-pub const MUL: Lab = 0x2; // multiplication
-pub const DIV: Lab = 0x3; // division
-pub const MOD: Lab = 0x4; // modulus
-pub const EQ : Lab = 0x5; // equal-to
-pub const NE : Lab = 0x6; // not-equal-to
-pub const LT : Lab = 0x7; // less-than
-pub const GT : Lab = 0x8; // greater-than
-pub const AND: Lab = 0x9; // logical-and
-pub const OR : Lab = 0xA; // logical-or
-pub const XOR: Lab = 0xB; // logical-xor
-pub const NOT: Lab = 0xC; // logical-not
-pub const LSH: Lab = 0xD; // left-shift
-pub const RSH: Lab = 0xE; // right-shift
+pub const ADD: Lab = 0x00; // addition
+pub const SUB: Lab = 0x01; // subtraction
+pub const MUL: Lab = 0x02; // multiplication
+pub const DIV: Lab = 0x03; // division
+pub const MOD: Lab = 0x04; // modulus
+pub const EQ : Lab = 0x05; // equal-to
+pub const NE : Lab = 0x06; // not-equal-to
+pub const LT : Lab = 0x07; // less-than
+pub const GT : Lab = 0x08; // greater-than
+pub const LTE: Lab = 0x09; // less-than-or-equal
+pub const GTE: Lab = 0x0A; // greater-than-or-equal
+pub const AND: Lab = 0x0B; // logical-and
+pub const OR : Lab = 0x0C; // logical-or
+pub const XOR: Lab = 0x0D; // logical-xor
+pub const LSH: Lab = 0x0E; // left-shift
+pub const RSH: Lab = 0x0F; // right-shift
+pub const NOT: Lab = 0x10; // logical-not
 
 pub const ERAS: Ptr = Ptr::new(ERA, 0, 0);
 pub const ROOT: Ptr = Ptr::new(VR2, 0, 0);
@@ -128,13 +132,18 @@ pub struct Def {
 
 // A map of id to definitions (closed nets).
 pub struct Book {
-  pub defs: Vec<Def>,
+  pub defs: HashMap<Val, Def, nohash_hasher::BuildNoHashHasher<Val>>,
 }
 
 impl Ptr {
   #[inline(always)]
   pub const fn new(tag: Tag, lab: Lab, loc: Loc) -> Self {
     Ptr(((loc as Val) << 32) | ((lab as Val) << 4) | (tag as Val))
+  }
+
+  #[inline(always)]
+  pub const fn big(tag: Tag, val: Val) -> Self {
+    Ptr((val << 4) | (tag as Val))
   }
 
   #[inline(always)]
@@ -150,6 +159,11 @@ impl Ptr {
   #[inline(always)]
   pub const fn loc(&self) -> Loc {
     (self.0 >> 32) as Loc
+  }
+
+  #[inline(always)]
+  pub const fn val(&self) -> Val {
+    self.0 >> 4
   }
 
   #[inline(always)]
@@ -262,18 +276,18 @@ impl Book {
   #[inline(always)]
   pub fn new() -> Self {
     Book {
-      defs: vec![Def::new(); 1 << 24],
+      defs: HashMap::with_hasher(std::hash::BuildHasherDefault::default()),
     }
   }
 
   #[inline(always)]
-  pub fn def(&mut self, id: Loc, def: Def) {
-    self.defs[id as usize] = def;
+  pub fn def(&mut self, name: Val, def: Def) {
+    self.defs.insert(name, def);
   }
 
   #[inline(always)]
-  pub fn get(&self, id: Loc) -> Option<&Def> {
-    self.defs.get(id as usize)
+  pub fn get(&self, name: Val) -> Option<&Def> {
+    self.defs.get(&name)
   }
 }
 
@@ -411,8 +425,8 @@ impl<'a> Net<'a> {
   }
 
   // Creates a net and boots from a REF.
-  pub fn boot(&mut self, root_id: Loc) {
-    self.heap.set_root(Ptr::new(REF, 0, root_id));
+  pub fn boot(&mut self, root_id: Val) {
+    self.heap.set_root(Ptr::big(REF, root_id));
   }
 
   // Total rewrite count.
@@ -820,31 +834,33 @@ impl<'a> Net<'a> {
   pub fn op1n(&mut self, a: Ptr, b: Ptr) {
     self.rwts.oper += 1;
     let op = a.lab();
-    let v0 = self.heap.get(a.loc(), P1).loc() as Loc;
-    let v1 = b.loc();
+    let v0 = self.heap.get(a.loc(), P1).val();
+    let v1 = b.val();
     let v2 = self.op(op, v0, v1);
     let a2 = Ptr::new(VR2, 0, a.loc());
-    self.half_atomic_link(a2, Ptr::new(NUM, 0, v2));
+    self.half_atomic_link(a2, Ptr::big(NUM, v2));
   }
 
   #[inline(always)]
-  pub fn op(&self, op: Lab, a: Loc, b: Loc) -> Loc {
+  pub fn op(&self, op: Lab, a: Val, b: Val) -> Val {
     match op {
-      ADD => { a.wrapping_add(b) }
-      SUB => { a.wrapping_sub(b) }
-      MUL => { a.wrapping_mul(b) }
-      DIV => { if b == 0 { 0 } else { a.wrapping_div(b) } }
-      MOD => { a.wrapping_rem(b) }
-      EQ  => { (a == b) as Loc }
-      NE  => { (a != b) as Loc }
-      LT  => { (a < b) as Loc }
-      GT  => { (a > b) as Loc }
-      AND => { a & b }
-      OR  => { a | b }
-      XOR => { a ^ b }
-      NOT => { !b }
-      LSH => { a << b }
-      RSH => { a >> b }
+      ADD => { u60::add(a, b) }
+      SUB => { u60::sub(a, b) }
+      MUL => { u60::mul(a, b) }
+      DIV => { u60::div(a, b) }
+      MOD => { u60::rem(a, b) }
+      EQ  => { u60::eq(a, b) }
+      NE  => { u60::ne(a, b) }
+      LT  => { u60::lt(a, b) }
+      GT  => { u60::gt(a, b) }
+      LTE => { u60::lte(a, b) }
+      GTE => { u60::gte(a, b) }
+      AND => { u60::and(a, b) }
+      OR  => { u60::or(a, b) }
+      XOR => { u60::xor(a, b) }
+      NOT => { u60::not(a) }
+      LSH => { u60::lsh(a, b) }
+      RSH => { u60::rsh(a, b) }
       _   => { unreachable!() }
     }
   }
@@ -861,7 +877,9 @@ impl<'a> Net<'a> {
         return;
       }
       // Load the closed net.
-      let got = unsafe { book.defs.get_unchecked((ptr.loc() as usize) & 0xFFFFFF) };
+      //println!("{:08x?}", book.defs);
+      //println!("{:08x} {}", ptr.0, crate::ast::val_to_name(ptr.val()));
+      let got = book.get(ptr.val()).unwrap();
       if got.safe && trg.is_dup() {
         return self.copy(trg, ptr);
       } else if got.node.len() > 0 {
