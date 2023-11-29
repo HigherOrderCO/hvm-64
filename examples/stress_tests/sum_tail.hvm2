@@ -1,6 +1,6 @@
 sum = λa match a {
-  0   : λs s
-  1+p : λs (sum p (+ p s))
+  0: λs s
+  +: λs (sum a-1 (+ a-1 s))
 }
 
 main = (sum 10000000 0)

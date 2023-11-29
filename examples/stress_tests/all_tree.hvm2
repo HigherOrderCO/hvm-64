@@ -4,8 +4,8 @@ data Tree = (Node lft rgt) | (Leaf val)
 and = λa (a λb(b) λb(False))
 
 gen = λn match n {
-  0   : (Leaf True)
-  1+p : (Node (gen p) (gen p))
+  0: (Leaf True)
+  +: (Node (gen n-1) (gen n-1))
 }
 
 all = λt

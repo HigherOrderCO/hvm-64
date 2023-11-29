@@ -11,10 +11,10 @@ Node = λx0 λx1 λfree λused λnode (node x0 x1)
 // gen : u32 -> Arr
 gen = λn match n {
   0: λx (Single x)
-  1+p: λx
+  +: λx
     let x0 = (<< x 1)
     let x1 = (| x0 1)
-    (Concat (gen p x0) (gen p x1))
+    (Concat (gen n-1 x0) (gen n-1 x1))
 }
 
 // rev : Arr -> Arr
@@ -101,9 +101,9 @@ radix = λn
 
 // swap : u32 -> Map -> Map -> Map
 swap = λn match n {
-  0:   λx0 λx1 (Node x0 x1)
-  1+p: λx0 λx1 (Node x1 x0)
+  0: λx0 λx1 (Node x0 x1)
+  +: λx0 λx1 (Node x1 x0)
 }
 
 // main : u32
-main = (sum (sort (rev (gen 22 0))))
+main = (sum (sort (rev (gen 20 0))))

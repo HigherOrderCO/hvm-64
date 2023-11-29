@@ -1,8 +1,8 @@
 add = λa λb (+ a b)
 
 sum = λn match n {
-  0   : 1
-  1+p : (add (sum p) (sum p))
+  0: 1
+  +: (add (sum n-1) (sum n-1))
 }
 
 main = (sum 26)
