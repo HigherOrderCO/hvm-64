@@ -345,24 +345,25 @@ called "load-op-type" is used to load the next operation on the left operand.
 See the `/examples` directory for more info. Below is a table with all available
 operations:
 
-N   | operation
+sym | name
 --- | ---------
-  0 | load-op-type
-  1 | addition
-  2 | subtraction
-  3 | multiplication
-  4 | division
-  5 | modulus
-  6 | equal-to
-  7 | not-equal-to
-  8 | less-than
-  9 | greater-than
-  A | logical-and
-  B | logical-or
-  C | logical-xor
-  D | logical-not
-  E | left-shift
-  F | right-shift
+`+` | addition
+`-` | subtraction
+`*` | multiplication
+`/` | division
+`%` | modulus
+`==`| equal-to
+`!=`| not-equal-to
+`<` | less-than
+`>` | greater-than
+`<=`| less-than-or-equal
+`>=`| greater-than-or-equal
+`&` | bitwise-and
+`\|`| bitwise-or
+`^` | bitwise-xor
+`~` | bitwise-not
+`<<`| left-shift
+`>>`| right-shift
 
 Since HVM already provides plenty of solutions for branching (global references,
 lambda encoded booleans and pattern-matching, etc.), the pattern-match operation
@@ -399,7 +400,7 @@ follow from the ones described above.
 
 ## Memory Layout
 
-The memory layout is optimized for efficiency, and can be summarized as:
+The memory layout is optimized for efficiency. Conceptually, it equals:
 
 ```rust
 // A pointer is a 64-bit word
@@ -429,31 +430,32 @@ As you can see, the memory layout resembles the textual syntax, with nets being
 represented as a vector of trees, with the 'redex' buffer storing the tree roots
 (as active pairs), and the 'nodes' buffer storing all the nodes. Each node has
 two 32-bit pointers and, thus, uses exactly 64 bits. Pointers include a 4-bit
-tag and a 32-bit addr, which allows addressing a 2 GB space per instance. There
-are 16 pointer types:
+tag, a 28-bit label (used for DUP colors, OP2 operators) and a 32-bit addr,
+which allows addressing a 2 GB space per instance. There are 12 pointer types:
 
 ```rust
-VR1 = 0x0; // variable to aux port 1
-VR2 = 0x1; // variable to aux port 2
-RD1 = 0x2; // redirect to aux port 1
-RD2 = 0x3; // redirect to aux port 2
-REF = 0x4; // lazy closed net
-ERA = 0x5; // unboxed eraser
-NUM = 0x6; // unboxed number
-OP2 = 0x7; // numeric operation (binary)
-OP1 = 0x8; // numeric operation (unary)
-ITE = 0x9; // numeric if-then-else
-CT0 = 0xA; // main port of con
-CT1 = 0xB; // main port of dup
-CT2 = 0xC; // main port of extra node 
-CT3 = 0xD; // main port of extra node
-CT4 = 0xE; // main port of extra node
-CT5 = 0xF; // main port of extra node
+VR1: Tag = 0x0; // Variable to aux port 1
+VR2: Tag = 0x1; // Variable to aux port 2
+RD1: Tag = 0x2; // Redirect to aux port 1
+RD2: Tag = 0x3; // Redirect to aux port 2
+REF: Tag = 0x4; // Lazy closed net
+ERA: Tag = 0x5; // Unboxed eraser
+NUM: Tag = 0x6; // Unboxed number
+OP2: Tag = 0x7; // Binary numeric operation
+OP1: Tag = 0x8; // Unary numeric operation
+MAT: Tag = 0x9; // Numeric pattern-matching
+LAM: Tag = 0xA; // Main port of lam node
+TUP: Tag = 0xB; // Main port of tup node
+DUP: Tag = 0xC; // Main port of dup node
 ```
 
 This memory-efficient format allows for a fast implementation in many
 situations; for example, an interaction combinator annihilation can be performed
 with just 2 atomic CAS.
+
+Note that LAM, TUP and DUP nodes are identical: they are interaction combinator
+nodes, and they annihilate/commute based on their labels being identical. The
+distinction is made for better printing, but isn't used internally.
 
 We also provide unboxed 60-bit unsigned integers, which allows HVMC to store raw
 data with minimal loss. For example, to store a raw 3.75 KB buffer, one could
