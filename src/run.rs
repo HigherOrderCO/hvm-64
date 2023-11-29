@@ -805,7 +805,7 @@ impl<'a> Net<'a> {
     self.rwts.oper += 1;
     let a1 = Ptr::new(VR1, 0, a.loc()); // branch
     let a2 = Ptr::new(VR2, 0, a.loc()); // return
-    if b.loc() == 0 {
+    if b.val() == 0 {
       let loc0 = self.alloc(1);
       self.heap.set(loc0, P2, ERAS);
       self.half_atomic_link(a1, Ptr::new(LAM, 0, loc0));
@@ -815,7 +815,7 @@ impl<'a> Net<'a> {
       let loc1 = self.alloc(1);
       self.heap.set(loc0, P1, ERAS);
       self.heap.set(loc0, P2, Ptr::new(LAM, 0, loc1));
-      self.heap.set(loc1, P1, Ptr::new(NUM, 0, b.loc() - 1));
+      self.heap.set(loc1, P1, Ptr::big(NUM, b.val() - 1));
       self.half_atomic_link(a1, Ptr::new(LAM, 0, loc0));
       self.half_atomic_link(a2, Ptr::new(VR2, 0, loc1));
     }
