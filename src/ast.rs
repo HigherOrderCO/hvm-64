@@ -455,7 +455,7 @@ pub fn tree_to_runtime_go(rt_net: &mut run::Net, tree: &Tree, vars: &mut HashMap
       run::ERAS
     }
     Tree::Con { lft, rgt } => {
-      let loc = rt_net.alloc(1);
+      let loc = rt_net.alloc();
       let p1 = tree_to_runtime_go(rt_net, &*lft, vars, Parent::Node { loc, port: run::P1 });
       rt_net.heap.set(loc, run::P1, p1);
       let p2 = tree_to_runtime_go(rt_net, &*rgt, vars, Parent::Node { loc, port: run::P2 });
@@ -463,7 +463,7 @@ pub fn tree_to_runtime_go(rt_net: &mut run::Net, tree: &Tree, vars: &mut HashMap
       run::Ptr::new(run::LAM, 0, loc)
     }
     Tree::Tup { lft, rgt } => {
-      let loc = rt_net.alloc(1);
+      let loc = rt_net.alloc();
       let p1 = tree_to_runtime_go(rt_net, &*lft, vars, Parent::Node { loc, port: run::P1 });
       rt_net.heap.set(loc, run::P1, p1);
       let p2 = tree_to_runtime_go(rt_net, &*rgt, vars, Parent::Node { loc, port: run::P2 });
@@ -471,7 +471,7 @@ pub fn tree_to_runtime_go(rt_net: &mut run::Net, tree: &Tree, vars: &mut HashMap
       run::Ptr::new(run::TUP, 0, loc)
     }
     Tree::Dup { lab, lft, rgt } => {
-      let loc = rt_net.alloc(1);
+      let loc = rt_net.alloc();
       let p1 = tree_to_runtime_go(rt_net, &*lft, vars, Parent::Node { loc, port: run::P1 });
       rt_net.heap.set(loc, run::P1, p1);
       let p2 = tree_to_runtime_go(rt_net, &*rgt, vars, Parent::Node { loc, port: run::P2 });
@@ -506,7 +506,7 @@ pub fn tree_to_runtime_go(rt_net: &mut run::Net, tree: &Tree, vars: &mut HashMap
       run::Ptr::big(run::NUM, *val)
     }
     Tree::Op2 { opr, lft, rgt } => {
-      let loc = rt_net.alloc(1);
+      let loc = rt_net.alloc();
       let p1 = tree_to_runtime_go(rt_net, &*lft, vars, Parent::Node { loc, port: run::P1 });
       rt_net.heap.set(loc, run::P1, p1);
       let p2 = tree_to_runtime_go(rt_net, &*rgt, vars, Parent::Node { loc, port: run::P2 });
@@ -514,7 +514,7 @@ pub fn tree_to_runtime_go(rt_net: &mut run::Net, tree: &Tree, vars: &mut HashMap
       run::Ptr::new(run::OP2, *opr, loc)
     }
     Tree::Mat { sel, ret } => {
-      let loc = rt_net.alloc(1);
+      let loc = rt_net.alloc();
       let p1 = tree_to_runtime_go(rt_net, &*sel, vars, Parent::Node { loc, port: run::P1 });
       rt_net.heap.set(loc, run::P1, p1);
       let p2 = tree_to_runtime_go(rt_net, &*ret, vars, Parent::Node { loc, port: run::P2 });
