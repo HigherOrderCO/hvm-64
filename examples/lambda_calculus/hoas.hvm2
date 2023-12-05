@@ -39,7 +39,7 @@ False = (Lam λt (Lam λf f))
 True  = (Lam λt (Lam λf t))
 Not   = (Lam λb (App (App b False) True))
 
-Main = (normal (App (App (App C6 C6) Not) True))
+Main = (normal (App (App C6 Not) True))
 
 //λa λ* λ* (a λb λc λ* λ* (c λ* b))
 //λa λ* λ* (a λ* λb λ* λ* (b λc c))
