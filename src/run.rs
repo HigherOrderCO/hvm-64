@@ -435,22 +435,25 @@ impl<'a> Net<'a> {
   }
 
   #[inline(always)]
-  pub fn alloc(&mut self, size: usize) -> Loc {
+  pub fn alloc(&mut self) -> Loc {
     // On the first pass, just alloc without checking.
     // Note: we add 1 to avoid overwritting root.
-    if self.next < self.area.size - 1 {
+    let index = if self.next < self.area.size - 1 {
       self.next += 1;
-      return self.area.init as Loc + self.next as Loc;
+      self.area.init as Loc + self.next as Loc
     // On later passes, search for an available slot.
     } else {
       loop {
         self.next += 1;
         let index = (self.area.init + self.next % self.area.size) as Loc;
         if self.heap.get(index, P1).is_nil() && self.heap.get(index, P2).is_nil() {
-          return index;
+          break index;
         }
       }
-    }
+    };
+    self.heap.set(index, P1, LOCK);
+    self.heap.set(index, P2, LOCK);
+    index
   }
 
   // Gets a pointer's target.
@@ -738,10 +741,10 @@ impl<'a> Net<'a> {
 
   pub fn comm(&mut self, a: Ptr, b: Ptr) {
     self.rwts.comm += 1;
-    let loc0 = self.alloc(1);
-    let loc1 = self.alloc(1);
-    let loc2 = self.alloc(1);
-    let loc3 = self.alloc(1);
+    let loc0 = self.alloc();
+    let loc1 = self.alloc();
+    let loc2 = self.alloc();
+    let loc3 = self.alloc();
     self.heap.set(loc0, P1, Ptr::new(VR1, 0, loc2));
     self.heap.set(loc0, P2, Ptr::new(VR1, 0, loc3));
     self.heap.set(loc1, P1, Ptr::new(VR2, 0, loc2));
@@ -776,9 +779,9 @@ impl<'a> Net<'a> {
 
   pub fn pass(&mut self, a: Ptr, b: Ptr) {
     self.rwts.comm += 1;
-    let loc0 = self.alloc(1);
-    let loc1 = self.alloc(1);
-    let loc2 = self.alloc(1);
+    let loc0 = self.alloc();
+    let loc1 = self.alloc();
+    let loc2 = self.alloc();
     self.heap.set(loc0, P1, Ptr::new(VR2, 0, loc1));
     self.heap.set(loc0, P2, Ptr::new(VR2, 0, loc2));
     self.heap.set(loc1, P1, self.heap.get(a.loc(), P1));
@@ -806,13 +809,13 @@ impl<'a> Net<'a> {
     let a1 = Ptr::new(VR1, 0, a.loc()); // branch
     let a2 = Ptr::new(VR2, 0, a.loc()); // return
     if b.val() == 0 {
-      let loc0 = self.alloc(1);
+      let loc0 = self.alloc();
       self.heap.set(loc0, P2, ERAS);
       self.half_atomic_link(a1, Ptr::new(LAM, 0, loc0));
       self.half_atomic_link(a2, Ptr::new(VR1, 0, loc0));
     } else {
-      let loc0 = self.alloc(1);
-      let loc1 = self.alloc(1);
+      let loc0 = self.alloc();
+      let loc1 = self.alloc();
       self.heap.set(loc0, P1, ERAS);
       self.heap.set(loc0, P2, Ptr::new(LAM, 0, loc1));
       self.heap.set(loc1, P1, Ptr::big(NUM, b.val() - 1));
@@ -823,7 +826,7 @@ impl<'a> Net<'a> {
 
   pub fn op2n(&mut self, a: Ptr, b: Ptr) {
     self.rwts.oper += 1;
-    let loc0 = self.alloc(1);
+    let loc0 = self.alloc();
     let a1 = Ptr::new(VR1, 0, a.loc());
     let a2 = Ptr::new(VR2, 0, a.loc());
     self.heap.set(loc0, P1, b);
@@ -886,7 +889,7 @@ impl<'a> Net<'a> {
         let len = got.node.len() - 1;
         // Allocate space.
         for i in 0 .. len {
-          *unsafe { self.locs.get_unchecked_mut(1 + i) } = self.alloc(1);
+          *unsafe { self.locs.get_unchecked_mut(1 + i) } = self.alloc();
         }
         // Load nodes, adjusted.
         for i in 0 .. len {
