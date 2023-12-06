@@ -36,7 +36,7 @@ fn main() {
 
 #[cfg(feature = "hvm_cli_options")]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-  let data = run::Heap::init(1 << 28);
+  let data = run::Heap::init(1 << 29);
   let args: Vec<String> = env::args().collect();
   let help = "help".to_string();
   let opts = args.iter().skip(3).map(|s| s.as_str()).collect::<HashSet<_>>();
