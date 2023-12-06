@@ -224,9 +224,9 @@ pub fn compile_term(book: &run::Book, tab: usize, fid: run::Val) -> String {
           code.push_str(&format!("{}{} = {};\n", ident(tab+2), &c_s.show(), trg.show()));
           code.push_str(&format!("{}}}\n", ident(tab+1)));
           code.push_str(&format!("{}}} else {{\n", ident(tab)));
-          code.push_str(&format!("{}let {} = self.alloc(1);\n", ident(tab+1), lam));
-          code.push_str(&format!("{}let {} = self.alloc(1);\n", ident(tab+1), mat));
-          code.push_str(&format!("{}let {} = self.alloc(1);\n", ident(tab+1), cse));
+          code.push_str(&format!("{}let {} = self.alloc();\n", ident(tab+1), lam));
+          code.push_str(&format!("{}let {} = self.alloc();\n", ident(tab+1), mat));
+          code.push_str(&format!("{}let {} = self.alloc();\n", ident(tab+1), cse));
           code.push_str(&format!("{}self.heap.set({}, P1, Ptr::new(MAT, 0, {}));\n", ident(tab+1), lam, mat));
           code.push_str(&format!("{}self.heap.set({}, P2, Ptr::new(VR2, 0, {}));\n", ident(tab+1), lam, mat));
           code.push_str(&format!("{}self.heap.set({}, P1, Ptr::new(LAM, 0, {}));\n", ident(tab+1), mat, cse));
@@ -260,7 +260,7 @@ pub fn compile_term(book: &run::Book, tab: usize, fid: run::Val) -> String {
         code.push_str(&format!("{}let vy = {};\n", ident(tab+1), val.take()));
         code.push_str(&format!("{}{} = Trg::Ptr(Ptr::big(NUM, self.op({},vx.val(),vy.val())));\n", ident(tab+1), &nxt.show(), ptr.lab()));
         code.push_str(&format!("{}}} else {{\n", ident(tab)));
-        code.push_str(&format!("{}let {} = self.alloc(1);\n", ident(tab+1), op2));
+        code.push_str(&format!("{}let {} = self.alloc();\n", ident(tab+1), op2));
         code.push_str(&format!("{}self.safe_link(Trg::Ptr(Ptr::new(VR1, 0, {})), {});\n", ident(tab+1), op2, val.show()));
         code.push_str(&format!("{}self.safe_link(Trg::Ptr(Ptr::new(OP2, {}, {})), {});\n", ident(tab+1), ptr.lab(), op2, trg.show()));
         code.push_str(&format!("{}{} = Trg::Ptr(Ptr::new(VR2, 0, {}));\n", ident(tab+1), &nxt.show(), op2));
@@ -289,7 +289,7 @@ pub fn compile_term(book: &run::Book, tab: usize, fid: run::Val) -> String {
       code.push_str(&format!("{}{} = Trg::Ptr(got);\n", ident(tab+1), &x1.show()));
       code.push_str(&format!("{}{} = Trg::Ptr(got);\n", ident(tab+1), &x2.show()));
       code.push_str(&format!("{}}} else {{\n", ident(tab)));
-      code.push_str(&format!("{}let {} = self.alloc(1);\n", ident(tab+1), lc));
+      code.push_str(&format!("{}let {} = self.alloc();\n", ident(tab+1), lc));
       code.push_str(&format!("{}{} = Trg::Ptr(Ptr::new(VR1, 0, {}));\n", ident(tab+1), &x1.show(), lc));
       code.push_str(&format!("{}{} = Trg::Ptr(Ptr::new(VR2, 0, {}));\n", ident(tab+1), &x2.show(), lc));
       code.push_str(&format!("{}self.safe_link(Trg::Ptr(Ptr::new({}, {}, {})), {});\n", ident(tab+1), tag(ptr.tag()), ptr.lab(), lc, trg.show()));
@@ -318,7 +318,7 @@ pub fn compile_term(book: &run::Book, tab: usize, fid: run::Val) -> String {
       code.push_str(&format!("{}{} = Trg::Dir(Ptr::new(VR1, 0, got.loc()));\n", ident(tab+1), &x1.show()));
       code.push_str(&format!("{}{} = Trg::Dir(Ptr::new(VR2, 0, got.loc()));\n", ident(tab+1), &x2.show()));
       code.push_str(&format!("{}}} else {{\n", ident(tab)));
-      code.push_str(&format!("{}let {} = self.alloc(1);\n", ident(tab+1), lc));
+      code.push_str(&format!("{}let {} = self.alloc();\n", ident(tab+1), lc));
       code.push_str(&format!("{}{} = Trg::Ptr(Ptr::new(VR1, 0, {}));\n", ident(tab+1), &x1.show(), lc));
       code.push_str(&format!("{}{} = Trg::Ptr(Ptr::new(VR2, 0, {}));\n", ident(tab+1), &x2.show(), lc));
       code.push_str(&format!("{}self.safe_link(Trg::Ptr(Ptr::new({}, 0, {})), {});\n", ident(tab+1), tag(ptr.tag()), lc, trg.show()));
@@ -373,7 +373,7 @@ pub fn compile_term(book: &run::Book, tab: usize, fid: run::Val) -> String {
       let lc = fresh(newx);
       let p1 = def.node[ptr.loc() as usize].0;
       let p2 = def.node[ptr.loc() as usize].1;
-      code.push_str(&format!("{}let {} = self.alloc(1);\n", ident(tab), lc));
+      code.push_str(&format!("{}let {} = self.alloc();\n", ident(tab), lc));
       code.push_str(&make(tab, newx, vars, def, p2, &format!("Trg::Ptr(Ptr::new(VR2, 0, {}))", lc)));
       code.push_str(&make(tab, newx, vars, def, p1, &format!("Trg::Ptr(Ptr::new(VR1, 0, {}))", lc)));
       code.push_str(&format!("{}self.safe_link(Trg::Ptr(Ptr::new({}, {}, {})), {});\n", ident(tab), tag(ptr.tag()), ptr.lab(), lc, trg));
