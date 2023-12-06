@@ -1,0 +1,2 @@
+
+main = @x match x { 0: * +: * }

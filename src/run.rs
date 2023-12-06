@@ -7,32 +7,103 @@
 // they interact with nodes, and are cleared when they interact with ERAs, allowing for constant
 // space evaluation of recursive functions on Scott encoded datatypes.
 
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Barrier};
-use std::collections::HashMap;
 use crate::u60;
+use std::collections::HashMap;
+use std::fmt;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering::Relaxed};
+use std::sync::{Arc, Barrier};
 
-pub type Tag  = u8;
-pub type Lab  = u32;
-pub type Loc  = u32;
-pub type Val  = u64;
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Tag {
+  Var = 0,
+  Red = 1,
+  Ref = 2,
+  Num = 3,
+  Op2 = 4,
+  Op1 = 5,
+  Mat = 6,
+  Ctr = 7,
+}
+
+use Tag::*;
+
+impl TryFrom<u8> for Tag {
+  type Error = ();
+
+  #[inline(always)]
+  fn try_from(value: u8) -> Result<Self, Self::Error> {
+    Ok(match value {
+      0 => Tag::Var,
+      1 => Tag::Red,
+      2 => Tag::Ref,
+      3 => Tag::Num,
+      4 => Tag::Op2,
+      5 => Tag::Op1,
+      6 => Tag::Mat,
+      7 => Tag::Ctr,
+      _ => Err(())?,
+    })
+  }
+}
+
+pub type Lab = u16;
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Loc(pub *const APtr);
+
+impl fmt::Debug for Loc {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    write!(f, "{:012x?}", self.0)
+  }
+}
+
+unsafe impl Send for Loc {}
+
+const PORT_MASK: Val = 0b1000;
+
+impl Loc {
+  pub const NULL: Loc = Loc(std::ptr::null());
+
+  pub fn index(&self) -> usize {
+    self.0 as usize >> 4
+  }
+
+  pub fn port(&self) -> u8 {
+    (((self.0 as usize as Val) & PORT_MASK) >> 3) as u8
+  }
+
+  pub fn local(index: usize, port: u8) -> Loc {
+    Loc((index << 4 | (port as usize) << 3) as *const _)
+  }
+
+  pub fn with_port(&self, port: u8) -> Loc {
+    Loc(((self.0 as Val) & !PORT_MASK | ((port as Val) << 3)) as _)
+  }
+
+  pub fn p0(&self) -> Loc {
+    Loc(((self.0 as Val) & !PORT_MASK) as _)
+  }
+
+  pub fn p1(&self) -> Loc {
+    Loc(((self.0 as Val) & !PORT_MASK) as _)
+  }
+
+  pub fn p2(&self) -> Loc {
+    Loc(((self.0 as Val) | PORT_MASK) as _)
+  }
+
+  pub fn target<'a>(self) -> &'a APtr {
+    unsafe { &*self.0 }
+  }
+
+  pub fn def<'a>(self) -> &'a Def {
+    unsafe { &*(self.0 as *const _) }
+  }
+}
+
+pub type Val = u64;
 pub type AVal = AtomicU64;
-
-// Core terms.
-pub const VR1: Tag = 0x0; // Variable to aux port 1
-pub const VR2: Tag = 0x1; // Variable to aux port 2
-pub const RD1: Tag = 0x2; // Redirect to aux port 1
-pub const RD2: Tag = 0x3; // Redirect to aux port 2
-pub const REF: Tag = 0x4; // Lazy closed net
-pub const ERA: Tag = 0x5; // Unboxed eraser
-pub const NUM: Tag = 0x6; // Unboxed number
-pub const OP2: Tag = 0x7; // Binary numeric operation
-pub const OP1: Tag = 0x8; // Unary numeric operation
-pub const MAT: Tag = 0x9; // Numeric pattern-matching
-pub const LAM: Tag = 0xA; // Main port of lam node
-pub const TUP: Tag = 0xB; // Main port of tup node
-pub const DUP: Tag = 0xC; // Main port of dup node
-pub const END: Tag = 0xE; // Last pointer tag
 
 // Numeric operations.
 pub const ADD: Lab = 0x00; // addition
@@ -40,36 +111,66 @@ pub const SUB: Lab = 0x01; // subtraction
 pub const MUL: Lab = 0x02; // multiplication
 pub const DIV: Lab = 0x03; // division
 pub const MOD: Lab = 0x04; // modulus
-pub const EQ : Lab = 0x05; // equal-to
-pub const NE : Lab = 0x06; // not-equal-to
-pub const LT : Lab = 0x07; // less-than
-pub const GT : Lab = 0x08; // greater-than
+pub const EQ: Lab = 0x05; // equal-to
+pub const NE: Lab = 0x06; // not-equal-to
+pub const LT: Lab = 0x07; // less-than
+pub const GT: Lab = 0x08; // greater-than
 pub const LTE: Lab = 0x09; // less-than-or-equal
 pub const GTE: Lab = 0x0A; // greater-than-or-equal
 pub const AND: Lab = 0x0B; // logical-and
-pub const OR : Lab = 0x0C; // logical-or
+pub const OR: Lab = 0x0C; // logical-or
 pub const XOR: Lab = 0x0D; // logical-xor
 pub const LSH: Lab = 0x0E; // left-shift
 pub const RSH: Lab = 0x0F; // right-shift
 pub const NOT: Lab = 0x10; // logical-not
 
-pub const ERAS: Ptr = Ptr::new(ERA, 0, 0);
-pub const ROOT: Ptr = Ptr::new(VR2, 0, 0);
+pub const ERA: Ptr = Ptr(Ref as _);
 pub const NULL: Ptr = Ptr(0x0000_0000_0000_0000);
 pub const GONE: Ptr = Ptr(0xFFFF_FFFF_FFFF_FFEF);
 pub const LOCK: Ptr = Ptr(0xFFFF_FFFF_FFFF_FFFF); // if last digit is F it will be seen as a CTR
 
-// An auxiliary port.
-pub type Port = Val;
-pub const P1: Port = 0;
-pub const P2: Port = 1;
-
-// A tagged pointer.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
+/// A tagged pointer.
+#[derive(Copy, Clone, Eq, PartialEq, PartialOrd, Hash, Default)]
+#[repr(transparent)]
 pub struct Ptr(pub Val);
 
-// An atomic tagged pointer.
+impl fmt::Debug for Ptr {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    match self {
+      &ERA => write!(f, "[ERA]"),
+      &NULL => write!(f, "[NULL]"),
+      &GONE => write!(f, "[GONE]"),
+      &LOCK => write!(f, "[LOCK]"),
+      _ => match self.tag() {
+        Num => write!(f, "[Num {}]", self.num()),
+        Var | Red => write!(
+          f,
+          "[{:?} {} {:?}]",
+          self.tag(),
+          self.loc().port(),
+          self.loc()
+        ),
+        Ref | Mat => write!(f, "[{:?} {:?}]", self.tag(), self.loc()),
+        Op2 | Op1 | Ctr => write!(f, "[{:?} {:?} {:?}]", self.tag(), self.lab(), self.loc()),
+      },
+    }
+  }
+}
+
+/// An atomic tagged pointer.
+#[repr(transparent)]
+#[derive(Default)]
 pub struct APtr(pub AVal);
+
+#[repr(C)]
+#[repr(align(128))]
+#[derive(Default, Debug, Clone, Copy)]
+pub struct Node(pub Ptr, pub Ptr);
+
+#[repr(C)]
+#[repr(align(128))]
+#[derive(Default)]
+pub struct ANode(pub APtr, pub APtr);
 
 // A target pointer, with implied ownership.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
@@ -79,14 +180,16 @@ pub enum Trg {
 }
 
 // The global node buffer.
-pub type Data = [(APtr, APtr)];
+pub type Data = [ANode];
 
 // A handy wrapper around Data.
 pub struct Heap<'a> {
-  pub data: &'a Data,
+  pub area: &'a Data,
+  pub next: usize,
 }
 
-// Rewrite counter.
+/// Rewrite counter.
+#[derive(Clone, Copy, Debug, Default)]
 pub struct Rewrites {
   pub anni: usize, // anni rewrites
   pub comm: usize, // comm rewrites
@@ -95,7 +198,8 @@ pub struct Rewrites {
   pub oper: usize, // oper rewrites
 }
 
-// Rewrite counter, atomic.
+/// Rewrite counter, atomic.
+#[derive(Default)]
 pub struct AtomicRewrites {
   pub anni: AtomicUsize, // anni rewrites
   pub comm: AtomicUsize, // comm rewrites
@@ -104,51 +208,47 @@ pub struct AtomicRewrites {
   pub oper: AtomicUsize, // oper rewrites
 }
 
-// An allocation area delimiter
-pub struct Area {
-  pub init: usize, // first allocation index
-  pub size: usize, // total nodes in area
-}
-
 // A interaction combinator net.
 pub struct Net<'a> {
-  pub tid : usize, // thread id
-  pub tids: usize, // thread count
-  pub heap: Heap<'a>, // nodes
-  pub rdex: Vec<(Ptr,Ptr)>, // redexes
+  pub tid: usize,            // thread id
+  pub tids: usize,           // thread count
+  pub heap: Heap<'a>,        // allocator
+  pub rdex: Vec<(Ptr, Ptr)>, // redexes
   pub locs: Vec<Loc>,
-  pub area: Area, // allocation area
-  pub next: usize, // next allocation index within area
   pub rwts: Rewrites, // rewrite count
+  pub root: Loc,
 }
 
 // A compact closed net, used for dereferences.
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug)]
+#[repr(align(128))]
 pub struct Def {
-  pub safe: bool,
+  pub lab: Lab,
+  pub comp: Option<fn(&mut Net, Ptr, Ptr)>, // TODO
+  pub root: Ptr,
   pub rdex: Vec<(Ptr, Ptr)>,
-  pub node: Vec<(Ptr, Ptr)>,
-}
-
-// A map of id to definitions (closed nets).
-pub struct Book {
-  pub defs: HashMap<Val, Def, nohash_hasher::BuildNoHashHasher<Val>>,
+  pub node: Vec<Node>,
 }
 
 impl Ptr {
   #[inline(always)]
-  pub const fn new(tag: Tag, lab: Lab, loc: Loc) -> Self {
-    Ptr(((loc as Val) << 32) | ((lab as Val) << 4) | (tag as Val))
+  pub fn new(tag: Tag, lab: Lab, loc: Loc) -> Self {
+    Ptr(((lab as Val) << 48) | (loc.0 as usize as Val) | (tag as Val))
   }
 
   #[inline(always)]
-  pub const fn big(tag: Tag, val: Val) -> Self {
-    Ptr((val << 4) | (tag as Val))
+  pub const fn new_num(val: Val) -> Self {
+    Ptr((val << 4) | (Num as Val))
   }
 
   #[inline(always)]
-  pub const fn tag(&self) -> Tag {
-    (self.0 & 0xF) as Tag
+  pub fn new_ref(def: &Def) -> Ptr {
+    Ptr::new(Ref, def.lab, Loc(def as *const _ as _))
+  }
+
+  #[inline(always)]
+  pub fn tag(&self) -> Tag {
+    unsafe { ((self.0 & 0x7) as u8).try_into().unwrap_unchecked() }
   }
 
   #[inline(always)]
@@ -158,275 +258,181 @@ impl Ptr {
 
   #[inline(always)]
   pub const fn loc(&self) -> Loc {
-    (self.0 >> 32) as Loc
+    Loc((self.0 & 0x0000_FFFF_FFFF_FFF0) as usize as _)
   }
 
   #[inline(always)]
-  pub const fn val(&self) -> Val {
+  pub const fn num(&self) -> Val {
     self.0 >> 4
   }
 
   #[inline(always)]
-  pub fn is_nil(&self) -> bool {
+  pub fn is_null(&self) -> bool {
     return self.0 == 0;
   }
 
   #[inline(always)]
-  pub fn is_var(&self) -> bool {
-    return matches!(self.tag(), VR1..=VR2) && !self.is_nil();
-  }
-
-  #[inline(always)]
-  pub fn is_red(&self) -> bool {
-    return matches!(self.tag(), RD1..=RD2) && !self.is_nil();
-  }
-
-  #[inline(always)]
-  pub fn is_era(&self) -> bool {
-    return matches!(self.tag(), ERA);
-  }
-
-  #[inline(always)]
-  pub fn is_ctr(&self) -> bool {
-    return matches!(self.tag(), LAM..=END);
-  }
-
-  #[inline(always)]
-  pub fn is_dup(&self) -> bool {
-    return matches!(self.tag(), DUP);
-  }
-
-  #[inline(always)]
-  pub fn is_ref(&self) -> bool {
-    return matches!(self.tag(), REF);
-  }
-
-  #[inline(always)]
   pub fn is_pri(&self) -> bool {
-    return matches!(self.tag(), REF..=END);
+    return self.tag() >= Ref;
   }
 
   #[inline(always)]
-  pub fn is_num(&self) -> bool {
-    return matches!(self.tag(), NUM);
-  }
-
-  #[inline(always)]
-  pub fn is_op1(&self) -> bool {
-    return matches!(self.tag(), OP1);
-  }
-
-  #[inline(always)]
-  pub fn is_op2(&self) -> bool {
-    return matches!(self.tag(), OP2);
-  }
-
-  #[inline(always)]
-  pub fn is_skp(&self) -> bool {
-    return matches!(self.tag(), ERA | NUM | REF);
-  }
-
-  #[inline(always)]
-  pub fn is_mat(&self) -> bool {
-    return matches!(self.tag(), MAT);
+  pub fn is_nilary(&self) -> bool {
+    return matches!(self.tag(), Num | Ref);
   }
 
   #[inline(always)]
   pub fn is_nod(&self) -> bool {
-    return matches!(self.tag(), OP2..=END);
+    return self.tag() >= Op2;
   }
 
   #[inline(always)]
-  pub fn has_loc(&self) -> bool {
-    return matches!(self.tag(), VR1..=VR2 | OP2..=END);
+  pub fn p1(&self) -> Ptr {
+    Ptr::new(Var, 0, self.loc().p1())
+  }
+
+  #[inline(always)]
+  pub fn p2(&self) -> Ptr {
+    Ptr::new(Var, 0, self.loc().p2())
+  }
+
+  #[inline(always)]
+  pub fn target(&self) -> &APtr {
+    self.loc().target()
   }
 
   #[inline(always)]
   pub fn redirect(&self) -> Ptr {
-    return Ptr::new(self.tag() + RD2 - VR2, 0, self.loc());
+    return Ptr::new(Red, 0, self.loc());
   }
 
   #[inline(always)]
   pub fn unredirect(&self) -> Ptr {
-    return Ptr::new(self.tag() + RD2 - VR2, 0, self.loc());
-  }
-
-  #[inline(always)]
-  pub fn can_skip(a: Ptr, b: Ptr) -> bool {
-    return matches!(a.tag(), ERA | REF) && matches!(b.tag(), ERA | REF);
+    return Ptr::new(Var, 0, self.loc());
   }
 }
 
 impl APtr {
+  #[inline(always)]
   pub fn new(ptr: Ptr) -> Self {
     APtr(AtomicU64::new(ptr.0))
   }
 
+  #[inline(always)]
   pub fn load(&self) -> Ptr {
-    Ptr(self.0.load(Ordering::Relaxed))
+    Ptr(self.0.load(Relaxed))
   }
 
+  #[inline(always)]
   pub fn store(&self, ptr: Ptr) {
-    self.0.store(ptr.0, Ordering::Relaxed);
-  }
-}
-
-
-impl Book {
-  #[inline(always)]
-  pub fn new() -> Self {
-    Book {
-      defs: HashMap::with_hasher(std::hash::BuildHasherDefault::default()),
-    }
+    self.0.store(ptr.0, Relaxed);
   }
 
   #[inline(always)]
-  pub fn def(&mut self, name: Val, def: Def) {
-    self.defs.insert(name, def);
+  pub fn cas(&self, expected: Ptr, value: Ptr) -> Result<Ptr, Ptr> {
+    self
+      .0
+      .compare_exchange_weak(expected.0, value.0, Relaxed, Relaxed)
+      .map(Ptr)
+      .map_err(Ptr)
   }
 
   #[inline(always)]
-  pub fn get(&self, name: Val) -> Option<&Def> {
-    self.defs.get(&name)
+  pub fn swap(&self, value: Ptr) -> Ptr {
+    Ptr(self.0.swap(value.0, Relaxed))
   }
-}
 
-impl Def {
-  pub fn new() -> Self {
-    Def {
-      safe: true,
-      rdex: vec![],
-      node: vec![],
+  // Takes a pointer's target.
+  #[inline(always)]
+  pub fn take(&self) -> Ptr {
+    loop {
+      let got = self.swap(LOCK);
+      if got != LOCK && got != NULL {
+        return got;
+      }
     }
   }
 }
 
 impl<'a> Heap<'a> {
-  pub fn init(size: usize) -> Box<[(APtr, APtr)]> {
-    let mut data = vec![];
-    for _ in 0..size {
-      data.push((APtr::new(NULL), APtr::new(NULL)));
-    }
+  pub fn init(size: usize) -> Box<[ANode]> {
+    let mut data = Vec::with_capacity(size);
+    data.resize_with(size, Default::default);
     return data.into_boxed_slice();
   }
 
   pub fn new(data: &'a Data) -> Self {
-    Heap { data }
+    Heap {
+      area: data,
+      next: 0,
+    }
   }
 
   #[inline(always)]
-  pub fn get(&self, index: Loc, port: Port) -> Ptr {
-    unsafe {
-      let node = self.data.get_unchecked(index as usize);
-      if port == P1 {
-        return node.0.load();
-      } else {
-        return node.1.load();
+  pub fn alloc(&mut self) -> Loc {
+    // On the first pass, just alloc without checking.
+    let index = if self.next < self.area.len() {
+      self.next
+    // On later passes, search for an available slot.
+    } else {
+      loop {
+        let index = self.next % self.area.len();
+        if self.area[index].0.load().is_null() && self.area[index].1.load().is_null() {
+          break index;
+        }
+        self.next += 1;
       }
-    }
-  }
-
-  #[inline(always)]
-  pub fn set(&self, index: Loc, port: Port, value: Ptr) {
-    unsafe {
-      let node = self.data.get_unchecked(index as usize);
-      if port == P1 {
-        node.0.store(value);
-      } else {
-        node.1.store(value);
-      }
-    }
-  }
-
-  #[inline(always)]
-  pub fn cas(&self, index: Loc, port: Port, expected: Ptr, value: Ptr) -> Result<Ptr,Ptr> {
-    unsafe {
-      let node = self.data.get_unchecked(index as usize);
-      let data = if port == P1 { &node.0.0 } else { &node.1.0 };
-      let done = data.compare_exchange_weak(expected.0, value.0, Ordering::Relaxed, Ordering::Relaxed);
-      return done.map(Ptr).map_err(Ptr);
-    }
-  }
-
-  #[inline(always)]
-  pub fn swap(&self, index: Loc, port: Port, value: Ptr) -> Ptr {
-    unsafe {
-      let node = self.data.get_unchecked(index as usize);
-      let data = if port == P1 { &node.0.0 } else { &node.1.0 };
-      return Ptr(data.swap(value.0, Ordering::Relaxed));
-    }
-  }
-
-  #[inline(always)]
-  pub fn get_root(&self) -> Ptr {
-    return self.get(ROOT.loc(), P2);
-  }
-
-  #[inline(always)]
-  pub fn set_root(&self, value: Ptr) {
-    self.set(ROOT.loc(), P2, value);
+    };
+    self.next += 1;
+    self.area[index].0.store(LOCK);
+    self.area[index].1.store(LOCK);
+    Loc(&self.area[index].0 as _)
   }
 }
 
 impl Rewrites {
-  pub fn new() -> Self {
-    Rewrites {
-      anni: 0,
-      comm: 0,
-      eras: 0,
-      dref: 0,
-      oper: 0,
-    }
-  }
-
   pub fn add_to(&self, target: &AtomicRewrites) {
-    target.anni.fetch_add(self.anni, Ordering::Relaxed);
-    target.comm.fetch_add(self.comm, Ordering::Relaxed);
-    target.eras.fetch_add(self.eras, Ordering::Relaxed);
-    target.dref.fetch_add(self.dref, Ordering::Relaxed);
-    target.oper.fetch_add(self.oper, Ordering::Relaxed);
+    target.anni.fetch_add(self.anni, Relaxed);
+    target.comm.fetch_add(self.comm, Relaxed);
+    target.eras.fetch_add(self.eras, Relaxed);
+    target.dref.fetch_add(self.dref, Relaxed);
+    target.oper.fetch_add(self.oper, Relaxed);
   }
-
 }
 
 impl AtomicRewrites {
-  pub fn new() -> Self {
-    AtomicRewrites {
-      anni: AtomicUsize::new(0),
-      comm: AtomicUsize::new(0),
-      eras: AtomicUsize::new(0),
-      dref: AtomicUsize::new(0),
-      oper: AtomicUsize::new(0),
-    }
-  }
-
   pub fn add_to(&self, target: &mut Rewrites) {
-    target.anni += self.anni.load(Ordering::Relaxed);
-    target.comm += self.comm.load(Ordering::Relaxed);
-    target.eras += self.eras.load(Ordering::Relaxed);
-    target.dref += self.dref.load(Ordering::Relaxed);
-    target.oper += self.oper.load(Ordering::Relaxed);
+    target.anni += self.anni.load(Relaxed);
+    target.comm += self.comm.load(Relaxed);
+    target.eras += self.eras.load(Relaxed);
+    target.dref += self.dref.load(Relaxed);
+    target.oper += self.oper.load(Relaxed);
   }
 }
 
 impl<'a> Net<'a> {
-  // Creates an empty net with given size.
-  pub fn new(data: &'a Data) -> Self {
+  // Creates an empty net with a given heap.
+  pub fn new(mut heap: Heap<'a>) -> Self {
+    let root = heap.alloc();
+    Net::new_with_root(heap, root)
+  }
+
+  // Creates an empty net with a given heap.
+  pub fn new_with_root(heap: Heap<'a>, root: Loc) -> Self {
     Net {
-      tid : 0,
+      tid: 0,
       tids: 1,
-      heap: Heap { data },
+      heap,
       rdex: vec![],
-      locs: vec![0; 1 << 16],
-      area: Area { init: 0, size: data.len() },
-      next: 0,
-      rwts: Rewrites::new(),
+      locs: vec![Loc::NULL; 1 << 16],
+      rwts: Rewrites::default(),
+      root,
     }
   }
 
   // Creates a net and boots from a REF.
-  pub fn boot(&mut self, root_id: Val) {
-    self.heap.set_root(Ptr::big(REF, root_id));
+  pub fn boot(&mut self, def: &Def) {
+    self.root.target().store(Ptr::new_ref(def));
   }
 
   // Total rewrite count.
@@ -435,84 +441,11 @@ impl<'a> Net<'a> {
   }
 
   #[inline(always)]
-  pub fn alloc(&mut self) -> Loc {
-    // On the first pass, just alloc without checking.
-    // Note: we add 1 to avoid overwritting root.
-    let index = if self.next < self.area.size - 1 {
-      self.next += 1;
-      self.area.init as Loc + self.next as Loc
-    // On later passes, search for an available slot.
-    } else {
-      loop {
-        self.next += 1;
-        let index = (self.area.init + self.next % self.area.size) as Loc;
-        if self.heap.get(index, P1).is_nil() && self.heap.get(index, P2).is_nil() {
-          break index;
-        }
-      }
-    };
-    self.heap.set(index, P1, LOCK);
-    self.heap.set(index, P2, LOCK);
-    index
-  }
-
-  // Gets a pointer's target.
-  #[inline(always)]
-  pub fn get_target(&self, ptr: Ptr) -> Ptr {
-    self.heap.get(ptr.loc(), ptr.0 & 1)
-  }
-
-  // Sets a pointer's target.
-  #[inline(always)]
-  pub fn set_target(&mut self, ptr: Ptr, val: Ptr) {
-    self.heap.set(ptr.loc(), ptr.0 & 1, val)
-  }
-
-  // Takes a pointer's target.
-  #[inline(always)]
-  pub fn swap_target(&self, ptr: Ptr, value: Ptr) -> Ptr {
-    self.heap.swap(ptr.loc(), ptr.0 & 1, value)
-  }
-
-  // Takes a pointer's target.
-  #[inline(always)]
-  pub fn take_target(&self, ptr: Ptr) -> Ptr {
-    loop {
-      let got = self.heap.swap(ptr.loc(), ptr.0 & 1, LOCK);
-      if got != LOCK && got != NULL {
-        return got;
-      }
-    }
-  }
-
-  // Sets a pointer's target, using CAS.
-  #[inline(always)]
-  pub fn cas_target(&self, ptr: Ptr, expected: Ptr, value: Ptr) -> Result<Ptr,Ptr> {
-    self.heap.cas(ptr.loc(), ptr.0 & 1, expected, value)
-  }
-
-  #[inline(always)]
   pub fn redux(&mut self, a: Ptr, b: Ptr) {
-    if Ptr::can_skip(a, b) {
+    if a.is_nilary() && b.is_nilary() {
       self.rwts.eras += 1;
     } else {
       self.rdex.push((a, b));
-    }
-  }
-
-  #[inline(always)]
-  pub fn get(&self, a: Trg) -> Ptr {
-    match a {
-      Trg::Dir(dir) => self.get_target(dir),
-      Trg::Ptr(ptr) => ptr,
-    }
-  }
-
-  #[inline(always)]
-  pub fn swap(&self, a: Trg, val: Ptr) -> Ptr {
-    match a {
-      Trg::Dir(dir) => self.swap_target(dir, val),
-      Trg::Ptr(ptr) => ptr,
     }
   }
 
@@ -531,11 +464,11 @@ impl<'a> Net<'a> {
   #[inline(always)]
   pub fn atomic_link(&mut self, a_dir: Ptr, b_dir: Ptr) {
     //println!("link {:016x} {:016x}", a_dir.0, b_dir.0);
-    let a_ptr = self.take_target(a_dir);
-    let b_ptr = self.take_target(b_dir);
+    let a_ptr = a_dir.target().take();
+    let b_ptr = b_dir.target().take();
     if a_ptr.is_pri() && b_ptr.is_pri() {
-      self.set_target(a_dir, NULL);
-      self.set_target(b_dir, NULL);
+      a_dir.target().store(NULL);
+      b_dir.target().store(NULL);
       return self.redux(a_ptr, b_ptr);
     } else {
       self.atomic_linker(a_ptr, a_dir, b_ptr);
@@ -546,9 +479,9 @@ impl<'a> Net<'a> {
   // Given a location, link the pointer stored to another pointer, atomically.
   #[inline(always)]
   pub fn half_atomic_link(&mut self, a_dir: Ptr, b_ptr: Ptr) {
-    let a_ptr = self.take_target(a_dir);
+    let a_ptr = a_dir.target().take();
     if a_ptr.is_pri() && b_ptr.is_pri() {
-      self.set_target(a_dir, NULL);
+      a_dir.target().store(NULL);
       return self.redux(a_ptr, b_ptr);
     } else {
       self.atomic_linker(a_ptr, a_dir, b_ptr);
@@ -559,8 +492,8 @@ impl<'a> Net<'a> {
   // When two threads interfere, uses the lock-free link algorithm described on the 'paper/'.
   #[inline(always)]
   pub fn linker(&mut self, a_ptr: Ptr, b_ptr: Ptr) {
-    if a_ptr.is_var() {
-      self.set_target(a_ptr, b_ptr);
+    if a_ptr.tag() == Var {
+      a_ptr.target().store(b_ptr);
     }
   }
 
@@ -568,26 +501,27 @@ impl<'a> Net<'a> {
   #[inline(always)]
   pub fn atomic_linker(&mut self, a_ptr: Ptr, a_dir: Ptr, b_ptr: Ptr) {
     // If 'a_ptr' is a var...
-    if a_ptr.is_var() {
-      let got = self.cas_target(a_ptr, a_dir, b_ptr);
+    if a_ptr.tag() == Var {
+      let got = a_ptr.target().cas(a_dir, b_ptr);
       // Attempts to link using a compare-and-swap.
       if got.is_ok() {
-        self.set_target(a_dir, NULL);
+        a_dir.target().store(NULL);
       // If the CAS failed, resolve by using redirections.
       } else {
         //println!("[{:04x}] cas fail {:016x}", self.tid, got.unwrap_err().0);
-        if b_ptr.is_var() {
-          self.set_target(a_dir, b_ptr.redirect());
+        if b_ptr.tag() == Var {
+          let ptr = b_ptr.redirect();
+          a_dir.target().store(ptr);
           //self.atomic_linker_var(a_ptr, a_dir, b_ptr);
         } else if b_ptr.is_pri() {
-          self.set_target(a_dir, b_ptr);
+          a_dir.target().store(b_ptr);
           self.atomic_linker_pri(a_ptr, a_dir, b_ptr);
         } else {
-          todo!();
+          unreachable!();
         }
       }
     } else {
-      self.set_target(a_dir, NULL);
+      a_dir.target().store(NULL);
     }
   }
 
@@ -596,26 +530,26 @@ impl<'a> Net<'a> {
     loop {
       // Peek the target, which may not be owned by us.
       let mut t_dir = a_ptr;
-      let mut t_ptr = self.get_target(t_dir);
+      let mut t_ptr = t_dir.target().load();
       // If target is a redirection, we own it. Clear and move forward.
-      if t_ptr.is_red() {
-        self.set_target(t_dir, NULL);
+      if t_ptr.tag() == Red {
+        t_dir.target().store(NULL);
         a_ptr = t_ptr;
         continue;
       }
       // If target is a variable, we don't own it. Try replacing it.
-      if t_ptr.is_var() {
-        if self.cas_target(t_dir, t_ptr, b_ptr).is_ok() {
+      if t_ptr.tag() == Var {
+        if t_dir.target().cas(t_ptr, b_ptr).is_ok() {
           //println!("[{:04x}] var", self.tid);
           // Clear source location.
-          self.set_target(a_dir, NULL);
+          a_dir.target().store(NULL);
           // Collect the orphaned backward path.
           t_dir = t_ptr;
-          t_ptr = self.get_target(t_ptr);
-          while t_ptr.is_red() {
-            self.swap_target(t_dir, NULL);
+          t_ptr = t_ptr.target().load();
+          while t_ptr.tag() == Red {
+            t_dir.target().store(NULL);
             t_dir = t_ptr;
-            t_ptr = self.get_target(t_dir);
+            t_ptr = t_dir.target().load();
           }
           return;
         }
@@ -628,18 +562,18 @@ impl<'a> Net<'a> {
         let x_dir = if a_dir < t_dir { a_dir } else { t_dir };
         let y_dir = if a_dir < t_dir { t_dir } else { a_dir };
         // Swap first reference by GONE placeholder.
-        let x_ptr = self.swap_target(x_dir, GONE);
+        let x_ptr = x_dir.target().swap(GONE);
         // First to arrive creates a redex.
         if x_ptr != GONE {
           //println!("[{:04x}] fst {:016x}", self.tid, x_ptr.0);
-          let y_ptr = self.swap_target(y_dir, GONE);
+          let y_ptr = y_dir.target().swap(GONE);
           self.redux(x_ptr, y_ptr);
           return;
         // Second to arrive clears up the memory.
         } else {
           //println!("[{:04x}] snd", self.tid);
-          self.swap_target(x_dir, NULL);
-          while self.cas_target(y_dir, GONE, NULL).is_err() {};
+          x_dir.target().store(NULL);
+          while y_dir.target().cas(GONE, NULL).is_err() {}
           return;
         }
       }
@@ -660,14 +594,14 @@ impl<'a> Net<'a> {
   pub fn atomic_linker_var(&mut self, a_ptr: Ptr, a_dir: Ptr, b_ptr: Ptr) {
     loop {
       let ste_dir = b_ptr;
-      let ste_ptr = self.get_target(ste_dir);
-      if ste_ptr.is_var() {
+      let ste_ptr = ste_dir.target().load();
+      if ste_ptr.tag() == Var {
         let trg_dir = ste_ptr;
-        let trg_ptr = self.get_target(trg_dir);
-        if trg_ptr.is_red() {
+        let trg_ptr = trg_dir.target().load();
+        if trg_ptr.tag() == Red {
           let neo_ptr = trg_ptr.unredirect();
-          if self.cas_target(ste_dir, ste_ptr, neo_ptr).is_ok() {
-            self.swap_target(trg_dir, NULL);
+          if ste_dir.target().cas(ste_ptr, neo_ptr).is_ok() {
+            trg_dir.target().store(NULL);
             continue;
           }
         }
@@ -686,237 +620,219 @@ impl<'a> Net<'a> {
       (Trg::Ptr(a_ptr), Trg::Ptr(b_ptr)) => self.link(a_ptr, b_ptr),
     }
   }
-  
+
   // Performs an interaction over a redex.
   #[inline(always)]
-  pub fn interact(&mut self, book: &Book, a: Ptr, b: Ptr) {
+  pub fn interact(&mut self, a: Ptr, b: Ptr) {
     match (a.tag(), b.tag()) {
-      (REF   , OP2..) => self.call(book, a, b),
-      (OP2.. , REF  ) => self.call(book, b, a),
-      (LAM.. , LAM..) if a.lab() == b.lab() => self.anni(a, b),
-      (LAM.. , LAM..) => self.comm(a, b),
-      (LAM.. , ERA  ) => self.era2(a),
-      (ERA   , LAM..) => self.era2(b),
-      (REF   , ERA  ) => self.rwts.eras += 1,
-      (ERA   , REF  ) => self.rwts.eras += 1,
-      (REF   , NUM  ) => self.rwts.eras += 1,
-      (NUM   , REF  ) => self.rwts.eras += 1,
-      (ERA   , ERA  ) => self.rwts.eras += 1,
-      (LAM.. , NUM  ) => self.copy(a, b),
-      (NUM   , LAM..) => self.copy(b, a),
-      (NUM   , ERA  ) => self.rwts.eras += 1,
-      (ERA   , NUM  ) => self.rwts.eras += 1,
-      (NUM   , NUM  ) => self.rwts.eras += 1,
-      (OP2   , NUM  ) => self.op2n(a, b),
-      (NUM   , OP2  ) => self.op2n(b, a),
-      (OP1   , NUM  ) => self.op1n(a, b),
-      (NUM   , OP1  ) => self.op1n(b, a),
-      (OP2   , LAM..) => self.comm(a, b),
-      (LAM.. , OP2  ) => self.comm(b, a),
-      (OP1   , LAM..) => self.pass(a, b),
-      (LAM.. , OP1  ) => self.pass(b, a),
-      (OP2   , ERA  ) => self.era2(a),
-      (ERA   , OP2  ) => self.era2(b),
-      (OP1   , ERA  ) => self.era1(a),
-      (ERA   , OP1  ) => self.era1(b),
-      (MAT   , NUM  ) => self.mtch(a, b),
-      (NUM   , MAT  ) => self.mtch(b, a),
-      (MAT   , LAM..) => self.comm(a, b),
-      (LAM.. , MAT  ) => self.comm(b, a),
-      (MAT   , ERA  ) => self.era2(a),
-      (ERA   , MAT  ) => self.era2(b),
-      _               => { println!("{:016x} {:016x}", a.0, b.0); unreachable!() },
-    };
-  }
-
-  pub fn anni(&mut self, a: Ptr, b: Ptr) {
-    self.rwts.anni += 1;
-    let a1 = Ptr::new(VR1, 0, a.loc());
-    let b1 = Ptr::new(VR1, 0, b.loc());
-    self.atomic_link(a1, b1);
-    let a2 = Ptr::new(VR2, 0, a.loc());
-    let b2 = Ptr::new(VR2, 0, b.loc());
-    self.atomic_link(a2, b2);
-  }
-
-  pub fn comm(&mut self, a: Ptr, b: Ptr) {
-    self.rwts.comm += 1;
-    let loc0 = self.alloc();
-    let loc1 = self.alloc();
-    let loc2 = self.alloc();
-    let loc3 = self.alloc();
-    self.heap.set(loc0, P1, Ptr::new(VR1, 0, loc2));
-    self.heap.set(loc0, P2, Ptr::new(VR1, 0, loc3));
-    self.heap.set(loc1, P1, Ptr::new(VR2, 0, loc2));
-    self.heap.set(loc1, P2, Ptr::new(VR2, 0, loc3));
-    self.heap.set(loc2, P1, Ptr::new(VR1, 0, loc0));
-    self.heap.set(loc2, P2, Ptr::new(VR1, 0, loc1));
-    self.heap.set(loc3, P1, Ptr::new(VR2, 0, loc0));
-    self.heap.set(loc3, P2, Ptr::new(VR2, 0, loc1));
-    let a1 = Ptr::new(VR1, 0, a.loc());
-    self.half_atomic_link(a1, Ptr::new(b.tag(), b.lab(), loc0));
-    let b1 = Ptr::new(VR1, 0, b.loc());
-    self.half_atomic_link(b1, Ptr::new(a.tag(), a.lab(), loc2));
-    let a2 = Ptr::new(VR2, 0, a.loc());
-    self.half_atomic_link(a2, Ptr::new(b.tag(), b.lab(), loc1));
-    let b2 = Ptr::new(VR2, 0, b.loc());
-    self.half_atomic_link(b2, Ptr::new(a.tag(), a.lab(), loc3));
-  }
-
-  pub fn era2(&mut self, a: Ptr) {
-    self.rwts.eras += 1;
-    let a1 = Ptr::new(VR1, 0, a.loc());
-    self.half_atomic_link(a1, ERAS);
-    let a2 = Ptr::new(VR2, 0, a.loc());
-    self.half_atomic_link(a2, ERAS);
-  }
-
-  pub fn era1(&mut self, a: Ptr) {
-    self.rwts.eras += 1;
-    let a2 = Ptr::new(VR2, 0, a.loc());
-    self.half_atomic_link(a2, ERAS);
-  }
-
-  pub fn pass(&mut self, a: Ptr, b: Ptr) {
-    self.rwts.comm += 1;
-    let loc0 = self.alloc();
-    let loc1 = self.alloc();
-    let loc2 = self.alloc();
-    self.heap.set(loc0, P1, Ptr::new(VR2, 0, loc1));
-    self.heap.set(loc0, P2, Ptr::new(VR2, 0, loc2));
-    self.heap.set(loc1, P1, self.heap.get(a.loc(), P1));
-    self.heap.set(loc1, P2, Ptr::new(VR1, 0, loc0));
-    self.heap.set(loc2, P1, self.heap.get(a.loc(), P1));
-    self.heap.set(loc2, P2, Ptr::new(VR2, 0, loc0));
-    let a2 = Ptr::new(VR2, 0, a.loc());
-    self.half_atomic_link(a2, Ptr::new(b.tag(), b.lab(), loc0));
-    let b1 = Ptr::new(VR1, 0, b.loc());
-    self.half_atomic_link(b1, Ptr::new(a.tag(), b.lab(), loc1));
-    let b2 = Ptr::new(VR2, 0, b.loc());
-    self.half_atomic_link(b2, Ptr::new(a.tag(), b.lab(), loc2));
-  }
-
-  pub fn copy(&mut self, a: Ptr, b: Ptr) {
-    self.rwts.comm += 1;
-    let a1 = Ptr::new(VR1, 0, a.loc());
-    self.half_atomic_link(a1, b);
-    let a2 = Ptr::new(VR2, 0, a.loc());
-    self.half_atomic_link(a2, b);
-  }
-
-  pub fn mtch(&mut self, a: Ptr, b: Ptr) {
-    self.rwts.oper += 1;
-    let a1 = Ptr::new(VR1, 0, a.loc()); // branch
-    let a2 = Ptr::new(VR2, 0, a.loc()); // return
-    if b.val() == 0 {
-      let loc0 = self.alloc();
-      self.heap.set(loc0, P2, ERAS);
-      self.half_atomic_link(a1, Ptr::new(LAM, 0, loc0));
-      self.half_atomic_link(a2, Ptr::new(VR1, 0, loc0));
-    } else {
-      let loc0 = self.alloc();
-      let loc1 = self.alloc();
-      self.heap.set(loc0, P1, ERAS);
-      self.heap.set(loc0, P2, Ptr::new(LAM, 0, loc1));
-      self.heap.set(loc1, P1, Ptr::big(NUM, b.val() - 1));
-      self.half_atomic_link(a1, Ptr::new(LAM, 0, loc0));
-      self.half_atomic_link(a2, Ptr::new(VR2, 0, loc1));
+      // not actually an active pair
+      (Var | Red, _) | (_, Var | Red) => unreachable!(),
+      // nil-nil
+      (Num | Ref, Num | Ref) => self.rwts.eras += 1,
+      // comm 2/2
+      (Ctr, Mat) if a.lab() != 0 => self.comm22(a, b),
+      (Mat, Ctr) if b.lab() != 0 => self.comm22(a, b),
+      (Ctr, Op2) | (Op2, Ctr) => self.comm22(a, b),
+      (Ctr, Ctr) if a.lab() != b.lab() => self.comm22(a, b),
+      // comm 1/2
+      (Op1, Ctr) => self.comm12(a, b),
+      (Ctr, Op1) => self.comm12(b, a),
+      // anni
+      (Mat, Mat) | (Op2, Op2) | (Ctr, Ctr) => self.anni2(a, b),
+      (Op1, Op1) => self.anni1(a, b),
+      // comm 2/0
+      (Ref, Ctr) if b.lab() >= a.lab() => self.comm02(a, b),
+      (Ctr, Ref) if a.lab() >= b.lab() => self.comm02(b, a),
+      (Num, Ctr) => self.comm02(a, b),
+      (Ctr, Num) => self.comm02(b, a),
+      (_, Ref) if b == ERA => self.comm02(a, b),
+      (Ref, _) if a == ERA => self.comm02(b, a),
+      // deref
+      (Ref, _) => self.call(a, b),
+      (_, Ref) => self.call(b, a),
+      // native ops
+      (Op2, Num) => self.op2_num(a, b),
+      (Num, Op2) => self.op2_num(b, a),
+      (Op1, Num) => self.op1_num(a, b),
+      (Num, Op1) => self.op1_num(a, b),
+      (Mat, Num) => self.mat_num(a, b),
+      (Num, Mat) => self.mat_num(b, a),
+      // todo: what should the semantics of these be?
+      (Mat, Ctr) // b.tag() == 0
+      | (Ctr, Mat) // a.tag() == 0
+      | (Op2, Op1)
+      | (Op1, Op2)
+      | (Op2, Mat)
+      | (Mat, Op2)
+      | (Op1, Mat)
+      | (Mat, Op1) => todo!(),
     }
   }
 
-  pub fn op2n(&mut self, a: Ptr, b: Ptr) {
-    self.rwts.oper += 1;
-    let loc0 = self.alloc();
-    let a1 = Ptr::new(VR1, 0, a.loc());
-    let a2 = Ptr::new(VR2, 0, a.loc());
-    self.heap.set(loc0, P1, b);
-    self.half_atomic_link(a2, Ptr::new(VR2, 0, loc0));
-    self.half_atomic_link(a1, Ptr::new(OP1, a.lab(), loc0));
+  pub fn anni2(&mut self, a: Ptr, b: Ptr) {
+    self.rwts.anni += 1;
+    self.atomic_link(a.p1(), b.p1());
+    self.atomic_link(a.p2(), b.p2());
   }
 
-  pub fn op1n(&mut self, a: Ptr, b: Ptr) {
+  pub fn anni1(&mut self, a: Ptr, b: Ptr) {
+    // todo: is this right?
+    self.rwts.anni += 1;
+    self.atomic_link(a.p2(), b.p2());
+  }
+
+  pub fn comm22(&mut self, a: Ptr, b: Ptr) {
+    self.rwts.comm += 1;
+    let B1 = Ptr::new(Ctr, b.lab(), self.heap.alloc());
+    let B2 = Ptr::new(Ctr, b.lab(), self.heap.alloc());
+    let A1 = Ptr::new(Ctr, a.lab(), self.heap.alloc());
+    let A2 = Ptr::new(Ctr, a.lab(), self.heap.alloc());
+    B1.p1().target().store(A1.p1());
+    B1.p2().target().store(A2.p1());
+    B2.p1().target().store(A1.p2());
+    B2.p2().target().store(A2.p2());
+    A1.p1().target().store(B1.p1());
+    A1.p2().target().store(B2.p1());
+    A2.p1().target().store(B1.p2());
+    A2.p2().target().store(B2.p2());
+    self.half_atomic_link(a.p1(), B1);
+    self.half_atomic_link(a.p2(), B2);
+    self.half_atomic_link(b.p1(), A1);
+    self.half_atomic_link(b.p2(), A2);
+  }
+
+  pub fn comm12(&mut self, a: Ptr, b: Ptr) {
+    self.rwts.comm += 1;
+    let n = a.p1().target().swap(NULL);
+    let B2 = Ptr::new(Ctr, b.lab(), self.heap.alloc());
+    let A1 = Ptr::new(Ctr, a.lab(), self.heap.alloc());
+    let A2 = Ptr::new(Ctr, a.lab(), self.heap.alloc());
+    B2.p1().target().store(A1.p2());
+    B2.p2().target().store(A2.p2());
+    A1.p1().target().store(n);
+    A1.p2().target().store(B2.p1());
+    A2.p1().target().store(n);
+    A2.p2().target().store(B2.p2());
+    self.half_atomic_link(a.p2(), B2);
+    self.half_atomic_link(b.p1(), A1);
+    self.half_atomic_link(b.p2(), A2);
+  }
+
+  pub fn comm02(&mut self, a: Ptr, b: Ptr) {
+    self.rwts.comm += 1;
+    self.half_atomic_link(b.p1(), a);
+    self.half_atomic_link(b.p2(), a);
+  }
+
+  pub fn comm01(&mut self, a: Ptr, b: Ptr) {
+    self.rwts.comm += 1;
+    b.p1().target().store(NULL);
+    self.half_atomic_link(b.p2(), a);
+  }
+
+  pub fn mat_num(&mut self, a: Ptr, b: Ptr) {
+    self.rwts.oper += 1;
+    if b.num() == 0 {
+      let x = Ptr::new(Ctr, 0, self.heap.alloc());
+      x.p2().target().store(ERA);
+      self.half_atomic_link(a.p2(), x.p1());
+      self.half_atomic_link(a.p1(), x);
+    } else {
+      let x = Ptr::new(Ctr, 0, self.heap.alloc());
+      let y = Ptr::new(Ctr, 0, self.heap.alloc());
+      x.p1().target().store(ERA);
+      x.p2().target().store(y);
+      y.p1().target().store(Ptr::new_num(b.num() - 1));
+      self.half_atomic_link(a.p1(), x);
+      self.half_atomic_link(a.p2(), y.p2());
+    }
+  }
+
+  pub fn op2_num(&mut self, a: Ptr, b: Ptr) {
+    self.rwts.oper += 1;
+    let x = Ptr::new(Op1, a.lab(), self.heap.alloc());
+    x.p1().target().store(b);
+    self.half_atomic_link(a.p2(), x.p2());
+    self.half_atomic_link(a.p1(), x);
+  }
+
+  pub fn op1_num(&mut self, a: Ptr, b: Ptr) {
     self.rwts.oper += 1;
     let op = a.lab();
-    let v0 = self.heap.get(a.loc(), P1).val();
-    let v1 = b.val();
+    let v0 = a.p1().target().swap(NULL).num();
+    let v1 = b.num();
     let v2 = self.op(op, v0, v1);
-    let a2 = Ptr::new(VR2, 0, a.loc());
-    self.half_atomic_link(a2, Ptr::big(NUM, v2));
+    self.half_atomic_link(a.p2(), Ptr::new_num(v2));
   }
 
   #[inline(always)]
   pub fn op(&self, op: Lab, a: Val, b: Val) -> Val {
     match op {
-      ADD => { u60::add(a, b) }
-      SUB => { u60::sub(a, b) }
-      MUL => { u60::mul(a, b) }
-      DIV => { u60::div(a, b) }
-      MOD => { u60::rem(a, b) }
-      EQ  => { u60::eq(a, b) }
-      NE  => { u60::ne(a, b) }
-      LT  => { u60::lt(a, b) }
-      GT  => { u60::gt(a, b) }
-      LTE => { u60::lte(a, b) }
-      GTE => { u60::gte(a, b) }
-      AND => { u60::and(a, b) }
-      OR  => { u60::or(a, b) }
-      XOR => { u60::xor(a, b) }
-      NOT => { u60::not(a) }
-      LSH => { u60::lsh(a, b) }
-      RSH => { u60::rsh(a, b) }
-      _   => { unreachable!() }
+      ADD => u60::add(a, b),
+      SUB => u60::sub(a, b),
+      MUL => u60::mul(a, b),
+      DIV => u60::div(a, b),
+      MOD => u60::rem(a, b),
+      EQ => u60::eq(a, b),
+      NE => u60::ne(a, b),
+      LT => u60::lt(a, b),
+      GT => u60::gt(a, b),
+      LTE => u60::lte(a, b),
+      GTE => u60::gte(a, b),
+      AND => u60::and(a, b),
+      OR => u60::or(a, b),
+      XOR => u60::xor(a, b),
+      NOT => u60::not(a),
+      LSH => u60::lsh(a, b),
+      RSH => u60::rsh(a, b),
+      _ => {
+        unreachable!()
+      }
     }
   }
 
   // Expands a closed net.
   #[inline(always)]
-  pub fn call(&mut self, book: &Book, ptr: Ptr, trg: Ptr) {
+  pub fn call(&mut self, ptr: Ptr, trg: Ptr) {
     self.rwts.dref += 1;
-    let mut ptr = ptr;
-    // FIXME: change "while" to "if" once lang prevents refs from returning refs
-    if ptr.is_ref() {
-      // Intercepts with a native function, if available.
-      if self.call_native(book, ptr, trg) {
-        return;
-      }
-      // Load the closed net.
-      //println!("{:08x?}", book.defs);
-      //println!("{:08x} {}", ptr.0, crate::ast::val_to_name(ptr.val()));
-      let got = book.get(ptr.val()).unwrap();
-      if got.safe && trg.is_dup() {
-        return self.copy(trg, ptr);
-      } else if got.node.len() > 0 {
-        let len = got.node.len() - 1;
-        // Allocate space.
-        for i in 0 .. len {
-          *unsafe { self.locs.get_unchecked_mut(1 + i) } = self.alloc();
-        }
-        // Load nodes, adjusted.
-        for i in 0 .. len {
-          let p1 = self.adjust(unsafe { got.node.get_unchecked(1 + i) }.0);
-          let p2 = self.adjust(unsafe { got.node.get_unchecked(1 + i) }.1);
-          let lc = *unsafe { self.locs.get_unchecked(1 + i) };
-          self.heap.set(lc, P1, p1);
-          self.heap.set(lc, P2, p2);
-        }
-        // Load redexes, adjusted.
-        for r in &got.rdex {
-          let p1 = self.adjust(r.0);
-          let p2 = self.adjust(r.1);
-          self.rdex.push((p1, p2));
-        }
-        // Load root, adjusted.
-        ptr = self.adjust(got.node[0].1);
-      }
+    let def = ptr.loc().def();
+    // Intercepts with a native function, if available.
+    if let Some(comp) = def.comp {
+      return comp(self, ptr, trg);
     }
-    self.link(ptr, trg);
+    let len = def.node.len();
+    // Allocate space.
+    for i in 0..len {
+      *unsafe { self.locs.get_unchecked_mut(i) } = self.heap.alloc();
+    }
+    // Load nodes, adjusted.
+    for i in 0..len {
+      let p1 = self.adjust(unsafe { def.node.get_unchecked(i) }.0);
+      let p2 = self.adjust(unsafe { def.node.get_unchecked(i) }.1);
+      let lc = *unsafe { self.locs.get_unchecked(i) };
+      lc.p1().target().store(p1);
+      lc.p1().target().store(p2);
+    }
+    // Load redexes, adjusted.
+    for r in &def.rdex {
+      let p1 = self.adjust(r.0);
+      let p2 = self.adjust(r.1);
+      self.rdex.push((p1, p2));
+    }
+    // Load root, adjusted.
+    self.link(self.adjust(def.root), trg);
   }
 
   // Adjusts dereferenced pointer locations.
   #[inline(always)]
   fn adjust(&self, ptr: Ptr) -> Ptr {
-    if ptr.has_loc() {
-      return Ptr::new(ptr.tag(), ptr.lab(), *unsafe { self.locs.get_unchecked(ptr.loc() as usize) });
+    if !ptr.is_nilary() {
+      let loc = ptr.loc().0 as usize;
+      return Ptr::new(
+        ptr.tag(),
+        ptr.lab(),
+        (*unsafe { self.locs.get_unchecked(ptr.loc().index()) }).with_port(ptr.loc().port()),
+      );
     } else {
       return ptr;
     }
@@ -924,113 +840,109 @@ impl<'a> Net<'a> {
 
   // Reduces all redexes.
   #[inline(always)]
-  pub fn reduce(&mut self, book: &Book, limit: usize) -> usize {
+  pub fn reduce(&mut self, limit: usize) -> usize {
     let mut count = 0;
     while let Some((a, b)) = self.rdex.pop() {
-      //if !a.is_nil() && !b.is_nil() {
-        self.interact(book, a, b);
-        count += 1;
-        if count >= limit {
-          break;
-        }
-      //}
+      self.interact(a, b);
+      count += 1;
+      if count >= limit {
+        break;
+      }
     }
     return count;
   }
 
   // Expands heads.
   #[inline(always)]
-  pub fn expand(&mut self, book: &Book) {
-    fn go(net: &mut Net, book: &Book, dir: Ptr, len: usize, key: usize) {
+  pub fn expand(&mut self) {
+    fn go(net: &mut Net, dir: Ptr, len: usize, key: usize) {
       //println!("[{:04x}] expand dir: {:016x}", net.tid, dir.0);
-      let ptr = net.get_target(dir);
-      if ptr.is_ctr() {
+      let ptr = dir.target().load();
+      if ptr.tag() == Ctr {
         if len >= net.tids || key % 2 == 0 {
-          go(net, book, Ptr::new(VR1, 0, ptr.loc()), len * 2, key / 2);
+          go(net, ptr.p1(), len * 2, key / 2);
         }
         if len >= net.tids || key % 2 == 1 {
-          go(net, book, Ptr::new(VR2, 0, ptr.loc()), len * 2, key / 2);
+          go(net, ptr.p2(), len * 2, key / 2);
         }
-      } else if ptr.is_ref() {
-        let got = net.swap_target(dir, LOCK);
+      } else if ptr.tag() == Ref {
+        let got = dir.target().swap(LOCK);
         if got != LOCK {
           //println!("[{:08x}] expand {:08x}", net.tid, dir.0);
-          net.call(book, ptr, dir);
+          net.call(ptr, dir);
         }
       }
     }
-    return go(self, book, ROOT, 1, self.tid);
+    return go(self, Ptr::new(Var, 0, self.root), 1, self.tid);
   }
 
   // Reduce a net to normal form.
-  pub fn normal(&mut self, book: &Book) {
-    self.expand(book);
+  pub fn normal(&mut self) {
+    self.expand();
     while self.rdex.len() > 0 {
-      self.reduce(book, usize::MAX);
-      self.expand(book);
+      self.reduce(usize::MAX);
+      self.expand();
     }
   }
 
   // Forks into child threads, returning a Net for the (tid/tids)'th thread.
   pub fn fork(&self, tid: usize, tids: usize) -> Self {
-    let mut net = Net::new(self.heap.data);
-    net.tid  = tid;
-    net.tids = tids;
-    net.area = Area {
-      init: self.heap.data.len() * tid / tids,
-      size: self.heap.data.len() / tids,
+    let heap_size = self.heap.area.len() / tids;
+    let heap_start = heap_size * tid;
+    let heap = Heap {
+      area: &self.heap.area[heap_start..heap_start + heap_size],
+      next: self.heap.next.saturating_sub(heap_start),
     };
+    let mut net = Net::new_with_root(heap, self.root);
+    net.tid = tid;
+    net.tids = tids;
     let from = self.rdex.len() * (tid + 0) / tids;
     let upto = self.rdex.len() * (tid + 1) / tids;
-    for i in from .. upto {
+    for i in from..upto {
       net.rdex.push((self.rdex[i].0, self.rdex[i].1));
-    }
-    if tid == 0 {
-      net.next = self.next;
     }
     return net;
   }
 
   // Evaluates a term to normal form in parallel
-  pub fn parallel_normal(&mut self, book: &Book) {
-
-    const SHARE_LIMIT : usize = 1 << 12; // max share redexes per split 
-    const LOCAL_LIMIT : usize = 1 << 18; // max local rewrites per epoch
+  pub fn parallel_normal(&mut self) {
+    const SHARE_LIMIT: usize = 1 << 12; // max share redexes per split
+    const LOCAL_LIMIT: usize = 1 << 18; // max local rewrites per epoch
 
     // Local thread context
     struct ThreadContext<'a> {
-      tid: usize, // thread id
-      tids: usize, // thread count
-      tlog2: usize, // log2 of thread count
-      tick: usize, // current tick
-      net: Net<'a>, // thread's own net object
-      book: &'a Book, // definition book
-      delta: &'a AtomicRewrites, // global delta rewrites
+      tid: usize,                   // thread id
+      tids: usize,                  // thread count
+      tlog2: usize,                 // log2 of thread count
+      tick: usize,                  // current tick
+      net: Net<'a>,                 // thread's own net object
+      delta: &'a AtomicRewrites,    // global delta rewrites
       share: &'a Vec<(APtr, APtr)>, // global share buffer
-      rlens: &'a Vec<AtomicUsize>, // global redex lengths
-      total: &'a AtomicUsize, // total redex length
-      barry: Arc<Barrier>, // synchronization barrier
+      rlens: &'a Vec<AtomicUsize>,  // global redex lengths
+      total: &'a AtomicUsize,       // total redex length
+      barry: Arc<Barrier>,          // synchronization barrier
     }
 
     // Initialize global objects
     let cores = std::thread::available_parallelism().unwrap().get() as usize;
     let tlog2 = cores.ilog2() as usize;
-    let tids  = 1 << tlog2;
-    let delta = AtomicRewrites::new(); // delta rewrite counter
+    let tids = 1 << tlog2;
+    let delta = AtomicRewrites::default(); // delta rewrite counter
     let rlens = (0..tids).map(|_| AtomicUsize::new(0)).collect::<Vec<_>>();
-    let share = (0..SHARE_LIMIT*tids).map(|_| (APtr(AtomicU64::new(0)), APtr(AtomicU64::new(0)))).collect::<Vec<_>>();
+    let share = (0..SHARE_LIMIT * tids)
+      .map(|_| (APtr(AtomicU64::new(0)), APtr(AtomicU64::new(0))))
+      .collect::<Vec<_>>();
     let total = AtomicUsize::new(0); // sum of redex bag length
     let barry = Arc::new(Barrier::new(tids)); // global barrier
 
     // Perform parallel reductions
     std::thread::scope(|s| {
-      for tid in 0 .. tids {
+      for tid in 0..tids {
         let mut ctx = ThreadContext {
           tid: tid,
           tids: tids,
           tick: 0,
           net: self.fork(tid, tids),
-          book: &book,
           tlog2: tlog2,
           delta: &delta,
           share: &share,
@@ -1038,9 +950,7 @@ impl<'a> Net<'a> {
           total: &total,
           barry: Arc::clone(&barry),
         };
-        s.spawn(move || {
-          main(&mut ctx)
-        });
+        s.spawn(move || main(&mut ctx));
       }
     });
 
@@ -1053,8 +963,10 @@ impl<'a> Net<'a> {
     fn main(ctx: &mut ThreadContext) {
       loop {
         reduce(ctx);
-        expand(ctx);
-        if count(ctx) == 0 { break; }
+        ctx.net.expand();
+        if count(ctx) == 0 {
+          break;
+        }
       }
       ctx.net.rwts.add_to(ctx.delta);
     }
@@ -1063,7 +975,7 @@ impl<'a> Net<'a> {
     #[inline(always)]
     fn reduce(ctx: &mut ThreadContext) {
       loop {
-        let reduced = ctx.net.reduce(ctx.book, LOCAL_LIMIT);
+        let reduced = ctx.net.reduce(LOCAL_LIMIT);
         //println!("[{:04x}] reduced {}", ctx.tid, reduced);
         if count(ctx) == 0 {
           break;
@@ -1074,40 +986,45 @@ impl<'a> Net<'a> {
       }
     }
 
-    // Expand head refs
-    #[inline(always)]
-    fn expand(ctx: &mut ThreadContext) {
-      ctx.net.expand(ctx.book);
-    }
-
     // Count total redexes (and populate 'rlens')
     #[inline(always)]
     fn count(ctx: &mut ThreadContext) -> usize {
       ctx.barry.wait();
-      ctx.total.store(0, Ordering::Relaxed);
+      ctx.total.store(0, Relaxed);
       ctx.barry.wait();
-      ctx.rlens[ctx.tid].store(ctx.net.rdex.len(), Ordering::Relaxed);
-      ctx.total.fetch_add(ctx.net.rdex.len(), Ordering::Relaxed);
+      ctx.rlens[ctx.tid].store(ctx.net.rdex.len(), Relaxed);
+      ctx.total.fetch_add(ctx.net.rdex.len(), Relaxed);
       ctx.barry.wait();
-      return ctx.total.load(Ordering::Relaxed);
+      return ctx.total.load(Relaxed);
     }
-
 
     // Share redexes with target thread
     #[inline(always)]
     fn split(ctx: &mut ThreadContext, plog2: usize) {
       unsafe {
-        let side  = (ctx.tid >> (plog2 - 1 - (ctx.tick % plog2))) & 1;
+        let side = (ctx.tid >> (plog2 - 1 - (ctx.tick % plog2))) & 1;
         let shift = (1 << (plog2 - 1)) >> (ctx.tick % plog2);
         let a_tid = ctx.tid;
-        let b_tid = if side == 1 { a_tid - shift } else { a_tid + shift };
+        let b_tid = if side == 1 {
+          a_tid - shift
+        } else {
+          a_tid + shift
+        };
         let a_len = ctx.net.rdex.len();
-        let b_len = ctx.rlens[b_tid].load(Ordering::Relaxed);
-        let send  = if a_len > b_len { (a_len - b_len) / 2 } else { 0 };
-        let recv  = if b_len > a_len { (b_len - a_len) / 2 } else { 0 };
-        let send  = std::cmp::min(send, SHARE_LIMIT);
-        let recv  = std::cmp::min(recv, SHARE_LIMIT);
-        for i in 0 .. send {
+        let b_len = ctx.rlens[b_tid].load(Relaxed);
+        let send = if a_len > b_len {
+          (a_len - b_len) / 2
+        } else {
+          0
+        };
+        let recv = if b_len > a_len {
+          (b_len - a_len) / 2
+        } else {
+          0
+        };
+        let send = std::cmp::min(send, SHARE_LIMIT);
+        let recv = std::cmp::min(recv, SHARE_LIMIT);
+        for i in 0..send {
           let init = a_len - send * 2;
           let rdx0 = *ctx.net.rdex.get_unchecked(init + i * 2 + 0);
           let rdx1 = *ctx.net.rdex.get_unchecked(init + i * 2 + 1);
@@ -1125,12 +1042,11 @@ impl<'a> Net<'a> {
         }
         ctx.net.rdex.truncate(a_len - send);
         ctx.barry.wait();
-        for i in 0 .. recv {
+        for i in 0..recv {
           let got = ctx.share.get_unchecked(a_tid * SHARE_LIMIT + i);
           ctx.net.rdex.push((got.0.load(), got.1.load()));
         }
       }
     }
   }
-
 }
