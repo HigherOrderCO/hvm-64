@@ -416,13 +416,27 @@ impl AtomicRewrites {
 }
 
 impl<'a> Net<'a> {
-  // Creates an empty net with given size.
+  // Creates an empty net with given heap data
   pub fn new(data: &'a Data) -> Self {
     Net {
       tid : 0,
       tids: 1,
       heap: Heap { data },
       rdex: Worker::new(WORKER_QUEUE_CAPACITY),
+      locs: vec![0; 1 << 16],
+      area: Area { init: 0, size: data.len() },
+      next: 0,
+      rwts: Rewrites::new(),
+    }
+  }
+
+  // Creates an empty net with given heap data and worker
+  pub fn new_with_worker(data: &'a Data, worker: Worker<Redex>) -> Self {
+    Net {
+      tid : 0,
+      tids: 1,
+      heap: Heap { data },
+      rdex: worker,
       locs: vec![0; 1 << 16],
       area: Area { init: 0, size: data.len() },
       next: 0,
@@ -449,8 +463,12 @@ impl<'a> Net<'a> {
       self.area.init as Loc + self.next as Loc
     // On later passes, search for an available slot.
     } else {
+      let limit = self.next + self.area.size;
       loop {
         self.next += 1;
+        if self.next >= limit {
+          panic!("out of memory");
+        }
         let index = (self.area.init + self.next % self.area.size) as Loc;
         if self.heap.get(index, P1).is_nil() && self.heap.get(index, P2).is_nil() {
           break index;
@@ -970,17 +988,19 @@ impl<'a> Net<'a> {
   }
 
   // Reduce a net to normal form.
-  pub fn normal(&mut self, book: &Book) {
+  pub fn normal(&mut self, book: &Book) -> std::time::Duration {
+    let start_time = std::time::Instant::now();
     self.expand(book);
     while !self.rdex.is_empty() {
       self.reduce(book, usize::MAX);
       self.expand(book);
     }
+    start_time.elapsed()
   }
 
   // Forks into child threads, returning a Net for the (tid/tids)'th thread.
-  pub fn fork(&self, tid: usize, tids: usize) -> Self {
-    let mut net = Net::new(&self.heap.data);
+  pub fn fork(&self, tid: usize, tids: usize, worker: Worker<Redex>) -> Self {
+    let mut net = Net::new_with_worker(&self.heap.data, worker);
     net.tid  = tid;
     net.tids = tids;
     net.area = Area {
@@ -994,7 +1014,7 @@ impl<'a> Net<'a> {
   }
 
   // Evaluates a term to normal form in parallel
-  pub fn parallel_normal(&mut self, book: &Book) {
+  pub fn parallel_normal(&mut self, book: &Book) -> std::time::Duration {
     const LOCAL_LIMIT : usize = 1 << 18; // max local rewrites per epoch
 
     // Local thread context
@@ -1006,7 +1026,7 @@ impl<'a> Net<'a> {
       delta: &'a AtomicRewrites, // global delta rewrites
       workers_with_non_empty_queues: &'a AtomicIsize, // how many workers have non-empty queues
       barrier: &'a Barrier, // synchronization barrier
-      stealers: Vec<&'a Stealer<Redex>>, // stealers
+      stealers: Vec<Stealer<Redex>>, // stealers
       next_stealer_idx: usize, // next stealer to try
       last_frame_is_not_empty: bool, // redex count of this worker, the last time count() was called
     }
@@ -1019,9 +1039,9 @@ impl<'a> Net<'a> {
     let workers_with_non_empty_queues = AtomicIsize::new(0);
     let barrier = Arc::new(Barrier::new(tids)); // global barrier
 
-    let worker_count = cores;
+    let worker_count = tids;
     let workers = (0 .. worker_count).map(|_| Worker::<Redex>::new(WORKER_QUEUE_CAPACITY)).collect::<Vec<_>>();
-    let stealers = workers.iter().map(|w| w.stealer_ref()).collect::<Vec<_>>();
+    let stealers = workers.iter().map(|w| w.stealer()).collect::<Vec<_>>();
 
     let worker_redex_counts = (0 .. worker_count).map(|_| std::cell::Cell::new(0)).collect::<Vec<_>>();
 
@@ -1040,35 +1060,40 @@ impl<'a> Net<'a> {
       workers_with_non_empty_queues.fetch_add(val, Ordering::Relaxed);
     }
 
+    let thread_contexts = workers.into_iter().enumerate().map(|(tid, worker)| {
+      ThreadContext {
+        tid,
+        tids,
+        net: self.fork(tid, tids, worker),
+        book: &book,
+        delta: &delta,
+        workers_with_non_empty_queues: &workers_with_non_empty_queues,
+        barrier: &barrier,
+        stealers: {
+          // TODO: Don't clone?
+          // https://lemire.me/blog/2017/09/18/visiting-all-values-in-an-array-exactly-once-in-random-order
+          let mut stealers = stealers.clone();
+          // We never want to steal from ourselves
+          stealers.remove(tid);
+          // Every worker gets a randomized permutation of the stealers
+          fastrand::shuffle(&mut stealers);
+          stealers
+        },
+        next_stealer_idx: 0,
+        last_frame_is_not_empty: worker_redex_counts[tid].get() > 0,
+      }
+    }).collect::<Vec<_>>();
+
     // Perform parallel reductions
-    std::thread::scope(|s| {
-      for tid in 0 .. tids {
-        let mut ctx = ThreadContext {
-          tid: tid,
-          tids: tids,
-          net: self.fork(tid, tids),
-          book: &book,
-          delta: &delta,
-          workers_with_non_empty_queues: &workers_with_non_empty_queues,
-          barrier: &barrier,
-          stealers: {
-            // TODO: Don't clone?
-            // https://lemire.me/blog/2017/09/18/visiting-all-values-in-an-array-exactly-once-in-random-order
-            let mut stealers = stealers.clone();
-            // We never want to steal from ourselves
-            stealers.remove(tid);
-            // Every worker gets a randomized permutation of the stealers
-            fastrand::shuffle(&mut stealers);
-            stealers
-          },
-          next_stealer_idx: 0,
-          last_frame_is_not_empty: worker_redex_counts[tid].get() > 0,
-        };
+    let start_time = std::time::Instant::now();
+    std::thread::scope(move |s| {
+      for (tid, mut ctx) in thread_contexts.into_iter().enumerate() {
         s.spawn(move || {
           main(&mut ctx);
         });
       }
     });
+    let elapsed = start_time.elapsed();
 
     // Sum stats
     delta.add_to(&mut self.rwts);
@@ -1139,5 +1164,7 @@ impl<'a> Net<'a> {
       ctx.barrier.wait();
       ctx.workers_with_non_empty_queues.load(Ordering::Relaxed) as usize
     }
+
+    elapsed
   }
 }
