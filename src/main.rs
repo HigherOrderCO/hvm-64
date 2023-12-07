@@ -35,6 +35,7 @@ fn main() {
 
 #[cfg(feature = "hvm_cli_options")]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+  // let data = run::Heap::init(1 << 16);
   let data = run::Heap::init(1 << 28);
   let args: Vec<String> = env::args().collect();
   let help = "help".to_string();
@@ -49,6 +50,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     "run" => {
       if let Some(file_name) = f_name {
         let (runtime, mut net) = load(&data, file_name);
+        dbg!(&runtime);
+        println!("hi");
         let start_time = std::time::Instant::now();
         if opts.contains("-1") {
           net.normal();

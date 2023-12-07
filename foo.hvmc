@@ -1,2 +1,5 @@
 
-main = @x match x { 0: * +: * }
+@foo = ((#1 x) x)
+
+@main = R
+& @foo ~ ((<+ #1 r> r) R)

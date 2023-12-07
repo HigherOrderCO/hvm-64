@@ -465,6 +465,7 @@ pub fn val_to_name(num: run::Val) -> String {
 // Injection and Readback
 // ----------------------
 
+#[derive(Debug, Clone)]
 pub struct Runtime {
   pub defs: HashMap<run::Val, Box<Def>>,
   pub back: HashMap<run::Loc, run::Val>,
@@ -520,8 +521,8 @@ impl Runtime {
 
     struct State<'a> {
       runtime: &'a Runtime,
-      vars: HashMap<run::Loc, run::Val>,
-      next_var: run::Val,
+      vars: HashMap<run::Loc, usize>,
+      next_var: usize,
     }
 
     impl<'a> State<'a> {
@@ -532,7 +533,7 @@ impl Runtime {
       fn read_ptr(&mut self, ptr: run::Ptr, dir: Option<run::Loc>) -> Tree {
         match ptr.tag() {
           Tag::Var => Tree::Var {
-            nam: val_to_name(self.vars.remove(&dir.unwrap()).unwrap_or_else(|| {
+            nam: num_to_str(self.vars.remove(&dir.unwrap()).unwrap_or_else(|| {
               let nam = self.next_var;
               self.next_var += 1;
               self.vars.insert(ptr.loc(), nam);
@@ -576,9 +577,16 @@ fn net_to_runtime_def(
     defs,
     scope: Default::default(),
     nodes: Default::default(),
+    root: run::NULL,
   };
 
-  let root = state.visit_tree(&net.root, None);
+  enum Place {
+    Ptr(Ptr),
+    Redex,
+    Root,
+  }
+
+  state.root = state.visit_tree(&net.root, Some(run::NULL));
 
   let rdex = net
     .rdex
@@ -586,7 +594,10 @@ fn net_to_runtime_def(
     .map(|(a, b)| (state.visit_tree(a, None), state.visit_tree(b, None)))
     .collect();
 
+  let root = state.root;
   let node = state.nodes;
+
+  assert!(state.scope.is_empty());
 
   let def = defs.get_mut(&nam).unwrap();
 
@@ -594,35 +605,47 @@ fn net_to_runtime_def(
   def.rdex = rdex;
   def.node = node;
 
+  #[derive(Debug)]
   struct State<'a> {
     book: &'a Book,
     defs: &'a HashMap<run::Val, Box<Def>>,
     scope: HashMap<&'a str, run::Ptr>,
     nodes: Vec<run::Node>,
+    root: Ptr,
   }
 
   impl<'a> State<'a> {
     fn visit_tree(&mut self, tree: &'a Tree, place: Option<Ptr>) -> Ptr {
+      dbg!(&self, tree, place);
       match tree {
         Tree::Era => run::ERA,
         Tree::Ref { nam } => Ptr::new_ref(&self.defs[nam]),
         Tree::Num { val } => Ptr::new_num(*val),
-        Tree::Var { nam } => match self.scope.entry(nam) {
-          Entry::Occupied(e) => {
-            let place = place.expect("cannot have variables in active pairs");
-            let other = e.remove();
-            let node = &mut self.nodes[other.loc().index()];
-            if other.loc().port() == 0 {
-              node.0 = place;
-            } else {
-              node.1 = place;
+        Tree::Var { nam } => {
+          let place = place.expect("cannot have variables in active pairs");
+          match self.scope.entry(nam) {
+            Entry::Occupied(e) => {
+              let other = e.remove();
+              if other == run::NULL {
+                self.root = place;
+              } else {
+                let node = &mut self.nodes[other.loc().index()];
+                if other.loc().port() == 0 {
+                  node.0 = place;
+                } else {
+                  node.1 = place;
+                }
+              }
+              other
             }
-            other
+            Entry::Vacant(e) => {
+              e.insert(place);
+              run::NULL
+            }
           }
-          Entry::Vacant(_) => todo!(),
-        },
+        }
         Tree::Ctr { lab, lft, rgt } => self.node(Tag::Ctr, *lab, lft, rgt),
-        Tree::Op2 { opr, lft, rgt } => self.node(Tag::Ctr, *opr, lft, rgt),
+        Tree::Op2 { opr, lft, rgt } => self.node(Tag::Op2, *opr, lft, rgt),
         Tree::Mat { sel, ret } => self.node(Tag::Mat, 0, sel, ret),
       }
     }
@@ -687,6 +710,9 @@ fn calculate_min_safe_labels(book: &Book) -> impl Iterator<Item = (run::Val, Lab
       for (a, b) in &def.rdex {
         self.visit_tree(a, &mut lab);
         self.visit_tree(b, &mut lab);
+      }
+      if normative {
+        self.labels.insert(key, LabelState::Done(lab));
       }
       lab
     }
