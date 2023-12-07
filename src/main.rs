@@ -123,7 +123,7 @@ fn load<'a>(data: &'a run::Data, file: &str) -> (ast::Runtime, run::Net<'a>) {
   };
   let runtime = ast::Runtime::new(&ast::do_parse_book(&file));
   let mut net = run::Net::new(run::Heap::new(data));
-  net.boot(&runtime.defs[&ast::name_to_val("main")]);
+  net.boot(&runtime.defs["main"]);
   return (runtime, net);
 }
 

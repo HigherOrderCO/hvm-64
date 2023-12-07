@@ -3,11 +3,11 @@
 // This file implements an efficient interaction combinator runtime. Nodes are represented by 2 aux
 // ports (P1, P2), with the main port (P1) omitted. A separate vector, 'rdex', holds main ports,
 // and, thus, tracks active pairs that can be reduced in parallel. Pointers are unboxed, meaning
-// that ERAs, NUMs and REFs don't use any additional space. REFs lazily expand to closed nets when
-// they interact with nodes, and are cleared when they interact with ERAs, allowing for constant
+// that Ptr::ERAs, NUMs and REFs don't use any additional space. REFs lazily expand to closed nets when
+// they interact with nodes, and are cleared when they interact with Ptr::ERAs, allowing for constant
 // space evaluation of recursive functions on Scott encoded datatypes.
 
-use crate::u60;
+use crate::ops::Op;
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering::Relaxed};
@@ -113,30 +113,6 @@ impl Loc {
 pub type Val = u64;
 pub type AVal = AtomicU64;
 
-// Numeric operations.
-pub const ADD: Lab = 0x00; // addition
-pub const SUB: Lab = 0x01; // subtraction
-pub const MUL: Lab = 0x02; // multiplication
-pub const DIV: Lab = 0x03; // division
-pub const MOD: Lab = 0x04; // modulus
-pub const EQ: Lab = 0x05; // equal-to
-pub const NE: Lab = 0x06; // not-equal-to
-pub const LT: Lab = 0x07; // less-than
-pub const GT: Lab = 0x08; // greater-than
-pub const LTE: Lab = 0x09; // less-than-or-equal
-pub const GTE: Lab = 0x0A; // greater-than-or-equal
-pub const AND: Lab = 0x0B; // logical-and
-pub const OR: Lab = 0x0C; // logical-or
-pub const XOR: Lab = 0x0D; // logical-xor
-pub const LSH: Lab = 0x0E; // left-shift
-pub const RSH: Lab = 0x0F; // right-shift
-pub const NOT: Lab = 0x10; // logical-not
-
-pub const ERA: Ptr = Ptr(Ref as _);
-pub const NULL: Ptr = Ptr(0x0000_0000_0000_0000);
-pub const GONE: Ptr = Ptr(0xFFFF_FFFF_FFFF_FFEF);
-pub const LOCK: Ptr = Ptr(0xFFFF_FFFF_FFFF_FFFF); // if last digit is F it will be seen as a CTR
-
 /// A tagged pointer.
 #[derive(Copy, Clone, Eq, PartialEq, PartialOrd, Hash, Default)]
 #[repr(transparent)]
@@ -146,10 +122,10 @@ impl fmt::Debug for Ptr {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     write!(f, "{:016x?} ", self.0)?;
     match self {
-      &ERA => write!(f, "[ERA]"),
-      &NULL => write!(f, "[NULL]"),
-      &GONE => write!(f, "[GONE]"),
-      &LOCK => write!(f, "[LOCK]"),
+      &Ptr::ERA => write!(f, "[Ptr::ERA]"),
+      &Ptr::NULL => write!(f, "[Ptr::NULL]"),
+      &Ptr::GONE => write!(f, "[Ptr::GONE]"),
+      &Ptr::LOCK => write!(f, "[Ptr::LOCK]"),
       _ => match self.tag() {
         Num => write!(f, "[Num {}]", self.num()),
         Var | Red => write!(
@@ -166,80 +142,12 @@ impl fmt::Debug for Ptr {
   }
 }
 
-/// An atomic tagged pointer.
-#[repr(transparent)]
-#[derive(Default)]
-pub struct APtr(pub AVal);
-
-#[repr(C)]
-#[repr(align(16))]
-#[derive(Default, Debug, Clone, Copy)]
-pub struct Node(pub Ptr, pub Ptr);
-
-#[repr(C)]
-#[repr(align(16))]
-#[derive(Default)]
-pub struct ANode(pub APtr, pub APtr);
-
-// A target pointer, with implied ownership.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
-pub enum Trg {
-  Dir(Ptr), // we don't own the pointer, so we point to its location
-  Ptr(Ptr), // we own the pointer, so we store it directly
-}
-
-// The global node buffer.
-pub type Data = [ANode];
-
-// A handy wrapper around Data.
-pub struct Heap<'a> {
-  pub area: &'a Data,
-  pub next: usize,
-}
-
-/// Rewrite counter.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct Rewrites {
-  pub anni: usize, // anni rewrites
-  pub comm: usize, // comm rewrites
-  pub eras: usize, // eras rewrites
-  pub dref: usize, // dref rewrites
-  pub oper: usize, // oper rewrites
-}
-
-/// Rewrite counter, atomic.
-#[derive(Default)]
-pub struct AtomicRewrites {
-  pub anni: AtomicUsize, // anni rewrites
-  pub comm: AtomicUsize, // comm rewrites
-  pub eras: AtomicUsize, // eras rewrites
-  pub dref: AtomicUsize, // dref rewrites
-  pub oper: AtomicUsize, // oper rewrites
-}
-
-// A interaction combinator net.
-pub struct Net<'a> {
-  pub tid: usize,            // thread id
-  pub tids: usize,           // thread count
-  pub heap: Heap<'a>,        // allocator
-  pub rdex: Vec<(Ptr, Ptr)>, // redexes
-  pub locs: Vec<Loc>,
-  pub rwts: Rewrites, // rewrite count
-  pub root: Loc,
-}
-
-// A compact closed net, used for dereferences.
-#[derive(Clone, Debug)]
-#[repr(align(16))]
-pub struct Def {
-  pub lab: Lab,
-  pub comp: Option<fn(&mut Net, Ptr, Ptr)>, // TODO
-  pub root: Ptr,
-  pub rdex: Vec<(Ptr, Ptr)>,
-  pub node: Vec<Node>,
-}
-
 impl Ptr {
+  pub const ERA: Ptr = Ptr(Ref as _);
+  pub const NULL: Ptr = Ptr(0x0000_0000_0000_0000);
+  pub const LOCK: Ptr = Ptr(0xFFFF_FFFF_FFFF_FFF0);
+  pub const GONE: Ptr = Ptr(0xFFFF_FFFF_FFFF_FFF8);
+
   #[inline(always)]
   pub fn new(tag: Tag, lab: Lab, loc: Loc) -> Self {
     Ptr(((lab as Val) << 48) | (loc.0 as usize as Val) | (tag as Val))
@@ -263,6 +171,11 @@ impl Ptr {
   #[inline(always)]
   pub const fn lab(&self) -> Lab {
     (self.0 >> 48) as Lab
+  }
+
+  #[inline(always)]
+  pub fn op(&self) -> Op {
+    unsafe { self.lab().try_into().unwrap_unchecked() }
   }
 
   #[inline(always)]
@@ -316,6 +229,11 @@ impl Ptr {
   }
 }
 
+/// An atomic tagged pointer.
+#[repr(transparent)]
+#[derive(Default)]
+pub struct APtr(pub AVal);
+
 impl APtr {
   #[inline(always)]
   pub fn new(ptr: Ptr) -> Self {
@@ -350,8 +268,8 @@ impl APtr {
   #[inline(always)]
   pub fn take(&self) -> Ptr {
     loop {
-      let got = self.swap(LOCK);
-      if got != LOCK && got != NULL {
+      let got = self.swap(Ptr::LOCK);
+      if got != Ptr::LOCK && got != Ptr::NULL {
         return got;
       }
     }
@@ -388,10 +306,39 @@ impl<'a> Heap<'a> {
       }
     };
     self.next += 1;
-    self.area[index].0.store(LOCK);
-    self.area[index].1.store(LOCK);
+    self.area[index].0.store(Ptr::LOCK);
+    self.area[index].1.store(Ptr::LOCK);
     Loc(&self.area[index].0 as _)
   }
+}
+
+#[repr(C)]
+#[repr(align(16))]
+#[derive(Default, Debug, Clone, Copy)]
+pub struct Node(pub Ptr, pub Ptr);
+
+#[repr(C)]
+#[repr(align(16))]
+#[derive(Default)]
+pub struct ANode(pub APtr, pub APtr);
+
+// The global node buffer.
+pub type Data = [ANode];
+
+// A handy wrapper around Data.
+pub struct Heap<'a> {
+  pub area: &'a Data,
+  pub next: usize,
+}
+
+/// Rewrite counter.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Rewrites {
+  pub anni: usize, // anni rewrites
+  pub comm: usize, // comm rewrites
+  pub eras: usize, // eras rewrites
+  pub dref: usize, // dref rewrites
+  pub oper: usize, // oper rewrites
 }
 
 impl Rewrites {
@@ -404,6 +351,16 @@ impl Rewrites {
   }
 }
 
+/// Rewrite counter, atomic.
+#[derive(Default)]
+pub struct AtomicRewrites {
+  pub anni: AtomicUsize, // anni rewrites
+  pub comm: AtomicUsize, // comm rewrites
+  pub eras: AtomicUsize, // eras rewrites
+  pub dref: AtomicUsize, // dref rewrites
+  pub oper: AtomicUsize, // oper rewrites
+}
+
 impl AtomicRewrites {
   pub fn add_to(&self, target: &mut Rewrites) {
     target.anni += self.anni.load(Relaxed);
@@ -412,6 +369,28 @@ impl AtomicRewrites {
     target.dref += self.dref.load(Relaxed);
     target.oper += self.oper.load(Relaxed);
   }
+}
+
+// A compact closed net, used for dereferences.
+#[derive(Clone, Debug)]
+#[repr(align(16))]
+pub struct Def {
+  pub lab: Lab,
+  pub comp: Option<fn(&mut Net, Ptr, Ptr)>, // TODO
+  pub root: Ptr,
+  pub rdex: Vec<(Ptr, Ptr)>,
+  pub node: Vec<Node>,
+}
+
+// A interaction combinator net.
+pub struct Net<'a> {
+  pub tid: usize,            // thread id
+  pub tids: usize,           // thread count
+  pub heap: Heap<'a>,        // allocator
+  pub rdex: Vec<(Ptr, Ptr)>, // redexes
+  pub locs: Vec<Loc>,
+  pub rwts: Rewrites, // rewrite count
+  pub root: Loc,
 }
 
 impl<'a> Net<'a> {
@@ -472,8 +451,8 @@ impl<'a> Net<'a> {
     let b_ptr = b_dir.target().take();
     trace!("[{:08x}] took {:?} {:?}", self.tid, a_ptr, b_ptr);
     if a_ptr.is_pri() && b_ptr.is_pri() {
-      a_dir.target().store(NULL);
-      b_dir.target().store(NULL);
+      a_dir.target().store(Ptr::NULL);
+      b_dir.target().store(Ptr::NULL);
       return self.redux(a_ptr, b_ptr);
     } else {
       self.atomic_linker(a_ptr, a_dir, b_ptr);
@@ -486,7 +465,7 @@ impl<'a> Net<'a> {
   pub fn half_atomic_link(&mut self, a_dir: Ptr, b_ptr: Ptr) {
     let a_ptr = a_dir.target().take();
     if a_ptr.is_pri() && b_ptr.is_pri() {
-      a_dir.target().store(NULL);
+      a_dir.target().store(Ptr::NULL);
       return self.redux(a_ptr, b_ptr);
     } else {
       self.atomic_linker(a_ptr, a_dir, b_ptr);
@@ -510,7 +489,7 @@ impl<'a> Net<'a> {
       let got = a_ptr.target().cas(a_dir, b_ptr);
       // Attempts to link using a compare-and-swap.
       if got.is_ok() {
-        a_dir.target().store(NULL);
+        a_dir.target().store(Ptr::NULL);
       // If the CAS failed, resolve by using redirections.
       } else {
         trace!("[{:04x}] cas fail {:016x}", self.tid, got.unwrap_err().0);
@@ -526,7 +505,7 @@ impl<'a> Net<'a> {
         }
       }
     } else {
-      a_dir.target().store(NULL);
+      a_dir.target().store(Ptr::NULL);
     }
   }
 
@@ -538,7 +517,7 @@ impl<'a> Net<'a> {
       let mut t_ptr = t_dir.target().load();
       // If target is a redirection, we own it. Clear and move forward.
       if t_ptr.tag() == Red {
-        t_dir.target().store(NULL);
+        t_dir.target().store(Ptr::NULL);
         a_ptr = t_ptr;
         continue;
       }
@@ -547,12 +526,12 @@ impl<'a> Net<'a> {
         if t_dir.target().cas(t_ptr, b_ptr).is_ok() {
           trace!("[{:04x}] var", self.tid);
           // Clear source location.
-          a_dir.target().store(NULL);
+          a_dir.target().store(Ptr::NULL);
           // Collect the orphaned backward path.
           t_dir = t_ptr;
           t_ptr = t_ptr.target().load();
           while t_ptr.tag() == Red {
-            t_dir.target().store(NULL);
+            t_dir.target().store(Ptr::NULL);
             t_dir = t_ptr;
             t_ptr = t_dir.target().load();
           }
@@ -562,31 +541,31 @@ impl<'a> Net<'a> {
         continue;
       }
       // If it is a node, two threads will reach this branch.
-      if t_ptr.is_pri() || t_ptr == GONE {
+      if t_ptr.is_pri() || t_ptr == Ptr::GONE {
         // Sort references, to avoid deadlocks.
         let x_dir = if a_dir < t_dir { a_dir } else { t_dir };
         let y_dir = if a_dir < t_dir { t_dir } else { a_dir };
-        // Swap first reference by GONE placeholder.
-        let x_ptr = x_dir.target().swap(GONE);
+        // Swap first reference by Ptr::GONE placeholder.
+        let x_ptr = x_dir.target().swap(Ptr::GONE);
         // First to arrive creates a redex.
-        if x_ptr != GONE {
+        if x_ptr != Ptr::GONE {
           trace!("[{:04x}] fst {:016x}", self.tid, x_ptr.0);
-          let y_ptr = y_dir.target().swap(GONE);
+          let y_ptr = y_dir.target().swap(Ptr::GONE);
           self.redux(x_ptr, y_ptr);
           return;
         // Second to arrive clears up the memory.
         } else {
           trace!("[{:04x}] snd", self.tid);
-          x_dir.target().store(NULL);
-          while y_dir.target().cas(GONE, NULL).is_err() {}
+          x_dir.target().store(Ptr::NULL);
+          while y_dir.target().cas(Ptr::GONE, Ptr::NULL).is_err() {}
           return;
         }
       }
       // If it is taken, we wait.
-      if t_ptr == LOCK {
+      if t_ptr == Ptr::LOCK {
         continue;
       }
-      if t_ptr == NULL {
+      if t_ptr == Ptr::NULL {
         continue;
       }
       // Shouldn't be reached.
@@ -613,23 +592,12 @@ impl<'a> Net<'a> {
         if trg_ptr.tag() == Red {
           let neo_ptr = trg_ptr.unredirect();
           if ste_dir.target().cas(ste_ptr, neo_ptr).is_ok() {
-            trg_dir.target().store(NULL);
+            trg_dir.target().store(Ptr::NULL);
             continue;
           }
         }
       }
       break;
-    }
-  }
-
-  // Links two targets, using atomics when necessary, based on implied ownership.
-  #[inline(always)]
-  pub fn safe_link(&mut self, a: Trg, b: Trg) {
-    match (a, b) {
-      (Trg::Dir(a_dir), Trg::Dir(b_dir)) => self.atomic_link(a_dir, b_dir),
-      (Trg::Dir(a_dir), Trg::Ptr(b_ptr)) => self.half_atomic_link(a_dir, b_ptr),
-      (Trg::Ptr(a_ptr), Trg::Dir(b_dir)) => self.half_atomic_link(b_dir, a_ptr),
-      (Trg::Ptr(a_ptr), Trg::Ptr(b_ptr)) => self.link(a_ptr, b_ptr),
     }
   }
 
@@ -663,8 +631,8 @@ impl<'a> Net<'a> {
       (Ctr, Ref) if a.lab() >= b.lab() => self.comm02(b, a),
       (Num, Ctr) => self.comm02(a, b),
       (Ctr, Num) => self.comm02(b, a),
-      (_, Ref) if b == ERA => self.comm02(a, b),
-      (Ref, _) if a == ERA => self.comm02(b, a),
+      (_, Ref) if b == Ptr::ERA => self.comm02(a, b),
+      (Ref, _) if a == Ptr::ERA => self.comm02(b, a),
       // deref
       (Ref, _) => self.call(a, b),
       (_, Ref) => self.call(b, a),
@@ -721,7 +689,7 @@ impl<'a> Net<'a> {
 
   pub fn comm12(&mut self, a: Ptr, b: Ptr) {
     self.rwts.comm += 1;
-    let n = a.p1().target().swap(NULL);
+    let n = a.p1().target().swap(Ptr::NULL);
     let B2 = Ptr::new(Ctr, b.lab(), self.heap.alloc());
     let A1 = Ptr::new(Ctr, a.lab(), self.heap.alloc());
     let A2 = Ptr::new(Ctr, a.lab(), self.heap.alloc());
@@ -744,7 +712,7 @@ impl<'a> Net<'a> {
 
   pub fn comm01(&mut self, a: Ptr, b: Ptr) {
     self.rwts.comm += 1;
-    b.p1().target().store(NULL);
+    b.p1().target().store(Ptr::NULL);
     self.half_atomic_link(b.p2(), a);
   }
 
@@ -752,13 +720,13 @@ impl<'a> Net<'a> {
     self.rwts.oper += 1;
     if b.num() == 0 {
       let x = Ptr::new(Ctr, 0, self.heap.alloc());
-      x.p2().target().store(ERA);
+      x.p2().target().store(Ptr::ERA);
       self.half_atomic_link(a.p2(), x.p1());
       self.half_atomic_link(a.p1(), x);
     } else {
       let x = Ptr::new(Ctr, 0, self.heap.alloc());
       let y = Ptr::new(Ctr, 0, self.heap.alloc());
-      x.p1().target().store(ERA);
+      x.p1().target().store(Ptr::ERA);
       x.p2().target().store(y);
       y.p1().target().store(Ptr::new_num(b.num() - 1));
       self.half_atomic_link(a.p1(), x);
@@ -776,37 +744,11 @@ impl<'a> Net<'a> {
 
   pub fn op1_num(&mut self, a: Ptr, b: Ptr) {
     self.rwts.oper += 1;
-    let op = a.lab();
-    let v0 = a.p1().target().swap(NULL).num();
+    let op = a.op();
+    let v0 = a.p1().target().swap(Ptr::NULL).num();
     let v1 = b.num();
-    let v2 = self.op(op, v0, v1);
+    let v2 = op.op(v0, v1);
     self.half_atomic_link(a.p2(), Ptr::new_num(v2));
-  }
-
-  #[inline(always)]
-  pub fn op(&self, op: Lab, a: Val, b: Val) -> Val {
-    match op {
-      ADD => u60::add(a, b),
-      SUB => u60::sub(a, b),
-      MUL => u60::mul(a, b),
-      DIV => u60::div(a, b),
-      MOD => u60::rem(a, b),
-      EQ => u60::eq(a, b),
-      NE => u60::ne(a, b),
-      LT => u60::lt(a, b),
-      GT => u60::gt(a, b),
-      LTE => u60::lte(a, b),
-      GTE => u60::gte(a, b),
-      AND => u60::and(a, b),
-      OR => u60::or(a, b),
-      XOR => u60::xor(a, b),
-      NOT => u60::not(a),
-      LSH => u60::lsh(a, b),
-      RSH => u60::rsh(a, b),
-      _ => {
-        unreachable!()
-      }
-    }
   }
 
   // Expands a closed net.
@@ -876,7 +818,7 @@ impl<'a> Net<'a> {
     fn go(net: &mut Net, dir: Ptr, len: usize, key: usize) {
       trace!("[{:04x}] expand dir: {:?}", net.tid, dir);
       let ptr = dir.target().load();
-      if ptr == LOCK {
+      if ptr == Ptr::LOCK {
         return;
       }
       if ptr.tag() == Ctr {
@@ -886,9 +828,9 @@ impl<'a> Net<'a> {
         if len >= net.tids || key % 2 == 1 {
           go(net, ptr.p2(), len * 2, key / 2);
         }
-      } else if ptr.tag() == Ref && ptr != ERA {
-        let got = dir.target().swap(LOCK);
-        if got != LOCK {
+      } else if ptr.tag() == Ref && ptr != Ptr::ERA {
+        let got = dir.target().swap(Ptr::LOCK);
+        if got != Ptr::LOCK {
           trace!("[{:08x}] expand {:?} {:?}", net.tid, ptr, dir);
           net.call(ptr, dir);
         }
