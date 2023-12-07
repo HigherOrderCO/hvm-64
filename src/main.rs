@@ -11,8 +11,15 @@ use hvmc::*;
 
 use std::collections::HashSet;
 
-#[cfg(not(feature = "hvm_cli_options"))]
 fn main() {
+  if cfg!(feature = "hvm_cli_options") {
+    cli_main()
+  } else {
+    bare_main()
+  }
+}
+
+fn bare_main() {
   let args: Vec<String> = env::args().collect();
   let opts = args
     .iter()
@@ -33,8 +40,7 @@ fn main() {
   print_stats(&net, start_time);
 }
 
-#[cfg(feature = "hvm_cli_options")]
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn cli_main() {
   // let data = run::Heap::init(1 << 16);
   let data = run::Heap::init(1 << 28);
   let args: Vec<String> = env::args().collect();
@@ -96,7 +102,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
       println!("  [-1] Single-core mode (no parallelism)");
     }
   }
-  Ok(())
 }
 
 fn print_stats(net: &run::Net, start_time: std::time::Instant) {
