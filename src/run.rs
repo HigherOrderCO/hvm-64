@@ -9,9 +9,9 @@
 
 use crate::ops::Op;
 use std::collections::HashMap;
-use std::fmt;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering::Relaxed};
 use std::sync::{Arc, Barrier};
+use std::{default, fmt};
 
 macro_rules! trace {
   ($($x:tt)*) => {
@@ -371,12 +371,22 @@ impl AtomicRewrites {
   }
 }
 
-// A compact closed net, used for dereferences.
 #[derive(Clone, Debug)]
 #[repr(align(16))]
 pub struct Def {
   pub lab: Lab,
-  pub comp: Option<fn(&mut Net, Ptr, Ptr)>, // TODO
+  pub inner: DefType,
+}
+
+#[derive(Clone, Debug)]
+pub enum DefType {
+  Native(fn(&mut Net, Ptr, Ptr)),
+  Net(DefNet),
+}
+
+/// A compact closed net, used for dereferences.
+#[derive(Clone, Debug, Default)]
+pub struct DefNet {
   pub root: Ptr,
   pub rdex: Vec<(Ptr, Ptr)>,
   pub node: Vec<Node>,
@@ -755,32 +765,33 @@ impl<'a> Net<'a> {
   #[inline(always)]
   pub fn call(&mut self, ptr: Ptr, trg: Ptr) {
     self.rwts.dref += 1;
-    let def = ptr.loc().def();
     // Intercepts with a native function, if available.
-    if let Some(comp) = def.comp {
-      return comp(self, ptr, trg);
-    }
-    let len = def.node.len();
+    let def = ptr.loc().def();
+    let net = match &def.inner {
+      DefType::Native(native) => return native(self, ptr, trg),
+      DefType::Net(net) => net,
+    };
+    let len = net.node.len();
     // Allocate space.
     for i in 0..len {
       *unsafe { self.locs.get_unchecked_mut(i) } = self.heap.alloc();
     }
     // Load nodes, adjusted.
     for i in 0..len {
-      let p1 = self.adjust(unsafe { def.node.get_unchecked(i) }.0);
-      let p2 = self.adjust(unsafe { def.node.get_unchecked(i) }.1);
+      let p1 = self.adjust(unsafe { net.node.get_unchecked(i) }.0);
+      let p2 = self.adjust(unsafe { net.node.get_unchecked(i) }.1);
       let lc = *unsafe { self.locs.get_unchecked(i) };
       lc.p1().target().store(p1);
       lc.p2().target().store(p2);
     }
     // Load redexes, adjusted.
-    for r in &def.rdex {
+    for r in &net.rdex {
       let p1 = self.adjust(r.0);
       let p2 = self.adjust(r.1);
       self.rdex.push((p1, p2));
     }
     // Load root, adjusted.
-    self.link(self.adjust(def.root), trg);
+    self.link(self.adjust(net.root), trg);
   }
 
   // Adjusts dereferenced pointer locations.

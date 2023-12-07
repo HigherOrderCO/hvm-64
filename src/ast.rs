@@ -6,7 +6,7 @@
 // syntax reflects this representation. The grammar is specified on this repo's README.
 
 use crate::ops::Op;
-use crate::run::{self, APtr, Def, Lab, Loc, Ptr, Tag};
+use crate::run::{self, APtr, Def, DefNet, DefType, Lab, Loc, Ptr, Tag};
 use std::collections::BTreeMap;
 use std::collections::{hash_map::Entry, HashMap};
 
@@ -339,17 +339,15 @@ impl Runtime {
           nam.to_owned(),
           Box::new(Def {
             lab,
-            comp: None,
-            root: Ptr::NULL,
-            rdex: vec![],
-            node: vec![],
+            inner: DefType::Net(DefNet::default()),
           }),
         )
       })
       .collect::<HashMap<_, _>>();
 
     for (nam, net) in book.iter() {
-      net_to_runtime_def(book, &mut defs, nam, net);
+      let net = net_to_runtime_def(book, &defs, nam, net);
+      defs.get_mut(nam).unwrap().inner = DefType::Net(net);
     }
 
     let back = defs
@@ -424,7 +422,12 @@ impl Runtime {
   }
 }
 
-fn net_to_runtime_def(book: &Book, defs: &mut HashMap<String, Box<Def>>, nam: &str, net: &Net) {
+fn net_to_runtime_def(
+  book: &Book,
+  defs: &HashMap<String, Box<Def>>,
+  nam: &str,
+  net: &Net,
+) -> DefNet {
   let mut state = State {
     book,
     defs,
@@ -447,16 +450,13 @@ fn net_to_runtime_def(book: &Book, defs: &mut HashMap<String, Box<Def>>, nam: &s
     .map(|(a, b)| (state.visit_tree(a, None), state.visit_tree(b, None)))
     .collect();
 
-  let root = state.root;
-  let node = state.nodes;
-
   assert!(state.scope.is_empty());
 
-  let def = defs.get_mut(nam).unwrap();
-
-  def.root = root;
-  def.rdex = rdex;
-  def.node = node;
+  return DefNet {
+    root: state.root,
+    rdex,
+    node: state.nodes,
+  };
 
   #[derive(Debug)]
   struct State<'a> {
