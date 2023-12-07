@@ -100,9 +100,9 @@ impl fmt::Display for Op {
       And => "&&",
       Or => "||",
       Xor => "^",
-      Lsh => "!",
-      Rsh => "<<",
-      Not => ">>",
+      Lsh => "<<",
+      Rsh => ">>",
+      Not => "!",
     })
   }
 }
@@ -126,9 +126,9 @@ impl FromStr for Op {
       "&&" => And,
       "||" => Or,
       "^" => Xor,
-      "!" => Lsh,
-      "<<" => Rsh,
-      ">>" => Not,
+      "<<" => Lsh,
+      ">>" => Rsh,
+      "!" => Not,
       _ => Err(())?,
     })
   }
