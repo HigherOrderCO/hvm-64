@@ -4,28 +4,19 @@
 #![allow(unused_imports)]
 #![allow(unused_variables)]
 
-use std::env;
-use std::fs;
+use std::{env, fs};
 
 use hvmc::*;
 
 use std::collections::HashSet;
 
 fn main() {
-  if cfg!(feature = "hvm_cli_options") {
-    cli_main()
-  } else {
-    bare_main()
-  }
+  if cfg!(feature = "hvm_cli_options") { cli_main() } else { bare_main() }
 }
 
 fn bare_main() {
   let args: Vec<String> = env::args().collect();
-  let opts = args
-    .iter()
-    .skip(3)
-    .map(|s| s.as_str())
-    .collect::<HashSet<_>>();
+  let opts = args.iter().skip(3).map(|s| s.as_str()).collect::<HashSet<_>>();
   let book = run::Book::new();
   let data = run::Heap::init(1 << 28);
   let mut net = run::Net::new(&data);
@@ -45,11 +36,7 @@ fn cli_main() {
   let data = run::Heap::init(1 << 28);
   let args: Vec<String> = env::args().collect();
   let help = "help".to_string();
-  let opts = args
-    .iter()
-    .skip(3)
-    .map(|s| s.as_str())
-    .collect::<HashSet<_>>();
+  let opts = args.iter().skip(3).map(|s| s.as_str()).collect::<HashSet<_>>();
   let action = args.get(1).unwrap_or(&help);
   let f_name = args.get(2);
   match action.as_str() {
@@ -111,14 +98,8 @@ fn print_stats(net: &run::Net, start_time: std::time::Instant) {
   println!("- ERAS : {}", net.rwts.eras);
   println!("- DREF : {}", net.rwts.dref);
   println!("- OPER : {}", net.rwts.oper);
-  println!(
-    "TIME   : {:.3} s",
-    (start_time.elapsed().as_millis() as f64) / 1000.0
-  );
-  println!(
-    "RPS    : {:.3} m",
-    (net.rewrites() as f64) / (start_time.elapsed().as_millis() as f64) / 1000.0
-  );
+  println!("TIME   : {:.3} s", (start_time.elapsed().as_millis() as f64) / 1000.0);
+  println!("RPS    : {:.3} m", (net.rewrites() as f64) / (start_time.elapsed().as_millis() as f64) / 1000.0);
 }
 
 // Load file and generate net
@@ -155,11 +136,8 @@ fn load<'a>(data: &'a run::Data, file: &str) -> (ast::Runtime, run::Net<'a>) {
 // }
 
 pub fn compile_rust_crate_to_executable(f_name: &str) -> Result<(), std::io::Error> {
-  let output = std::process::Command::new("cargo")
-    .current_dir("./.hvm")
-    .arg("build")
-    .arg("--release")
-    .output()?;
+  let output =
+    std::process::Command::new("cargo").current_dir("./.hvm").arg("build").arg("--release").output()?;
   let target = format!("./{}", f_name.replace(".hvmc", ""));
   if std::path::Path::new(&target).exists() {
     fs::remove_file(&target)?;

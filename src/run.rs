@@ -8,10 +8,14 @@
 // space evaluation of recursive functions on Scott encoded datatypes.
 
 use crate::ops::Op;
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering::Relaxed};
-use std::sync::{Arc, Barrier};
-use std::{default, fmt};
+use std::{
+  collections::HashMap,
+  default, fmt,
+  sync::{
+    atomic::{AtomicU64, AtomicUsize, Ordering::Relaxed},
+    Arc, Barrier,
+  },
+};
 
 macro_rules! trace {
   ($($x:tt)*) => {
@@ -128,13 +132,7 @@ impl fmt::Debug for Ptr {
       &Ptr::LOCK => write!(f, "[Ptr::LOCK]"),
       _ => match self.tag() {
         Num => write!(f, "[Num {}]", self.num()),
-        Var | Red => write!(
-          f,
-          "[{:?} {} {:?}]",
-          self.tag(),
-          self.loc().port(),
-          self.loc()
-        ),
+        Var | Red => write!(f, "[{:?} {} {:?}]", self.tag(), self.loc().port(), self.loc()),
         Ref | Mat => write!(f, "[{:?} {:?}]", self.tag(), self.loc()),
         Op2 | Op1 | Ctr => write!(f, "[{:?} {:?} {:?}]", self.tag(), self.lab(), self.loc()),
       },
@@ -252,11 +250,7 @@ impl APtr {
 
   #[inline(always)]
   pub fn cas(&self, expected: Ptr, value: Ptr) -> Result<Ptr, Ptr> {
-    self
-      .0
-      .compare_exchange_weak(expected.0, value.0, Relaxed, Relaxed)
-      .map(Ptr)
-      .map_err(Ptr)
+    self.0.compare_exchange_weak(expected.0, value.0, Relaxed, Relaxed).map(Ptr).map_err(Ptr)
   }
 
   #[inline(always)]
@@ -276,6 +270,13 @@ impl APtr {
   }
 }
 
+// A target pointer, with implied ownership.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
+pub enum Trg {
+  Dir(Ptr), // we don't own the pointer, so we point to its location
+  Ptr(Ptr), // we own the pointer, so we store it directly
+}
+
 impl<'a> Heap<'a> {
   pub fn init(size: usize) -> Box<[ANode]> {
     let mut data = Vec::with_capacity(size);
@@ -284,10 +285,7 @@ impl<'a> Heap<'a> {
   }
 
   pub fn new(data: &'a Data) -> Self {
-    Heap {
-      area: data,
-      next: 0,
-    }
+    Heap { area: data, next: 0 }
   }
 
   #[inline(always)]
@@ -582,14 +580,7 @@ impl<'a> Net<'a> {
         }
       }
       // Shouldn't be reached.
-      trace!(
-        "[{:04x}] {:016x} | {:016x} {:016x} {:016x}",
-        self.tid,
-        t_ptr.0,
-        a_dir.0,
-        a_ptr.0,
-        b_ptr.0
-      );
+      trace!("[{:04x}] {:016x} | {:016x} {:016x} {:016x}", self.tid, t_ptr.0, a_dir.0, a_ptr.0, b_ptr.0);
       unreachable!()
     }
   }
@@ -614,15 +605,21 @@ impl<'a> Net<'a> {
     }
   }
 
+  // Links two targets, using atomics when necessary, based on implied ownership.
+  #[inline(always)]
+  pub fn safe_link(&mut self, a: Trg, b: Trg) {
+    match (a, b) {
+      (Trg::Dir(a_dir), Trg::Dir(b_dir)) => self.atomic_link(a_dir, b_dir),
+      (Trg::Dir(a_dir), Trg::Ptr(b_ptr)) => self.half_atomic_link(a_dir, b_ptr),
+      (Trg::Ptr(a_ptr), Trg::Dir(b_dir)) => self.half_atomic_link(b_dir, a_ptr),
+      (Trg::Ptr(a_ptr), Trg::Ptr(b_ptr)) => self.link(a_ptr, b_ptr),
+    }
+  }
+
   // Performs an interaction over a redex.
   #[inline(always)]
   pub fn interact(&mut self, a: Ptr, b: Ptr) {
-    trace!(
-      "[{:04x}] interact {:?}\n                {:?}",
-      self.tid,
-      a,
-      b
-    );
+    trace!("[{:04x}] interact {:?}\n                {:?}", self.tid, a, b);
     match (a.tag(), b.tag()) {
       // not actually an active pair
       (Var | Red, _) | (_, Var | Red) => unreachable!(),
@@ -776,11 +773,11 @@ impl<'a> Net<'a> {
     };
     let len = net.node.len();
     // Allocate space.
-    for i in 0..len {
+    for i in 0 .. len {
       *unsafe { self.locs.get_unchecked_mut(i) } = self.heap.alloc();
     }
     // Load nodes, adjusted.
-    for i in 0..len {
+    for i in 0 .. len {
       let p1 = self.adjust(unsafe { net.node.get_unchecked(i) }.0);
       let p2 = self.adjust(unsafe { net.node.get_unchecked(i) }.1);
       let lc = *unsafe { self.locs.get_unchecked(i) };
@@ -868,7 +865,7 @@ impl<'a> Net<'a> {
     let heap_start = heap_size * tid;
     println!("{} {} {}", tid, tids, heap_start);
     let heap = Heap {
-      area: &self.heap.area[heap_start..heap_start + heap_size],
+      area: &self.heap.area[heap_start .. heap_start + heap_size],
       next: self.heap.next.saturating_sub(heap_start),
     };
     let mut net = Net::new_with_root(heap, self.root);
@@ -876,7 +873,7 @@ impl<'a> Net<'a> {
     net.tids = tids;
     let from = self.rdex.len() * (tid + 0) / tids;
     let upto = self.rdex.len() * (tid + 1) / tids;
-    for i in from..upto {
+    for i in from .. upto {
       net.rdex.push((self.rdex[i].0, self.rdex[i].1));
     }
     return net;
@@ -906,8 +903,8 @@ impl<'a> Net<'a> {
     let tlog2 = cores.ilog2() as usize;
     let tids = 1 << tlog2;
     let delta = AtomicRewrites::default(); // delta rewrite counter
-    let rlens = (0..tids).map(|_| AtomicUsize::new(0)).collect::<Vec<_>>();
-    let share = (0..SHARE_LIMIT * tids)
+    let rlens = (0 .. tids).map(|_| AtomicUsize::new(0)).collect::<Vec<_>>();
+    let share = (0 .. SHARE_LIMIT * tids)
       .map(|_| (APtr(AtomicU64::new(0)), APtr(AtomicU64::new(0))))
       .collect::<Vec<_>>();
     let total = AtomicUsize::new(0); // sum of redex bag length
@@ -915,13 +912,13 @@ impl<'a> Net<'a> {
 
     // Perform parallel reductions
     std::thread::scope(|s| {
-      for tid in 0..tids {
+      for tid in 0 .. tids {
         let mut ctx = ThreadContext {
-          tid: tid,
-          tids: tids,
+          tid,
+          tids,
           tick: 0,
           net: self.fork(tid, tids),
-          tlog2: tlog2,
+          tlog2,
           delta: &delta,
           share: &share,
           rlens: &rlens,
@@ -983,26 +980,14 @@ impl<'a> Net<'a> {
         let side = (ctx.tid >> (plog2 - 1 - (ctx.tick % plog2))) & 1;
         let shift = (1 << (plog2 - 1)) >> (ctx.tick % plog2);
         let a_tid = ctx.tid;
-        let b_tid = if side == 1 {
-          a_tid - shift
-        } else {
-          a_tid + shift
-        };
+        let b_tid = if side == 1 { a_tid - shift } else { a_tid + shift };
         let a_len = ctx.net.rdex.len();
         let b_len = ctx.rlens[b_tid].load(Relaxed);
-        let send = if a_len > b_len {
-          (a_len - b_len) / 2
-        } else {
-          0
-        };
-        let recv = if b_len > a_len {
-          (b_len - a_len) / 2
-        } else {
-          0
-        };
+        let send = if a_len > b_len { (a_len - b_len) / 2 } else { 0 };
+        let recv = if b_len > a_len { (b_len - a_len) / 2 } else { 0 };
         let send = std::cmp::min(send, SHARE_LIMIT);
         let recv = std::cmp::min(recv, SHARE_LIMIT);
-        for i in 0..send {
+        for i in 0 .. send {
           let init = a_len - send * 2;
           let rdx0 = *ctx.net.rdex.get_unchecked(init + i * 2 + 0);
           let rdx1 = *ctx.net.rdex.get_unchecked(init + i * 2 + 1);
@@ -1020,7 +1005,7 @@ impl<'a> Net<'a> {
         }
         ctx.net.rdex.truncate(a_len - send);
         ctx.barry.wait();
-        for i in 0..recv {
+        for i in 0 .. recv {
           let got = ctx.share.get_unchecked(a_tid * SHARE_LIMIT + i);
           ctx.net.rdex.push((got.0.load(), got.1.load()));
         }

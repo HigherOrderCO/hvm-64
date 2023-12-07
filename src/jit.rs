@@ -1,7 +1,6 @@
 // Despite the file name, this is not actually a JIT (yet).
 
-use crate::ast;
-use crate::run;
+use crate::{ast, run};
 
 use std::collections::HashMap;
 
@@ -31,12 +30,7 @@ pub fn compile_book(book: &run::Book) -> String {
   for (fid, def) in book.defs.iter() {
     if def.node.len() > 0 {
       let fun = ast::val_to_name(*fid);
-      code.push_str(&format!(
-        "{}F_{} => {{ return self.F_{}(ptr, Trg::Ptr(x)); }}\n",
-        ident(3),
-        fun,
-        fun
-      ));
+      code.push_str(&format!("{}F_{} => {{ return self.F_{}(ptr, Trg::Ptr(x)); }}\n", ident(3), fun, fun));
     }
   }
   code.push_str(&format!("{}_ => {{ return false; }}\n", ident(3)));
@@ -83,12 +77,7 @@ pub fn atom(ptr: run::Ptr) -> String {
   if ptr.is_ref() {
     return format!("Ptr::big(REF, F_{})", ast::val_to_name(ptr.val()));
   } else {
-    return format!(
-      "Ptr::new({}, 0x{:x}, 0x{:x})",
-      tag(ptr.tag()),
-      ptr.lab(),
-      ptr.loc()
-    );
+    return format!("Ptr::new({}, 0x{:x}, 0x{:x})", tag(ptr.tag()), ptr.lab(), ptr.loc());
   }
 }
 
@@ -132,22 +121,8 @@ pub fn compile_term(book: &run::Book, tab: usize, fid: run::Val) -> String {
     let (rf, rx) = adjust_redex(rdex.0, rdex.1);
     let rf_name = format!("_{}", fresh(newx));
     let mut code = String::new();
-    code.push_str(&format!(
-      "{}let {} : Trg = Trg::Ptr({});\n",
-      ident(tab),
-      rf_name,
-      &atom(rf)
-    ));
-    code.push_str(&burn(
-      book,
-      tab,
-      None,
-      newx,
-      vars,
-      def,
-      rx,
-      &Target { nam: rf_name },
-    ));
+    code.push_str(&format!("{}let {} : Trg = Trg::Ptr({});\n", ident(tab), rf_name, &atom(rf)));
+    code.push_str(&burn(book, tab, None, newx, vars, def, rx, &Target { nam: rf_name }));
     return code;
   }
 
@@ -186,16 +161,7 @@ pub fn compile_term(book: &run::Book, tab: usize, fid: run::Val) -> String {
     for rdex in &def.rdex {
       code.push_str(&call_redex(book, tab, newx, vars, def, *rdex));
     }
-    code.push_str(&burn(
-      book,
-      tab,
-      Some(fid),
-      newx,
-      vars,
-      def,
-      def.node[0].1,
-      &trg,
-    ));
+    code.push_str(&burn(book, tab, Some(fid), newx, vars, def, def.node[0].1, &trg));
     return code;
   }
 
@@ -234,12 +200,8 @@ pub fn compile_term(book: &run::Book, tab: usize, fid: run::Val) -> String {
           let ifs = def.node[cse.loc() as usize].1;
           let c_z = Target { nam: fresh(newx) };
           let c_s = Target { nam: fresh(newx) };
-          let num = Target {
-            nam: format!("{}x", trg.show()),
-          };
-          let res = Target {
-            nam: format!("{}y", trg.show()),
-          };
+          let num = Target { nam: format!("{}x", trg.show()) };
+          let res = Target { nam: format!("{}y", trg.show()) };
           let lam = fresh(newx);
           let mat = fresh(newx);
           let cse = fresh(newx);
@@ -265,42 +227,18 @@ pub fn compile_term(book: &run::Book, tab: usize, fid: run::Val) -> String {
             ident(tab + 1),
             res.show()
           ));
-          code.push_str(&format!(
-            "{}if {}.val() == 0 {{\n",
-            ident(tab + 1),
-            num.get()
-          ));
+          code.push_str(&format!("{}if {}.val() == 0 {{\n", ident(tab + 1), num.get()));
           code.push_str(&format!("{}{};\n", ident(tab + 2), num.take()));
-          code.push_str(&format!(
-            "{}{} = {};\n",
-            ident(tab + 2),
-            &c_z.show(),
-            res.show()
-          ));
-          code.push_str(&format!(
-            "{}{} = Trg::Ptr({});\n",
-            ident(tab + 2),
-            &c_s.show(),
-            "ERAS"
-          ));
+          code.push_str(&format!("{}{} = {};\n", ident(tab + 2), &c_z.show(), res.show()));
+          code.push_str(&format!("{}{} = Trg::Ptr({});\n", ident(tab + 2), &c_s.show(), "ERAS"));
           code.push_str(&format!("{}}} else {{\n", ident(tab + 1)));
           code.push_str(&format!(
             "{}{};\n",
             ident(tab + 2),
             num.swap(&format!("Ptr::big(NUM, {}.val() - 1)", num.get()))
           ));
-          code.push_str(&format!(
-            "{}{} = Trg::Ptr({});\n",
-            ident(tab + 2),
-            &c_z.show(),
-            "ERAS"
-          ));
-          code.push_str(&format!(
-            "{}{} = {};\n",
-            ident(tab + 2),
-            &c_s.show(),
-            trg.show()
-          ));
+          code.push_str(&format!("{}{} = Trg::Ptr({});\n", ident(tab + 2), &c_z.show(), "ERAS"));
+          code.push_str(&format!("{}{} = {};\n", ident(tab + 2), &c_s.show(), trg.show()));
           code.push_str(&format!("{}}}\n", ident(tab + 1)));
           code.push_str(&format!("{}}} else {{\n", ident(tab)));
           code.push_str(&format!("{}let {} = self.alloc(1);\n", ident(tab + 1), lam));
@@ -368,12 +306,7 @@ pub fn compile_term(book: &run::Book, tab: usize, fid: run::Val) -> String {
         let op2 = fresh(newx);
         code.push_str(&format!("{}let {} : Trg;\n", ident(tab), &nxt.show()));
         code.push_str(&format!("{}// fast op\n", ident(tab)));
-        code.push_str(&format!(
-          "{}if {}.is_num() && {}.is_num() {{\n",
-          ident(tab),
-          trg.get(),
-          val.get()
-        ));
+        code.push_str(&format!("{}if {}.is_num() && {}.is_num() {{\n", ident(tab), trg.get(), val.get()));
         code.push_str(&format!("{}self.rwts.oper += 2;\n", ident(tab + 1))); // OP2 + OP1
         code.push_str(&format!("{}let vx = {};\n", ident(tab + 1), trg.take()));
         code.push_str(&format!("{}let vy = {};\n", ident(tab + 1), val.take()));
@@ -398,12 +331,7 @@ pub fn compile_term(book: &run::Book, tab: usize, fid: run::Val) -> String {
           op2,
           trg.show()
         ));
-        code.push_str(&format!(
-          "{}{} = Trg::Ptr(Ptr::new(VR2, 0, {}));\n",
-          ident(tab + 1),
-          &nxt.show(),
-          op2
-        ));
+        code.push_str(&format!("{}{} = Trg::Ptr(Ptr::new(VR2, 0, {}));\n", ident(tab + 1), &nxt.show(), op2));
         code.push_str(&format!("{}}}\n", ident(tab)));
         code.push_str(&burn(book, tab, None, newx, vars, def, ret, &nxt));
         return code;
@@ -415,12 +343,8 @@ pub fn compile_term(book: &run::Book, tab: usize, fid: run::Val) -> String {
     // p1 <~ #N
     // p2 <~ #N
     if ptr.is_dup() {
-      let x1 = Target {
-        nam: format!("{}x", trg.show()),
-      };
-      let x2 = Target {
-        nam: format!("{}y", trg.show()),
-      };
+      let x1 = Target { nam: format!("{}x", trg.show()) };
+      let x2 = Target { nam: format!("{}y", trg.show()) };
       let p1 = def.node[ptr.loc() as usize].0;
       let p2 = def.node[ptr.loc() as usize].1;
       let lc = fresh(newx);
@@ -430,30 +354,12 @@ pub fn compile_term(book: &run::Book, tab: usize, fid: run::Val) -> String {
       code.push_str(&format!("{}if {}.tag() == NUM {{\n", ident(tab), trg.get()));
       code.push_str(&format!("{}self.rwts.comm += 1;\n", ident(tab + 1)));
       code.push_str(&format!("{}let got = {};\n", ident(tab + 1), trg.take()));
-      code.push_str(&format!(
-        "{}{} = Trg::Ptr(got);\n",
-        ident(tab + 1),
-        &x1.show()
-      ));
-      code.push_str(&format!(
-        "{}{} = Trg::Ptr(got);\n",
-        ident(tab + 1),
-        &x2.show()
-      ));
+      code.push_str(&format!("{}{} = Trg::Ptr(got);\n", ident(tab + 1), &x1.show()));
+      code.push_str(&format!("{}{} = Trg::Ptr(got);\n", ident(tab + 1), &x2.show()));
       code.push_str(&format!("{}}} else {{\n", ident(tab)));
       code.push_str(&format!("{}let {} = self.alloc(1);\n", ident(tab + 1), lc));
-      code.push_str(&format!(
-        "{}{} = Trg::Ptr(Ptr::new(VR1, 0, {}));\n",
-        ident(tab + 1),
-        &x1.show(),
-        lc
-      ));
-      code.push_str(&format!(
-        "{}{} = Trg::Ptr(Ptr::new(VR2, 0, {}));\n",
-        ident(tab + 1),
-        &x2.show(),
-        lc
-      ));
+      code.push_str(&format!("{}{} = Trg::Ptr(Ptr::new(VR1, 0, {}));\n", ident(tab + 1), &x1.show(), lc));
+      code.push_str(&format!("{}{} = Trg::Ptr(Ptr::new(VR2, 0, {}));\n", ident(tab + 1), &x2.show(), lc));
       code.push_str(&format!(
         "{}self.safe_link(Trg::Ptr(Ptr::new({}, {}, {})), {});\n",
         ident(tab + 1),
@@ -473,50 +379,23 @@ pub fn compile_term(book: &run::Book, tab: usize, fid: run::Val) -> String {
     // p1 <~ x1
     // p2 <~ x2
     if ptr.is_ctr() && ptr.tag() == run::LAM {
-      let x1 = Target {
-        nam: format!("{}x", trg.show()),
-      };
-      let x2 = Target {
-        nam: format!("{}y", trg.show()),
-      };
+      let x1 = Target { nam: format!("{}x", trg.show()) };
+      let x2 = Target { nam: format!("{}y", trg.show()) };
       let p1 = def.node[ptr.loc() as usize].0;
       let p2 = def.node[ptr.loc() as usize].1;
       let lc = fresh(newx);
       code.push_str(&format!("{}let {} : Trg;\n", ident(tab), &x1.show()));
       code.push_str(&format!("{}let {} : Trg;\n", ident(tab), &x2.show()));
       code.push_str(&format!("{}// fast apply\n", ident(tab)));
-      code.push_str(&format!(
-        "{}if {}.tag() == {} {{\n",
-        ident(tab),
-        trg.get(),
-        tag(ptr.tag())
-      ));
+      code.push_str(&format!("{}if {}.tag() == {} {{\n", ident(tab), trg.get(), tag(ptr.tag())));
       code.push_str(&format!("{}self.rwts.anni += 1;\n", ident(tab + 1)));
       code.push_str(&format!("{}let got = {};\n", ident(tab + 1), trg.take()));
-      code.push_str(&format!(
-        "{}{} = Trg::Dir(Ptr::new(VR1, 0, got.loc()));\n",
-        ident(tab + 1),
-        &x1.show()
-      ));
-      code.push_str(&format!(
-        "{}{} = Trg::Dir(Ptr::new(VR2, 0, got.loc()));\n",
-        ident(tab + 1),
-        &x2.show()
-      ));
+      code.push_str(&format!("{}{} = Trg::Dir(Ptr::new(VR1, 0, got.loc()));\n", ident(tab + 1), &x1.show()));
+      code.push_str(&format!("{}{} = Trg::Dir(Ptr::new(VR2, 0, got.loc()));\n", ident(tab + 1), &x2.show()));
       code.push_str(&format!("{}}} else {{\n", ident(tab)));
       code.push_str(&format!("{}let {} = self.alloc(1);\n", ident(tab + 1), lc));
-      code.push_str(&format!(
-        "{}{} = Trg::Ptr(Ptr::new(VR1, 0, {}));\n",
-        ident(tab + 1),
-        &x1.show(),
-        lc
-      ));
-      code.push_str(&format!(
-        "{}{} = Trg::Ptr(Ptr::new(VR2, 0, {}));\n",
-        ident(tab + 1),
-        &x2.show(),
-        lc
-      ));
+      code.push_str(&format!("{}{} = Trg::Ptr(Ptr::new(VR1, 0, {}));\n", ident(tab + 1), &x1.show(), lc));
+      code.push_str(&format!("{}{} = Trg::Ptr(Ptr::new(VR2, 0, {}));\n", ident(tab + 1), &x2.show(), lc));
       code.push_str(&format!(
         "{}self.safe_link(Trg::Ptr(Ptr::new({}, 0, {})), {});\n",
         ident(tab + 1),
@@ -576,22 +455,8 @@ pub fn compile_term(book: &run::Book, tab: usize, fid: run::Val) -> String {
       let p1 = def.node[ptr.loc() as usize].0;
       let p2 = def.node[ptr.loc() as usize].1;
       code.push_str(&format!("{}let {} = self.alloc(1);\n", ident(tab), lc));
-      code.push_str(&make(
-        tab,
-        newx,
-        vars,
-        def,
-        p2,
-        &format!("Trg::Ptr(Ptr::new(VR2, 0, {}))", lc),
-      ));
-      code.push_str(&make(
-        tab,
-        newx,
-        vars,
-        def,
-        p1,
-        &format!("Trg::Ptr(Ptr::new(VR1, 0, {}))", lc),
-      ));
+      code.push_str(&make(tab, newx, vars, def, p2, &format!("Trg::Ptr(Ptr::new(VR2, 0, {}))", lc)));
+      code.push_str(&make(tab, newx, vars, def, p1, &format!("Trg::Ptr(Ptr::new(VR1, 0, {}))", lc)));
       code.push_str(&format!(
         "{}self.safe_link(Trg::Ptr(Ptr::new({}, {}, {})), {});\n",
         ident(tab),
@@ -608,21 +473,11 @@ pub fn compile_term(book: &run::Book, tab: usize, fid: run::Val) -> String {
         }
         Some(got) => {
           //println!("-var snd");
-          code.push_str(&format!(
-            "{}self.safe_link({}, {});\n",
-            ident(tab),
-            trg,
-            got
-          ));
+          code.push_str(&format!("{}self.safe_link({}, {});\n", ident(tab), trg, got));
         }
       }
     } else {
-      code.push_str(&format!(
-        "{}self.safe_link({}, Trg::Ptr({}));\n",
-        ident(tab),
-        trg,
-        atom(ptr)
-      ));
+      code.push_str(&format!("{}self.safe_link({}, Trg::Ptr({}));\n", ident(tab), trg, atom(ptr)));
     }
     return code;
   }
@@ -641,31 +496,16 @@ pub fn compile_term(book: &run::Book, tab: usize, fid: run::Val) -> String {
   let def = &book.get(fid).unwrap();
 
   let mut code = String::new();
-  code.push_str(&format!(
-    "{}pub fn F_{}(&mut self, ptr: Ptr, trg: Trg) -> bool {{\n",
-    ident(tab),
-    fun
-  ));
+  code.push_str(&format!("{}pub fn F_{}(&mut self, ptr: Ptr, trg: Trg) -> bool {{\n", ident(tab), fun));
   if def.safe {
     code.push_str(&format!("{}if self.get(trg).is_dup() {{\n", ident(tab + 1)));
-    code.push_str(&format!(
-      "{}self.copy(self.swap(trg, NULL), ptr);\n",
-      ident(tab + 2)
-    ));
+    code.push_str(&format!("{}self.copy(self.swap(trg, NULL), ptr);\n", ident(tab + 2)));
     code.push_str(&format!("{}return true;\n", ident(tab + 2)));
     code.push_str(&format!("{}}}\n", ident(tab + 1)));
   }
-  code.push_str(&call(
-    book,
-    tab + 1,
-    None,
-    &mut 0,
-    &mut HashMap::new(),
-    fid,
-    &Target {
-      nam: "trg".to_string(),
-    },
-  ));
+  code.push_str(&call(book, tab + 1, None, &mut 0, &mut HashMap::new(), fid, &Target {
+    nam: "trg".to_string(),
+  }));
   code.push_str(&format!("{}return true;\n", ident(tab + 1)));
   code.push_str(&format!("{}}}\n", ident(tab)));
 
