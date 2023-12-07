@@ -146,7 +146,7 @@ impl Ptr {
   pub const ERA: Ptr = Ptr(Ref as _);
   pub const NULL: Ptr = Ptr(0x0000_0000_0000_0000);
   pub const LOCK: Ptr = Ptr(0xFFFF_FFFF_FFFF_FFF0);
-  pub const GONE: Ptr = Ptr(0xFFFF_FFFF_FFFF_FFF8);
+  pub const GONE: Ptr = Ptr(0xFFFF_FFFF_FFFF_FFF7);
 
   #[inline(always)]
   pub fn new(tag: Tag, lab: Lab, loc: Loc) -> Self {
@@ -305,6 +305,9 @@ impl<'a> Heap<'a> {
         self.next += 1;
       }
     };
+    if index & 0xfff == 0 {
+      // println!("{} {}", index, self.area.len());
+    }
     self.next += 1;
     self.area[index].0.store(Ptr::LOCK);
     self.area[index].1.store(Ptr::LOCK);
@@ -525,6 +528,13 @@ impl<'a> Net<'a> {
       // Peek the target, which may not be owned by us.
       let mut t_dir = a_ptr;
       let mut t_ptr = t_dir.target().load();
+      // If it is taken, we wait.
+      if t_ptr == Ptr::LOCK {
+        continue;
+      }
+      if t_ptr == Ptr::NULL {
+        continue;
+      }
       // If target is a redirection, we own it. Clear and move forward.
       if t_ptr.tag() == Red {
         t_dir.target().store(Ptr::NULL);
@@ -570,13 +580,6 @@ impl<'a> Net<'a> {
           while y_dir.target().cas(Ptr::GONE, Ptr::NULL).is_err() {}
           return;
         }
-      }
-      // If it is taken, we wait.
-      if t_ptr == Ptr::LOCK {
-        continue;
-      }
-      if t_ptr == Ptr::NULL {
-        continue;
       }
       // Shouldn't be reached.
       trace!(
@@ -863,6 +866,7 @@ impl<'a> Net<'a> {
   pub fn fork(&self, tid: usize, tids: usize) -> Self {
     let heap_size = self.heap.area.len() / tids;
     let heap_start = heap_size * tid;
+    println!("{} {} {}", tid, tids, heap_start);
     let heap = Heap {
       area: &self.heap.area[heap_start..heap_start + heap_size],
       next: self.heap.next.saturating_sub(heap_start),

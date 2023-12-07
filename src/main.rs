@@ -56,6 +56,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         } else {
           net.parallel_normal();
         }
+        print!("normal!");
         println!("{}", ast::show_net(&runtime.readback(&net)));
         if opts.contains("-s") {
           print_stats(&net, start_time);
