@@ -50,8 +50,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     "run" => {
       if let Some(file_name) = f_name {
         let (runtime, mut net) = load(&data, file_name);
-        dbg!(&runtime);
-        println!("hi");
         let start_time = std::time::Instant::now();
         if opts.contains("-1") {
           net.normal();

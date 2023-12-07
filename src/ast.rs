@@ -616,7 +616,6 @@ fn net_to_runtime_def(
 
   impl<'a> State<'a> {
     fn visit_tree(&mut self, tree: &'a Tree, place: Option<Ptr>) -> Ptr {
-      dbg!(&self, tree, place);
       match tree {
         Tree::Era => run::ERA,
         Tree::Ref { nam } => Ptr::new_ref(&self.defs[nam]),

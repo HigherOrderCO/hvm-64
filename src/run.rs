@@ -387,7 +387,6 @@ impl<'a> Heap<'a> {
         self.next += 1;
       }
     };
-    dbg!(index);
     self.next += 1;
     self.area[index].0.store(LOCK);
     self.area[index].1.store(LOCK);
@@ -768,7 +767,6 @@ impl<'a> Net<'a> {
   }
 
   pub fn op2_num(&mut self, a: Ptr, b: Ptr) {
-    dbg!("op2_num", a, b);
     self.rwts.oper += 1;
     let x = Ptr::new(Op1, a.lab(), self.heap.alloc());
     x.p1().target().store(b);
@@ -777,11 +775,9 @@ impl<'a> Net<'a> {
   }
 
   pub fn op1_num(&mut self, a: Ptr, b: Ptr) {
-    dbg!(a, b);
     self.rwts.oper += 1;
     let op = a.lab();
     let v0 = a.p1().target().swap(NULL).num();
-    dbg!(v0);
     let v1 = b.num();
     let v2 = self.op(op, v0, v1);
     self.half_atomic_link(a.p2(), Ptr::new_num(v2));
@@ -817,7 +813,6 @@ impl<'a> Net<'a> {
   #[inline(always)]
   pub fn call(&mut self, ptr: Ptr, trg: Ptr) {
     self.rwts.dref += 1;
-    dbg!(ptr);
     let def = ptr.loc().def();
     // Intercepts with a native function, if available.
     if let Some(comp) = def.comp {
@@ -828,7 +823,6 @@ impl<'a> Net<'a> {
     for i in 0..len {
       *unsafe { self.locs.get_unchecked_mut(i) } = self.heap.alloc();
     }
-    dbg!(&self.locs[0..10]);
     // Load nodes, adjusted.
     for i in 0..len {
       let p1 = self.adjust(unsafe { def.node.get_unchecked(i) }.0);
@@ -844,9 +838,7 @@ impl<'a> Net<'a> {
       self.rdex.push((p1, p2));
     }
     // Load root, adjusted.
-    dbg!(self.adjust(def.root), self.adjust(def.root).target().load());
     self.link(self.adjust(def.root), trg);
-    dbg!(self.adjust(def.root), self.adjust(def.root).target().load());
   }
 
   // Adjusts dereferenced pointer locations.
@@ -884,6 +876,9 @@ impl<'a> Net<'a> {
     fn go(net: &mut Net, dir: Ptr, len: usize, key: usize) {
       trace!("[{:04x}] expand dir: {:?}", net.tid, dir);
       let ptr = dir.target().load();
+      if ptr == LOCK {
+        return;
+      }
       if ptr.tag() == Ctr {
         if len >= net.tids || key % 2 == 0 {
           go(net, ptr.p1(), len * 2, key / 2);
