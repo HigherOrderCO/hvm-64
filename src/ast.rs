@@ -519,7 +519,7 @@ pub fn tree_to_runtime_go(rt_net: &mut run::Net, tree: &Tree, vars: &mut HashMap
     }
     Tree::Op1 { opr, lft, rgt } => {
       let loc = rt_net.alloc();
-      let p1 = tree_to_runtime_go(rt_net, &Tree::Num { val: *lft }, vars, Parent::Node { loc, port: run::P1 });
+      let p1 = run::Ptr::big(run::NUM, *lft);
       rt_net.heap.set(loc, run::P1, p1);
       let p2 = tree_to_runtime_go(rt_net, rgt, vars, Parent::Node { loc, port: run::P2 });
       rt_net.heap.set(loc, run::P2, p2);
