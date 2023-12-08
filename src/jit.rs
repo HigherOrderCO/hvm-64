@@ -14,12 +14,18 @@ use Instr::SetHeap;
 use crate::ast;
 use crate::run::{self, Book, CallNative, Def, Ptr, Val};
 
+static mut DEBUG: bool = false;
+
 macro_rules! dprintln {
   () => {
-    println!();
+    if unsafe { DEBUG } {
+      println!();
+    }
   };
   ($($arg:tt)*) => {{
-    println!($( $arg )*);
+    if unsafe { DEBUG } {
+      println!($( $arg )*);
+    }
   }};
 }
 
@@ -454,48 +460,48 @@ impl Lowering<'_> {
   ///
   /// This function basically concentrates all the optimizations
   fn burn(&mut self, def: &Def, ptr: Ptr, target: Expr) {
-    // // (<?(ifz ifs) ret> ret) ~ (#X R)
-    // // ------------------------------- fast match
-    // // if X == 0:
-    // //   ifz ~ R
-    // //   ifs ~ *
-    // // else:
-    // //   ifz ~ *
-    // //   ifs ~ (#(X-1) R)
-    // // When ifs is REF, tail-call optimization is applied.
-    // if fast_match(self, def, ptr, target.clone()) {
-    //   return;
-    // }
+    // (<?(ifz ifs) ret> ret) ~ (#X R)
+    // ------------------------------- fast match
+    // if X == 0:
+    //   ifz ~ R
+    //   ifs ~ *
+    // else:
+    //   ifz ~ *
+    //   ifs ~ (#(X-1) R)
+    // When ifs is REF, tail-call optimization is applied.
+    if fast_match(self, def, ptr, target.clone()) {
+      return;
+    }
 
-    // // <x <y r>> ~ #N
-    // // --------------------- fast op
-    // // r <~ #(op(op(N,x),y))
-    // if fast_op(self, def, ptr, target.clone()) {
-    //   return;
-    // }
+    // <x <y r>> ~ #N
+    // --------------------- fast op
+    // r <~ #(op(op(N,x),y))
+    if fast_op(self, def, ptr, target.clone()) {
+      return;
+    }
 
-    // // {p1 p2} <~ #N
-    // // ------------- fast copy
-    // // p1 <~ #N
-    // // p2 <~ #N
-    // if fast_copy(self, def, ptr, target.clone()) {
-    //   return;
-    // }
+    // {p1 p2} <~ #N
+    // ------------- fast copy
+    // p1 <~ #N
+    // p2 <~ #N
+    if fast_copy(self, def, ptr, target.clone()) {
+      return;
+    }
 
-    // // (p1 p2) <~ (x1 x2)
-    // // ------------------ fast apply
-    // // p1 <~ x1
-    // // p2 <~ x2
-    // if fast_apply(self, def, ptr, target.clone()) {
-    //   return;
-    // }
+    // (p1 p2) <~ (x1 x2)
+    // ------------------ fast apply
+    // p1 <~ x1
+    // p2 <~ x2
+    if fast_apply(self, def, ptr, target.clone()) {
+      return;
+    }
 
-    // // ATOM <~ *
-    // // --------- fast erase
-    // // nothing
-    // if fast_erase(self, def, ptr, target.clone()) {
-    //   return;
-    // }
+    // ATOM <~ *
+    // --------- fast erase
+    // nothing
+    if fast_erase(self, def, ptr, target.clone()) {
+      return;
+    }
 
     self.make(def, ptr, target);
   }
@@ -924,7 +930,7 @@ type JitFunction = unsafe extern "C" fn(JitNet, JitBook, JitPtr, JitPtr) -> u8;
 impl Program {
   /// Compile the program into a JIT function.
   pub fn compile_function(&self, function: Function) -> JitFunction {
-    println!("LOG: Compiling function: {}", function.name);
+    dprintln!("Compiling function: {}", function.name);
     let function = self.lowering.borrow_mut().translate(self, function);
     unsafe { std::mem::transmute(function) }
   }
