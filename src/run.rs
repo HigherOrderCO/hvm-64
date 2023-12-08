@@ -348,6 +348,11 @@ impl Rewrites {
     target.dref.fetch_add(self.dref, Relaxed);
     target.oper.fetch_add(self.oper, Relaxed);
   }
+
+  // Total rewrite count.
+  pub fn total(&self) -> usize {
+    return self.anni + self.comm + self.eras + self.dref + self.oper;
+  }
 }
 
 /// Rewrite counter, atomic.
@@ -399,6 +404,7 @@ pub struct Net<'a> {
   pub rdex: Vec<(Ptr, Ptr)>, // redexes
   pub locs: Vec<Loc>,
   pub rwts: Rewrites, // rewrite count
+  pub quik: Rewrites, // quick rewrite count
   pub root: Loc,
 }
 
@@ -411,17 +417,21 @@ impl<'a> Net<'a> {
 
   // Creates an empty net with a given heap.
   pub fn new_with_root(heap: Heap<'a>, root: Loc) -> Self {
-    Net { tid: 0, tids: 1, heap, rdex: vec![], locs: vec![Loc::NULL; 1 << 16], rwts: Rewrites::default(), root }
+    Net {
+      tid: 0,
+      tids: 1,
+      heap,
+      rdex: vec![],
+      locs: vec![Loc::NULL; 1 << 16],
+      rwts: Rewrites::default(),
+      quik: Rewrites::default(),
+      root,
+    }
   }
 
   // Creates a net and boots from a REF.
   pub fn boot(&mut self, def: &Def) {
     self.root.target().store(Ptr::new_ref(def));
-  }
-
-  // Total rewrite count.
-  pub fn rewrites(&self) -> usize {
-    return self.rwts.anni + self.rwts.comm + self.rwts.eras + self.rwts.dref + self.rwts.oper;
   }
 
   #[inline(always)]
@@ -871,6 +881,7 @@ impl<'a> Net<'a> {
       tick: usize,                  // current tick
       net: Net<'a>,                 // thread's own net object
       delta: &'a AtomicRewrites,    // global delta rewrites
+      quick: &'a AtomicRewrites,    // global delta rewrites
       share: &'a Vec<(APtr, APtr)>, // global share buffer
       rlens: &'a Vec<AtomicUsize>,  // global redex lengths
       total: &'a AtomicUsize,       // total redex length
@@ -882,6 +893,7 @@ impl<'a> Net<'a> {
     let tlog2 = cores.ilog2() as usize;
     let tids = 1 << tlog2;
     let delta = AtomicRewrites::default(); // delta rewrite counter
+    let quick = AtomicRewrites::default(); // quick rewrite counter
     let rlens = (0 .. tids).map(|_| AtomicUsize::new(0)).collect::<Vec<_>>();
     let share =
       (0 .. SHARE_LIMIT * tids).map(|_| (APtr(AtomicU64::new(0)), APtr(AtomicU64::new(0)))).collect::<Vec<_>>();
@@ -898,6 +910,7 @@ impl<'a> Net<'a> {
           net: self.fork(tid, tids),
           tlog2,
           delta: &delta,
+          quick: &quick,
           share: &share,
           rlens: &rlens,
           total: &total,
@@ -910,6 +923,7 @@ impl<'a> Net<'a> {
     // Clear redexes and sum stats
     self.rdex.clear();
     delta.add_to(&mut self.rwts);
+    quick.add_to(&mut self.quik);
 
     // Main reduction loop
     #[inline(always)]
@@ -922,6 +936,7 @@ impl<'a> Net<'a> {
         }
       }
       ctx.net.rwts.add_to(ctx.delta);
+      ctx.net.quik.add_to(ctx.quick);
     }
 
     // Reduce redexes locally, then share with target

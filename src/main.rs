@@ -47,9 +47,10 @@ fn cli_main() {
         } else {
           net.parallel_normal();
         }
+        let elapsed = start_time.elapsed();
         println!("{}", ast::show_net(&host.readback(&net)));
         if opts.contains("-s") {
-          print_stats(&net, start_time);
+          print_stats(&net, elapsed);
         }
       } else {
         println!("Usage: hvmc run <file.hvmc> [-s]");
@@ -67,9 +68,10 @@ fn cli_main() {
       } else {
         net.parallel_normal();
       }
+      let elapsed = start_time.elapsed();
       println!("{}", ast::show_net(&host.readback(&net)));
       if opts.contains("-s") {
-        print_stats(&net, start_time);
+        print_stats(&net, elapsed);
       }
     }
     "compile" => {
@@ -105,15 +107,21 @@ fn cli_main() {
   }
 }
 
-fn print_stats(net: &run::Net, start_time: std::time::Instant) {
-  println!("RWTS   : {}", net.rewrites());
+fn print_stats(net: &run::Net, elapsed: std::time::Duration) {
+  println!("RWTS   : {}", net.rwts.total());
   println!("- ANNI : {}", net.rwts.anni);
   println!("- COMM : {}", net.rwts.comm);
   println!("- ERAS : {}", net.rwts.eras);
   println!("- DREF : {}", net.rwts.dref);
   println!("- OPER : {}", net.rwts.oper);
-  println!("TIME   : {:.3} s", (start_time.elapsed().as_millis() as f64) / 1000.0);
-  println!("RPS    : {:.3} m", (net.rewrites() as f64) / (start_time.elapsed().as_millis() as f64) / 1000.0);
+  println!("QUIK   : {}", net.quik.total());
+  println!("- ANNI : {}", net.quik.anni);
+  println!("- COMM : {}", net.quik.comm);
+  println!("- ERAS : {}", net.quik.eras);
+  println!("- DREF : {}", net.quik.dref);
+  println!("- OPER : {}", net.quik.oper);
+  println!("TIME   : {:.3} s", (elapsed.as_millis() as f64) / 1000.0);
+  println!("RPS    : {:.3} m", ((net.rwts.total() + net.quik.total()) as f64) / (elapsed.as_millis() as f64) / 1000.0);
 }
 
 // Load file and generate net

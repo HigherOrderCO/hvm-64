@@ -250,11 +250,13 @@ impl<'a> run::Net<'a> {
   pub(crate) fn quick_ctr(&mut self, trg: Trg, lab: Lab) -> (Trg, Trg) {
     let ptr = trg.target();
     if ptr.is_ctr(lab) {
-      self.rwts.anni += 1;
+      self.quik.anni += 1;
       let got = trg.take();
       (Trg::Dir(got.p1()), Trg::Dir(got.p2()))
-    } else if ptr.tag() == Num || ptr.tag() == Ref && lab >= ptr.lab() {
-      (Trg::Ptr(ptr), Trg::Ptr(ptr))
+    // TODO: fast copy?
+    // } else if ptr.tag() == Num || ptr.tag() == Ref && lab >= ptr.lab() {
+    //   self.quik.comm += 1;
+    //   (Trg::Ptr(ptr), Trg::Ptr(ptr))
     } else {
       let loc = self.heap.alloc();
       let n = Ptr::new(Ctr, lab, loc);
@@ -267,7 +269,7 @@ impl<'a> run::Net<'a> {
   pub(crate) fn quick_op2_num(&mut self, trg: Trg, op: Op, b: u64) -> Trg {
     let ptr = trg.target();
     if ptr.tag() == Num {
-      self.rwts.oper += 2;
+      self.quik.oper += 2;
       let got = trg.take();
       Trg::Ptr(Ptr::new_num(op.op(got.num(), b)))
     } else if ptr == Ptr::ERA {
@@ -284,7 +286,7 @@ impl<'a> run::Net<'a> {
   pub(crate) fn quick_op2(&mut self, trg: Trg, op: Op) -> (Trg, Trg) {
     let ptr = trg.target();
     if ptr.tag() == Num {
-      self.rwts.oper += 1;
+      self.quik.oper += 1;
       let got = trg.take();
       let n = Ptr::new(Op1, op as Lab, self.heap.alloc());
       n.p1().target().store(Ptr::new_num(got.num()));
@@ -302,7 +304,7 @@ impl<'a> run::Net<'a> {
   pub(crate) fn quick_op1(&mut self, trg: Trg, op: Op, a: u64) -> Trg {
     let ptr = trg.target();
     if trg.target().tag() == Num {
-      self.rwts.oper += 1;
+      self.quik.oper += 1;
       let got = trg.take();
       Trg::Ptr(Ptr::new_num(op.op(a, got.num())))
     } else if ptr == Ptr::ERA {
@@ -319,7 +321,7 @@ impl<'a> run::Net<'a> {
   pub(crate) fn quick_mat_con_con(&mut self, trg: Trg, out: Trg) -> (Trg, Trg, Trg) {
     let ptr = trg.target();
     if trg.target().tag() == Num {
-      self.rwts.oper += 1;
+      self.quik.oper += 1;
       let num = trg.take().num();
       if num == 0 {
         (out, Trg::Ptr(Ptr::ERA), Trg::Ptr(Ptr::ERA))
@@ -344,7 +346,7 @@ impl<'a> run::Net<'a> {
   pub(crate) fn quick_mat_con<'t, 'l>(&mut self, trg: Trg, out: Trg) -> (Trg, Trg) {
     let ptr = trg.target();
     if trg.target().tag() == Num {
-      self.rwts.oper += 1;
+      self.quik.oper += 1;
       let num = trg.take().num();
       if num == 0 {
         (out, Trg::Ptr(Ptr::ERA))
@@ -370,7 +372,7 @@ impl<'a> run::Net<'a> {
   pub(crate) fn quick_mat<'t, 'l>(&mut self, trg: Trg, out: Trg) -> Trg {
     let ptr = trg.target();
     if trg.target().tag() == Num {
-      self.rwts.oper += 1;
+      self.quik.oper += 1;
       let num = trg.take().num();
       let c1 = Ptr::new(Ctr, 0, self.heap.alloc());
       if num == 0 {

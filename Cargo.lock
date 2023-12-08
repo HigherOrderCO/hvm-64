@@ -371,7 +371,7 @@ dependencies = [
 [[package]]
 name = "hvm-lang"
 version = "0.1.0"
-source = "git+https://github.com/HigherOrderCO/hvm-lang.git#4443d27768fdf1b45d2d1add66e3d297b2e2adf9"
+source = "git+https://github.com/HigherOrderCO/hvm-lang.git#e6861bb942fcf46147c9568145c23bdc1cc41237"
 dependencies = [
  "chumsky",
  "clap",
