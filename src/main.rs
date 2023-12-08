@@ -4,9 +4,7 @@
 #![allow(unused_imports)]
 #![allow(unused_variables)]
 
-mod gen;
-
-use hvmc::{jit::compile_book, *};
+use hvmc::{jit::compile_book, run::Def, *};
 
 use std::{collections::HashSet, env, fs};
 
@@ -49,7 +47,6 @@ fn cli_main() {
         } else {
           net.parallel_normal();
         }
-        print!("normal!");
         println!("{}", ast::show_net(&host.readback(&net)));
         if opts.contains("-s") {
           print_stats(&net, start_time);
@@ -57,6 +54,22 @@ fn cli_main() {
       } else {
         println!("Usage: hvmc run <file.hvmc> [-s]");
         std::process::exit(1);
+      }
+    }
+    "compiled" => {
+      let host: ast::Host = Default::default();
+      let host = hvmc::gen::host();
+      let mut net = run::Net::new(run::Heap::new(&data));
+      net.boot(&host.defs["main"]);
+      let start_time = std::time::Instant::now();
+      if opts.contains("-1") {
+        net.normal();
+      } else {
+        net.parallel_normal();
+      }
+      println!("{}", ast::show_net(&host.readback(&net)));
+      if opts.contains("-s") {
+        print_stats(&net, start_time);
       }
     }
     "compile" => {

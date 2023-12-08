@@ -8,3 +8,5 @@ pub mod ast;
 pub mod jit;
 pub mod ops;
 pub mod run;
+
+pub mod gen;

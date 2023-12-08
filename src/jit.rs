@@ -16,7 +16,7 @@ use std::{
 pub fn compile_book(book: &ast::Book) -> Result<String, fmt::Error> {
   let mut code = Code::default();
 
-  writeln!(code, "use hvmc::{{ast::Host, run::{{*, Tag::*}}, ops::Op::*}};\n")?;
+  writeln!(code, "use crate::{{ast::{{Host, DefRef}}, run::{{*, Tag::*}}, ops::Op::*, jit::*}};\n")?;
 
   writeln!(code, "pub fn host() -> Host {{")?;
   code.indent(|code| {
@@ -24,7 +24,7 @@ pub fn compile_book(book: &ast::Book) -> Result<String, fmt::Error> {
     for (raw_name, net) in book.iter() {
       let name = sanitize_name(raw_name);
       writeln!(code, r##"host.defs.insert(r#"{raw_name}"#.to_owned(), DefRef::Static(&DEF_{name}));"##)?;
-      writeln!(code, r##"host.defs.insert(Ptr::new_ref(&DEF_{name}).loc(), r#"{raw_name}"#.to_owned());"##)?;
+      writeln!(code, r##"host.back.insert(Ptr::new_ref(&DEF_{name}).loc(), r#"{raw_name}"#.to_owned());"##)?;
     }
     writeln!(code, "host")
   })?;
@@ -58,6 +58,7 @@ fn compile_def(code: &mut Code, book: &ast::Book, raw_name: &str, net: &ast::Net
   let name = sanitize_name(raw_name);
   writeln!(code, "pub fn call_{name}(net: &mut Net, rt: Ptr) {{")?;
   code.indent(|code| {
+    code.write_str("let rt = Trg::Ptr(rt);\n")?;
     code.write_str(&state.code.code)?;
     code.write_char('\n')?;
     code.write_str(&state.post.code)
@@ -82,12 +83,12 @@ fn compile_def(code: &mut Code, book: &ast::Book, raw_name: &str, net: &ast::Net
       let n0 = format!("{n}0");
       let n1 = format!("{n}1");
 
-      writeln!(self.code, "let mut {n} = (Lcl::Todo(i), Lcl::Todo(i));")?;
+      writeln!(self.code, "let mut {n} = (Lcl::Todo({i}), Lcl::Todo({i}));")?;
       writeln!(self.code, "let {n0} = Trg::Lcl(&mut {n}.0);")?;
       writeln!(self.code, "let {n1} = Trg::Lcl(&mut {n}.1);")?;
 
       writeln!(self.post, "let (Lcl::Bound({n0}), Lcl::Bound({n1})) = {n} else {{ unreachable!() }};")?;
-      writeln!(self.post, "net.safe_link(n0, n1);")?;
+      writeln!(self.post, "net.safe_link({n0}, {n1});")?;
 
       Ok((n0, n1))
     }
@@ -111,7 +112,7 @@ fn compile_def(code: &mut Code, book: &ast::Book, raw_name: &str, net: &ast::Net
         }
         Tree::Var { nam } => match self.vars.entry(&nam) {
           Entry::Occupied(e) => {
-            writeln!(self.code, "net.safe_link({}, {trg}", e.remove())?;
+            writeln!(self.code, "net.safe_link({}, {trg});", e.remove())?;
           }
           Entry::Vacant(e) => {
             e.insert(trg);
@@ -165,18 +166,18 @@ fn compile_def(code: &mut Code, book: &ast::Book, raw_name: &str, net: &ast::Net
 }
 
 pub(crate) enum Lcl<'a> {
-  Bound(Trg<'a>),
+  Bound(Trg<'a, 'a>),
   Todo(usize),
 }
 
 // A target pointer, with implied ownership.
-pub(crate) enum Trg<'a> {
-  Lcl(&'a mut Lcl<'a>),
+pub(crate) enum Trg<'t, 'l> {
+  Lcl(&'t mut Lcl<'l>),
   Dir(Ptr), // we don't own the pointer, so we point to its location
   Ptr(Ptr), // we own the pointer, so we store it directly
 }
 
-impl<'a> Trg<'a> {
+impl<'t, 'l> Trg<'t, 'l> {
   #[inline]
   pub fn target(&self) -> Ptr {
     match self {
@@ -212,7 +213,7 @@ impl<'a> run::Net<'a> {
 
   // Links two targets, using atomics when necessary, based on implied ownership.
   #[inline(always)]
-  pub(crate) fn safe_link<'b>(&mut self, a: Trg<'b>, b: Trg<'b>) {
+  pub(crate) fn safe_link<'t: 'l, 'l>(&mut self, a: Trg<'t, 'l>, b: Trg<'t, 'l>) {
     match (a, b) {
       (Trg::Dir(a_dir), Trg::Dir(b_dir)) => self.atomic_link(a_dir, b_dir),
       (Trg::Dir(a_dir), Trg::Ptr(b_ptr)) => self.half_atomic_link(a_dir, b_ptr),
@@ -230,7 +231,7 @@ impl<'a> run::Net<'a> {
 
   #[inline]
   /// {#lab x y}
-  pub(crate) fn quick_ctr<'b>(&mut self, trg: Trg<'b>, lab: Lab) -> (Trg<'b>, Trg<'b>) {
+  pub(crate) fn quick_ctr(&mut self, trg: Trg, lab: Lab) -> (Trg<'static, 'static>, Trg<'static, 'static>) {
     let ptr = trg.target();
     if ptr.is_ctr(lab) {
       self.rwts.anni += 1;
@@ -246,7 +247,7 @@ impl<'a> run::Net<'a> {
   }
   #[inline]
   /// <op #b x>
-  pub(crate) fn quick_op2_num<'b>(&mut self, trg: Trg<'b>, op: Op, b: u64) -> Trg<'b> {
+  pub(crate) fn quick_op2_num(&mut self, trg: Trg, op: Op, b: u64) -> Trg<'static, 'static> {
     let ptr = trg.target();
     if ptr.tag() == Num {
       self.rwts.oper += 2;
@@ -263,7 +264,7 @@ impl<'a> run::Net<'a> {
   }
   #[inline]
   /// <op x y>
-  pub(crate) fn quick_op2<'b>(&mut self, trg: Trg<'b>, op: Op) -> (Trg<'b>, Trg<'b>) {
+  pub(crate) fn quick_op2(&mut self, trg: Trg, op: Op) -> (Trg<'static, 'static>, Trg<'static, 'static>) {
     let ptr = trg.target();
     if ptr.tag() == Num {
       self.rwts.oper += 1;
@@ -281,7 +282,7 @@ impl<'a> run::Net<'a> {
   }
   #[inline]
   /// <a op x>
-  pub(crate) fn quick_op1<'b>(&mut self, trg: Trg<'b>, op: Op, a: u64) -> Trg<'b> {
+  pub(crate) fn quick_op1(&mut self, trg: Trg, op: Op, a: u64) -> Trg<'static, 'static> {
     let ptr = trg.target();
     if trg.target().tag() == Num {
       self.rwts.oper += 1;
@@ -298,7 +299,11 @@ impl<'a> run::Net<'a> {
   }
   #[inline]
   /// ?<(x (y z)) out>
-  pub(crate) fn quick_mat_con_con<'b>(&mut self, trg: Trg<'b>, out: Trg<'b>) -> (Trg<'b>, Trg<'b>, Trg<'b>) {
+  pub(crate) fn quick_mat_con_con<'t, 'l>(
+    &mut self,
+    trg: Trg<'t, 'l>,
+    out: Trg<'t, 'l>,
+  ) -> (Trg<'t, 'l>, Trg<'static, 'static>, Trg<'t, 'l>) {
     let ptr = trg.target();
     if trg.target().tag() == Num {
       self.rwts.oper += 1;
@@ -323,7 +328,7 @@ impl<'a> run::Net<'a> {
   }
   #[inline]
   /// ?<(x y) out>
-  pub(crate) fn quick_mat_con<'b>(&mut self, trg: Trg<'b>, out: Trg<'b>) -> (Trg<'b>, Trg<'b>) {
+  pub(crate) fn quick_mat_con<'t, 'l>(&mut self, trg: Trg, out: Trg<'t, 'l>) -> (Trg<'t, 'l>, Trg<'t, 'l>) {
     let ptr = trg.target();
     if trg.target().tag() == Num {
       self.rwts.oper += 1;
@@ -349,7 +354,7 @@ impl<'a> run::Net<'a> {
   }
   #[inline]
   /// ?<x out>
-  pub(crate) fn quick_mat<'b>(&mut self, trg: Trg<'b>, out: Trg<'b>) -> Trg<'b> {
+  pub(crate) fn quick_mat<'t, 'l>(&mut self, trg: Trg, out: Trg<'t, 'l>) -> Trg<'t, 'l> {
     let ptr = trg.target();
     if trg.target().tag() == Num {
       self.rwts.oper += 1;
@@ -376,7 +381,7 @@ impl<'a> run::Net<'a> {
     }
   }
   #[inline(always)]
-  pub(crate) fn make<'b>(&mut self, tag: Tag, lab: Lab, x: Trg<'b>, y: Trg<'b>) -> Trg<'b> {
+  pub(crate) fn make(&mut self, tag: Tag, lab: Lab, x: Trg, y: Trg) -> Trg<'static, 'static> {
     let n = Ptr::new(tag, lab, self.heap.alloc());
     self.half_safe_link(x, n.p1());
     self.half_safe_link(y, n.p2());
