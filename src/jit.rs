@@ -14,6 +14,15 @@ use Instr::SetHeap;
 use crate::ast;
 use crate::run::{self, Book, CallNative, Def, Ptr, Val};
 
+macro_rules! dprintln {
+  () => {
+    println!();
+  };
+  ($($arg:tt)*) => {{
+    println!($( $arg )*);
+  }};
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TypeRepr {
   HvmPtr,
@@ -947,7 +956,7 @@ impl JitLowering {
     signature.params.push(AbiParam::new(types::I32)); // argument
     signature.returns.push(AbiParam::new(types::I32));
 
-    let mut lowering = FunctionLowering {
+    let mut trans = FunctionLowering {
       program,
       builder: FunctionBuilder::new(&mut self.ctx.func, &mut self.builder_context),
       variables: HashMap::new(),
@@ -955,37 +964,39 @@ impl JitLowering {
       index: 0,
     };
 
-    let environment = lowering.declare_variable(types::I64, "environment");
-    let book = lowering.declare_variable(types::I64, "book");
-    let ptr = lowering.declare_variable(types::I32, "ptr");
-    let argument = lowering.declare_variable(types::I32, "argument");
+    let environment = trans.declare_variable(types::I64, "environment");
+    let book = trans.declare_variable(types::I64, "book");
+    let ptr = trans.declare_variable(types::I32, "ptr");
+    let argument = trans.declare_variable(types::I32, "argument");
 
-    lowering.variables.insert("environment".into(), environment);
-    lowering.variables.insert("book".into(), book);
-    lowering.variables.insert("ptr".into(), ptr);
-    lowering.variables.insert("argument".into(), argument);
+    trans.variables.insert("environment".into(), environment);
+    trans.variables.insert("book".into(), book);
+    trans.variables.insert("ptr".into(), ptr);
+    trans.variables.insert("argument".into(), argument);
 
-    let entry_block = lowering.builder.create_block();
+    let entry_block = trans.builder.create_block();
     let mut return_value = None;
-    lowering
+    trans
       .builder
       .append_block_params_for_function_params(entry_block);
-    lowering.builder.switch_to_block(entry_block);
-    lowering.builder.seal_block(entry_block);
+    trans.builder.switch_to_block(entry_block);
+    trans.builder.seal_block(entry_block);
     for instr in function.body {
-      return_value = lowering.lower_instr(instr);
+      return_value = trans.lower_instr(instr);
     }
 
     if let Some(return_value) = return_value {
-      lowering.builder.ins().return_(&[return_value]);
+      trans.builder.ins().return_(&[return_value]);
     }
 
-    lowering.builder.finalize();
+    trans.builder.finalize();
 
     let function = self
       .module
       .declare_function(&function.name, Linkage::Export, &self.ctx.func.signature)
       .expect("Can't create new function");
+
+    dprintln!("Function: {}", self.ctx.func);
 
     self
       .module
@@ -1003,8 +1014,14 @@ impl Program {
     match constant {
       Const::F(name) => {
         let constant = self.values.iter().find(|i| i.name == name);
+        dprintln!("Constant: {:?}", name);
         constant.expect("Can't find value for const").value as i64
       }
+      Const::EQ => crate::run::EQ as i64,
+      Const::NE => crate::run::NE as i64,
+      Const::LT => crate::run::LT as i64,
+      Const::GT => crate::run::GT as i64,
+      Const::OR => crate::run::OR as i64,
       Const::P1 => crate::run::P1 as i64,
       Const::P2 => crate::run::P2 as i64,
       Const::NULL => crate::run::NULL.0 as i64,
@@ -1032,12 +1049,7 @@ impl Program {
       Const::MUL => crate::run::MUL as i64,
       Const::DIV => crate::run::DIV as i64,
       Const::MOD => crate::run::MOD as i64,
-      Const::EQ => crate::run::EQ as i64,
-      Const::NE => crate::run::NE as i64,
-      Const::LT => crate::run::LT as i64,
-      Const::GT => crate::run::GT as i64,
       Const::AND => crate::run::AND as i64,
-      Const::OR => crate::run::OR as i64,
       Const::XOR => crate::run::XOR as i64,
       Const::NOT => crate::run::NOT as i64,
       Const::RSH => crate::run::RSH as i64,
