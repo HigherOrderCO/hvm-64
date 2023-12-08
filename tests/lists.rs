@@ -1,5 +1,5 @@
 use crate::loaders::*;
-use hvm_lang::term::Book;
+use hvml::term::Book;
 use insta::assert_debug_snapshot;
 
 mod loaders;

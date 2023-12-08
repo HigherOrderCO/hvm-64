@@ -7,30 +7,45 @@ use std::{
   time::Duration,
 };
 
+struct NetWithData<'a> (
+  pub run::Net<'a>,
+  Box<[(run::APtr, run::APtr)]>,
+);
+
+impl NetWithData<'_> {
+  fn new(size: usize) -> Self {
+    let data = Box::leak(run::Heap::init(size));
+    let boxed = unsafe { Box::from_raw(data) };
+    let mut net = run::Net::new(data);
+    net.boot(name_to_val("main"));
+    NetWithData(net, boxed)
+  }
+}
+
 // Loads file and generate net from hvm-core syntax
-fn load_from_core<P: AsRef<Path>>(file: P) -> (run::Book, run::Net) {
+fn load_from_core<'a, P: AsRef<Path>>(file: P) -> (run::Book, NetWithData<'a>) {
   let code = fs::read_to_string(file).unwrap();
   let (size, code) = extract_size(&code);
 
   let book = ast::do_parse_book(code);
   let rbook = ast::book_to_runtime(&book);
 
-  let mut net = run::Net::new(size);
-  net.boot(name_to_val("main"));
+  let mut net = NetWithData::new(size);
+  net.0.boot(name_to_val("main"));
   (rbook, net)
 }
 
 // Loads file and generate net from hvm-lang syntax
-fn load_from_lang<P: AsRef<Path>>(file: P) -> (run::Book, run::Net) {
+fn load_from_lang<'a, P: AsRef<Path>>(file: P) -> (run::Book, NetWithData<'a>) {
   let code = fs::read_to_string(file).unwrap();
   let (size, code) = extract_size(&code);
 
-  let mut book = hvm_lang::term::parser::parse_definition_book(&code).unwrap();
-  let (book, _) = hvm_lang::compile_book(&mut book).unwrap();
+  let mut book = hvml::term::parser::parse_definition_book(&code).unwrap();
+  let book = hvml::compile_book(&mut book, hvml::OptimizationLevel::Heavy).unwrap().core_book;
   let book = ast::book_to_runtime(&book);
 
-  let mut net = run::Net::new(size);
-  net.boot(name_to_val("main"));
+  let mut net = NetWithData::new(size);
+  net.0.boot(name_to_val("main"));
   (book, net)
 }
 
@@ -76,14 +91,6 @@ fn run_dir(path: &PathBuf, group: Option<String>, c: &mut Criterion) {
 }
 
 fn run_file(path: &PathBuf, mut group: Option<String>, c: &mut Criterion) {
-  let (book, net) = match path.extension().and_then(OsStr::to_str) {
-    Some("hvmc") => load_from_core(path),
-    Some("hvm") => load_from_lang(path),
-    _ => panic!("invalid file found: {}", path.to_string_lossy()),
-  };
-
-  let file_name = path.file_stem().unwrap().to_string_lossy();
-
   if cfg!(feature = "cuda") {
     group = Some(match group {
       Some(group) => format!("cuda/{group}"),
@@ -92,29 +99,43 @@ fn run_file(path: &PathBuf, mut group: Option<String>, c: &mut Criterion) {
   };
 
   match group {
-    Some(group) => benchmark_group(&file_name, group, book, net, c),
-    None => benchmark(&file_name, book, net, c),
+    Some(group) => benchmark_group(path, group, c),
+    None => benchmark(path, c),
   }
 }
 
-fn benchmark(file_name: &str, book: run::Book, net: run::Net, c: &mut Criterion) {
-  c.bench_function(file_name, |b| {
+fn benchmark(path: &PathBuf, c: &mut Criterion) {
+  let file_name = path.file_stem().unwrap().to_string_lossy();
+  c.bench_function(&file_name, |b| {
     b.iter_batched(
-      || net.clone(),
-      |net| black_box(black_box(net).normal(black_box(&book))),
-      criterion::BatchSize::SmallInput,
+      || {
+        match path.extension().and_then(OsStr::to_str) {
+          Some("hvmc") => load_from_core(path),
+          Some("hvm") => load_from_lang(path),
+          _ => panic!("invalid file found: {}", path.to_string_lossy()),
+        }
+      },
+      |(book, net)| black_box(black_box(net.0).normal(black_box(&book))),
+      criterion::BatchSize::PerIteration,
     );
   });
 }
 
 #[allow(unused_variables)]
-fn benchmark_group(file_name: &str, group: String, book: run::Book, net: run::Net, c: &mut Criterion) {
+fn benchmark_group(path: &PathBuf, group: String, c: &mut Criterion) {
+  let file_name = path.file_stem().unwrap().to_string_lossy();
   #[cfg(not(feature = "cuda"))]
   c.benchmark_group(group).bench_function(file_name, |b| {
     b.iter_batched(
-      || net.clone(),
-      |net| black_box(black_box(net).normal(black_box(&book))),
-      criterion::BatchSize::SmallInput,
+      || {
+        match path.extension().and_then(OsStr::to_str) {
+          Some("hvmc") => load_from_core(path),
+          Some("hvm") => load_from_lang(path),
+          _ => panic!("invalid file found: {}", path.to_string_lossy()),
+        }
+      },
+      |(book, net)| black_box(black_box(net.0).normal(black_box(&book))),
+      criterion::BatchSize::PerIteration,
     );
   });
 
@@ -152,21 +173,23 @@ fn interact_benchmark(c: &mut Criterion) {
 
   let cases = [
     ("era-era", (Era, Era)),
-    ("era-con", (Era, Ctr { lab: 0, lft: Era.into(), rgt: Era.into() })),
-    ("con-con", ((Ctr { lab: 0, lft: Era.into(), rgt: Era.into() }), Ctr { lab: 0, lft: Era.into(), rgt: Era.into() })),
-    ("con-dup", ((Ctr { lab: 0, lft: Era.into(), rgt: Era.into() }), Ctr { lab: 2, lft: Era.into(), rgt: Era.into() })),
+    ("era-con", (Era, Con { lft: Era.into(), rgt: Era.into() })),
+    ("con-con", ((Con { lft: Era.into(), rgt: Era.into() }), Con { lft: Era.into(), rgt: Era.into() })),
+    ("con-dup", ((Con { lft: Era.into(), rgt: Era.into() }), Dup { lab: 2, lft: Era.into(), rgt: Era.into() })),
   ];
 
   for (name, redex) in cases {
-    let mut net = run::Net::new(10);
-    let book = run::Book::new();
-    ast::net_to_runtime(&mut net, &ast::Net { root: Era, rdex: vec![redex] });
-    let (rdx_a, rdx_b) = net.rdex[0];
     group.bench_function(name, |b| {
       b.iter_batched(
-        || net.clone(),
-        |net| black_box(black_box(net).interact(black_box(&book), black_box(rdx_a), black_box(rdx_b))),
-        criterion::BatchSize::SmallInput,
+        || {
+          let mut net = NetWithData::new(1 << 4);
+          let book = run::Book::new();
+          ast::net_to_runtime(&mut net.0, &ast::Net { root: Era, rdex: vec![redex.clone()] });
+          let (rdx_a, rdx_b) = net.0.rdex[0];
+          (book, net, rdx_a, rdx_b)
+        },
+        |(book, net, rdx_a, rdx_b)| black_box(black_box(net.0).interact(black_box(&book), black_box(rdx_a), black_box(rdx_b))),
+        criterion::BatchSize::PerIteration,
       );
     });
   }
@@ -178,7 +201,7 @@ criterion_group! {
     .measurement_time(Duration::from_millis(1000))
     .warm_up_time(Duration::from_millis(500));
   targets =
-    run_programs_dir,
+    // run_programs_dir,
     interact_benchmark,
 }
 criterion_main!(benches);

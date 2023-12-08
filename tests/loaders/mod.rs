@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use hvm_lang::term::{parser, DefId, Book as DefinitionBook};
+use hvml::term::{parser, DefId, Book as DefinitionBook};
 use hvmc::{ast::*, run};
 use std::{collections::HashMap, fs};
 
@@ -34,22 +34,23 @@ pub fn replace_template(mut code: String, map: &[(&str, &str)]) -> String {
 }
 
 pub fn hvm_lang_readback(net: &Net, book: &DefinitionBook, id_map: HashMap<run::Val, DefId>) -> (String, bool) {
-  let net = hvm_lang::net::hvmc_to_net::hvmc_to_net(net, &|val| id_map[&val]);
-  let (res_term, valid_readback) = hvm_lang::term::net_to_term::net_to_term_non_linear(&net, book);
+  let net = hvml::net::hvmc_to_net::hvmc_to_net(net, &|val| id_map[&val]);
+  let (res_term, readback_errs) = hvml::term::net_to_term::net_to_term(&net, book, &Default::default(), false);
 
-  (res_term.to_string(&book.def_names), valid_readback)
+  (res_term.clone().display(&book.def_names).to_string(), readback_errs.is_empty())
 }
 
-pub fn hvm_lang_normal(book: &mut DefinitionBook, size: usize) -> (run::Net, Net, HashMap<run::Val, DefId>) {
-  let (compiled, id_map) = hvm_lang::compile_book(book).unwrap();
-  let (root, res_lnet) = normal(compiled, size);
-  (root, res_lnet, id_map)
+pub fn hvm_lang_normal<'a>(book: &mut DefinitionBook, size: usize) -> (run::Net<'a>, Net, HashMap<run::Val, DefId>) {
+  let result = hvml::compile_book(book).unwrap();
+  let (root, res_lnet) = normal(result.core_book, size);
+  (root, res_lnet, result.hvmc_names.hvmc_name_to_id)
 }
 
 #[allow(unused_variables)]
-pub fn normal(book: Book, size: usize) -> (run::Net, Net) {
-  fn normal_cpu(book: run::Book, size: usize) -> run::Net {
-    let mut rnet = run::Net::new(size);
+pub fn normal(book: Book, size: usize) -> (run::Net<'static>, Net) {
+  fn normal_cpu(book: run::Book, size: usize) -> run::Net<'static> {
+    let data = Box::leak(run::Heap::init(size));
+    let mut rnet = run::Net::new(data);
     rnet.boot(name_to_val("main"));
     rnet.normal(&book);
     rnet

@@ -41,7 +41,7 @@ fn test_bool_and() {
   );
   let (rnet, net) = normal(book, 64);
 
-  assert_snapshot!(show_net(&net), @"(* (b b))");
+  assert_snapshot!(show_net(&net), @"(* (a a))");
   assert_debug_snapshot!(rnet.rewrites(), @"9");
 }
 
@@ -64,9 +64,9 @@ fn test_tree_alloc() {
   let (readback, valid_readback) = hvm_lang_readback(&net, &book, id_map);
 
   assert!(valid_readback);
-  assert_snapshot!(show_net(&net), @"(b (* b))");
+  assert_snapshot!(show_net(&net), @"(a (* a))");
   assert_snapshot!(readback, @"λa λ* a");
-  assert_debug_snapshot!(rnet.rewrites(), @"104");
+  assert_debug_snapshot!(rnet.rewrites(), @"100");
 }
 
 #[test]

@@ -16,7 +16,7 @@ fn load_core(file: &str) -> hvmc::ast::Book {
 }
 
 // Loads file and generate DefinitionBook from hvm-lang syntax
-pub fn load_lang(file: &str) -> hvm_lang::term::Book {
+pub fn load_lang(file: &str) -> hvml::term::Book {
   let code = load_bench(file);
   parse_lang(&code)
 }
@@ -93,13 +93,13 @@ fn test_neg_fusion() {
   let (readback, valid_readback) = hvm_lang_readback(&net, &book, id_map);
 
   assert!(valid_readback);
-  assert_snapshot!(show_net(&net), @"(b (* b))");
+  assert_snapshot!(show_net(&net), @"(a (* a))");
   assert_snapshot!(readback, @"λa λ* a");
 
   // TODO: investigate why this difference exists
   if cfg!(feature = "cuda") {
     assert_debug_snapshot!(rnet.rewrites(), @"160");
   } else {
-    assert_debug_snapshot!(rnet.rewrites(), @"153");
+    assert_debug_snapshot!(rnet.rewrites(), @"148");
   }
 }
