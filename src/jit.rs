@@ -454,48 +454,48 @@ impl Lowering<'_> {
   ///
   /// This function basically concentrates all the optimizations
   fn burn(&mut self, def: &Def, ptr: Ptr, target: Expr) {
-    // (<?(ifz ifs) ret> ret) ~ (#X R)
-    // ------------------------------- fast match
-    // if X == 0:
-    //   ifz ~ R
-    //   ifs ~ *
-    // else:
-    //   ifz ~ *
-    //   ifs ~ (#(X-1) R)
-    // When ifs is REF, tail-call optimization is applied.
-    if fast_match(self, def, ptr, target.clone()) {
-      return;
-    }
+    // // (<?(ifz ifs) ret> ret) ~ (#X R)
+    // // ------------------------------- fast match
+    // // if X == 0:
+    // //   ifz ~ R
+    // //   ifs ~ *
+    // // else:
+    // //   ifz ~ *
+    // //   ifs ~ (#(X-1) R)
+    // // When ifs is REF, tail-call optimization is applied.
+    // if fast_match(self, def, ptr, target.clone()) {
+    //   return;
+    // }
 
-    // <x <y r>> ~ #N
-    // --------------------- fast op
-    // r <~ #(op(op(N,x),y))
-    if fast_op(self, def, ptr, target.clone()) {
-      return;
-    }
+    // // <x <y r>> ~ #N
+    // // --------------------- fast op
+    // // r <~ #(op(op(N,x),y))
+    // if fast_op(self, def, ptr, target.clone()) {
+    //   return;
+    // }
 
-    // {p1 p2} <~ #N
-    // ------------- fast copy
-    // p1 <~ #N
-    // p2 <~ #N
-    if fast_copy(self, def, ptr, target.clone()) {
-      return;
-    }
+    // // {p1 p2} <~ #N
+    // // ------------- fast copy
+    // // p1 <~ #N
+    // // p2 <~ #N
+    // if fast_copy(self, def, ptr, target.clone()) {
+    //   return;
+    // }
 
-    // (p1 p2) <~ (x1 x2)
-    // ------------------ fast apply
-    // p1 <~ x1
-    // p2 <~ x2
-    if fast_apply(self, def, ptr, target.clone()) {
-      return;
-    }
+    // // (p1 p2) <~ (x1 x2)
+    // // ------------------ fast apply
+    // // p1 <~ x1
+    // // p2 <~ x2
+    // if fast_apply(self, def, ptr, target.clone()) {
+    //   return;
+    // }
 
-    // ATOM <~ *
-    // --------- fast erase
-    // nothing
-    if fast_erase(self, def, ptr, target.clone()) {
-      return;
-    }
+    // // ATOM <~ *
+    // // --------- fast erase
+    // // nothing
+    // if fast_erase(self, def, ptr, target.clone()) {
+    //   return;
+    // }
 
     self.make(def, ptr, target);
   }
@@ -880,7 +880,31 @@ impl Default for JitLowering {
     let isa = isa_builder
       .finish(settings::Flags::new(flag_builder))
       .unwrap();
-    let builder = JITBuilder::with_isa(isa, cranelift_module::default_libcall_names());
+    let mut builder = JITBuilder::with_isa(isa, cranelift_module::default_libcall_names());
+    unsafe {
+      use crate::exe::*;
+      use std::mem::transmute;
+
+      builder.symbol("VAL", transmute::<_, *mut u8>(VAL as unsafe extern "C" fn(_) -> _));
+      builder.symbol("TAG", transmute::<_, *mut u8>(TAG as unsafe extern "C" fn(_) -> _));
+      builder.symbol("IS_NUM", transmute::<_, *mut u8>(IS_NUM as unsafe extern "C" fn(_) -> _));
+      builder.symbol("IS_SKP", transmute::<_, *mut u8>(IS_SKP as unsafe extern "C" fn(_) -> _));
+      builder.symbol("NEW_PTR", transmute::<_, *mut u8>(NEW_PTR as unsafe extern "C" fn(_, _) -> _));
+      builder.symbol("ALLOC", transmute::<_, *mut u8>(ALLOC as unsafe extern "C" fn(_, _) -> _));
+      builder.symbol("OP", transmute::<_, *mut u8>(OP as unsafe extern "C" fn(_, _, _) -> _));
+      builder.symbol("GET_HEAP", transmute::<_, *mut u8>(GET_HEAP as unsafe extern "C" fn(_, _, _) -> _));
+      builder.symbol("SET_HEAP", transmute::<_, *mut u8>(SET_HEAP as unsafe extern "C" fn(_, _, _, _) -> _));
+      builder.symbol("LINK", transmute::<_, *mut u8>(LINK as unsafe extern "C" fn(_, _, _) -> _));
+      builder.symbol("FREE", transmute::<_, *mut u8>(FREE as unsafe extern "C" fn(_, _) -> _));
+      builder.symbol("GET_ANNI", transmute::<_, *mut u8>(GET_ANNI as unsafe extern "C" fn(_) -> _));
+      builder.symbol("SET_ANNI", transmute::<_, *mut u8>(SET_ANNI as unsafe extern "C" fn(_, _) -> _));
+      builder.symbol("GET_OPER", transmute::<_, *mut u8>(GET_OPER as unsafe extern "C" fn(_) -> _));
+      builder.symbol("SET_OPER", transmute::<_, *mut u8>(SET_OPER as unsafe extern "C" fn(_, _) -> _));
+      builder.symbol("GET_ERAS", transmute::<_, *mut u8>(GET_ERAS as unsafe extern "C" fn(_) -> _));
+      builder.symbol("SET_ERAS", transmute::<_, *mut u8>(SET_ERAS as unsafe extern "C" fn(_, _) -> _));
+      builder.symbol("GET_COMM", transmute::<_, *mut u8>(GET_COMM as unsafe extern "C" fn(_) -> _));
+      builder.symbol("SET_COMM", transmute::<_, *mut u8>(SET_COMM as unsafe extern "C" fn(_, _) -> _));
+    }
 
     let module = JITModule::new(builder);
     Self {
@@ -959,6 +983,7 @@ impl JitLowering {
       self.ctx.func.signature.params.push(AbiParam::new(*argument_type));
     }
 
+    let mut return_value = None;
     let mut trans = FunctionLowering {
       program,
       builder: FunctionBuilder::new(&mut self.ctx.func, &mut self.builder_context),
@@ -966,13 +991,11 @@ impl JitLowering {
       module: &mut self.module,
       index: 0,
     };
-
     let bb = trans.builder.create_block();
-    let mut return_value = None;
-
     trans.builder.append_block_params_for_function_params(bb);
     trans.builder.switch_to_block(bb);
     trans.builder.seal_block(bb);
+
     trans.create_parameter(bb, 0, "environment", types::I64);
     trans.create_parameter(bb, 1, "book", types::I64);
     trans.create_parameter(bb, 2, "ptr", types::I32);
@@ -991,8 +1014,6 @@ impl JitLowering {
       .module
       .declare_function(&function.name, Linkage::Export, &self.ctx.func.signature)
       .expect("Can't create new function");
-
-    dprintln!("Function: {}", self.ctx.func);
 
     self
       .module
@@ -1139,6 +1160,7 @@ impl FunctionLowering<'_, '_> {
       Var::Eras => self.GET_ERAS(environment),
       Var::Comm => self.GET_COMM(environment),
       Var::Var(var) => {
+        dprintln!("VAR: {}", var);
         let variable = self.variables.get(&var).unwrap();
         self.builder.use_var(*variable)
       }
