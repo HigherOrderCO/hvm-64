@@ -15,20 +15,20 @@ fn main() {
 }
 
 fn bare_main() {
-  let args: Vec<String> = env::args().collect();
-  let opts = args.iter().skip(3).map(|s| s.as_str()).collect::<HashSet<_>>();
-  let book = run::Book::new();
-  let data = run::Heap::init(1 << 28);
-  let mut net = run::Net::new(&data);
-  net.boot(ast::name_to_val("main"));
-  let start_time = std::time::Instant::now();
-  if opts.contains("-1") {
-    net.normal(&book);
-  } else {
-    net.parallel_normal(&book);
-  }
-  println!("{}", ast::show_runtime_net(&net));
-  print_stats(&net, start_time);
+  // let args: Vec<String> = env::args().collect();
+  // let opts = args.iter().skip(3).map(|s| s.as_str()).collect::<HashSet<_>>();
+  // let book = run::Book::new();
+  // let data = run::Heap::init(1 << 28);
+  // let mut net = run::Net::new(&data);
+  // net.boot(ast::name_to_val("main"));
+  // let start_time = std::time::Instant::now();
+  // if opts.contains("-1") {
+  //   net.normal();
+  // } else {
+  //   net.parallel_normal();
+  // }
+  // println!("{}", ast::show_runtime_net(&net));
+  // print_stats(&net, start_time);
 }
 
 fn cli_main() {
@@ -136,8 +136,7 @@ fn load<'a>(data: &'a run::Data, file: &str) -> (ast::Runtime, run::Net<'a>) {
 // }
 
 pub fn compile_rust_crate_to_executable(f_name: &str) -> Result<(), std::io::Error> {
-  let output =
-    std::process::Command::new("cargo").current_dir("./.hvm").arg("build").arg("--release").output()?;
+  let output = std::process::Command::new("cargo").current_dir("./.hvm").arg("build").arg("--release").output()?;
   let target = format!("./{}", f_name.replace(".hvmc", ""));
   if std::path::Path::new(&target).exists() {
     fs::remove_file(&target)?;

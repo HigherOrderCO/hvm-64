@@ -202,6 +202,11 @@ impl Ptr {
   }
 
   #[inline(always)]
+  pub fn is_ctr(&self, lab: Lab) -> bool {
+    return self.tag() == Ctr && self.lab() == lab;
+  }
+
+  #[inline(always)]
   pub fn p1(&self) -> Ptr {
     Ptr::new(Var, 0, self.loc().p1())
   }
@@ -270,11 +275,36 @@ impl APtr {
   }
 }
 
+enum Lcl<'a> {
+  Bound(Trg<'a>),
+  Todo(usize),
+}
+
 // A target pointer, with implied ownership.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
-pub enum Trg {
+pub enum Trg<'a> {
+  Lcl(&'a mut Lcl<'a>),
   Dir(Ptr), // we don't own the pointer, so we point to its location
   Ptr(Ptr), // we own the pointer, so we store it directly
+}
+
+impl<'a> Trg<'a> {
+  #[inline]
+  pub fn target(&self) -> Ptr {
+    match self {
+      Trg::Dir(dir) => dir.target().load(),
+      Trg::Ptr(ptr) => *ptr,
+      Trg::Lcl(lcl) => Ptr::NULL,
+    }
+  }
+
+  #[inline]
+  pub fn take(self) -> Ptr {
+    match self {
+      Trg::Dir(dir) => dir.target().swap(Ptr::LOCK),
+      Trg::Ptr(ptr) => ptr,
+      Trg::Lcl(lcl) => Ptr::NULL,
+    }
+  }
 }
 
 impl<'a> Heap<'a> {
@@ -381,7 +411,7 @@ pub struct Def {
 
 #[derive(Clone, Debug)]
 pub enum DefType {
-  Native(fn(&mut Net, Ptr, Ptr)),
+  Native(fn(&mut Net, Ptr)),
   Net(DefNet),
 }
 
@@ -413,15 +443,7 @@ impl<'a> Net<'a> {
 
   // Creates an empty net with a given heap.
   pub fn new_with_root(heap: Heap<'a>, root: Loc) -> Self {
-    Net {
-      tid: 0,
-      tids: 1,
-      heap,
-      rdex: vec![],
-      locs: vec![Loc::NULL; 1 << 16],
-      rwts: Rewrites::default(),
-      root,
-    }
+    Net { tid: 0, tids: 1, heap, rdex: vec![], locs: vec![Loc::NULL; 1 << 16], rwts: Rewrites::default(), root }
   }
 
   // Creates a net and boots from a REF.
@@ -607,12 +629,32 @@ impl<'a> Net<'a> {
 
   // Links two targets, using atomics when necessary, based on implied ownership.
   #[inline(always)]
-  pub fn safe_link(&mut self, a: Trg, b: Trg) {
+  pub fn half_safe_link(&mut self, a: Trg, b: Ptr) {
+    match a {
+      Trg::Dir(a_dir) => self.half_atomic_link(a_dir, b),
+      Trg::Ptr(a_ptr) => self.link(a_ptr, b),
+      Trg::Lcl(Lcl::Bound(_)) => unreachable!(),
+      Trg::Lcl(t) => {
+        *t = Lcl::Bound(Trg::Ptr(b));
+      }
+    }
+  }
+
+  // Links two targets, using atomics when necessary, based on implied ownership.
+  #[inline(always)]
+  pub fn safe_link<'b>(&mut self, a: Trg<'b>, b: Trg<'b>) {
     match (a, b) {
       (Trg::Dir(a_dir), Trg::Dir(b_dir)) => self.atomic_link(a_dir, b_dir),
       (Trg::Dir(a_dir), Trg::Ptr(b_ptr)) => self.half_atomic_link(a_dir, b_ptr),
       (Trg::Ptr(a_ptr), Trg::Dir(b_dir)) => self.half_atomic_link(b_dir, a_ptr),
       (Trg::Ptr(a_ptr), Trg::Ptr(b_ptr)) => self.link(a_ptr, b_ptr),
+      (Trg::Lcl(Lcl::Bound(_)), _) | (_, Trg::Lcl(Lcl::Bound(_))) => unreachable!(),
+      (Trg::Lcl(a), Trg::Lcl(b)) => {
+        let (&Lcl::Todo(an), &Lcl::Todo(bn)) = (&*a, &*b) else { unreachable!() };
+        let (a, b) = if an < bn { (a, b) } else { (b, a) };
+        *b = Lcl::Bound(Trg::Lcl(a));
+      }
+      _ => todo!(), // (Trg::Lcl(t), u) | (u, Trg::Lcl(t)) => *t = Lcl::Bound(u),
     }
   }
 
@@ -768,7 +810,7 @@ impl<'a> Net<'a> {
     // Intercepts with a native function, if available.
     let def = ptr.loc().def();
     let net = match &def.inner {
-      DefType::Native(native) => return native(self, ptr, trg),
+      DefType::Native(native) => return native(self, trg),
       DefType::Net(net) => net,
     };
     let len = net.node.len();
@@ -904,9 +946,8 @@ impl<'a> Net<'a> {
     let tids = 1 << tlog2;
     let delta = AtomicRewrites::default(); // delta rewrite counter
     let rlens = (0 .. tids).map(|_| AtomicUsize::new(0)).collect::<Vec<_>>();
-    let share = (0 .. SHARE_LIMIT * tids)
-      .map(|_| (APtr(AtomicU64::new(0)), APtr(AtomicU64::new(0))))
-      .collect::<Vec<_>>();
+    let share =
+      (0 .. SHARE_LIMIT * tids).map(|_| (APtr(AtomicU64::new(0)), APtr(AtomicU64::new(0)))).collect::<Vec<_>>();
     let total = AtomicUsize::new(0); // sum of redex bag length
     let barry = Arc::new(Barrier::new(tids)); // global barrier
 

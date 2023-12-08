@@ -5,13 +5,13 @@
 // On the runtime, a net is represented by a list of active trees, plus a root tree. The textual
 // syntax reflects this representation. The grammar is specified on this repo's README.
 
-use crate::ops::Op;
-use crate::run::{self, APtr, Def, DefNet, DefType, Lab, Loc, Ptr, Tag};
-use std::collections::BTreeMap;
-use std::collections::{hash_map::Entry, HashMap};
+use crate::{
+  ops::Op,
+  run::{self, APtr, Def, DefNet, DefType, Lab, Loc, Ptr, Tag},
+};
+use std::collections::{hash_map::Entry, BTreeMap, HashMap};
 
-use std::iter::Peekable;
-use std::str::Chars;
+use std::{iter::Peekable, str::Chars};
 
 // AST
 // ---
@@ -37,6 +37,11 @@ pub enum Tree {
   Op2 {
     opr: Op,
     lft: Box<Tree>,
+    rgt: Box<Tree>,
+  },
+  Op1 {
+    opr: Op,
+    lft: u64,
     rgt: Box<Tree>,
   },
   Mat {
@@ -90,10 +95,7 @@ pub fn parse_decimal(chars: &mut Peekable<Chars>) -> Result<u64, String> {
   let mut num: u64 = 0;
   skip(chars);
   if !chars.peek().map_or(false, |c| c.is_digit(10)) {
-    return Err(format!(
-      "Expected a decimal number, found {:?}",
-      chars.peek()
-    ));
+    return Err(format!("Expected a decimal number, found {:?}", chars.peek()));
   }
   while let Some(c) = chars.peek() {
     if !c.is_digit(10) {
@@ -108,14 +110,8 @@ pub fn parse_decimal(chars: &mut Peekable<Chars>) -> Result<u64, String> {
 pub fn parse_name(chars: &mut Peekable<Chars>) -> Result<String, String> {
   let mut txt = String::new();
   skip(chars);
-  if !chars
-    .peek()
-    .map_or(false, |c| c.is_alphanumeric() || *c == '_' || *c == '.')
-  {
-    return Err(format!(
-      "Expected a name character, found {:?}",
-      chars.peek()
-    ));
+  if !chars.peek().map_or(false, |c| c.is_alphanumeric() || *c == '_' || *c == '.') {
+    return Err(format!("Expected a name character, found {:?}", chars.peek()));
   }
   while let Some(c) = chars.peek() {
     if !c.is_alphanumeric() && *c != '_' && *c != '.' {
@@ -183,9 +179,7 @@ pub fn parse_tree(chars: &mut Peekable<Chars>) -> Result<Tree, String> {
     }
     Some('#') => {
       chars.next();
-      Ok(Tree::Num {
-        val: parse_decimal(chars)?,
-      })
+      Ok(Tree::Num { val: parse_decimal(chars)? })
     }
     Some('<') => {
       chars.next();
@@ -203,9 +197,7 @@ pub fn parse_tree(chars: &mut Peekable<Chars>) -> Result<Tree, String> {
       consume(chars, ">")?;
       Ok(Tree::Mat { sel, ret })
     }
-    _ => Ok(Tree::Var {
-      nam: parse_name(chars)?,
-    }),
+    _ => Ok(Tree::Var { nam: parse_name(chars)? }),
   }
 }
 
@@ -299,6 +291,9 @@ pub fn show_tree(tree: &Tree) -> String {
     Tree::Op2 { opr, lft, rgt } => {
       format!("<{} {} {}>", opr, show_tree(&*lft), show_tree(&*rgt))
     }
+    Tree::Op1 { opr, lft, rgt } => {
+      format!("<{}{} {}>", lft, opr, show_tree(&*rgt))
+    }
     Tree::Mat { sel, ret } => {
       format!("?<{} {}>", show_tree(&*sel), show_tree(&*ret))
     }
@@ -326,51 +321,53 @@ pub fn show_book(book: &Book) -> String {
 // ----------------------
 
 #[derive(Debug, Clone)]
+pub enum DefRef {
+  Owned(Box<Def>),
+  Borrowed(&'static Def),
+}
+
+impl std::ops::Deref for DefRef {
+  type Target = Def;
+  fn deref(&self) -> &Def {
+    match self {
+      DefRef::Owned(x) => x,
+      DefRef::Borrowed(x) => x,
+    }
+  }
+}
+
+#[derive(Debug, Clone)]
 pub struct Runtime {
-  pub defs: HashMap<String, Box<Def>>,
+  pub defs: HashMap<String, DefRef>,
   pub back: HashMap<Loc, String>,
 }
 
 impl Runtime {
   pub fn new(book: &Book) -> Runtime {
     let mut defs = calculate_min_safe_labels(book)
-      .map(|(nam, lab)| {
-        (
-          nam.to_owned(),
-          Box::new(Def {
-            lab,
-            inner: DefType::Net(DefNet::default()),
-          }),
-        )
-      })
+      .map(|(nam, lab)| (nam.to_owned(), DefRef::Owned(Box::new(Def { lab, inner: DefType::Net(DefNet::default()) }))))
       .collect::<HashMap<_, _>>();
 
     for (nam, net) in book.iter() {
       let net = net_to_runtime_def(book, &defs, nam, net);
-      defs.get_mut(nam).unwrap().inner = DefType::Net(net);
+      match defs.get_mut(nam).unwrap() {
+        DefRef::Owned(def) => def.inner = DefType::Net(net),
+        DefRef::Borrowed(_) => unreachable!(),
+      }
     }
 
-    let back = defs
-      .iter()
-      .map(|(nam, def)| (Ptr::new_ref(def).loc(), nam.clone()))
-      .collect();
+    let back = defs.iter().map(|(nam, def)| (Ptr::new_ref(def).loc(), nam.clone())).collect();
 
     Runtime { defs, back }
   }
   pub fn readback(&self, rt_net: &run::Net) -> Net {
-    let mut state = State {
-      runtime: self,
-      vars: Default::default(),
-      next_var: 0,
-    };
+    let mut state = State { runtime: self, vars: Default::default(), next_var: 0 };
     let mut net = Net::default();
 
     net.root = state.read_dir(rt_net.root);
 
     for &(a, b) in &rt_net.rdex {
-      net
-        .rdex
-        .push((state.read_ptr(a, None), state.read_ptr(b, None)))
+      net.rdex.push((state.read_ptr(a, None), state.read_ptr(b, None)))
     }
 
     return net;
@@ -398,9 +395,7 @@ impl Runtime {
           },
           Tag::Red => self.read_dir(ptr.loc()),
           Tag::Ref if ptr == Ptr::ERA => Tree::Era,
-          Tag::Ref => Tree::Ref {
-            nam: self.runtime.back[&ptr.loc()].clone(),
-          },
+          Tag::Ref => Tree::Ref { nam: self.runtime.back[&ptr.loc()].clone() },
           Tag::Num => Tree::Num { val: ptr.num() },
           Tag::Op2 | Tag::Op1 => Tree::Op2 {
             opr: ptr.op(),
@@ -412,29 +407,17 @@ impl Runtime {
             lft: Box::new(self.read_dir(ptr.p1().loc())),
             rgt: Box::new(self.read_dir(ptr.p2().loc())),
           },
-          Tag::Mat => Tree::Mat {
-            sel: Box::new(self.read_dir(ptr.p1().loc())),
-            ret: Box::new(self.read_dir(ptr.p2().loc())),
-          },
+          Tag::Mat => {
+            Tree::Mat { sel: Box::new(self.read_dir(ptr.p1().loc())), ret: Box::new(self.read_dir(ptr.p2().loc())) }
+          }
         }
       }
     }
   }
 }
 
-fn net_to_runtime_def(
-  book: &Book,
-  defs: &HashMap<String, Box<Def>>,
-  nam: &str,
-  net: &Net,
-) -> DefNet {
-  let mut state = State {
-    book,
-    defs,
-    scope: Default::default(),
-    nodes: Default::default(),
-    root: Ptr::NULL,
-  };
+fn net_to_runtime_def(book: &Book, defs: &HashMap<String, DefRef>, nam: &str, net: &Net) -> DefNet {
+  let mut state = State { book, defs, scope: Default::default(), nodes: Default::default(), root: Ptr::NULL };
 
   enum Place {
     Ptr(Ptr),
@@ -444,24 +427,16 @@ fn net_to_runtime_def(
 
   state.root = state.visit_tree(&net.root, Some(Ptr::NULL));
 
-  let rdex = net
-    .rdex
-    .iter()
-    .map(|(a, b)| (state.visit_tree(a, None), state.visit_tree(b, None)))
-    .collect();
+  let rdex = net.rdex.iter().map(|(a, b)| (state.visit_tree(a, None), state.visit_tree(b, None))).collect();
 
   assert!(state.scope.is_empty());
 
-  return DefNet {
-    root: state.root,
-    rdex,
-    node: state.nodes,
-  };
+  return DefNet { root: state.root, rdex, node: state.nodes };
 
   #[derive(Debug)]
   struct State<'a> {
     book: &'a Book,
-    defs: &'a HashMap<String, Box<Def>>,
+    defs: &'a HashMap<String, DefRef>,
     scope: HashMap<&'a str, Ptr>,
     nodes: Vec<run::Node>,
     root: Ptr,
@@ -498,6 +473,13 @@ fn net_to_runtime_def(
         }
         Tree::Ctr { lab, lft, rgt } => self.node(Tag::Ctr, *lab, lft, rgt),
         Tree::Op2 { opr, lft, rgt } => self.node(Tag::Op2, *opr as Lab, lft, rgt),
+        Tree::Op1 { opr, lft, rgt } => {
+          let index = self.nodes.len();
+          self.nodes.push(Default::default());
+          self.nodes[index].0 = Ptr::new_num(*lft);
+          self.nodes[index].1 = self.visit_tree(rgt, Some(Ptr::new(Tag::Var, 0, Loc::local(index, 1))));
+          Ptr::new(Tag::Op1, *opr as Lab, Loc::local(index, 0))
+        }
         Tree::Mat { sel, ret } => self.node(Tag::Mat, 0, sel, ret),
       }
     }
@@ -512,10 +494,7 @@ fn net_to_runtime_def(
 }
 
 fn calculate_min_safe_labels<'a>(book: &'a Book) -> impl Iterator<Item = (&'a str, Lab)> {
-  let mut state = State {
-    book,
-    labels: HashMap::with_capacity(book.len()),
-  };
+  let mut state = State { book, labels: HashMap::with_capacity(book.len()) };
 
   for name in book.keys() {
     state.visit_def(name);
@@ -579,6 +558,9 @@ fn calculate_min_safe_labels<'a>(book: &'a Book) -> impl Iterator<Item = (&'a st
         }
         Tree::Op2 { lft, rgt, .. } => {
           self.visit_tree(lft, out);
+          self.visit_tree(rgt, out);
+        }
+        Tree::Op1 { rgt, .. } => {
           self.visit_tree(rgt, out);
         }
         Tree::Mat { sel, ret } => {
