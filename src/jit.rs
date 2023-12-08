@@ -967,13 +967,13 @@ impl JitLowering {
     let bb = trans.builder.create_block();
     let mut return_value = None;
 
+    trans.builder.append_block_params_for_function_params(bb);
+    trans.builder.switch_to_block(bb);
+    trans.builder.seal_block(bb);
     trans.create_parameter(bb, 0, "environment", types::I64);
     trans.create_parameter(bb, 1, "book", types::I64);
     trans.create_parameter(bb, 2, "ptr", types::I32);
     trans.create_parameter(bb, 3, "argument", types::I32);
-    trans.builder.append_block_params_for_function_params(bb);
-    trans.builder.switch_to_block(bb);
-    trans.builder.seal_block(bb);
     for instr in function.body {
       return_value = trans.lower_instr(instr);
     }
