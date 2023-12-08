@@ -317,9 +317,6 @@ pub fn show_book(book: &Book) -> String {
   return result;
 }
 
-// Injection and Readback
-// ----------------------
-
 #[derive(Debug, Clone)]
 pub enum DefRef {
   Owned(Box<Def>),

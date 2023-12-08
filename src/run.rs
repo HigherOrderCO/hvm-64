@@ -302,7 +302,7 @@ impl<'a> Heap<'a> {
     Heap { area: data, next: 0, head: Loc::NULL }
   }
 
-  #[inline]
+  #[inline(always)]
   pub fn half_free(&mut self, loc: Loc) {
     loc.target().store(Ptr::NULL);
     if loc.other().target().load() == Ptr::NULL {
@@ -313,15 +313,7 @@ impl<'a> Heap<'a> {
     }
   }
 
-  #[inline]
-  pub fn free(&mut self, loc: Loc) {
-    let loc = loc.p0();
-    loc.target().store(Ptr::new(Red, 1, self.head));
-    loc.p2().target().store(Ptr::NULL);
-    self.head = loc;
-  }
-
-  #[inline]
+  #[inline(always)]
   pub fn alloc(&mut self) -> Loc {
     if self.head != Loc::NULL {
       let loc = self.head;

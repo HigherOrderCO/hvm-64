@@ -59,7 +59,7 @@ fn cli_main() {
     }
     "compiled" => {
       let host: ast::Host = Default::default();
-      let host = hvmc::gen::host();
+      // let host = hvmc::gen::host();
       let mut net = run::Net::new(run::Heap::new(&data));
       net.boot(&host.defs["main"]);
       let start_time = std::time::Instant::now();
@@ -76,8 +76,8 @@ fn cli_main() {
     }
     "compile" => {
       if let Some(file_name) = f_name {
-        let (book, _, _) = load(&data, file_name);
-        println!("{}", compile_book(&book).unwrap());
+        let (book, host, _) = load(&data, file_name);
+        println!("{}", compile_book(&book, &host).unwrap());
         // compile_book_to_rust_crate(file_name, &book)?;
         // compile_rust_crate_to_executable(file_name)?;
       } else {
