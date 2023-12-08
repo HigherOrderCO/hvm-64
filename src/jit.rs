@@ -955,6 +955,9 @@ impl JitLowering {
       .signature
       .returns
       .push(AbiParam::new(types::I32));
+    for argument_type in &[types::I64, types::I64, types::I32, types::I32] {
+      self.ctx.func.signature.params.push(AbiParam::new(*argument_type));
+    }
 
     let mut trans = FunctionLowering {
       program,
@@ -1107,14 +1110,6 @@ impl FunctionLowering<'_, '_> {
   ]);
 
   fn create_parameter(&mut self, block: Block, idx: usize, name: &str, type_repr: Type) {
-    self
-      .builder
-      .func
-      .signature
-      .params
-      .push(AbiParam::new(type_repr));
-    self.builder.append_block_params_for_function_params(block);
-
     let variable = self.declare_variable(type_repr, &name);
     let value = self.builder.block_params(block)[idx];
     self.variables.insert(name.to_string(), variable);
