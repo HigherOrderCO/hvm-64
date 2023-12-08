@@ -950,7 +950,6 @@ impl JitLowering {
 
   fn translate(&mut self, program: &Program, function: Function) -> *const u8 {
     let signature = &mut self.ctx.func.signature;
-    signature.params.push(AbiParam::new(types::I64)); // net
     signature.params.push(AbiParam::new(types::I64)); // book
     signature.params.push(AbiParam::new(types::I32)); // ptr
     signature.params.push(AbiParam::new(types::I32)); // argument
@@ -1112,6 +1111,14 @@ impl FunctionLowering<'_, '_> {
     GET_COMM (net: types::I64) -> types::I32,
     SET_COMM (net: types::I64, val: types::I32) -> types::I32
   ]);
+
+  fn create_parameter(&mut self, name: &str, type_repr: Type) {
+    self.builder.func.signature.params.push(AbiParam::new(type_repr));
+
+    let variable = self.declare_variable(type_repr, &name);
+    
+    self.variables.insert(name.to_string(), variable);
+  }
 
   fn declare_variable(&mut self, int: types::Type, name: &str) -> Variable {
     let var = Variable::new(self.index);
