@@ -891,25 +891,26 @@ impl Default for JitLowering {
       use crate::exe::*;
       use std::mem::transmute;
 
-      builder.symbol("VAL", transmute::<_, *mut u8>(VAL as unsafe extern "C" fn(_) -> _));
-      builder.symbol("TAG", transmute::<_, *mut u8>(TAG as unsafe extern "C" fn(_) -> _));
-      builder.symbol("IS_NUM", transmute::<_, *mut u8>(IS_NUM as unsafe extern "C" fn(_) -> _));
-      builder.symbol("IS_SKP", transmute::<_, *mut u8>(IS_SKP as unsafe extern "C" fn(_) -> _));
-      builder.symbol("NEW_PTR", transmute::<_, *mut u8>(NEW_PTR as unsafe extern "C" fn(_, _) -> _));
-      builder.symbol("ALLOC", transmute::<_, *mut u8>(ALLOC as unsafe extern "C" fn(_, _) -> _));
-      builder.symbol("OP", transmute::<_, *mut u8>(OP as unsafe extern "C" fn(_, _, _) -> _));
-      builder.symbol("GET_HEAP", transmute::<_, *mut u8>(GET_HEAP as unsafe extern "C" fn(_, _, _) -> _));
-      builder.symbol("SET_HEAP", transmute::<_, *mut u8>(SET_HEAP as unsafe extern "C" fn(_, _, _, _) -> _));
-      builder.symbol("LINK", transmute::<_, *mut u8>(LINK as unsafe extern "C" fn(_, _, _) -> _));
-      builder.symbol("FREE", transmute::<_, *mut u8>(FREE as unsafe extern "C" fn(_, _) -> _));
-      builder.symbol("GET_ANNI", transmute::<_, *mut u8>(GET_ANNI as unsafe extern "C" fn(_) -> _));
-      builder.symbol("SET_ANNI", transmute::<_, *mut u8>(SET_ANNI as unsafe extern "C" fn(_, _) -> _));
-      builder.symbol("GET_OPER", transmute::<_, *mut u8>(GET_OPER as unsafe extern "C" fn(_) -> _));
-      builder.symbol("SET_OPER", transmute::<_, *mut u8>(SET_OPER as unsafe extern "C" fn(_, _) -> _));
-      builder.symbol("GET_ERAS", transmute::<_, *mut u8>(GET_ERAS as unsafe extern "C" fn(_) -> _));
-      builder.symbol("SET_ERAS", transmute::<_, *mut u8>(SET_ERAS as unsafe extern "C" fn(_, _) -> _));
-      builder.symbol("GET_COMM", transmute::<_, *mut u8>(GET_COMM as unsafe extern "C" fn(_) -> _));
-      builder.symbol("SET_COMM", transmute::<_, *mut u8>(SET_COMM as unsafe extern "C" fn(_, _) -> _));
+      builder
+        .symbol("VAL", transmute::<_, *mut u8>(VAL as unsafe extern "C" fn(_) -> _))
+        .symbol("TAG", transmute::<_, *mut u8>(TAG as unsafe extern "C" fn(_) -> _))
+        .symbol("IS_NUM", transmute::<_, *mut u8>(IS_NUM as unsafe extern "C" fn(_) -> _))
+        .symbol("IS_SKP", transmute::<_, *mut u8>(IS_SKP as unsafe extern "C" fn(_) -> _))
+        .symbol("NEW_PTR", transmute::<_, *mut u8>(NEW_PTR as unsafe extern "C" fn(_, _) -> _))
+        .symbol("ALLOC", transmute::<_, *mut u8>(ALLOC as unsafe extern "C" fn(_, _) -> _))
+        .symbol("OP", transmute::<_, *mut u8>(OP as unsafe extern "C" fn(_, _, _) -> _))
+        .symbol("GET_HEAP", transmute::<_, *mut u8>(GET_HEAP as unsafe extern "C" fn(_, _, _) -> _))
+        .symbol("SET_HEAP", transmute::<_, *mut u8>(SET_HEAP as unsafe extern "C" fn(_, _, _, _) -> _))
+        .symbol("LINK", transmute::<_, *mut u8>(LINK as unsafe extern "C" fn(_, _, _) -> _))
+        .symbol("FREE", transmute::<_, *mut u8>(FREE as unsafe extern "C" fn(_, _) -> _))
+        .symbol("GET_ANNI", transmute::<_, *mut u8>(GET_ANNI as unsafe extern "C" fn(_) -> _))
+        .symbol("SET_ANNI", transmute::<_, *mut u8>(SET_ANNI as unsafe extern "C" fn(_, _) -> _))
+        .symbol("GET_OPER", transmute::<_, *mut u8>(GET_OPER as unsafe extern "C" fn(_) -> _))
+        .symbol("SET_OPER", transmute::<_, *mut u8>(SET_OPER as unsafe extern "C" fn(_, _) -> _))
+        .symbol("GET_ERAS", transmute::<_, *mut u8>(GET_ERAS as unsafe extern "C" fn(_) -> _))
+        .symbol("SET_ERAS", transmute::<_, *mut u8>(SET_ERAS as unsafe extern "C" fn(_, _) -> _))
+        .symbol("GET_COMM", transmute::<_, *mut u8>(GET_COMM as unsafe extern "C" fn(_) -> _))
+        .symbol("SET_COMM", transmute::<_, *mut u8>(SET_COMM as unsafe extern "C" fn(_, _) -> _));
     }
 
     let module = JITModule::new(builder);
