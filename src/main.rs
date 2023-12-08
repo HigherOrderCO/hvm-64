@@ -46,11 +46,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     "eval" => {
       if let Some(file_name) = f_name {
         let (book, mut net) = load(file_name);
-        let start_time = std::time::Instant::now();
         println!("LOG: Compiling to IR");
         let fns = hvmc::jit::compile_book(&book);
         println!("LOG: Compiling with cranelift");
         net.call_native = fns.compile_program();
+        let start_time = std::time::Instant::now();
         net.normal(&book);
         println!("{}", ast::show_runtime_net(&net));
         if args.len() >= 4 && args[3] == "-s" {
