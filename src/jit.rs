@@ -949,11 +949,12 @@ impl JitLowering {
   }
 
   fn translate(&mut self, program: &Program, function: Function) -> *const u8 {
-    let signature = &mut self.ctx.func.signature;
-    signature.params.push(AbiParam::new(types::I64)); // book
-    signature.params.push(AbiParam::new(types::I32)); // ptr
-    signature.params.push(AbiParam::new(types::I32)); // argument
-    signature.returns.push(AbiParam::new(types::I32));
+    self
+      .ctx
+      .func
+      .signature
+      .returns
+      .push(AbiParam::new(types::I32));
 
     let mut trans = FunctionLowering {
       program,
@@ -963,23 +964,16 @@ impl JitLowering {
       index: 0,
     };
 
-    let environment = trans.declare_variable(types::I64, "environment");
-    let book = trans.declare_variable(types::I64, "book");
-    let ptr = trans.declare_variable(types::I32, "ptr");
-    let argument = trans.declare_variable(types::I32, "argument");
-
-    trans.variables.insert("environment".into(), environment);
-    trans.variables.insert("book".into(), book);
-    trans.variables.insert("ptr".into(), ptr);
-    trans.variables.insert("argument".into(), argument);
-
-    let entry_block = trans.builder.create_block();
+    let bb = trans.builder.create_block();
     let mut return_value = None;
-    trans
-      .builder
-      .append_block_params_for_function_params(entry_block);
-    trans.builder.switch_to_block(entry_block);
-    trans.builder.seal_block(entry_block);
+
+    trans.create_parameter(bb, 0, "environment", types::I64);
+    trans.create_parameter(bb, 1, "book", types::I64);
+    trans.create_parameter(bb, 2, "ptr", types::I32);
+    trans.create_parameter(bb, 3, "argument", types::I32);
+    trans.builder.append_block_params_for_function_params(bb);
+    trans.builder.switch_to_block(bb);
+    trans.builder.seal_block(bb);
     for instr in function.body {
       return_value = trans.lower_instr(instr);
     }
@@ -1112,12 +1106,19 @@ impl FunctionLowering<'_, '_> {
     SET_COMM (net: types::I64, val: types::I32) -> types::I32
   ]);
 
-  fn create_parameter(&mut self, name: &str, type_repr: Type) {
-    self.builder.func.signature.params.push(AbiParam::new(type_repr));
+  fn create_parameter(&mut self, block: Block, idx: usize, name: &str, type_repr: Type) {
+    self
+      .builder
+      .func
+      .signature
+      .params
+      .push(AbiParam::new(type_repr));
+    self.builder.append_block_params_for_function_params(block);
 
     let variable = self.declare_variable(type_repr, &name);
-    
+    let value = self.builder.block_params(block)[idx];
     self.variables.insert(name.to_string(), variable);
+    self.builder.def_var(variable, value);
   }
 
   fn declare_variable(&mut self, int: types::Type, name: &str) -> Variable {
