@@ -4,7 +4,7 @@ use crate::{
   ast::{self, calculate_min_safe_labels, Book, DefRef, Net, Tree},
   ops::Op,
   run::{
-    self, ANode, Lab, Ptr,
+    self, ANode, Lab, Loc, Ptr,
     Tag::{self, *},
   },
 };
@@ -203,17 +203,16 @@ impl Trg {
       Trg::Ptr(ptr) => *ptr,
     }
   }
-
-  #[inline(always)]
-  pub fn take(self) -> Ptr {
-    match self {
-      Trg::Dir(dir) => dir.target().swap(Ptr::LOCK),
-      Trg::Ptr(ptr) => ptr,
-    }
-  }
 }
 
 impl<'a> run::Net<'a> {
+  #[inline(always)]
+  pub(crate) fn free_trg(&mut self, trg: Trg) {
+    match trg {
+      Trg::Dir(dir) => self.heap.half_free(dir.loc()),
+      Trg::Ptr(_) => {}
+    }
+  }
   // Links two targets, using atomics when necessary, based on implied ownership.
   #[inline(always)]
   pub(crate) fn half_safe_link(&mut self, a: Trg, b: Ptr) {
@@ -251,8 +250,8 @@ impl<'a> run::Net<'a> {
     let ptr = trg.target();
     if ptr.is_ctr(lab) {
       self.quik.anni += 1;
-      let got = trg.take();
-      (Trg::Dir(got.p1()), Trg::Dir(got.p2()))
+      self.free_trg(trg);
+      (Trg::Dir(ptr.p1()), Trg::Dir(ptr.p2()))
     // TODO: fast copy?
     // } else if ptr.tag() == Num || ptr.tag() == Ref && lab >= ptr.lab() {
     //   self.quik.comm += 1;
@@ -270,8 +269,8 @@ impl<'a> run::Net<'a> {
     let ptr = trg.target();
     if ptr.tag() == Num {
       self.quik.oper += 2;
-      let got = trg.take();
-      Trg::Ptr(Ptr::new_num(op.op(got.num(), b)))
+      self.free_trg(trg);
+      Trg::Ptr(Ptr::new_num(op.op(ptr.num(), b)))
     } else if ptr == Ptr::ERA {
       Trg::Ptr(Ptr::ERA)
     } else {
@@ -287,9 +286,9 @@ impl<'a> run::Net<'a> {
     let ptr = trg.target();
     if ptr.tag() == Num {
       self.quik.oper += 1;
-      let got = trg.take();
+      self.free_trg(trg);
       let n = Ptr::new(Op1, op as Lab, self.heap.alloc());
-      n.p1().target().store(Ptr::new_num(got.num()));
+      n.p1().target().store(Ptr::new_num(ptr.num()));
       (Trg::Ptr(n), Trg::Ptr(n.p2()))
     } else if ptr == Ptr::ERA {
       (Trg::Ptr(Ptr::ERA), Trg::Ptr(Ptr::ERA))
@@ -305,8 +304,8 @@ impl<'a> run::Net<'a> {
     let ptr = trg.target();
     if trg.target().tag() == Num {
       self.quik.oper += 1;
-      let got = trg.take();
-      Trg::Ptr(Ptr::new_num(op.op(a, got.num())))
+      self.free_trg(trg);
+      Trg::Ptr(Ptr::new_num(op.op(a, ptr.num())))
     } else if ptr == Ptr::ERA {
       Trg::Ptr(Ptr::ERA)
     } else {
@@ -322,7 +321,8 @@ impl<'a> run::Net<'a> {
     let ptr = trg.target();
     if trg.target().tag() == Num {
       self.quik.oper += 1;
-      let num = trg.take().num();
+      self.free_trg(trg);
+      let num = ptr.num();
       if num == 0 {
         (out, Trg::Ptr(Ptr::ERA), Trg::Ptr(Ptr::ERA))
       } else {
@@ -347,7 +347,8 @@ impl<'a> run::Net<'a> {
     let ptr = trg.target();
     if trg.target().tag() == Num {
       self.quik.oper += 1;
-      let num = trg.take().num();
+      self.free_trg(trg);
+      let num = ptr.num();
       if num == 0 {
         (out, Trg::Ptr(Ptr::ERA))
       } else {
@@ -373,7 +374,8 @@ impl<'a> run::Net<'a> {
     let ptr = trg.target();
     if trg.target().tag() == Num {
       self.quik.oper += 1;
-      let num = trg.take().num();
+      self.free_trg(trg);
+      let num = ptr.num();
       let c1 = Ptr::new(Ctr, 0, self.heap.alloc());
       if num == 0 {
         self.half_safe_link(out, c1.p1());

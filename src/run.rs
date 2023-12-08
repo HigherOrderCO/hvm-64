@@ -105,6 +105,10 @@ impl Loc {
     Loc(((self.0 as Val) | PORT_MASK) as _)
   }
 
+  pub fn other(&self) -> Loc {
+    Loc(((self.0 as Val) ^ PORT_MASK) as _)
+  }
+
   pub fn target<'a>(self) -> &'a APtr {
     unsafe { &*self.0 }
   }
@@ -259,6 +263,11 @@ impl APtr {
   }
 
   #[inline(always)]
+  pub fn cas_strong(&self, expected: Ptr, value: Ptr) -> Result<Ptr, Ptr> {
+    self.0.compare_exchange(expected.0, value.0, Relaxed, Relaxed).map(Ptr).map_err(Ptr)
+  }
+
+  #[inline(always)]
   pub fn swap(&self, value: Ptr) -> Ptr {
     Ptr(self.0.swap(value.0, Relaxed))
   }
@@ -275,6 +284,13 @@ impl APtr {
   }
 }
 
+// A handy wrapper around Data.
+pub struct Heap<'a> {
+  pub head: Loc,
+  pub area: &'a Data,
+  pub next: usize,
+}
+
 impl<'a> Heap<'a> {
   pub fn init(size: usize) -> Box<[ANode]> {
     let mut data = Vec::with_capacity(size);
@@ -283,31 +299,39 @@ impl<'a> Heap<'a> {
   }
 
   pub fn new(data: &'a Data) -> Self {
-    Heap { area: data, next: 0 }
+    Heap { area: data, next: 0, head: Loc::NULL }
   }
 
-  #[inline(always)]
-  pub fn alloc(&mut self) -> Loc {
-    // On the first pass, just alloc without checking.
-    let index = if self.next < self.area.len() {
-      self.next
-    // On later passes, search for an available slot.
-    } else {
-      loop {
-        let index = self.next % self.area.len();
-        if self.area[index].0.load().is_null() && self.area[index].1.load().is_null() {
-          break index;
-        }
-        self.next += 1;
+  #[inline]
+  pub fn half_free(&mut self, loc: Loc) {
+    loc.target().store(Ptr::NULL);
+    if loc.other().target().load() == Ptr::NULL {
+      let loc = loc.p0();
+      if let Ok(x) = loc.target().cas_strong(Ptr::NULL, Ptr::new(Red, 1, self.head)) {
+        self.head = loc;
       }
-    };
-    if index & 0xfff == 0 {
-      // println!("{} {}", index, self.area.len());
     }
-    self.next += 1;
-    self.area[index].0.store(Ptr::LOCK);
-    self.area[index].1.store(Ptr::LOCK);
-    Loc(&self.area[index].0 as _)
+  }
+
+  #[inline]
+  pub fn free(&mut self, loc: Loc) {
+    let loc = loc.p0();
+    loc.target().store(Ptr::new(Red, 1, self.head));
+    loc.p2().target().store(Ptr::NULL);
+    self.head = loc;
+  }
+
+  #[inline]
+  pub fn alloc(&mut self) -> Loc {
+    if self.head != Loc::NULL {
+      let loc = self.head;
+      self.head = self.head.target().load().loc();
+      loc
+    } else {
+      let index = self.next;
+      self.next += 1;
+      Loc(&unsafe { self.area.get_unchecked(index) }.0 as _)
+    }
   }
 }
 
@@ -323,12 +347,6 @@ pub struct ANode(pub APtr, pub APtr);
 
 // The global node buffer.
 pub type Data = [ANode];
-
-// A handy wrapper around Data.
-pub struct Heap<'a> {
-  pub area: &'a Data,
-  pub next: usize,
-}
 
 /// Rewrite counter.
 #[derive(Clone, Copy, Debug, Default)]
@@ -462,8 +480,8 @@ impl<'a> Net<'a> {
     let b_ptr = b_dir.target().take();
     trace!("[{:08x}] took {:?} {:?}", self.tid, a_ptr, b_ptr);
     if a_ptr.is_pri() && b_ptr.is_pri() {
-      a_dir.target().store(Ptr::NULL);
-      b_dir.target().store(Ptr::NULL);
+      self.heap.half_free(a_dir.loc());
+      self.heap.half_free(b_dir.loc());
       return self.redux(a_ptr, b_ptr);
     } else {
       self.atomic_linker(a_ptr, a_dir, b_ptr);
@@ -476,7 +494,7 @@ impl<'a> Net<'a> {
   pub fn half_atomic_link(&mut self, a_dir: Ptr, b_ptr: Ptr) {
     let a_ptr = a_dir.target().take();
     if a_ptr.is_pri() && b_ptr.is_pri() {
-      a_dir.target().store(Ptr::NULL);
+      self.heap.half_free(a_dir.loc());
       return self.redux(a_ptr, b_ptr);
     } else {
       self.atomic_linker(a_ptr, a_dir, b_ptr);
@@ -500,7 +518,7 @@ impl<'a> Net<'a> {
       let got = a_ptr.target().cas(a_dir, b_ptr);
       // Attempts to link using a compare-and-swap.
       if got.is_ok() {
-        a_dir.target().store(Ptr::NULL);
+        self.heap.half_free(a_dir.loc());
       // If the CAS failed, resolve by using redirections.
       } else {
         trace!("[{:04x}] cas fail {:016x}", self.tid, got.unwrap_err().0);
@@ -516,7 +534,7 @@ impl<'a> Net<'a> {
         }
       }
     } else {
-      a_dir.target().store(Ptr::NULL);
+      self.heap.half_free(a_dir.loc());
     }
   }
 
@@ -568,14 +586,14 @@ impl<'a> Net<'a> {
         // First to arrive creates a redex.
         if x_ptr != Ptr::GONE {
           trace!("[{:04x}] fst {:016x}", self.tid, x_ptr.0);
-          let y_ptr = y_dir.target().swap(Ptr::GONE);
+          let y_ptr = y_dir.target().load();
+          self.heap.half_free(y_dir.loc());
           self.redux(x_ptr, y_ptr);
           return;
         // Second to arrive clears up the memory.
         } else {
           trace!("[{:04x}] snd", self.tid);
-          x_dir.target().store(Ptr::NULL);
-          while y_dir.target().cas(Ptr::GONE, Ptr::NULL).is_err() {}
+          self.heap.half_free(x_dir.loc());
           return;
         }
       }
@@ -596,7 +614,7 @@ impl<'a> Net<'a> {
         if trg_ptr.tag() == Red {
           let neo_ptr = trg_ptr.unredirect();
           if ste_dir.target().cas(ste_ptr, neo_ptr).is_ok() {
-            trg_dir.target().store(Ptr::NULL);
+            self.heap.half_free(trg_dir.loc());
             continue;
           }
         }
@@ -688,7 +706,8 @@ impl<'a> Net<'a> {
 
   pub fn comm12(&mut self, a: Ptr, b: Ptr) {
     self.rwts.comm += 1;
-    let n = a.p1().target().swap(Ptr::NULL);
+    let n = a.p1().target().load();
+    self.heap.half_free(a.p1().loc());
     let B2 = Ptr::new(Ctr, b.lab(), self.heap.alloc());
     let A1 = Ptr::new(Ctr, a.lab(), self.heap.alloc());
     let A2 = Ptr::new(Ctr, a.lab(), self.heap.alloc());
@@ -711,7 +730,7 @@ impl<'a> Net<'a> {
 
   pub fn comm01(&mut self, a: Ptr, b: Ptr) {
     self.rwts.comm += 1;
-    b.p1().target().store(Ptr::NULL);
+    self.heap.half_free(b.p1().loc());
     self.half_atomic_link(b.p2(), a);
   }
 
@@ -744,7 +763,8 @@ impl<'a> Net<'a> {
   pub fn op1_num(&mut self, a: Ptr, b: Ptr) {
     self.rwts.oper += 1;
     let op = a.op();
-    let v0 = a.p1().target().swap(Ptr::NULL).num();
+    let v0 = a.p1().target().load().num();
+    self.heap.half_free(b.p1().loc());
     let v1 = b.num();
     let v2 = op.op(v0, v1);
     self.half_atomic_link(a.p2(), Ptr::new_num(v2));
@@ -856,6 +876,7 @@ impl<'a> Net<'a> {
     let heap = Heap {
       area: &self.heap.area[heap_start .. heap_start + heap_size],
       next: self.heap.next.saturating_sub(heap_start),
+      head: if tid == 0 { self.heap.head } else { Loc::NULL },
     };
     let mut net = Net::new_with_root(heap, self.root);
     net.tid = tid;
