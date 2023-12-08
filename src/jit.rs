@@ -87,6 +87,7 @@ pub struct Constant {
 pub struct Program {
   pub functions: Vec<Function>,
   pub values: Vec<Constant>,
+  lowering: Rc<RefCell<JitLowering>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -227,7 +228,11 @@ pub fn compile_book(book: &Book) -> Program {
     }
   }
 
-  Program { functions, values }
+  Program {
+    functions,
+    values,
+    lowering: Rc::new(RefCell::new(JitLowering::default())),
+  }
 }
 
 pub fn compile_term(book: &Book, fid: Val) -> Function {
@@ -886,15 +891,15 @@ type JitFunction = unsafe extern "C" fn(JitNet, JitBook, JitPtr, JitPtr) -> u8;
 impl Program {
   /// Compile the program into a JIT function.
   pub fn compile_function(&self, function: Function) -> JitFunction {
-    let mut lowering = JitLowering::default();
-    let function = lowering.translate(self, function);
+    println!("LOG: Compiling function: {}", function.name);
+    let function = self.lowering.borrow_mut().translate(self, function);
     unsafe { std::mem::transmute(function) }
   }
 
   pub fn compile_program(&self) -> CallNative {
     let mut functions = HashMap::new();
 
-    for function in &self.functions {
+    for function in self.functions.iter() {
       let Some(value) = self.values.iter().find(|i| i.name == function.name) else {
         panic!("Can't find value for function");
       };
@@ -917,24 +922,21 @@ impl Program {
 
 impl JitLowering {
   /// Create a zero-initialized data section.
-  fn create_data(&mut self, name: &str, contents: Vec<u8>) -> Result<&[u8], String> {
+  fn create_data(&mut self, name: &str, contents: Vec<u8>) -> &[u8] {
     // The steps here are analogous to `compile`, except that data is much
     // simpler than functions.
     self.data_description.define(contents.into_boxed_slice());
     let id = self
       .module
       .declare_data(name, Linkage::Export, true, false)
-      .map_err(|e| e.to_string())?;
+      .unwrap();
 
-    self
-      .module
-      .define_data(id, &self.data_description)
-      .map_err(|e| e.to_string())?;
+    self.module.define_data(id, &self.data_description).unwrap();
     self.data_description.clear();
     self.module.finalize_definitions().unwrap();
     let buffer = self.module.get_finalized_data(id);
     // TODO: Can we move the unsafe into cranelift?
-    Ok(unsafe { core::slice::from_raw_parts(buffer.0, buffer.1) })
+    unsafe { core::slice::from_raw_parts(buffer.0, buffer.1) }
   }
 
   fn translate(&mut self, program: &Program, function: Function) -> *const u8 {
@@ -985,7 +987,10 @@ impl JitLowering {
       .declare_function(&function.name, Linkage::Export, &self.ctx.func.signature)
       .expect("Can't create new function");
 
-    self.module.define_function(function, &mut self.ctx).unwrap();
+    self
+      .module
+      .define_function(function, &mut self.ctx)
+      .unwrap();
 
     self.module.clear_context(&mut self.ctx);
     self.module.finalize_definitions().unwrap();
