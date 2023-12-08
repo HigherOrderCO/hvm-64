@@ -4,11 +4,11 @@
 #![allow(unused_imports)]
 #![allow(unused_variables)]
 
-use std::{env, fs};
+mod gen;
 
-use hvmc::*;
+use hvmc::{jit::compile_book, *};
 
-use std::collections::HashSet;
+use std::{collections::HashSet, env, fs};
 
 fn main() {
   if cfg!(feature = "hvm_cli_options") { cli_main() } else { bare_main() }
@@ -42,7 +42,7 @@ fn cli_main() {
   match action.as_str() {
     "run" => {
       if let Some(file_name) = f_name {
-        let (runtime, mut net) = load(&data, file_name);
+        let (_, host, mut net) = load(&data, file_name);
         let start_time = std::time::Instant::now();
         if opts.contains("-1") {
           net.normal();
@@ -50,7 +50,7 @@ fn cli_main() {
           net.parallel_normal();
         }
         print!("normal!");
-        println!("{}", ast::show_net(&runtime.readback(&net)));
+        println!("{}", ast::show_net(&host.readback(&net)));
         if opts.contains("-s") {
           print_stats(&net, start_time);
         }
@@ -59,16 +59,17 @@ fn cli_main() {
         std::process::exit(1);
       }
     }
-    // "compile" => {
-    //   if let Some(file_name) = f_name {
-    //     let (book, _) = load(&data, file_name);
-    //     compile_book_to_rust_crate(file_name, &book)?;
-    //     compile_rust_crate_to_executable(file_name)?;
-    //   } else {
-    //     println!("Usage: hvmc compile <file.hvmc>");
-    //     std::process::exit(1);
-    //   }
-    // }
+    "compile" => {
+      if let Some(file_name) = f_name {
+        let (book, _, _) = load(&data, file_name);
+        println!("{}", compile_book(&book).unwrap());
+        // compile_book_to_rust_crate(file_name, &book)?;
+        // compile_rust_crate_to_executable(file_name)?;
+      } else {
+        println!("Usage: hvmc compile <file.hvmc>");
+        std::process::exit(1);
+      }
+    }
     // "gen-cuda-book" => {
     //   if let Some(file_name) = f_name {
     //     let book = load(&data, file_name).0;
@@ -103,15 +104,16 @@ fn print_stats(net: &run::Net, start_time: std::time::Instant) {
 }
 
 // Load file and generate net
-fn load<'a>(data: &'a run::Data, file: &str) -> (ast::Runtime, run::Net<'a>) {
+fn load<'a>(data: &'a run::Data, file: &str) -> (ast::Book, ast::Host, run::Net<'a>) {
   let Ok(file) = fs::read_to_string(file) else {
     eprintln!("Input file not found");
     std::process::exit(1);
   };
-  let runtime = ast::Runtime::new(&ast::do_parse_book(&file));
+  let book = ast::do_parse_book(&file);
+  let host = ast::Host::new(&book);
   let mut net = run::Net::new(run::Heap::new(data));
-  net.boot(&runtime.defs["main"]);
-  return (runtime, net);
+  net.boot(&host.defs["main"]);
+  return (book, host, net);
 }
 
 // pub fn compile_book_to_rust_crate(f_name: &str, book: &run::Book) -> Result<(), std::io::Error> {

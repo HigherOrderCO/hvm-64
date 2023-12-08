@@ -323,7 +323,7 @@ pub fn show_book(book: &Book) -> String {
 #[derive(Debug, Clone)]
 pub enum DefRef {
   Owned(Box<Def>),
-  Borrowed(&'static Def),
+  Static(&'static Def),
 }
 
 impl std::ops::Deref for DefRef {
@@ -331,19 +331,19 @@ impl std::ops::Deref for DefRef {
   fn deref(&self) -> &Def {
     match self {
       DefRef::Owned(x) => x,
-      DefRef::Borrowed(x) => x,
+      DefRef::Static(x) => x,
     }
   }
 }
 
-#[derive(Debug, Clone)]
-pub struct Runtime {
+#[derive(Debug, Clone, Default)]
+pub struct Host {
   pub defs: HashMap<String, DefRef>,
   pub back: HashMap<Loc, String>,
 }
 
-impl Runtime {
-  pub fn new(book: &Book) -> Runtime {
+impl Host {
+  pub fn new(book: &Book) -> Host {
     let mut defs = calculate_min_safe_labels(book)
       .map(|(nam, lab)| (nam.to_owned(), DefRef::Owned(Box::new(Def { lab, inner: DefType::Net(DefNet::default()) }))))
       .collect::<HashMap<_, _>>();
@@ -352,13 +352,13 @@ impl Runtime {
       let net = net_to_runtime_def(book, &defs, nam, net);
       match defs.get_mut(nam).unwrap() {
         DefRef::Owned(def) => def.inner = DefType::Net(net),
-        DefRef::Borrowed(_) => unreachable!(),
+        DefRef::Static(_) => unreachable!(),
       }
     }
 
     let back = defs.iter().map(|(nam, def)| (Ptr::new_ref(def).loc(), nam.clone())).collect();
 
-    Runtime { defs, back }
+    Host { defs, back }
   }
   pub fn readback(&self, rt_net: &run::Net) -> Net {
     let mut state = State { runtime: self, vars: Default::default(), next_var: 0 };
@@ -373,7 +373,7 @@ impl Runtime {
     return net;
 
     struct State<'a> {
-      runtime: &'a Runtime,
+      runtime: &'a Host,
       vars: HashMap<Loc, usize>,
       next_var: usize,
     }
@@ -493,7 +493,7 @@ fn net_to_runtime_def(book: &Book, defs: &HashMap<String, DefRef>, nam: &str, ne
   }
 }
 
-fn calculate_min_safe_labels<'a>(book: &'a Book) -> impl Iterator<Item = (&'a str, Lab)> {
+pub fn calculate_min_safe_labels<'a>(book: &'a Book) -> impl Iterator<Item = (&'a str, Lab)> {
   let mut state = State { book, labels: HashMap::with_capacity(book.len()) };
 
   for name in book.keys() {

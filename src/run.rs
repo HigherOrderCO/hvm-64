@@ -275,38 +275,6 @@ impl APtr {
   }
 }
 
-enum Lcl<'a> {
-  Bound(Trg<'a>),
-  Todo(usize),
-}
-
-// A target pointer, with implied ownership.
-pub enum Trg<'a> {
-  Lcl(&'a mut Lcl<'a>),
-  Dir(Ptr), // we don't own the pointer, so we point to its location
-  Ptr(Ptr), // we own the pointer, so we store it directly
-}
-
-impl<'a> Trg<'a> {
-  #[inline]
-  pub fn target(&self) -> Ptr {
-    match self {
-      Trg::Dir(dir) => dir.target().load(),
-      Trg::Ptr(ptr) => *ptr,
-      Trg::Lcl(lcl) => Ptr::NULL,
-    }
-  }
-
-  #[inline]
-  pub fn take(self) -> Ptr {
-    match self {
-      Trg::Dir(dir) => dir.target().swap(Ptr::LOCK),
-      Trg::Ptr(ptr) => ptr,
-      Trg::Lcl(lcl) => Ptr::NULL,
-    }
-  }
-}
-
 impl<'a> Heap<'a> {
   pub fn init(size: usize) -> Box<[ANode]> {
     let mut data = Vec::with_capacity(size);
@@ -624,37 +592,6 @@ impl<'a> Net<'a> {
         }
       }
       break;
-    }
-  }
-
-  // Links two targets, using atomics when necessary, based on implied ownership.
-  #[inline(always)]
-  pub fn half_safe_link(&mut self, a: Trg, b: Ptr) {
-    match a {
-      Trg::Dir(a_dir) => self.half_atomic_link(a_dir, b),
-      Trg::Ptr(a_ptr) => self.link(a_ptr, b),
-      Trg::Lcl(Lcl::Bound(_)) => unreachable!(),
-      Trg::Lcl(t) => {
-        *t = Lcl::Bound(Trg::Ptr(b));
-      }
-    }
-  }
-
-  // Links two targets, using atomics when necessary, based on implied ownership.
-  #[inline(always)]
-  pub fn safe_link<'b>(&mut self, a: Trg<'b>, b: Trg<'b>) {
-    match (a, b) {
-      (Trg::Dir(a_dir), Trg::Dir(b_dir)) => self.atomic_link(a_dir, b_dir),
-      (Trg::Dir(a_dir), Trg::Ptr(b_ptr)) => self.half_atomic_link(a_dir, b_ptr),
-      (Trg::Ptr(a_ptr), Trg::Dir(b_dir)) => self.half_atomic_link(b_dir, a_ptr),
-      (Trg::Ptr(a_ptr), Trg::Ptr(b_ptr)) => self.link(a_ptr, b_ptr),
-      (Trg::Lcl(Lcl::Bound(_)), _) | (_, Trg::Lcl(Lcl::Bound(_))) => unreachable!(),
-      (Trg::Lcl(a), Trg::Lcl(b)) => {
-        let (&Lcl::Todo(an), &Lcl::Todo(bn)) = (&*a, &*b) else { unreachable!() };
-        let (a, b) = if an < bn { (a, b) } else { (b, a) };
-        *b = Lcl::Bound(Trg::Lcl(a));
-      }
-      _ => todo!(), // (Trg::Lcl(t), u) | (u, Trg::Lcl(t)) => *t = Lcl::Bound(u),
     }
   }
 
