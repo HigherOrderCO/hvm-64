@@ -11,6 +11,7 @@ use crate::{
 use std::{
   collections::{hash_map::Entry, HashMap},
   fmt::{self, format, Write},
+  hint::unreachable_unchecked,
 };
 
 pub fn compile_book(book: &ast::Book) -> Result<String, fmt::Error> {
@@ -49,19 +50,17 @@ fn compile_def(code: &mut Code, book: &ast::Book, raw_name: &str, net: &ast::Net
 
   state.call_tree(&net.root, format!("rt"))?;
 
-  for (i, rd) in net.rdex.iter().enumerate() {
-    let (rd0, rd1) = state.create_pair(format!("rd_{i}_"))?;
-    state.call_tree(&rd.0, rd0)?;
-    state.call_tree(&rd.1, rd1)?;
+  for (i, (a, b)) in net.rdex.iter().enumerate() {
+    state.call_redex(a, b, format!("rd{i}"))?;
   }
 
   let name = sanitize_name(raw_name);
   writeln!(code, "pub fn call_{name}(net: &mut Net, rt: Ptr) {{")?;
   code.indent(|code| {
     code.write_str("let rt = Trg::Ptr(rt);\n")?;
-    code.write_str(&state.code.code)?;
-    code.write_char('\n')?;
-    code.write_str(&state.post.code)
+    code.write_str(&state.code.code)
+    // code.write_char('\n')?;
+    // code.write_str(&state.post.code)
   })?;
   writeln!(code, "}}")?;
   code.write_char('\n')?;
@@ -71,26 +70,44 @@ fn compile_def(code: &mut Code, book: &ast::Book, raw_name: &str, net: &ast::Net
   #[derive(Default)]
   struct State<'a> {
     code: Code,
-    post: Code,
+    // post: Code,
     vars: HashMap<&'a str, String>,
     pair_count: usize,
   }
 
   impl<'a> State<'a> {
-    fn create_pair(&mut self, n: String) -> Result<(String, String), fmt::Error> {
-      let i = self.pair_count;
-      self.pair_count += 1;
-      let n0 = format!("{n}0");
-      let n1 = format!("{n}1");
+    // fn create_pair(&mut self, n: String) -> Result<(String, String), fmt::Error> {
+    //   let i = self.pair_count;
+    //   self.pair_count += 1;
+    //   let n0 = format!("{n}0");
+    //   let n1 = format!("{n}1");
 
-      writeln!(self.code, "let mut {n} = (Lcl::Todo({i}), Lcl::Todo({i}));")?;
-      writeln!(self.code, "let {n0} = Trg::Lcl(&mut {n}.0);")?;
-      writeln!(self.code, "let {n1} = Trg::Lcl(&mut {n}.1);")?;
+    //   writeln!(self.code, "let mut {n} = (Lcl::Todo({i}), Lcl::Todo({i}));")?;
+    //   writeln!(self.code, "let {n0} = Trg::Lcl(&mut {n}.0);")?;
+    //   writeln!(self.code, "let {n1} = Trg::Lcl(&mut {n}.1);")?;
 
-      writeln!(self.post, "let (Lcl::Bound({n0}), Lcl::Bound({n1})) = {n} else {{ unreachable!() }};")?;
-      writeln!(self.post, "net.safe_link({n0}, {n1});")?;
+    //   writeln!(self.post, "let (Lcl::Bound({n0}), Lcl::Bound({n1})) = {n} else {{ unreachable!() }};")?;
+    //   writeln!(self.post, "net.safe_link({n0}, {n1});")?;
 
-      Ok((n0, n1))
+    //   Ok((n0, n1))
+    // }
+    fn call_redex(&mut self, a: &'a Tree, b: &'a Tree, name: String) -> fmt::Result {
+      let t = match (a, b) {
+        (Tree::Era, t) | (t, Tree::Era) => {
+          writeln!(self.code, "let {name} = Trg::Ptr(Ptr::ERA);")?;
+          t
+        }
+        (Tree::Ref { nam }, t) | (t, Tree::Ref { nam }) => {
+          writeln!(self.code, "let {name} = Trg::Ptr(Ptr::new_ref(&DEF_{nam}));")?;
+          t
+        }
+        (Tree::Num { val }, t) | (t, Tree::Num { val }) => {
+          writeln!(self.code, "let {name} = Trg::Ptr(Ptr::new_num({val}));")?;
+          t
+        }
+        _ => panic!("Invalid redex"),
+      };
+      self.call_tree(t, name)
     }
     fn call_tree(&mut self, tree: &'a Tree, trg: String) -> fmt::Result {
       match tree {
@@ -137,27 +154,28 @@ fn compile_def(code: &mut Code, book: &ast::Book, raw_name: &str, net: &ast::Net
           self.call_tree(rgt, r)?;
         }
         Tree::Mat { sel, ret } => {
-          let (r0, r1) = self.create_pair(format!("{trg}r"))?;
-          let s = format!("{trg}s");
-          if let Tree::Ctr { lab: 0, lft: zero, rgt: succ } = &**sel {
-            let z = format!("{trg}z");
-            if let Tree::Ctr { lab: 0, lft: inp, rgt: succ } = &**succ {
-              let i = format!("{trg}i");
-              writeln!(self.code, "let ({z}, {i}, {s}) = net.quick_mat_con({trg}, {r0});")?;
-              self.call_tree(zero, z)?;
-              self.call_tree(inp, i)?;
-              self.call_tree(succ, s)?;
-            } else {
-              let z = format!("{trg}z");
-              writeln!(self.code, "let ({z}, {s}) = net.quick_mat_con({trg}, {r0});")?;
-              self.call_tree(zero, z)?;
-              self.call_tree(succ, s)?;
-            }
-          } else {
-            writeln!(self.code, "let {s} = net.quick_mat({trg}, {r0});")?;
-            self.call_tree(sel, s)?;
-          }
-          self.call_tree(ret, r1)?;
+          todo!()
+          // let (r0, r1) = self.create_pair(format!("{trg}r"))?;
+          // let s = format!("{trg}s");
+          // if let Tree::Ctr { lab: 0, lft: zero, rgt: succ } = &**sel {
+          //   let z = format!("{trg}z");
+          //   if let Tree::Ctr { lab: 0, lft: inp, rgt: succ } = &**succ {
+          //     let i = format!("{trg}i");
+          //     writeln!(self.code, "let ({z}, {i}, {s}) = net.quick_mat_con({trg}, {r0});")?;
+          //     self.call_tree(zero, z)?;
+          //     self.call_tree(inp, i)?;
+          //     self.call_tree(succ, s)?;
+          //   } else {
+          //     let z = format!("{trg}z");
+          //     writeln!(self.code, "let ({z}, {s}) = net.quick_mat_con({trg}, {r0});")?;
+          //     self.call_tree(zero, z)?;
+          //     self.call_tree(succ, s)?;
+          //   }
+          // } else {
+          //   writeln!(self.code, "let {s} = net.quick_mat({trg}, {r0});")?;
+          //   self.call_tree(sel, s)?;
+          // }
+          // self.call_tree(ret, r1)?;
         }
       }
       Ok(())
@@ -165,34 +183,32 @@ fn compile_def(code: &mut Code, book: &ast::Book, raw_name: &str, net: &ast::Net
   }
 }
 
-pub(crate) enum Lcl<'a> {
-  Bound(Trg<'a, 'a>),
-  Todo(usize),
-}
+// pub(crate) enum Lcl<'a> {
+//   Bound(Trg<'a, 'a>),
+//   Todo(usize),
+// }
 
 // A target pointer, with implied ownership.
-pub(crate) enum Trg<'t, 'l> {
-  Lcl(&'t mut Lcl<'l>),
+pub(crate) enum Trg {
+  // Lcl(&'t mut Lcl<'l>),
   Dir(Ptr), // we don't own the pointer, so we point to its location
   Ptr(Ptr), // we own the pointer, so we store it directly
 }
 
-impl<'t, 'l> Trg<'t, 'l> {
-  #[inline]
+impl Trg {
+  #[inline(always)]
   pub fn target(&self) -> Ptr {
     match self {
       Trg::Dir(dir) => dir.target().load(),
       Trg::Ptr(ptr) => *ptr,
-      Trg::Lcl(lcl) => Ptr::NULL,
     }
   }
 
-  #[inline]
+  #[inline(always)]
   pub fn take(self) -> Ptr {
     match self {
       Trg::Dir(dir) => dir.target().swap(Ptr::LOCK),
       Trg::Ptr(ptr) => ptr,
-      Trg::Lcl(lcl) => Ptr::NULL,
     }
   }
 }
@@ -204,34 +220,34 @@ impl<'a> run::Net<'a> {
     match a {
       Trg::Dir(a_dir) => self.half_atomic_link(a_dir, b),
       Trg::Ptr(a_ptr) => self.link(a_ptr, b),
-      Trg::Lcl(Lcl::Bound(_)) => unreachable!(),
-      Trg::Lcl(t) => {
-        *t = Lcl::Bound(Trg::Ptr(b));
-      }
+      // Trg::Lcl(Lcl::Bound(_)) => unsafe { unreachable_unchecked() },
+      // Trg::Lcl(t) => {
+      //   *t = Lcl::Bound(Trg::Ptr(b));
+      // }
     }
   }
 
   // Links two targets, using atomics when necessary, based on implied ownership.
   #[inline(always)]
-  pub(crate) fn safe_link<'t: 'l, 'l>(&mut self, a: Trg<'t, 'l>, b: Trg<'t, 'l>) {
+  pub(crate) fn safe_link(&mut self, a: Trg, b: Trg) {
     match (a, b) {
       (Trg::Dir(a_dir), Trg::Dir(b_dir)) => self.atomic_link(a_dir, b_dir),
       (Trg::Dir(a_dir), Trg::Ptr(b_ptr)) => self.half_atomic_link(a_dir, b_ptr),
       (Trg::Ptr(a_ptr), Trg::Dir(b_dir)) => self.half_atomic_link(b_dir, a_ptr),
       (Trg::Ptr(a_ptr), Trg::Ptr(b_ptr)) => self.link(a_ptr, b_ptr),
-      (Trg::Lcl(Lcl::Bound(_)), _) | (_, Trg::Lcl(Lcl::Bound(_))) => unreachable!(),
-      (Trg::Lcl(a), Trg::Lcl(b)) => {
-        let (&Lcl::Todo(an), &Lcl::Todo(bn)) = (&*a, &*b) else { unreachable!() };
-        let (a, b) = if an < bn { (a, b) } else { (b, a) };
-        *b = Lcl::Bound(Trg::Lcl(a));
-      }
-      _ => todo!(), // (Trg::Lcl(t), u) | (u, Trg::Lcl(t)) => *t = Lcl::Bound(u),
+      // (Trg::Lcl(Lcl::Bound(_)), _) | (_, Trg::Lcl(Lcl::Bound(_))) => unsafe { unreachable_unchecked() },
+      // (Trg::Lcl(a), Trg::Lcl(b)) => {
+      //   let (&Lcl::Todo(an), &Lcl::Todo(bn)) = (&*a, &*b) else { unsafe { unreachable_unchecked() } };
+      //   let (a, b) = if an < bn { (a, b) } else { (b, a) };
+      //   *b = Lcl::Bound(Trg::Lcl(a));
+      // }
+      // _ => todo!(), // (Trg::Lcl(t), u) | (u, Trg::Lcl(t)) => *t = Lcl::Bound(u),
     }
   }
 
-  #[inline]
+  #[inline(always)]
   /// {#lab x y}
-  pub(crate) fn quick_ctr(&mut self, trg: Trg, lab: Lab) -> (Trg<'static, 'static>, Trg<'static, 'static>) {
+  pub(crate) fn quick_ctr(&mut self, trg: Trg, lab: Lab) -> (Trg, Trg) {
     let ptr = trg.target();
     if ptr.is_ctr(lab) {
       self.rwts.anni += 1;
@@ -240,14 +256,15 @@ impl<'a> run::Net<'a> {
     } else if ptr.tag() == Num || ptr.tag() == Ref && lab >= ptr.lab() {
       (Trg::Ptr(ptr), Trg::Ptr(ptr))
     } else {
-      let n = Ptr::new(Ctr, lab, self.heap.alloc());
+      let loc = self.heap.alloc();
+      let n = Ptr::new(Ctr, lab, loc);
       self.half_safe_link(trg, n);
       (Trg::Ptr(n.p1()), Trg::Ptr(n.p2()))
     }
   }
-  #[inline]
+  #[inline(always)]
   /// <op #b x>
-  pub(crate) fn quick_op2_num(&mut self, trg: Trg, op: Op, b: u64) -> Trg<'static, 'static> {
+  pub(crate) fn quick_op2_num(&mut self, trg: Trg, op: Op, b: u64) -> Trg {
     let ptr = trg.target();
     if ptr.tag() == Num {
       self.rwts.oper += 2;
@@ -262,9 +279,9 @@ impl<'a> run::Net<'a> {
       Trg::Ptr(n.p2())
     }
   }
-  #[inline]
+  #[inline(always)]
   /// <op x y>
-  pub(crate) fn quick_op2(&mut self, trg: Trg, op: Op) -> (Trg<'static, 'static>, Trg<'static, 'static>) {
+  pub(crate) fn quick_op2(&mut self, trg: Trg, op: Op) -> (Trg, Trg) {
     let ptr = trg.target();
     if ptr.tag() == Num {
       self.rwts.oper += 1;
@@ -280,9 +297,9 @@ impl<'a> run::Net<'a> {
       (Trg::Ptr(n.p1()), Trg::Ptr(n.p2()))
     }
   }
-  #[inline]
+  #[inline(always)]
   /// <a op x>
-  pub(crate) fn quick_op1(&mut self, trg: Trg, op: Op, a: u64) -> Trg<'static, 'static> {
+  pub(crate) fn quick_op1(&mut self, trg: Trg, op: Op, a: u64) -> Trg {
     let ptr = trg.target();
     if trg.target().tag() == Num {
       self.rwts.oper += 1;
@@ -297,13 +314,9 @@ impl<'a> run::Net<'a> {
       Trg::Ptr(n.p2())
     }
   }
-  #[inline]
+  #[inline(always)]
   /// ?<(x (y z)) out>
-  pub(crate) fn quick_mat_con_con<'t, 'l>(
-    &mut self,
-    trg: Trg<'t, 'l>,
-    out: Trg<'t, 'l>,
-  ) -> (Trg<'t, 'l>, Trg<'static, 'static>, Trg<'t, 'l>) {
+  pub(crate) fn quick_mat_con_con(&mut self, trg: Trg, out: Trg) -> (Trg, Trg, Trg) {
     let ptr = trg.target();
     if trg.target().tag() == Num {
       self.rwts.oper += 1;
@@ -326,9 +339,9 @@ impl<'a> run::Net<'a> {
       (Trg::Ptr(c1.p1()), Trg::Ptr(c2.p1()), Trg::Ptr(c2.p2()))
     }
   }
-  #[inline]
+  #[inline(always)]
   /// ?<(x y) out>
-  pub(crate) fn quick_mat_con<'t, 'l>(&mut self, trg: Trg, out: Trg<'t, 'l>) -> (Trg<'t, 'l>, Trg<'t, 'l>) {
+  pub(crate) fn quick_mat_con<'t, 'l>(&mut self, trg: Trg, out: Trg) -> (Trg, Trg) {
     let ptr = trg.target();
     if trg.target().tag() == Num {
       self.rwts.oper += 1;
@@ -352,9 +365,9 @@ impl<'a> run::Net<'a> {
       (Trg::Ptr(c1.p1()), Trg::Ptr(c1.p2()))
     }
   }
-  #[inline]
+  #[inline(always)]
   /// ?<x out>
-  pub(crate) fn quick_mat<'t, 'l>(&mut self, trg: Trg, out: Trg<'t, 'l>) -> Trg<'t, 'l> {
+  pub(crate) fn quick_mat<'t, 'l>(&mut self, trg: Trg, out: Trg) -> Trg {
     let ptr = trg.target();
     if trg.target().tag() == Num {
       self.rwts.oper += 1;
@@ -381,7 +394,7 @@ impl<'a> run::Net<'a> {
     }
   }
   #[inline(always)]
-  pub(crate) fn make(&mut self, tag: Tag, lab: Lab, x: Trg, y: Trg) -> Trg<'static, 'static> {
+  pub(crate) fn make(&mut self, tag: Tag, lab: Lab, x: Trg, y: Trg) -> Trg {
     let n = Ptr::new(tag, lab, self.heap.alloc());
     self.half_safe_link(x, n.p1());
     self.half_safe_link(y, n.p2());

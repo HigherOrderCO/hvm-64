@@ -68,35 +68,35 @@ pub fn host() -> Host {
   host
 }
 
-pub static DEF_decO: Def = Def { lab: 1, inner: DefType::Native(call_decO) };
-pub static DEF_decI: Def = Def { lab: 1, inner: DefType::Native(call_decI) };
-pub static DEF_c8: Def = Def { lab: 2, inner: DefType::Native(call_c8) };
-pub static DEF_run: Def = Def { lab: 1, inner: DefType::Native(call_run) };
-pub static DEF_c10: Def = Def { lab: 2, inner: DefType::Native(call_c10) };
-pub static DEF_c20: Def = Def { lab: 2, inner: DefType::Native(call_c20) };
-pub static DEF_c14: Def = Def { lab: 2, inner: DefType::Native(call_c14) };
-pub static DEF_runO: Def = Def { lab: 1, inner: DefType::Native(call_runO) };
-pub static DEF_I: Def = Def { lab: 1, inner: DefType::Native(call_I) };
-pub static DEF_lowO: Def = Def { lab: 1, inner: DefType::Native(call_lowO) };
-pub static DEF_Z: Def = Def { lab: 1, inner: DefType::Native(call_Z) };
 pub static DEF_S: Def = Def { lab: 1, inner: DefType::Native(call_S) };
-pub static DEF_runI: Def = Def { lab: 1, inner: DefType::Native(call_runI) };
-pub static DEF_c16: Def = Def { lab: 2, inner: DefType::Native(call_c16) };
-pub static DEF_brnZ: Def = Def { lab: 2, inner: DefType::Native(call_brnZ) };
-pub static DEF_c24: Def = Def { lab: 2, inner: DefType::Native(call_c24) };
-pub static DEF_brn: Def = Def { lab: 2, inner: DefType::Native(call_brn) };
-pub static DEF_c4: Def = Def { lab: 2, inner: DefType::Native(call_c4) };
-pub static DEF_low: Def = Def { lab: 1, inner: DefType::Native(call_low) };
-pub static DEF_c6: Def = Def { lab: 2, inner: DefType::Native(call_c6) };
-pub static DEF_main: Def = Def { lab: 2, inner: DefType::Native(call_main) };
-pub static DEF_lowI: Def = Def { lab: 1, inner: DefType::Native(call_lowI) };
-pub static DEF_dec: Def = Def { lab: 1, inner: DefType::Native(call_dec) };
-pub static DEF_brnS: Def = Def { lab: 2, inner: DefType::Native(call_brnS) };
 pub static DEF_O: Def = Def { lab: 1, inner: DefType::Native(call_O) };
-pub static DEF_c12: Def = Def { lab: 2, inner: DefType::Native(call_c12) };
+pub static DEF_brnZ: Def = Def { lab: 2, inner: DefType::Native(call_brnZ) };
+pub static DEF_c14: Def = Def { lab: 2, inner: DefType::Native(call_c14) };
+pub static DEF_I: Def = Def { lab: 1, inner: DefType::Native(call_I) };
+pub static DEF_c6: Def = Def { lab: 2, inner: DefType::Native(call_c6) };
+pub static DEF_Z: Def = Def { lab: 1, inner: DefType::Native(call_Z) };
+pub static DEF_c16: Def = Def { lab: 2, inner: DefType::Native(call_c16) };
 pub static DEF_c3: Def = Def { lab: 2, inner: DefType::Native(call_c3) };
-pub static DEF_E: Def = Def { lab: 1, inner: DefType::Native(call_E) };
+pub static DEF_main: Def = Def { lab: 2, inner: DefType::Native(call_main) };
+pub static DEF_lowO: Def = Def { lab: 1, inner: DefType::Native(call_lowO) };
+pub static DEF_c24: Def = Def { lab: 2, inner: DefType::Native(call_c24) };
+pub static DEF_low: Def = Def { lab: 1, inner: DefType::Native(call_low) };
+pub static DEF_c4: Def = Def { lab: 2, inner: DefType::Native(call_c4) };
+pub static DEF_brn: Def = Def { lab: 2, inner: DefType::Native(call_brn) };
+pub static DEF_decO: Def = Def { lab: 1, inner: DefType::Native(call_decO) };
+pub static DEF_c12: Def = Def { lab: 2, inner: DefType::Native(call_c12) };
+pub static DEF_run: Def = Def { lab: 1, inner: DefType::Native(call_run) };
 pub static DEF_c22: Def = Def { lab: 2, inner: DefType::Native(call_c22) };
+pub static DEF_lowI: Def = Def { lab: 1, inner: DefType::Native(call_lowI) };
+pub static DEF_decI: Def = Def { lab: 1, inner: DefType::Native(call_decI) };
+pub static DEF_c10: Def = Def { lab: 2, inner: DefType::Native(call_c10) };
+pub static DEF_dec: Def = Def { lab: 1, inner: DefType::Native(call_dec) };
+pub static DEF_c8: Def = Def { lab: 2, inner: DefType::Native(call_c8) };
+pub static DEF_c20: Def = Def { lab: 2, inner: DefType::Native(call_c20) };
+pub static DEF_E: Def = Def { lab: 1, inner: DefType::Native(call_E) };
+pub static DEF_runI: Def = Def { lab: 1, inner: DefType::Native(call_runI) };
+pub static DEF_brnS: Def = Def { lab: 2, inner: DefType::Native(call_brnS) };
+pub static DEF_runO: Def = Def { lab: 1, inner: DefType::Native(call_runO) };
 
 pub fn call_E(net: &mut Net, rt: Ptr) {
   let rt = Trg::Ptr(rt);
@@ -168,51 +168,29 @@ pub fn call_brnS(net: &mut Net, rt: Ptr) {
   let (rtx, rty) = net.quick_ctr(rt, 0);
   let (rtxx, rtxy) = net.quick_ctr(rtx, 1);
   let (rtyx, rtyy) = net.quick_ctr(rty, 0);
-  let mut rd_0_ = (Lcl::Todo(0), Lcl::Todo(0));
-  let rd_0_0 = Trg::Lcl(&mut rd_0_.0);
-  let rd_0_1 = Trg::Lcl(&mut rd_0_.1);
-  net.half_safe_link(rd_0_0, Ptr::new_ref(&DEF_brn));
-  let (rd_0_1x, rd_0_1y) = net.quick_ctr(rd_0_1, 0);
-  net.safe_link(rtxx, rd_0_1x);
-  net.safe_link(rtyx, rd_0_1y);
-  let mut rd_1_ = (Lcl::Todo(1), Lcl::Todo(1));
-  let rd_1_0 = Trg::Lcl(&mut rd_1_.0);
-  let rd_1_1 = Trg::Lcl(&mut rd_1_.1);
-  net.half_safe_link(rd_1_0, Ptr::new_ref(&DEF_brn));
-  let (rd_1_1x, rd_1_1y) = net.quick_ctr(rd_1_1, 0);
-  net.safe_link(rtxy, rd_1_1x);
-  net.safe_link(rtyy, rd_1_1y);
-
-  let (Lcl::Bound(rd_0_0), Lcl::Bound(rd_0_1)) = rd_0_ else { unreachable!() };
-  net.safe_link(rd_0_0, rd_0_1);
-  let (Lcl::Bound(rd_1_0), Lcl::Bound(rd_1_1)) = rd_1_ else { unreachable!() };
-  net.safe_link(rd_1_0, rd_1_1);
+  let rd0 = Trg::Ptr(Ptr::new_ref(&DEF_brn));
+  let (rd0x, rd0y) = net.quick_ctr(rd0, 0);
+  net.safe_link(rtxx, rd0x);
+  net.safe_link(rtyx, rd0y);
+  let rd1 = Trg::Ptr(Ptr::new_ref(&DEF_brn));
+  let (rd1x, rd1y) = net.quick_ctr(rd1, 0);
+  net.safe_link(rtxy, rd1x);
+  net.safe_link(rtyy, rd1y);
 }
 
 pub fn call_brnZ(net: &mut Net, rt: Ptr) {
   let rt = Trg::Ptr(rt);
   let (rtx, rty) = net.quick_ctr(rt, 0);
   net.half_safe_link(rtx, Ptr::ERA);
-  let mut rd_0_ = (Lcl::Todo(0), Lcl::Todo(0));
-  let rd_0_0 = Trg::Lcl(&mut rd_0_.0);
-  let rd_0_1 = Trg::Lcl(&mut rd_0_.1);
-  net.half_safe_link(rd_0_0, Ptr::new_ref(&DEF_run));
-  let (rd_0_1x, rd_0_1y) = net.quick_ctr(rd_0_1, 0);
-  net.safe_link(rty, rd_0_1y);
-  let mut rd_1_ = (Lcl::Todo(1), Lcl::Todo(1));
-  let rd_1_0 = Trg::Lcl(&mut rd_1_.0);
-  let rd_1_1 = Trg::Lcl(&mut rd_1_.1);
-  net.half_safe_link(rd_1_0, Ptr::new_ref(&DEF_c20));
-  let (rd_1_1x, rd_1_1y) = net.quick_ctr(rd_1_1, 0);
-  net.half_safe_link(rd_1_1x, Ptr::new_ref(&DEF_I));
-  let (rd_1_1yx, rd_1_1yy) = net.quick_ctr(rd_1_1y, 0);
-  net.half_safe_link(rd_1_1yx, Ptr::new_ref(&DEF_E));
-  net.safe_link(rd_0_1x, rd_1_1yy);
-
-  let (Lcl::Bound(rd_0_0), Lcl::Bound(rd_0_1)) = rd_0_ else { unreachable!() };
-  net.safe_link(rd_0_0, rd_0_1);
-  let (Lcl::Bound(rd_1_0), Lcl::Bound(rd_1_1)) = rd_1_ else { unreachable!() };
-  net.safe_link(rd_1_0, rd_1_1);
+  let rd0 = Trg::Ptr(Ptr::new_ref(&DEF_run));
+  let (rd0x, rd0y) = net.quick_ctr(rd0, 0);
+  net.safe_link(rty, rd0y);
+  let rd1 = Trg::Ptr(Ptr::new_ref(&DEF_c20));
+  let (rd1x, rd1y) = net.quick_ctr(rd1, 0);
+  net.half_safe_link(rd1x, Ptr::new_ref(&DEF_I));
+  let (rd1yx, rd1yy) = net.quick_ctr(rd1y, 0);
+  net.half_safe_link(rd1yx, Ptr::new_ref(&DEF_E));
+  net.safe_link(rd0x, rd1yy);
 }
 
 pub fn call_c10(net: &mut Net, rt: Ptr) {
@@ -713,39 +691,22 @@ pub fn call_dec(net: &mut Net, rt: Ptr) {
 pub fn call_decI(net: &mut Net, rt: Ptr) {
   let rt = Trg::Ptr(rt);
   let (rtx, rty) = net.quick_ctr(rt, 0);
-  let mut rd_0_ = (Lcl::Todo(0), Lcl::Todo(0));
-  let rd_0_0 = Trg::Lcl(&mut rd_0_.0);
-  let rd_0_1 = Trg::Lcl(&mut rd_0_.1);
-  net.half_safe_link(rd_0_0, Ptr::new_ref(&DEF_low));
-  let (rd_0_1x, rd_0_1y) = net.quick_ctr(rd_0_1, 0);
-  net.safe_link(rtx, rd_0_1x);
-  net.safe_link(rty, rd_0_1y);
-
-  let (Lcl::Bound(rd_0_0), Lcl::Bound(rd_0_1)) = rd_0_ else { unreachable!() };
-  net.safe_link(rd_0_0, rd_0_1);
+  let rd0 = Trg::Ptr(Ptr::new_ref(&DEF_low));
+  let (rd0x, rd0y) = net.quick_ctr(rd0, 0);
+  net.safe_link(rtx, rd0x);
+  net.safe_link(rty, rd0y);
 }
 
 pub fn call_decO(net: &mut Net, rt: Ptr) {
   let rt = Trg::Ptr(rt);
   let (rtx, rty) = net.quick_ctr(rt, 0);
-  let mut rd_0_ = (Lcl::Todo(0), Lcl::Todo(0));
-  let rd_0_0 = Trg::Lcl(&mut rd_0_.0);
-  let rd_0_1 = Trg::Lcl(&mut rd_0_.1);
-  net.half_safe_link(rd_0_0, Ptr::new_ref(&DEF_I));
-  let (rd_0_1x, rd_0_1y) = net.quick_ctr(rd_0_1, 0);
-  net.safe_link(rty, rd_0_1y);
-  let mut rd_1_ = (Lcl::Todo(1), Lcl::Todo(1));
-  let rd_1_0 = Trg::Lcl(&mut rd_1_.0);
-  let rd_1_1 = Trg::Lcl(&mut rd_1_.1);
-  net.half_safe_link(rd_1_0, Ptr::new_ref(&DEF_dec));
-  let (rd_1_1x, rd_1_1y) = net.quick_ctr(rd_1_1, 0);
-  net.safe_link(rtx, rd_1_1x);
-  net.safe_link(rd_0_1x, rd_1_1y);
-
-  let (Lcl::Bound(rd_0_0), Lcl::Bound(rd_0_1)) = rd_0_ else { unreachable!() };
-  net.safe_link(rd_0_0, rd_0_1);
-  let (Lcl::Bound(rd_1_0), Lcl::Bound(rd_1_1)) = rd_1_ else { unreachable!() };
-  net.safe_link(rd_1_0, rd_1_1);
+  let rd0 = Trg::Ptr(Ptr::new_ref(&DEF_I));
+  let (rd0x, rd0y) = net.quick_ctr(rd0, 0);
+  net.safe_link(rty, rd0y);
+  let rd1 = Trg::Ptr(Ptr::new_ref(&DEF_dec));
+  let (rd1x, rd1y) = net.quick_ctr(rd1, 0);
+  net.safe_link(rtx, rd1x);
+  net.safe_link(rd0x, rd1y);
 }
 
 pub fn call_low(net: &mut Net, rt: Ptr) {
@@ -763,70 +724,38 @@ pub fn call_low(net: &mut Net, rt: Ptr) {
 pub fn call_lowI(net: &mut Net, rt: Ptr) {
   let rt = Trg::Ptr(rt);
   let (rtx, rty) = net.quick_ctr(rt, 0);
-  let mut rd_0_ = (Lcl::Todo(0), Lcl::Todo(0));
-  let rd_0_0 = Trg::Lcl(&mut rd_0_.0);
-  let rd_0_1 = Trg::Lcl(&mut rd_0_.1);
-  net.half_safe_link(rd_0_0, Ptr::new_ref(&DEF_I));
-  let (rd_0_1x, rd_0_1y) = net.quick_ctr(rd_0_1, 0);
-  net.safe_link(rtx, rd_0_1x);
-  let mut rd_1_ = (Lcl::Todo(1), Lcl::Todo(1));
-  let rd_1_0 = Trg::Lcl(&mut rd_1_.0);
-  let rd_1_1 = Trg::Lcl(&mut rd_1_.1);
-  net.half_safe_link(rd_1_0, Ptr::new_ref(&DEF_O));
-  let (rd_1_1x, rd_1_1y) = net.quick_ctr(rd_1_1, 0);
-  net.safe_link(rd_0_1y, rd_1_1x);
-  net.safe_link(rty, rd_1_1y);
-
-  let (Lcl::Bound(rd_0_0), Lcl::Bound(rd_0_1)) = rd_0_ else { unreachable!() };
-  net.safe_link(rd_0_0, rd_0_1);
-  let (Lcl::Bound(rd_1_0), Lcl::Bound(rd_1_1)) = rd_1_ else { unreachable!() };
-  net.safe_link(rd_1_0, rd_1_1);
+  let rd0 = Trg::Ptr(Ptr::new_ref(&DEF_I));
+  let (rd0x, rd0y) = net.quick_ctr(rd0, 0);
+  net.safe_link(rtx, rd0x);
+  let rd1 = Trg::Ptr(Ptr::new_ref(&DEF_O));
+  let (rd1x, rd1y) = net.quick_ctr(rd1, 0);
+  net.safe_link(rd0y, rd1x);
+  net.safe_link(rty, rd1y);
 }
 
 pub fn call_lowO(net: &mut Net, rt: Ptr) {
   let rt = Trg::Ptr(rt);
   let (rtx, rty) = net.quick_ctr(rt, 0);
-  let mut rd_0_ = (Lcl::Todo(0), Lcl::Todo(0));
-  let rd_0_0 = Trg::Lcl(&mut rd_0_.0);
-  let rd_0_1 = Trg::Lcl(&mut rd_0_.1);
-  net.half_safe_link(rd_0_0, Ptr::new_ref(&DEF_O));
-  let (rd_0_1x, rd_0_1y) = net.quick_ctr(rd_0_1, 0);
-  net.safe_link(rtx, rd_0_1x);
-  let mut rd_1_ = (Lcl::Todo(1), Lcl::Todo(1));
-  let rd_1_0 = Trg::Lcl(&mut rd_1_.0);
-  let rd_1_1 = Trg::Lcl(&mut rd_1_.1);
-  net.half_safe_link(rd_1_0, Ptr::new_ref(&DEF_O));
-  let (rd_1_1x, rd_1_1y) = net.quick_ctr(rd_1_1, 0);
-  net.safe_link(rd_0_1y, rd_1_1x);
-  net.safe_link(rty, rd_1_1y);
-
-  let (Lcl::Bound(rd_0_0), Lcl::Bound(rd_0_1)) = rd_0_ else { unreachable!() };
-  net.safe_link(rd_0_0, rd_0_1);
-  let (Lcl::Bound(rd_1_0), Lcl::Bound(rd_1_1)) = rd_1_ else { unreachable!() };
-  net.safe_link(rd_1_0, rd_1_1);
+  let rd0 = Trg::Ptr(Ptr::new_ref(&DEF_O));
+  let (rd0x, rd0y) = net.quick_ctr(rd0, 0);
+  net.safe_link(rtx, rd0x);
+  let rd1 = Trg::Ptr(Ptr::new_ref(&DEF_O));
+  let (rd1x, rd1y) = net.quick_ctr(rd1, 0);
+  net.safe_link(rd0y, rd1x);
+  net.safe_link(rty, rd1y);
 }
 
 pub fn call_main(net: &mut Net, rt: Ptr) {
   let rt = Trg::Ptr(rt);
-  let mut rd_0_ = (Lcl::Todo(0), Lcl::Todo(0));
-  let rd_0_0 = Trg::Lcl(&mut rd_0_.0);
-  let rd_0_1 = Trg::Lcl(&mut rd_0_.1);
-  net.half_safe_link(rd_0_0, Ptr::new_ref(&DEF_c4));
-  let (rd_0_1x, rd_0_1y) = net.quick_ctr(rd_0_1, 0);
-  net.half_safe_link(rd_0_1x, Ptr::new_ref(&DEF_S));
-  let (rd_0_1yx, rd_0_1yy) = net.quick_ctr(rd_0_1y, 0);
-  net.half_safe_link(rd_0_1yx, Ptr::new_ref(&DEF_Z));
-  let mut rd_1_ = (Lcl::Todo(1), Lcl::Todo(1));
-  let rd_1_0 = Trg::Lcl(&mut rd_1_.0);
-  let rd_1_1 = Trg::Lcl(&mut rd_1_.1);
-  net.half_safe_link(rd_1_0, Ptr::new_ref(&DEF_brn));
-  let (rd_1_1x, rd_1_1y) = net.quick_ctr(rd_1_1, 0);
-  net.safe_link(rd_0_1yy, rd_1_1x);
-  net.safe_link(rt, rd_1_1y);
-  let (Lcl::Bound(rd_0_0), Lcl::Bound(rd_0_1)) = rd_0_ else { unreachable!() };
-  net.safe_link(rd_0_0, rd_0_1);
-  let (Lcl::Bound(rd_1_0), Lcl::Bound(rd_1_1)) = rd_1_ else { unreachable!() };
-  net.safe_link(rd_1_0, rd_1_1);
+  let rd0 = Trg::Ptr(Ptr::new_ref(&DEF_c6));
+  let (rd0x, rd0y) = net.quick_ctr(rd0, 0);
+  net.half_safe_link(rd0x, Ptr::new_ref(&DEF_S));
+  let (rd0yx, rd0yy) = net.quick_ctr(rd0y, 0);
+  net.half_safe_link(rd0yx, Ptr::new_ref(&DEF_Z));
+  let rd1 = Trg::Ptr(Ptr::new_ref(&DEF_brn));
+  let (rd1x, rd1y) = net.quick_ctr(rd1, 0);
+  net.safe_link(rd0yy, rd1x);
+  net.safe_link(rt, rd1y);
 }
 
 pub fn call_run(net: &mut Net, rt: Ptr) {
@@ -844,61 +773,29 @@ pub fn call_run(net: &mut Net, rt: Ptr) {
 pub fn call_runI(net: &mut Net, rt: Ptr) {
   let rt = Trg::Ptr(rt);
   let (rtx, rty) = net.quick_ctr(rt, 0);
-  let mut rd_0_ = (Lcl::Todo(0), Lcl::Todo(0));
-  let rd_0_0 = Trg::Lcl(&mut rd_0_.0);
-  let rd_0_1 = Trg::Lcl(&mut rd_0_.1);
-  net.half_safe_link(rd_0_0, Ptr::new_ref(&DEF_run));
-  let (rd_0_1x, rd_0_1y) = net.quick_ctr(rd_0_1, 0);
-  net.safe_link(rty, rd_0_1y);
-  let mut rd_1_ = (Lcl::Todo(1), Lcl::Todo(1));
-  let rd_1_0 = Trg::Lcl(&mut rd_1_.0);
-  let rd_1_1 = Trg::Lcl(&mut rd_1_.1);
-  net.half_safe_link(rd_1_0, Ptr::new_ref(&DEF_dec));
-  let (rd_1_1x, rd_1_1y) = net.quick_ctr(rd_1_1, 0);
-  net.safe_link(rd_0_1x, rd_1_1y);
-  let mut rd_2_ = (Lcl::Todo(2), Lcl::Todo(2));
-  let rd_2_0 = Trg::Lcl(&mut rd_2_.0);
-  let rd_2_1 = Trg::Lcl(&mut rd_2_.1);
-  net.half_safe_link(rd_2_0, Ptr::new_ref(&DEF_I));
-  let (rd_2_1x, rd_2_1y) = net.quick_ctr(rd_2_1, 0);
-  net.safe_link(rtx, rd_2_1x);
-  net.safe_link(rd_1_1x, rd_2_1y);
-
-  let (Lcl::Bound(rd_0_0), Lcl::Bound(rd_0_1)) = rd_0_ else { unreachable!() };
-  net.safe_link(rd_0_0, rd_0_1);
-  let (Lcl::Bound(rd_1_0), Lcl::Bound(rd_1_1)) = rd_1_ else { unreachable!() };
-  net.safe_link(rd_1_0, rd_1_1);
-  let (Lcl::Bound(rd_2_0), Lcl::Bound(rd_2_1)) = rd_2_ else { unreachable!() };
-  net.safe_link(rd_2_0, rd_2_1);
+  let rd0 = Trg::Ptr(Ptr::new_ref(&DEF_run));
+  let (rd0x, rd0y) = net.quick_ctr(rd0, 0);
+  net.safe_link(rty, rd0y);
+  let rd1 = Trg::Ptr(Ptr::new_ref(&DEF_dec));
+  let (rd1x, rd1y) = net.quick_ctr(rd1, 0);
+  net.safe_link(rd0x, rd1y);
+  let rd2 = Trg::Ptr(Ptr::new_ref(&DEF_I));
+  let (rd2x, rd2y) = net.quick_ctr(rd2, 0);
+  net.safe_link(rtx, rd2x);
+  net.safe_link(rd1x, rd2y);
 }
 
 pub fn call_runO(net: &mut Net, rt: Ptr) {
   let rt = Trg::Ptr(rt);
   let (rtx, rty) = net.quick_ctr(rt, 0);
-  let mut rd_0_ = (Lcl::Todo(0), Lcl::Todo(0));
-  let rd_0_0 = Trg::Lcl(&mut rd_0_.0);
-  let rd_0_1 = Trg::Lcl(&mut rd_0_.1);
-  net.half_safe_link(rd_0_0, Ptr::new_ref(&DEF_run));
-  let (rd_0_1x, rd_0_1y) = net.quick_ctr(rd_0_1, 0);
-  net.safe_link(rty, rd_0_1y);
-  let mut rd_1_ = (Lcl::Todo(1), Lcl::Todo(1));
-  let rd_1_0 = Trg::Lcl(&mut rd_1_.0);
-  let rd_1_1 = Trg::Lcl(&mut rd_1_.1);
-  net.half_safe_link(rd_1_0, Ptr::new_ref(&DEF_dec));
-  let (rd_1_1x, rd_1_1y) = net.quick_ctr(rd_1_1, 0);
-  net.safe_link(rd_0_1x, rd_1_1y);
-  let mut rd_2_ = (Lcl::Todo(2), Lcl::Todo(2));
-  let rd_2_0 = Trg::Lcl(&mut rd_2_.0);
-  let rd_2_1 = Trg::Lcl(&mut rd_2_.1);
-  net.half_safe_link(rd_2_0, Ptr::new_ref(&DEF_O));
-  let (rd_2_1x, rd_2_1y) = net.quick_ctr(rd_2_1, 0);
-  net.safe_link(rtx, rd_2_1x);
-  net.safe_link(rd_1_1x, rd_2_1y);
-
-  let (Lcl::Bound(rd_0_0), Lcl::Bound(rd_0_1)) = rd_0_ else { unreachable!() };
-  net.safe_link(rd_0_0, rd_0_1);
-  let (Lcl::Bound(rd_1_0), Lcl::Bound(rd_1_1)) = rd_1_ else { unreachable!() };
-  net.safe_link(rd_1_0, rd_1_1);
-  let (Lcl::Bound(rd_2_0), Lcl::Bound(rd_2_1)) = rd_2_ else { unreachable!() };
-  net.safe_link(rd_2_0, rd_2_1);
+  let rd0 = Trg::Ptr(Ptr::new_ref(&DEF_run));
+  let (rd0x, rd0y) = net.quick_ctr(rd0, 0);
+  net.safe_link(rty, rd0y);
+  let rd1 = Trg::Ptr(Ptr::new_ref(&DEF_dec));
+  let (rd1x, rd1y) = net.quick_ctr(rd1, 0);
+  net.safe_link(rd0x, rd1y);
+  let rd2 = Trg::Ptr(Ptr::new_ref(&DEF_O));
+  let (rd2x, rd2y) = net.quick_ctr(rd2, 0);
+  net.safe_link(rtx, rd2x);
+  net.safe_link(rd1x, rd2y);
 }
