@@ -130,7 +130,7 @@ impl fmt::Debug for Ptr {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     write!(f, "{:016x?} ", self.0)?;
     match self {
-      &Ptr::ERA => write!(f, "[Ptr::ERA]"),
+      &Ptr::ERA => write!(f, "[ERA]"),
       &Ptr::NULL => write!(f, "[Ptr::NULL]"),
       &Ptr::GONE => write!(f, "[Ptr::GONE]"),
       &Ptr::LOCK => write!(f, "[Ptr::LOCK]"),
@@ -148,7 +148,7 @@ impl Ptr {
   pub const ERA: Ptr = Ptr(Ref as _);
   pub const NULL: Ptr = Ptr(0x0000_0000_0000_0000);
   pub const LOCK: Ptr = Ptr(0xFFFF_FFFF_FFFF_FFF0);
-  pub const GONE: Ptr = Ptr(0xFFFF_FFFF_FFFF_FFF7);
+  pub const GONE: Ptr = Ptr(0xFFFF_FFFF_FFFF_FFFF);
 
   #[inline(always)]
   pub fn new(tag: Tag, lab: Lab, loc: Loc) -> Self {
@@ -277,7 +277,8 @@ impl APtr {
   pub fn take(&self) -> Ptr {
     loop {
       let got = self.swap(Ptr::LOCK);
-      if got != Ptr::LOCK && got != Ptr::NULL {
+      if got != Ptr::LOCK {
+        std::hint::spin_loop();
         return got;
       }
     }
@@ -315,7 +316,7 @@ impl<'a> Heap<'a> {
 
   #[inline(always)]
   pub fn alloc(&mut self) -> Loc {
-    if self.head != Loc::NULL {
+    let loc = if self.head != Loc::NULL {
       let loc = self.head;
       self.head = self.head.target().load().loc();
       loc
@@ -323,7 +324,10 @@ impl<'a> Heap<'a> {
       let index = self.next;
       self.next += 1;
       Loc(&unsafe { self.area.get_unchecked(index) }.0 as _)
-    }
+    };
+    loc.target().store(Ptr::LOCK);
+    loc.p2().target().store(Ptr::LOCK);
+    loc
   }
 }
 
@@ -538,14 +542,12 @@ impl<'a> Net<'a> {
       let mut t_ptr = t_dir.target().load();
       // If it is taken, we wait.
       if t_ptr == Ptr::LOCK {
-        continue;
-      }
-      if t_ptr == Ptr::NULL {
+        std::hint::spin_loop();
         continue;
       }
       // If target is a redirection, we own it. Clear and move forward.
       if t_ptr.tag() == Red {
-        t_dir.target().store(Ptr::NULL);
+        self.heap.half_free(t_dir.loc());
         a_ptr = t_ptr;
         continue;
       }
@@ -554,12 +556,12 @@ impl<'a> Net<'a> {
         if t_dir.target().cas(t_ptr, b_ptr).is_ok() {
           trace!("[{:04x}] var", self.tid);
           // Clear source location.
-          a_dir.target().store(Ptr::NULL);
+          self.heap.half_free(a_dir.loc());
           // Collect the orphaned backward path.
           t_dir = t_ptr;
           t_ptr = t_ptr.target().load();
           while t_ptr.tag() == Red {
-            t_dir.target().store(Ptr::NULL);
+            self.heap.half_free(t_dir.loc());
             t_dir = t_ptr;
             t_ptr = t_dir.target().load();
           }
@@ -578,14 +580,15 @@ impl<'a> Net<'a> {
         // First to arrive creates a redex.
         if x_ptr != Ptr::GONE {
           trace!("[{:04x}] fst {:016x}", self.tid, x_ptr.0);
-          let y_ptr = y_dir.target().load();
-          self.heap.half_free(y_dir.loc());
+          let y_ptr = y_dir.target().swap(Ptr::GONE);
           self.redux(x_ptr, y_ptr);
           return;
         // Second to arrive clears up the memory.
         } else {
           trace!("[{:04x}] snd", self.tid);
           self.heap.half_free(x_dir.loc());
+          while y_dir.target().cas(Ptr::GONE, Ptr::NULL).is_err() {}
+          self.heap.half_free(y_dir.loc());
           return;
         }
       }
@@ -640,8 +643,8 @@ impl<'a> Net<'a> {
       (Ctr, Ref) if a.lab() >= b.lab() => self.comm02(b, a),
       (Num, Ctr) => self.comm02(a, b),
       (Ctr, Num) => self.comm02(b, a),
-      (_, Ref) if b == Ptr::ERA => self.comm02(a, b),
-      (Ref, _) if a == Ptr::ERA => self.comm02(b, a),
+      (Ref, _) if a == Ptr::ERA => self.comm02(a, b),
+      (_, Ref) if b == Ptr::ERA => self.comm02(b, a),
       // deref
       (Ref, _) => self.call(a, b),
       (_, Ref) => self.call(b, a),
@@ -864,7 +867,6 @@ impl<'a> Net<'a> {
   pub fn fork(&self, tid: usize, tids: usize) -> Self {
     let heap_size = self.heap.area.len() / tids;
     let heap_start = heap_size * tid;
-    println!("{} {} {}", tid, tids, heap_start);
     let heap = Heap {
       area: &self.heap.area[heap_start .. heap_start + heap_size],
       next: self.heap.next.saturating_sub(heap_start),

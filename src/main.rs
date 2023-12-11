@@ -9,7 +9,10 @@ use hvmc::{jit::compile_book, run::Def, *};
 use std::{collections::HashSet, env, fs};
 
 fn main() {
-  if cfg!(feature = "hvm_cli_options") { cli_main() } else { bare_main() }
+  for _ in 0 .. 100000 {
+    cli_main()
+  }
+  // if cfg!(feature = "hvm_cli_options") { cli_main() } else { bare_main() }
 }
 
 fn bare_main() {
