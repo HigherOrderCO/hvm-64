@@ -20,6 +20,7 @@ codegen-units = 1
 lto = "fat"
 opt-level = 3
 panic = "abort"
+debug = "full"
 
 [features]
 default = ["hvm_cli_options"]

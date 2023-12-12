@@ -1,15 +1,28 @@
+#![cfg_attr(feature = "trace", feature(const_type_name))]
 #![allow(dead_code)]
 #![allow(non_snake_case)]
 #![allow(non_upper_case_globals)]
 #![allow(unused_imports)]
 #![allow(unused_variables)]
 
-use hvmc::{jit::compile_book, run::Def, *};
+use hvmc::{
+  jit::compile_book,
+  run::Def,
+  trace::{Tracer, _read_traces, _reset_traces},
+  *,
+};
 
-use std::{collections::HashSet, env, fs};
+use std::{collections::HashSet, env, fs, time::Instant};
 
 fn main() {
+  #[cfg(feature = "trace")]
+  if std::hint::black_box(false) {
+    hvmc::trace::_read_traces(0)
+  }
+  let s = Instant::now();
   for _ in 0 .. 100000 {
+    _reset_traces();
+    println!("{:?}", s.elapsed());
     cli_main()
   }
   // if cfg!(feature = "hvm_cli_options") { cli_main() } else { bare_main() }

@@ -1,3 +1,4 @@
+#![cfg_attr(feature = "trace", feature(const_type_name))]
 #![allow(dead_code)]
 #![allow(unused_variables)]
 #![allow(unused_imports)]
@@ -8,5 +9,6 @@ pub mod ast;
 pub mod jit;
 pub mod ops;
 pub mod run;
+pub mod trace;
 
 pub mod gen;

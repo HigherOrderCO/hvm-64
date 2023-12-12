@@ -7,7 +7,7 @@
 // they interact with nodes, and are cleared when they interact with Ptr::ERAs, allowing for constant
 // space evaluation of recursive functions on Scott encoded datatypes.
 
-use crate::ops::Op;
+use crate::{ops::Op, trace, trace::Tracer};
 use std::{
   collections::HashMap,
   default, fmt,
@@ -16,14 +16,6 @@ use std::{
     Arc, Barrier,
   },
 };
-
-macro_rules! trace {
-  ($($x:tt)*) => {
-    if cfg!(feature = "trace")  {
-      eprintln!($($x)*);
-    }
-  };
-}
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -420,6 +412,7 @@ pub struct Net<'a> {
   pub rwts: Rewrites, // rewrite count
   pub quik: Rewrites, // quick rewrite count
   pub root: Loc,
+  pub tracer: Tracer,
 }
 
 impl<'a> Net<'a> {
@@ -440,6 +433,7 @@ impl<'a> Net<'a> {
       rwts: Rewrites::default(),
       quik: Rewrites::default(),
       root,
+      tracer: Tracer::new(),
     }
   }
 
@@ -471,10 +465,10 @@ impl<'a> Net<'a> {
   // Given two locations, links both stored pointers, atomically.
   #[inline(always)]
   pub fn atomic_link(&mut self, a_dir: Ptr, b_dir: Ptr) {
-    trace!("[{:04x}] atomic_link {:?} {:?}", self.tid, a_dir, b_dir);
+    trace!(self.tracer, a_dir, b_dir);
     let a_ptr = a_dir.target().take();
     let b_ptr = b_dir.target().take();
-    trace!("[{:08x}] took {:?} {:?}", self.tid, a_ptr, b_ptr);
+    trace!(self.tracer, a_ptr, b_ptr);
     if a_ptr.is_pri() && b_ptr.is_pri() {
       self.heap.half_free(a_dir.loc());
       self.heap.half_free(b_dir.loc());
@@ -517,7 +511,7 @@ impl<'a> Net<'a> {
         self.heap.half_free(a_dir.loc());
       // If the CAS failed, resolve by using redirections.
       } else {
-        trace!("[{:04x}] cas fail {:016x}", self.tid, got.unwrap_err().0);
+        trace!(self.tracer, got.unwrap_err());
         if b_ptr.tag() == Var {
           let ptr = b_ptr.redirect();
           a_dir.target().store(ptr);
@@ -554,7 +548,7 @@ impl<'a> Net<'a> {
       // If target is a variable, we don't own it. Try replacing it.
       if t_ptr.tag() == Var {
         if t_dir.target().cas(t_ptr, b_ptr).is_ok() {
-          trace!("[{:04x}] var", self.tid);
+          trace!(self.tracer,);
           // Clear source location.
           self.heap.half_free(a_dir.loc());
           // Collect the orphaned backward path.
@@ -579,13 +573,13 @@ impl<'a> Net<'a> {
         let x_ptr = x_dir.target().swap(Ptr::GONE);
         // First to arrive creates a redex.
         if x_ptr != Ptr::GONE {
-          trace!("[{:04x}] fst {:016x}", self.tid, x_ptr.0);
+          trace!(self.tracer, x_dir, y_dir, a_dir, t_dir);
           let y_ptr = y_dir.target().swap(Ptr::GONE);
           self.redux(x_ptr, y_ptr);
           return;
         // Second to arrive clears up the memory.
         } else {
-          trace!("[{:04x}] snd", self.tid);
+          trace!(self.tracer, x_dir, y_dir, a_dir, t_dir);
           self.heap.half_free(x_dir.loc());
           while y_dir.target().cas(Ptr::GONE, Ptr::NULL).is_err() {}
           self.heap.half_free(y_dir.loc());
@@ -593,7 +587,7 @@ impl<'a> Net<'a> {
         }
       }
       // Shouldn't be reached.
-      trace!("[{:04x}] {:016x} | {:016x} {:016x} {:016x}", self.tid, t_ptr.0, a_dir.0, a_ptr.0, b_ptr.0);
+      trace!(self.tracer, t_ptr, a_dir, a_ptr, b_ptr);
       unreachable!()
     }
   }
@@ -621,7 +615,7 @@ impl<'a> Net<'a> {
   // Performs an interaction over a redex.
   #[inline(always)]
   pub fn interact(&mut self, a: Ptr, b: Ptr) {
-    trace!("[{:04x}] interact {:?}\n                {:?}", self.tid, a, b);
+    trace!(self.tracer, a, b);
     match (a.tag(), b.tag()) {
       // not actually an active pair
       (Var | Red, _) | (_, Var | Red) => unreachable!(),
@@ -831,7 +825,7 @@ impl<'a> Net<'a> {
   #[inline(always)]
   pub fn expand(&mut self) {
     fn go(net: &mut Net, dir: Ptr, len: usize, key: usize) {
-      trace!("[{:04x}] expand dir: {:?}", net.tid, dir);
+      trace!(net.tracer, dir);
       let ptr = dir.target().load();
       if ptr == Ptr::LOCK {
         return;
@@ -846,7 +840,7 @@ impl<'a> Net<'a> {
       } else if ptr.tag() == Ref && ptr != Ptr::ERA {
         let got = dir.target().swap(Ptr::LOCK);
         if got != Ptr::LOCK {
-          trace!("[{:08x}] expand {:?} {:?}", net.tid, ptr, dir);
+          trace!(net.tracer, ptr, dir);
           net.call(ptr, dir);
         }
       }
@@ -959,7 +953,6 @@ impl<'a> Net<'a> {
     fn reduce(ctx: &mut ThreadContext) {
       loop {
         let reduced = ctx.net.reduce(LOCAL_LIMIT);
-        trace!("[{:04x}] reduced {}", ctx.tid, reduced);
         if count(ctx) == 0 {
           break;
         }
