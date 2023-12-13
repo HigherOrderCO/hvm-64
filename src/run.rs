@@ -299,8 +299,10 @@ impl<'a> Net<'a> {
     if loc.other().target().load() == Ptr::NULL {
       trace!(self.tracer, "other free");
       let loc = loc.p0();
-      if let Ok(x) = loc.target().cas_strong(Ptr::NULL, Ptr::new(Red, 1, self.head)) {
-        trace!(self.tracer, "appended", Ptr::new(Red, 0, self.head), Ptr::new(Red, 0, loc));
+      let wrt = Ptr::new(Red, 1, self.head);
+      trace!(self.tracer, wrt);
+      if let Ok(x) = loc.target().cas_strong(Ptr::NULL, wrt) {
+        trace!(self.tracer, "appended", Ptr::new(Red, 0, self.head), Ptr::new(Red, 0, loc), x);
         self.head = loc;
       } else {
         trace!(self.tracer, "too slow");
@@ -651,9 +653,6 @@ impl<'a> Net<'a> {
   // Performs an interaction over a redex.
   #[inline(always)]
   pub fn interact(&mut self, a: Ptr, b: Ptr) {
-    if self.rwts.anni > 1000 {
-      panic!("boop");
-    }
     self.tracer.sync_nonce();
     trace!(self.tracer, a, b);
     match (a.tag(), b.tag()) {
@@ -813,7 +812,7 @@ impl<'a> Net<'a> {
     self.rwts.oper += 1;
     let op = a.op();
     let v0 = a.p1().target().load().num();
-    self.half_free(b.p1().loc());
+    self.half_free(a.p1().loc());
     let v1 = b.num();
     let v2 = op.op(v0, v1);
     self.half_atomic_link(a.p2(), Ptr::new_num(v2));

@@ -1,8 +1,9 @@
 use std::{
+  cell::UnsafeCell,
   fmt::{self, Formatter, Write},
   io::stdout,
   sync::{
-    atomic::{AtomicU64, AtomicUsize, Ordering},
+    atomic::{AtomicBool, AtomicU64, AtomicU8, AtomicUsize, Ordering},
     Mutex,
   },
 };
@@ -55,17 +56,17 @@ macro_rules! trace {
 }
 
 #[cfg(feature = "trace")]
-pub struct Tracer(OwnedTracer);
+pub struct Tracer(TraceWriter);
 
 #[cfg(feature = "trace")]
 impl Tracer {
   #[inline(always)]
   pub fn new() -> Tracer {
-    Tracer(OwnedTracer::new())
+    Tracer(TraceWriter::new())
   }
   #[inline(always)]
   pub fn sync_nonce(&mut self) {
-    self.0.sync_nonce()
+    self.0.sync()
   }
   #[inline(always)]
   pub fn trace(&mut self, point: &'static TracePoint, args: &[Ptr]) {
@@ -86,96 +87,98 @@ pub struct TracePoint {
   pub args: &'static [&'static str],
 }
 
-const TRACE_SIZE: usize = 1 << 20;
+const TRACE_SIZE: usize = 1 << 22;
 
 static TRACE_NONCE: AtomicU64 = AtomicU64::new(1);
 
-struct TracerInner {
-  data: Box<[u64; TRACE_SIZE]>,
-  cursor: usize,
-  safe: AtomicUsize,
-  nonce: u64,
+struct TraceLock {
+  locked: AtomicBool,
+  data: UnsafeCell<TraceData>,
+}
+
+struct TraceData {
   tid: usize,
+  cursor: usize,
+  data: Box<[u64; TRACE_SIZE]>,
+}
+
+impl TraceData {
+  fn write_word(&mut self, word: u64) {
+    self.data[self.cursor] = word;
+    self.cursor = (self.cursor + 1) % TRACE_SIZE;
+  }
 }
 
 #[derive(Debug)]
-struct GlobalTracerRef(*const TracerInner);
+struct GlobalTracerRef(*const TraceData);
 unsafe impl Send for GlobalTracerRef {}
 
-static ACTIVE_TRACERS: Mutex<Vec<Option<GlobalTracerRef>>> = Mutex::new(Vec::new());
+static ACTIVE_TRACERS: Mutex<Vec<Box<TraceLock>>> = Mutex::new(Vec::new());
 
-struct OwnedTracer {
-  inner: Box<TracerInner>,
-  id: usize,
+struct TraceWriter {
+  lock: &'static TraceLock,
+  nonce: u64,
 }
 
-impl OwnedTracer {
+unsafe impl Send for TraceWriter {}
+
+impl TraceWriter {
   fn new() -> Self {
-    let inner =
-      Box::new(TracerInner { data: Box::new([0; TRACE_SIZE]), cursor: 0, safe: AtomicUsize::new(0), nonce: 0, tid: 0 });
-
+    let boxed = Box::new(TraceLock {
+      locked: AtomicBool::new(false),
+      data: UnsafeCell::new(TraceData { tid: 0, cursor: 0, data: Box::new([0; TRACE_SIZE]) }),
+    });
+    let lock = unsafe { &*(&*boxed as *const _) };
     let mut active_tracers = ACTIVE_TRACERS.lock().unwrap();
-    let id = active_tracers.len();
-    let ptr = (&*inner) as *const _;
-    active_tracers.push(Some(GlobalTracerRef(ptr)));
-    let mut tracer = OwnedTracer { inner, id };
-    tracer.sync_nonce();
-    tracer
+    active_tracers.push(boxed);
+    TraceWriter { lock, nonce: TRACE_NONCE.fetch_add(1, Ordering::Relaxed) }
   }
-  fn sync_nonce(&mut self) {
-    self.inner.nonce = TRACE_NONCE.fetch_add(1, Ordering::Relaxed);
+  fn sync(&mut self) {
+    self.nonce = TRACE_NONCE.fetch_add(1, Ordering::Relaxed);
   }
-  fn trace(&mut self, point: &'static TracePoint, args: &[Ptr]) {
-    let nonce = self.inner.nonce;
-    assert!(args.len() == point.args.len());
-    for arg in args.iter().rev() {
-      self.write_word(arg.0);
+  fn acquire(&self, cb: impl FnOnce(&mut TraceData)) {
+    while self.lock.locked.compare_exchange_weak(false, true, Ordering::Relaxed, Ordering::Relaxed).is_err() {
+      std::hint::spin_loop();
     }
-    self.write_word(point as *const _ as u64);
-    self.write_word(nonce);
-    self.inner.safe.store(self.inner.cursor, Ordering::Release);
+    cb(unsafe { &mut *self.lock.data.get() });
+    self.lock.locked.store(false, Ordering::Release);
   }
-  fn write_word(&mut self, word: u64) {
-    self.inner.data[self.inner.cursor] = word;
-    unsafe {
-      std::ptr::write_volatile(&mut self.inner.cursor as *mut _, (self.inner.cursor + 1) % TRACE_SIZE);
-    }
+  fn trace(&self, point: &'static TracePoint, args: &[Ptr]) {
+    self.acquire(|data| {
+      let nonce = self.nonce;
+      assert!(args.len() == point.args.len());
+      for arg in args.iter().rev() {
+        data.write_word(arg.0);
+      }
+      data.write_word(point as *const _ as u64);
+      data.write_word(nonce);
+    })
   }
-  fn set_tid(&mut self, tid: usize) {
-    self.inner.tid = tid;
+  fn set_tid(&self, tid: usize) {
+    self.acquire(|data| data.tid = tid);
   }
 }
 
-impl Drop for OwnedTracer {
-  fn drop(&mut self) {
-    let mut active_tracers = ACTIVE_TRACERS.lock().unwrap();
-    active_tracers[self.id] = None;
-  }
-}
-
-struct TracerReader<'a> {
-  tracer: &'a TracerInner,
+struct TraceReader<'a> {
+  data: &'a TraceData,
   cursor: usize,
   id: usize,
 }
 
-impl<'a> TracerReader<'a> {
-  fn new(tracer: &'a TracerInner, id: usize) -> Self {
-    let safe = tracer.safe.load(Ordering::Acquire);
-    dbg!(tracer.cursor, safe, tracer.data.last());
-    TracerReader { tracer, cursor: (TRACE_SIZE + safe - 1) % TRACE_SIZE, id }
+impl<'a> TraceReader<'a> {
+  fn new(data: &'a TraceData, id: usize) -> Self {
+    TraceReader { data, cursor: (TRACE_SIZE + data.cursor - 1) % TRACE_SIZE, id }
   }
   fn read_entry(&mut self, f: &mut impl Write) -> Option<fmt::Result> {
     let nonce = self.read_word()?;
     let point = self.read_word()?;
-    dbg!(self.id, self.cursor, self.tracer.cursor, point as *const u8);
     if point == 0 {
-      self.cursor = self.tracer.cursor;
+      self.cursor = self.data.cursor;
       return None;
     }
     let point = unsafe { &*(point as *const TracePoint) };
     if self.remaining() < point.args.len() {
-      self.cursor = self.tracer.cursor;
+      self.cursor = self.data.cursor;
       return None;
     }
     Some((|| {
@@ -183,7 +186,7 @@ impl<'a> TracerReader<'a> {
         f,
         "{:02x}t{:02x} {}{}{} [{}:{}] #{}",
         self.id,
-        self.tracer.tid,
+        self.data.tid,
         point.func.strip_suffix("::__").unwrap_or(point.func).rsplit("::").next().unwrap(),
         if point.str.is_empty() { "" } else { " " },
         point.str,
@@ -203,7 +206,7 @@ impl<'a> TracerReader<'a> {
     })())
   }
   fn peek_word(&self) -> Option<u64> {
-    if self.cursor == self.tracer.cursor { None } else { Some(self.tracer.data[self.cursor]) }
+    if self.cursor == self.data.cursor { None } else { Some(self.data.data[self.cursor]) }
   }
   fn read_word(&mut self) -> Option<u64> {
     let word = self.peek_word()?;
@@ -211,17 +214,22 @@ impl<'a> TracerReader<'a> {
     Some(word)
   }
   fn remaining(&self) -> usize {
-    (self.cursor + TRACE_SIZE - self.tracer.cursor) % TRACE_SIZE
+    (self.cursor + TRACE_SIZE - self.data.cursor) % TRACE_SIZE
   }
 }
 
 #[no_mangle]
-pub unsafe fn _read_traces(limit: usize) {
+pub fn _read_traces(limit: usize) {
   let active_tracers = &*ACTIVE_TRACERS.lock().unwrap();
   let mut readers = active_tracers
     .iter()
     .enumerate()
-    .filter_map(|(i, t)| Some(TracerReader::new(unsafe { &*t.as_ref()?.0 }, i)))
+    .map(|(i, t)| {
+      while t.locked.compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed).is_err() {
+        std::hint::spin_loop();
+      }
+      TraceReader::new(unsafe { &*t.data.get() }, i)
+    })
     .collect::<Vec<_>>();
   let mut out = String::new();
   for _ in 0 .. limit {
@@ -229,13 +237,12 @@ pub unsafe fn _read_traces(limit: usize) {
       break;
     };
     r.read_entry(&mut out);
-    eprintln!("{}", out);
-    out.clear();
   }
-  eprintln!("{}", out.len());
+  eprintln!("{}", out);
+  active_tracers.iter().for_each(|t| t.locked.store(false, Ordering::Relaxed));
 }
 
-pub fn _reset_traces() {
+pub unsafe fn _reset_traces() {
   ACTIVE_TRACERS.lock().unwrap().clear();
   TRACE_NONCE.store(1, Ordering::Relaxed);
 }

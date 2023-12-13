@@ -17,14 +17,16 @@ use std::{collections::HashSet, env, fs, time::Instant};
 fn main() {
   #[cfg(feature = "trace")]
   if std::hint::black_box(false) {
-    unsafe { hvmc::trace::_read_traces(0) }
+    hvmc::trace::_read_traces(0)
   }
   let s = Instant::now();
   for i in 0 .. 100000 {
-    _reset_traces();
+    unsafe {
+      _reset_traces();
+    }
     println!("{} {:?}", i, s.elapsed());
     cli_main();
-    return;
+    // return;
     // unsafe { std::ptr::read_volatile(std::hint::black_box(usize::MAX as *mut u8)) };
   }
   // if cfg!(feature = "hvm_cli_options") { cli_main() } else { bare_main() }
