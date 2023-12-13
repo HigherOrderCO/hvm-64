@@ -260,7 +260,7 @@ impl<'a> run::Net<'a> {
     //   self.quik.comm += 1;
     //   (Trg::Ptr(ptr), Trg::Ptr(ptr))
     } else {
-      let loc = self.alloc();
+      let loc = self.safe_alloc();
       let n = Ptr::new(Ctr, lab, loc);
       self.link_trg_ptr(trg, n);
       (Trg::Ptr(n.p1().var()), Trg::Ptr(n.p2().var()))
@@ -277,7 +277,7 @@ impl<'a> run::Net<'a> {
     } else if ptr == Ptr::ERA {
       Trg::Ptr(Ptr::ERA)
     } else {
-      let n = Ptr::new(Op2, op as Lab, self.alloc());
+      let n = Ptr::new(Op2, op as Lab, self.safe_alloc());
       self.link_trg_ptr(trg, n);
       n.p1().target().store(Ptr::new_num(b));
       Trg::Ptr(n.p2().var())
@@ -290,13 +290,13 @@ impl<'a> run::Net<'a> {
     if ptr.tag() == Num {
       self.quik.oper += 1;
       self.free_trg(trg);
-      let n = Ptr::new(Op1, op as Lab, self.alloc());
+      let n = Ptr::new(Op1, op as Lab, self.safe_alloc());
       n.p1().target().store(Ptr::new_num(ptr.num()));
       (Trg::Ptr(n), Trg::Ptr(n.p2().var()))
     } else if ptr == Ptr::ERA {
       (Trg::Ptr(Ptr::ERA), Trg::Ptr(Ptr::ERA))
     } else {
-      let n = Ptr::new(Op2, op as Lab, self.alloc());
+      let n = Ptr::new(Op2, op as Lab, self.safe_alloc());
       self.link_trg_ptr(trg, n);
       (Trg::Ptr(n.p1().var()), Trg::Ptr(n.p2().var()))
     }
@@ -312,7 +312,7 @@ impl<'a> run::Net<'a> {
     } else if ptr == Ptr::ERA {
       Trg::Ptr(Ptr::ERA)
     } else {
-      let n = Ptr::new(Op1, op as Lab, self.alloc());
+      let n = Ptr::new(Op1, op as Lab, self.safe_alloc());
       self.link_trg_ptr(trg, n);
       n.p1().target().store(Ptr::new_num(a));
       Trg::Ptr(n.p2().var())
@@ -335,9 +335,9 @@ impl<'a> run::Net<'a> {
       self.link_trg_ptr(out, Ptr::ERA);
       (Trg::Ptr(Ptr::ERA), Trg::Ptr(Ptr::ERA), Trg::Ptr(Ptr::ERA))
     } else {
-      let m = Ptr::new(Mat, 0, self.alloc());
-      let c1 = Ptr::new(Ctr, 0, self.alloc());
-      let c2 = Ptr::new(Ctr, 0, self.alloc());
+      let m = Ptr::new(Mat, 0, self.safe_alloc());
+      let c1 = Ptr::new(Ctr, 0, self.safe_alloc());
+      let c2 = Ptr::new(Ctr, 0, self.safe_alloc());
       m.p1().target().store(c1);
       c1.p2().target().store(c2);
       self.link_trg_ptr(out, m.p2().var());
@@ -355,7 +355,7 @@ impl<'a> run::Net<'a> {
       if num == 0 {
         (out, Trg::Ptr(Ptr::ERA))
       } else {
-        let c2 = Ptr::new(Ctr, 0, self.alloc());
+        let c2 = Ptr::new(Ctr, 0, self.safe_alloc());
         c2.p1().target().store(Ptr::new_num(num - 1));
         self.link_trg_ptr(out, c2.p2().var());
         (Trg::Ptr(Ptr::ERA), Trg::Ptr(c2))
@@ -364,8 +364,8 @@ impl<'a> run::Net<'a> {
       self.link_trg_ptr(out, Ptr::ERA);
       (Trg::Ptr(Ptr::ERA), Trg::Ptr(Ptr::ERA))
     } else {
-      let m = Ptr::new(Mat, 0, self.alloc());
-      let c1 = Ptr::new(Ctr, 0, self.alloc());
+      let m = Ptr::new(Mat, 0, self.safe_alloc());
+      let c1 = Ptr::new(Ctr, 0, self.safe_alloc());
       m.p1().target().store(c1);
       self.link_trg_ptr(out, m.p2().var());
       (Trg::Ptr(c1.p1().var()), Trg::Ptr(c1.p2().var()))
@@ -379,12 +379,12 @@ impl<'a> run::Net<'a> {
       self.quik.oper += 1;
       self.free_trg(trg);
       let num = ptr.num();
-      let c1 = Ptr::new(Ctr, 0, self.alloc());
+      let c1 = Ptr::new(Ctr, 0, self.safe_alloc());
       if num == 0 {
         c1.p2().target().store(Ptr::ERA);
         (Trg::Ptr(c1.p1().var()), Trg::Ptr(c1))
       } else {
-        let c2 = Ptr::new(Ctr, 0, self.alloc());
+        let c2 = Ptr::new(Ctr, 0, self.safe_alloc());
         c1.p1().target().store(Ptr::ERA);
         c1.p2().target().store(c2);
         c2.p1().target().store(Ptr::new_num(num - 1));
@@ -393,13 +393,13 @@ impl<'a> run::Net<'a> {
     } else if ptr == Ptr::ERA {
       (Trg::Ptr(Ptr::ERA), Trg::Ptr(Ptr::ERA))
     } else {
-      let m = Ptr::new(Mat, 0, self.alloc());
+      let m = Ptr::new(Mat, 0, self.safe_alloc());
       (Trg::Ptr(m.p2().var()), Trg::Ptr(m.p1().var()))
     }
   }
   #[inline(always)]
   pub(crate) fn make(&mut self, tag: Tag, lab: Lab, x: Trg, y: Trg) -> Trg {
-    let n = Ptr::new(tag, lab, self.alloc());
+    let n = Ptr::new(tag, lab, self.safe_alloc());
     self.link_trg_ptr(x, n.p1().var());
     self.link_trg_ptr(y, n.p2().var());
     Trg::Ptr(n)

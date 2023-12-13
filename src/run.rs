@@ -346,6 +346,12 @@ impl<'a> Net<'a> {
       Loc(&self.area.get(index).expect("OOM").0 as _)
     };
     trace!(self.tracer, loc, self.head);
+    loc
+  }
+
+  #[inline(never)]
+  pub fn safe_alloc(&mut self) -> Loc {
+    let loc = self.alloc();
     loc.target().store(Ptr::LOCK);
     loc.p2().target().store(Ptr::LOCK);
     loc
@@ -452,7 +458,7 @@ impl<'a> Net<'a> {
   // Creates an empty net with a given heap.
   pub fn new(area: &'a Data) -> Self {
     let mut net = Net::new_with_root(area, Loc::NULL);
-    let root = net.alloc();
+    let root = net.safe_alloc();
     net.root = root;
     net
   }
@@ -812,8 +818,8 @@ impl<'a> Net<'a> {
       x.p2().target().store(y);
       y.p1().target().store(Ptr::new_num(b.num() - 1));
       trace!(self.tracer);
-      self.half_atomic_link(a.p1(), x);
       self.half_atomic_link(a.p2(), y.p2().var());
+      self.half_atomic_link(a.p1(), x);
     }
   }
 
@@ -855,7 +861,7 @@ impl<'a> Net<'a> {
     let len = net.node.len();
     // Allocate space.
     for i in 0 .. len {
-      *unsafe { self.locs.get_unchecked_mut(i) } = self.alloc();
+      *unsafe { self.locs.get_unchecked_mut(i) } = self.safe_alloc();
     }
     // Load nodes, adjusted.
     for i in 0 .. len {
