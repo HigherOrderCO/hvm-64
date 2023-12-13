@@ -75,46 +75,57 @@ const PORT_MASK: Val = 0b1000;
 impl Loc {
   pub const NULL: Loc = Loc(std::ptr::null());
 
+  #[inline(always)]
   pub fn index(&self) -> usize {
     self.0 as usize >> 4
   }
 
+  #[inline(always)]
   pub fn port(&self) -> u8 {
     (((self.0 as usize as Val) & PORT_MASK) >> 3) as u8
   }
 
+  #[inline(always)]
   pub fn local(index: usize, port: u8) -> Loc {
     Loc(((index << 4) | ((port as usize) << 3)) as *const _)
   }
 
+  #[inline(always)]
   pub fn with_port(&self, port: u8) -> Loc {
     Loc(((self.0 as Val) & !PORT_MASK | ((port as Val) << 3)) as _)
   }
 
+  #[inline(always)]
   pub fn p0(&self) -> Loc {
     Loc(((self.0 as Val) & !PORT_MASK) as _)
   }
 
+  #[inline(always)]
   pub fn p1(&self) -> Loc {
     Loc(((self.0 as Val) & !PORT_MASK) as _)
   }
 
+  #[inline(always)]
   pub fn p2(&self) -> Loc {
     Loc(((self.0 as Val) | PORT_MASK) as _)
   }
 
+  #[inline(always)]
   pub fn other(&self) -> Loc {
     Loc(((self.0 as Val) ^ PORT_MASK) as _)
   }
 
+  #[inline(always)]
   pub fn target<'a>(self) -> &'a APtr {
     unsafe { &*self.0 }
   }
 
+  #[inline(always)]
   pub fn def<'a>(self) -> &'a Def {
     unsafe { &*(self.0 as *const _) }
   }
 
+  #[inline(always)]
   pub fn var(self) -> Ptr {
     Ptr::new(Var, 0, self)
   }
@@ -279,7 +290,6 @@ impl APtr {
     loop {
       let got = self.swap(Ptr::LOCK);
       if got != Ptr::LOCK {
-        std::hint::spin_loop();
         return got;
       }
     }
@@ -296,7 +306,13 @@ impl<'a> Net<'a> {
     }
   }
 
-  #[inline(always)]
+  #[inline(never)]
+  pub fn weak_half_free(&mut self, loc: Loc) {
+    trace!(self.tracer, loc);
+    loc.target().store(Ptr::NULL);
+  }
+
+  #[inline(never)]
   pub fn half_free(&mut self, loc: Loc) {
     trace!(self.tracer, loc);
     loc.target().store(Ptr::NULL);
@@ -311,11 +327,11 @@ impl<'a> Net<'a> {
         self.head = new_head;
       } else {
         trace!(self.tracer, "too slow");
-      }
+      };
     }
   }
 
-  #[inline(always)]
+  #[inline(never)]
   pub fn alloc(&mut self) -> Loc {
     trace!(self.tracer, self.head);
     let loc = if self.head != Loc::NULL {
@@ -569,7 +585,6 @@ impl<'a> Net<'a> {
       trace!(self.tracer, t_ptr);
       // If it is taken, we wait.
       if t_ptr == Ptr::LOCK {
-        std::hint::spin_loop();
         continue;
       }
       // If target is a redirection, we own it. Clear and move forward.
@@ -699,6 +714,7 @@ impl<'a> Net<'a> {
     }
   }
 
+  #[inline(never)]
   pub fn anni2(&mut self, a: Ptr, b: Ptr) {
     trace!(self.tracer, a, b);
     self.rwts.anni += 1;
@@ -706,14 +722,16 @@ impl<'a> Net<'a> {
     self.atomic_link(a.p2(), b.p2());
   }
 
+  #[inline(never)]
   pub fn anni1(&mut self, a: Ptr, b: Ptr) {
     trace!(self.tracer, a, b);
     self.rwts.anni += 1;
-    self.half_free(a.p1());
-    self.half_free(b.p1());
+    self.weak_half_free(a.p1());
+    self.weak_half_free(b.p1());
     self.atomic_link(a.p2(), b.p2());
   }
 
+  #[inline(never)]
   pub fn comm22(&mut self, a: Ptr, b: Ptr) {
     trace!(self.tracer, a, b);
     self.rwts.comm += 1;
@@ -737,11 +755,12 @@ impl<'a> Net<'a> {
     self.half_atomic_link(b.p2(), A2);
   }
 
+  #[inline(never)]
   pub fn comm12(&mut self, a: Ptr, b: Ptr) {
     trace!(self.tracer, a, b);
     self.rwts.comm += 1;
     let n = a.p1().target().load();
-    self.half_free(a.p1());
+    self.weak_half_free(a.p1());
     let B2 = Ptr::new(Ctr, b.lab(), self.alloc());
     let A1 = Ptr::new(Ctr, a.lab(), self.alloc());
     let A2 = Ptr::new(Ctr, a.lab(), self.alloc());
@@ -758,6 +777,7 @@ impl<'a> Net<'a> {
     self.half_atomic_link(b.p2(), A2);
   }
 
+  #[inline(never)]
   pub fn comm02(&mut self, a: Ptr, b: Ptr) {
     trace!(self.tracer, a, b);
     self.rwts.comm += 1;
@@ -765,13 +785,15 @@ impl<'a> Net<'a> {
     self.half_atomic_link(b.p2(), a);
   }
 
+  #[inline(never)]
   pub fn comm01(&mut self, a: Ptr, b: Ptr) {
     trace!(self.tracer, a, b);
     self.rwts.comm += 1;
-    self.half_free(b.p1());
+    self.weak_half_free(b.p1());
     self.half_atomic_link(b.p2(), a);
   }
 
+  #[inline(never)]
   pub fn mat_num(&mut self, a: Ptr, b: Ptr) {
     trace!(self.tracer, a, b);
     self.rwts.oper += 1;
@@ -795,6 +817,7 @@ impl<'a> Net<'a> {
     }
   }
 
+  #[inline(never)]
   pub fn op2_num(&mut self, a: Ptr, b: Ptr) {
     trace!(self.tracer, a, b);
     self.rwts.oper += 1;
@@ -806,19 +829,20 @@ impl<'a> Net<'a> {
     self.half_atomic_link(a.p1(), x);
   }
 
+  #[inline(never)]
   pub fn op1_num(&mut self, a: Ptr, b: Ptr) {
     trace!(self.tracer, a, b);
     self.rwts.oper += 1;
     let op = a.op();
     let v0 = a.p1().target().load().num();
-    self.half_free(a.p1());
+    self.weak_half_free(a.p1());
     let v1 = b.num();
     let v2 = op.op(v0, v1);
     self.half_atomic_link(a.p2(), Ptr::new_num(v2));
   }
 
   // Expands a closed net.
-  #[inline(always)]
+  #[inline(never)]
   pub fn call(&mut self, ptr: Ptr, trg: Ptr) {
     trace!(self.tracer, ptr, trg);
     self.rwts.dref += 1;

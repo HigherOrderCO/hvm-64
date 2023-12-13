@@ -217,32 +217,34 @@ impl<'a> run::Net<'a> {
   // Links two targets, using atomics when necessary, based on implied ownership.
   #[inline(always)]
   pub(crate) fn link_trg_ptr(&mut self, a: Trg, b: Ptr) {
-    match a {
-      Trg::Dir(a_dir) => self.half_atomic_link(a_dir, b),
-      Trg::Ptr(a_ptr) => self.link(a_ptr, b),
-      // Trg::Lcl(Lcl::Bound(_)) => unsafe { unreachable_unchecked() },
-      // Trg::Lcl(t) => {
-      //   *t = Lcl::Bound(Trg::Ptr(b));
-      // }
-    }
+    todo!()
+    // match a {
+    //   Trg::Dir(a_dir) => self.half_atomic_link(a_dir, b),
+    //   Trg::Ptr(a_ptr) => self.link(a_ptr, b),
+    //   // Trg::Lcl(Lcl::Bound(_)) => unsafe { unreachable_unchecked() },
+    //   // Trg::Lcl(t) => {
+    //   //   *t = Lcl::Bound(Trg::Ptr(b));
+    //   // }
+    // }
   }
 
   // Links two targets, using atomics when necessary, based on implied ownership.
   #[inline(always)]
   pub(crate) fn link_trg(&mut self, a: Trg, b: Trg) {
-    match (a, b) {
-      (Trg::Dir(a_dir), Trg::Dir(b_dir)) => self.atomic_link(a_dir, b_dir),
-      (Trg::Dir(a_dir), Trg::Ptr(b_ptr)) => self.half_atomic_link(a_dir, b_ptr),
-      (Trg::Ptr(a_ptr), Trg::Dir(b_dir)) => self.half_atomic_link(b_dir, a_ptr),
-      (Trg::Ptr(a_ptr), Trg::Ptr(b_ptr)) => self.link(a_ptr, b_ptr),
-      // (Trg::Lcl(Lcl::Bound(_)), _) | (_, Trg::Lcl(Lcl::Bound(_))) => unsafe { unreachable_unchecked() },
-      // (Trg::Lcl(a), Trg::Lcl(b)) => {
-      //   let (&Lcl::Todo(an), &Lcl::Todo(bn)) = (&*a, &*b) else { unsafe { unreachable_unchecked() } };
-      //   let (a, b) = if an < bn { (a, b) } else { (b, a) };
-      //   *b = Lcl::Bound(Trg::Lcl(a));
-      // }
-      // _ => todo!(), // (Trg::Lcl(t), u) | (u, Trg::Lcl(t)) => *t = Lcl::Bound(u),
-    }
+    todo!()
+    // match (a, b) {
+    //   (Trg::Dir(a_dir), Trg::Dir(b_dir)) => self.atomic_link(a_dir, b_dir),
+    //   (Trg::Dir(a_dir), Trg::Ptr(b_ptr)) => self.half_atomic_link(a_dir, b_ptr),
+    //   (Trg::Ptr(a_ptr), Trg::Dir(b_dir)) => self.half_atomic_link(b_dir, a_ptr),
+    //   (Trg::Ptr(a_ptr), Trg::Ptr(b_ptr)) => self.link(a_ptr, b_ptr),
+    //   // (Trg::Lcl(Lcl::Bound(_)), _) | (_, Trg::Lcl(Lcl::Bound(_))) => unsafe { unreachable_unchecked() },
+    //   // (Trg::Lcl(a), Trg::Lcl(b)) => {
+    //   //   let (&Lcl::Todo(an), &Lcl::Todo(bn)) = (&*a, &*b) else { unsafe { unreachable_unchecked() } };
+    //   //   let (a, b) = if an < bn { (a, b) } else { (b, a) };
+    //   //   *b = Lcl::Bound(Trg::Lcl(a));
+    //   // }
+    //   // _ => todo!(), // (Trg::Lcl(t), u) | (u, Trg::Lcl(t)) => *t = Lcl::Bound(u),
+    // }
   }
 
   #[inline(always)]

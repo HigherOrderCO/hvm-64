@@ -20,14 +20,14 @@ fn main() {
     hvmc::trace::_read_traces(0)
   }
   let s = Instant::now();
-  for i in 0 .. 100000 {
-    unsafe { _reset_traces() };
-    println!("{} {:?}", i, s.elapsed());
-    cli_main();
-    _read_traces(100);
-    return;
-  }
-  // if cfg!(feature = "hvm_cli_options") { cli_main() } else { bare_main() }
+  // for i in 0 .. 100000 {
+  //   unsafe { _reset_traces() };
+  //   println!("{} {:?}", i, s.elapsed());
+  //   cli_main();
+  //   _read_traces(100);
+  //   return;
+  // }
+  if cfg!(feature = "hvm_cli_options") { cli_main() } else { bare_main() }
 }
 
 fn bare_main() {
@@ -48,7 +48,7 @@ fn bare_main() {
 }
 
 fn cli_main() {
-  let data = run::Net::init_heap(1 << 28);
+  let data = run::Net::init_heap(1 << 30);
   let args: Vec<String> = env::args().collect();
   let help = "help".to_string();
   let opts = args.iter().skip(3).map(|s| s.as_str()).collect::<HashSet<_>>();
