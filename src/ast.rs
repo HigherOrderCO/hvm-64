@@ -394,19 +394,13 @@ impl Host {
           Tag::Ref if ptr == Ptr::ERA => Tree::Era,
           Tag::Ref => Tree::Ref { nam: self.runtime.back[&ptr.loc()].clone() },
           Tag::Num => Tree::Num { val: ptr.num() },
-          Tag::Op2 | Tag::Op1 => Tree::Op2 {
-            opr: ptr.op(),
-            lft: Box::new(self.read_dir(ptr.p1().loc())),
-            rgt: Box::new(self.read_dir(ptr.p2().loc())),
-          },
-          Tag::Ctr => Tree::Ctr {
-            lab: ptr.lab(),
-            lft: Box::new(self.read_dir(ptr.p1().loc())),
-            rgt: Box::new(self.read_dir(ptr.p2().loc())),
-          },
-          Tag::Mat => {
-            Tree::Mat { sel: Box::new(self.read_dir(ptr.p1().loc())), ret: Box::new(self.read_dir(ptr.p2().loc())) }
+          Tag::Op2 | Tag::Op1 => {
+            Tree::Op2 { opr: ptr.op(), lft: Box::new(self.read_dir(ptr.p1())), rgt: Box::new(self.read_dir(ptr.p2())) }
           }
+          Tag::Ctr => {
+            Tree::Ctr { lab: ptr.lab(), lft: Box::new(self.read_dir(ptr.p1())), rgt: Box::new(self.read_dir(ptr.p2())) }
+          }
+          Tag::Mat => Tree::Mat { sel: Box::new(self.read_dir(ptr.p1())), ret: Box::new(self.read_dir(ptr.p2())) },
         }
       }
     }

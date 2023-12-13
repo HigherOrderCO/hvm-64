@@ -59,7 +59,7 @@ impl TryFrom<u8> for Tag {
 
 pub type Lab = u16;
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Loc(pub *const APtr);
 
 impl fmt::Debug for Loc {
@@ -113,6 +113,10 @@ impl Loc {
 
   pub fn def<'a>(self) -> &'a Def {
     unsafe { &*(self.0 as *const _) }
+  }
+
+  pub fn var(self) -> Ptr {
+    Ptr::new(Var, 0, self)
   }
 }
 
@@ -208,13 +212,13 @@ impl Ptr {
   }
 
   #[inline(always)]
-  pub fn p1(&self) -> Ptr {
-    Ptr::new(Var, 0, self.loc().p1())
+  pub fn p1(&self) -> Loc {
+    self.loc().p1()
   }
 
   #[inline(always)]
-  pub fn p2(&self) -> Ptr {
-    Ptr::new(Var, 0, self.loc().p2())
+  pub fn p2(&self) -> Loc {
+    self.loc().p2()
   }
 
   #[inline(always)]
@@ -299,6 +303,7 @@ impl<'a> Net<'a> {
     if loc.other().target().load() == Ptr::NULL {
       trace!(self.tracer, "other free");
       let loc = loc.p0();
+      // use a label of 1 to distinguish from Ptr::NULL
       if let Ok(_) = loc.target().cas_strong(Ptr::NULL, Ptr::new(Red, 1, self.head)) {
         let old_head = self.head;
         let new_head = loc;
@@ -484,14 +489,14 @@ impl<'a> Net<'a> {
 
   // Given two locations, links both stored pointers, atomically.
   #[inline(always)]
-  pub fn atomic_link(&mut self, a_dir: Ptr, b_dir: Ptr) {
+  pub fn atomic_link(&mut self, a_dir: Loc, b_dir: Loc) {
     trace!(self.tracer, a_dir, b_dir);
     let a_ptr = a_dir.target().take();
     let b_ptr = b_dir.target().take();
     trace!(self.tracer, a_ptr, b_ptr);
     if a_ptr.is_pri() && b_ptr.is_pri() {
-      self.half_free(a_dir.loc());
-      self.half_free(b_dir.loc());
+      self.half_free(a_dir);
+      self.half_free(b_dir);
       return self.redux(a_ptr, b_ptr);
     } else {
       self.atomic_linker(a_ptr, a_dir, b_ptr);
@@ -501,12 +506,12 @@ impl<'a> Net<'a> {
 
   // Given a location, link the pointer stored to another pointer, atomically.
   #[inline(always)]
-  pub fn half_atomic_link(&mut self, a_dir: Ptr, b_ptr: Ptr) {
+  pub fn half_atomic_link(&mut self, a_dir: Loc, b_ptr: Ptr) {
     trace!(self.tracer, a_dir, b_ptr);
     let a_ptr = a_dir.target().take();
     trace!(self.tracer, a_ptr);
     if a_ptr.is_pri() && b_ptr.is_pri() {
-      self.half_free(a_dir.loc());
+      self.half_free(a_dir);
       return self.redux(a_ptr, b_ptr);
     } else {
       self.atomic_linker(a_ptr, a_dir, b_ptr);
@@ -525,15 +530,15 @@ impl<'a> Net<'a> {
 
   // When two threads interfere, uses the lock-free link algorithm described on the 'paper/'.
   #[inline(always)]
-  pub fn atomic_linker(&mut self, a_ptr: Ptr, a_dir: Ptr, b_ptr: Ptr) {
+  pub fn atomic_linker(&mut self, a_ptr: Ptr, a_dir: Loc, b_ptr: Ptr) {
     trace!(self.tracer, a_ptr, a_dir, b_ptr);
     // If 'a_ptr' is a var...
     if a_ptr.tag() == Var {
-      let got = a_ptr.target().cas(a_dir, b_ptr);
+      let got = a_ptr.target().cas(Ptr::new(Var, 0, a_dir), b_ptr);
       // Attempts to link using a compare-and-swap.
       if got.is_ok() {
         trace!(self.tracer, "cas ok");
-        self.half_free(a_dir.loc());
+        self.half_free(a_dir);
       // If the CAS failed, resolve by using redirections.
       } else {
         trace!(self.tracer, "cas fail", got.unwrap_err());
@@ -549,17 +554,17 @@ impl<'a> Net<'a> {
         }
       }
     } else {
-      self.half_free(a_dir.loc());
+      self.half_free(a_dir);
     }
   }
 
   // Atomic linker for when 'b_ptr' is a principal port.
-  pub fn atomic_linker_pri(&mut self, mut a_ptr: Ptr, a_dir: Ptr, b_ptr: Ptr) {
+  pub fn atomic_linker_pri(&mut self, mut a_ptr: Ptr, a_dir: Loc, b_ptr: Ptr) {
     trace!(self.tracer);
     loop {
       trace!(self.tracer, a_ptr, a_dir, b_ptr);
       // Peek the target, which may not be owned by us.
-      let mut t_dir = a_ptr;
+      let mut t_dir = a_ptr.loc();
       let mut t_ptr = t_dir.target().load();
       trace!(self.tracer, t_ptr);
       // If it is taken, we wait.
@@ -569,7 +574,7 @@ impl<'a> Net<'a> {
       }
       // If target is a redirection, we own it. Clear and move forward.
       if t_ptr.tag() == Red {
-        self.half_free(t_dir.loc());
+        self.half_free(t_dir);
         a_ptr = t_ptr;
         continue;
       }
@@ -578,14 +583,14 @@ impl<'a> Net<'a> {
         if t_dir.target().cas(t_ptr, b_ptr).is_ok() {
           trace!(self.tracer, "var cas ok");
           // Clear source location.
-          self.half_free(a_dir.loc());
+          self.half_free(a_dir);
           // Collect the orphaned backward path.
-          t_dir = t_ptr;
+          t_dir = t_ptr.loc();
           t_ptr = t_ptr.target().load();
           while t_ptr.tag() == Red {
             trace!(self.tracer, t_dir, t_ptr);
-            self.half_free(t_dir.loc());
-            t_dir = t_ptr;
+            self.half_free(t_dir);
+            t_dir = t_ptr.loc();
             t_ptr = t_dir.target().load();
           }
           return;
@@ -612,9 +617,9 @@ impl<'a> Net<'a> {
         // Second to arrive clears up the memory.
         } else {
           trace!(self.tracer, "snd", x_dir, y_dir);
-          self.half_free(x_dir.loc());
+          self.half_free(x_dir);
           while y_dir.target().cas(Ptr::GONE, Ptr::LOCK).is_err() {}
-          self.half_free(y_dir.loc());
+          self.half_free(y_dir);
           return;
         }
       }
@@ -625,17 +630,17 @@ impl<'a> Net<'a> {
   }
 
   // Atomic linker for when 'b_ptr' is an aux port.
-  pub fn atomic_linker_var(&mut self, a_ptr: Ptr, a_dir: Ptr, b_ptr: Ptr) {
+  pub fn atomic_linker_var(&mut self, a_ptr: Ptr, a_dir: Loc, b_ptr: Ptr) {
     loop {
       let ste_dir = b_ptr;
       let ste_ptr = ste_dir.target().load();
       if ste_ptr.tag() == Var {
-        let trg_dir = ste_ptr;
+        let trg_dir = ste_ptr.loc();
         let trg_ptr = trg_dir.target().load();
         if trg_ptr.tag() == Red {
           let neo_ptr = trg_ptr.unredirect();
           if ste_dir.target().cas(ste_ptr, neo_ptr).is_ok() {
-            self.half_free(trg_dir.loc());
+            self.half_free(trg_dir);
             continue;
           }
         }
@@ -704,8 +709,8 @@ impl<'a> Net<'a> {
   pub fn anni1(&mut self, a: Ptr, b: Ptr) {
     trace!(self.tracer, a, b);
     self.rwts.anni += 1;
-    self.half_free(a.p1().loc());
-    self.half_free(b.p1().loc());
+    self.half_free(a.p1());
+    self.half_free(b.p1());
     self.atomic_link(a.p2(), b.p2());
   }
 
@@ -717,14 +722,14 @@ impl<'a> Net<'a> {
     let A1 = Ptr::new(Ctr, a.lab(), self.alloc());
     let A2 = Ptr::new(Ctr, a.lab(), self.alloc());
     trace!(self.tracer, B1, B2, A1, A2);
-    B1.p1().target().store(A1.p1());
-    B1.p2().target().store(A2.p1());
-    B2.p1().target().store(A1.p2());
-    B2.p2().target().store(A2.p2());
-    A1.p1().target().store(B1.p1());
-    A1.p2().target().store(B2.p1());
-    A2.p1().target().store(B1.p2());
-    A2.p2().target().store(B2.p2());
+    B1.p1().target().store(A1.p1().var());
+    B1.p2().target().store(A2.p1().var());
+    B2.p1().target().store(A1.p2().var());
+    B2.p2().target().store(A2.p2().var());
+    A1.p1().target().store(B1.p1().var());
+    A1.p2().target().store(B2.p1().var());
+    A2.p1().target().store(B1.p2().var());
+    A2.p2().target().store(B2.p2().var());
     trace!(self.tracer);
     self.half_atomic_link(a.p1(), B1);
     self.half_atomic_link(a.p2(), B2);
@@ -736,17 +741,17 @@ impl<'a> Net<'a> {
     trace!(self.tracer, a, b);
     self.rwts.comm += 1;
     let n = a.p1().target().load();
-    self.half_free(a.p1().loc());
+    self.half_free(a.p1());
     let B2 = Ptr::new(Ctr, b.lab(), self.alloc());
     let A1 = Ptr::new(Ctr, a.lab(), self.alloc());
     let A2 = Ptr::new(Ctr, a.lab(), self.alloc());
     trace!(self.tracer, B2, A1, A2);
-    B2.p1().target().store(A1.p2());
-    B2.p2().target().store(A2.p2());
+    B2.p1().target().store(A1.p2().var());
+    B2.p2().target().store(A2.p2().var());
     A1.p1().target().store(n);
-    A1.p2().target().store(B2.p1());
+    A1.p2().target().store(B2.p1().var());
     A2.p1().target().store(n);
-    A2.p2().target().store(B2.p2());
+    A2.p2().target().store(B2.p2().var());
     trace!(self.tracer);
     self.half_atomic_link(a.p2(), B2);
     self.half_atomic_link(b.p1(), A1);
@@ -763,7 +768,7 @@ impl<'a> Net<'a> {
   pub fn comm01(&mut self, a: Ptr, b: Ptr) {
     trace!(self.tracer, a, b);
     self.rwts.comm += 1;
-    self.half_free(b.p1().loc());
+    self.half_free(b.p1());
     self.half_atomic_link(b.p2(), a);
   }
 
@@ -775,7 +780,7 @@ impl<'a> Net<'a> {
       trace!(self.tracer, x);
       x.p2().target().store(Ptr::ERA);
       trace!(self.tracer);
-      self.half_atomic_link(a.p2(), x.p1());
+      self.half_atomic_link(a.p2(), x.p1().var());
       self.half_atomic_link(a.p1(), x);
     } else {
       let x = Ptr::new(Ctr, 0, self.alloc());
@@ -786,7 +791,7 @@ impl<'a> Net<'a> {
       y.p1().target().store(Ptr::new_num(b.num() - 1));
       trace!(self.tracer);
       self.half_atomic_link(a.p1(), x);
-      self.half_atomic_link(a.p2(), y.p2());
+      self.half_atomic_link(a.p2(), y.p2().var());
     }
   }
 
@@ -797,7 +802,7 @@ impl<'a> Net<'a> {
     trace!(self.tracer, x);
     x.p1().target().store(b);
     trace!(self.tracer);
-    self.half_atomic_link(a.p2(), x.p2());
+    self.half_atomic_link(a.p2(), x.p2().var());
     self.half_atomic_link(a.p1(), x);
   }
 
@@ -806,7 +811,7 @@ impl<'a> Net<'a> {
     self.rwts.oper += 1;
     let op = a.op();
     let v0 = a.p1().target().load().num();
-    self.half_free(a.p1().loc());
+    self.half_free(a.p1());
     let v1 = b.num();
     let v2 = op.op(v0, v1);
     self.half_atomic_link(a.p2(), Ptr::new_num(v2));
@@ -881,7 +886,7 @@ impl<'a> Net<'a> {
   // Expands heads.
   #[inline(always)]
   pub fn expand(&mut self) {
-    fn go(net: &mut Net, dir: Ptr, len: usize, key: usize) {
+    fn go(net: &mut Net, dir: Loc, len: usize, key: usize) {
       trace!(net.tracer, dir);
       let ptr = dir.target().load();
       trace!(net.tracer, ptr);
@@ -899,11 +904,11 @@ impl<'a> Net<'a> {
         let got = dir.target().swap(Ptr::LOCK);
         if got != Ptr::LOCK {
           trace!(net.tracer, ptr, dir);
-          net.call(ptr, dir);
+          net.call(ptr, dir.var());
         }
       }
     }
-    go(self, Ptr::new(Var, 0, self.root), 1, self.tid);
+    go(self, self.root, 1, self.tid);
   }
 
   // Reduce a net to normal form.

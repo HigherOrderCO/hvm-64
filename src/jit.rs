@@ -192,7 +192,7 @@ fn compile_def(code: &mut Code, book: &ast::Book, raw_name: &str, net: &ast::Net
 // A target pointer, with implied ownership.
 pub(crate) enum Trg {
   // Lcl(&'t mut Lcl<'l>),
-  Dir(Ptr), // we don't own the pointer, so we point to its location
+  Dir(Loc), // we don't own the pointer, so we point to its location
   Ptr(Ptr), // we own the pointer, so we store it directly
 }
 
@@ -210,7 +210,7 @@ impl<'a> run::Net<'a> {
   #[inline(always)]
   pub(crate) fn free_trg(&mut self, trg: Trg) {
     match trg {
-      Trg::Dir(dir) => self.half_free(dir.loc()),
+      Trg::Dir(dir) => self.half_free(dir),
       Trg::Ptr(_) => {}
     }
   }
@@ -261,7 +261,7 @@ impl<'a> run::Net<'a> {
       let loc = self.alloc();
       let n = Ptr::new(Ctr, lab, loc);
       self.link_trg_ptr(trg, n);
-      (Trg::Ptr(n.p1()), Trg::Ptr(n.p2()))
+      (Trg::Ptr(n.p1().var()), Trg::Ptr(n.p2().var()))
     }
   }
   #[inline(always)]
@@ -278,7 +278,7 @@ impl<'a> run::Net<'a> {
       let n = Ptr::new(Op2, op as Lab, self.alloc());
       self.link_trg_ptr(trg, n);
       n.p1().target().store(Ptr::new_num(b));
-      Trg::Ptr(n.p2())
+      Trg::Ptr(n.p2().var())
     }
   }
   #[inline(always)]
@@ -290,13 +290,13 @@ impl<'a> run::Net<'a> {
       self.free_trg(trg);
       let n = Ptr::new(Op1, op as Lab, self.alloc());
       n.p1().target().store(Ptr::new_num(ptr.num()));
-      (Trg::Ptr(n), Trg::Ptr(n.p2()))
+      (Trg::Ptr(n), Trg::Ptr(n.p2().var()))
     } else if ptr == Ptr::ERA {
       (Trg::Ptr(Ptr::ERA), Trg::Ptr(Ptr::ERA))
     } else {
       let n = Ptr::new(Op2, op as Lab, self.alloc());
       self.link_trg_ptr(trg, n);
-      (Trg::Ptr(n.p1()), Trg::Ptr(n.p2()))
+      (Trg::Ptr(n.p1().var()), Trg::Ptr(n.p2().var()))
     }
   }
   #[inline(always)]
@@ -313,7 +313,7 @@ impl<'a> run::Net<'a> {
       let n = Ptr::new(Op1, op as Lab, self.alloc());
       self.link_trg_ptr(trg, n);
       n.p1().target().store(Ptr::new_num(a));
-      Trg::Ptr(n.p2())
+      Trg::Ptr(n.p2().var())
     }
   }
   #[inline(always)]
@@ -338,8 +338,8 @@ impl<'a> run::Net<'a> {
       let c2 = Ptr::new(Ctr, 0, self.alloc());
       m.p1().target().store(c1);
       c1.p2().target().store(c2);
-      self.link_trg_ptr(out, m.p2());
-      (Trg::Ptr(c1.p1()), Trg::Ptr(c2.p1()), Trg::Ptr(c2.p2()))
+      self.link_trg_ptr(out, m.p2().var());
+      (Trg::Ptr(c1.p1().var()), Trg::Ptr(c2.p1().var()), Trg::Ptr(c2.p2().var()))
     }
   }
   #[inline(always)]
@@ -355,7 +355,7 @@ impl<'a> run::Net<'a> {
       } else {
         let c2 = Ptr::new(Ctr, 0, self.alloc());
         c2.p1().target().store(Ptr::new_num(num - 1));
-        self.link_trg_ptr(out, c2.p2());
+        self.link_trg_ptr(out, c2.p2().var());
         (Trg::Ptr(Ptr::ERA), Trg::Ptr(c2))
       }
     } else if ptr == Ptr::ERA {
@@ -365,8 +365,8 @@ impl<'a> run::Net<'a> {
       let m = Ptr::new(Mat, 0, self.alloc());
       let c1 = Ptr::new(Ctr, 0, self.alloc());
       m.p1().target().store(c1);
-      self.link_trg_ptr(out, m.p2());
-      (Trg::Ptr(c1.p1()), Trg::Ptr(c1.p2()))
+      self.link_trg_ptr(out, m.p2().var());
+      (Trg::Ptr(c1.p1().var()), Trg::Ptr(c1.p2().var()))
     }
   }
   #[inline(always)]
@@ -380,26 +380,26 @@ impl<'a> run::Net<'a> {
       let c1 = Ptr::new(Ctr, 0, self.alloc());
       if num == 0 {
         c1.p2().target().store(Ptr::ERA);
-        (Trg::Ptr(c1.p1()), Trg::Ptr(c1))
+        (Trg::Ptr(c1.p1().var()), Trg::Ptr(c1))
       } else {
         let c2 = Ptr::new(Ctr, 0, self.alloc());
         c1.p1().target().store(Ptr::ERA);
         c1.p2().target().store(c2);
         c2.p1().target().store(Ptr::new_num(num - 1));
-        (Trg::Ptr(c2.p2()), Trg::Ptr(c1))
+        (Trg::Ptr(c2.p2().var()), Trg::Ptr(c1))
       }
     } else if ptr == Ptr::ERA {
       (Trg::Ptr(Ptr::ERA), Trg::Ptr(Ptr::ERA))
     } else {
       let m = Ptr::new(Mat, 0, self.alloc());
-      (Trg::Ptr(m.p2()), Trg::Ptr(m.p1()))
+      (Trg::Ptr(m.p2().var()), Trg::Ptr(m.p1().var()))
     }
   }
   #[inline(always)]
   pub(crate) fn make(&mut self, tag: Tag, lab: Lab, x: Trg, y: Trg) -> Trg {
     let n = Ptr::new(tag, lab, self.alloc());
-    self.link_trg_ptr(x, n.p1());
-    self.link_trg_ptr(y, n.p2());
+    self.link_trg_ptr(x, n.p1().var());
+    self.link_trg_ptr(y, n.p2().var());
     Trg::Ptr(n)
   }
 }
