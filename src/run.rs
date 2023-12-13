@@ -295,11 +295,7 @@ impl<'a> Net<'a> {
   #[inline(always)]
   pub fn half_free(&mut self, loc: Loc) {
     trace!(self.tracer, Ptr::new(Red, 0, loc));
-    let got = loc.target().swap(Ptr::NULL);
-    trace!(self.tracer, got);
-    if got.tag() == Red && got.lab() == 1 {
-      panic!("hey! {:?}", got);
-    }
+    loc.target().store(Ptr::NULL);
     if loc.other().target().load() == Ptr::NULL {
       trace!(self.tracer, "other free");
       let loc = loc.p0();
@@ -319,15 +315,9 @@ impl<'a> Net<'a> {
     trace!(self.tracer, Ptr::new(Red, 0, self.head));
     let loc = if self.head != Loc::NULL {
       let loc = self.head;
-      let ld = self.head.target().load();
-      trace!(self.tracer, ld);
-      if (ld.tag() != Red || ld.lab() != 1) && ld != Ptr::NULL {
-        panic!("wat {:?}", ld);
-        // unsafe {
-        //   std::ptr::read_volatile(std::ptr::null::<u64>());
-        // }
-      }
-      self.head = ld.loc();
+      let next = self.head.target().load();
+      trace!(self.tracer, next);
+      self.head = next.loc();
       loc
     } else {
       let index = self.next;
@@ -657,7 +647,7 @@ impl<'a> Net<'a> {
   // Performs an interaction over a redex.
   #[inline(always)]
   pub fn interact(&mut self, a: Ptr, b: Ptr) {
-    self.tracer.sync_nonce();
+    self.tracer.sync();
     trace!(self.tracer, a, b);
     match (a.tag(), b.tag()) {
       // not actually an active pair

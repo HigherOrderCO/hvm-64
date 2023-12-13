@@ -93,7 +93,7 @@ impl Tracer {
     Tracer
   }
   #[inline(always)]
-  pub fn sync_nonce(&mut self) {}
+  pub fn sync(&mut self) {}
   #[inline(always)]
   pub fn set_tid(&mut self, tid: usize) {}
 }
@@ -127,15 +127,15 @@ impl Tracer {
     Tracer(TraceWriter::new())
   }
   #[inline(always)]
-  pub fn sync_nonce(&mut self) {
+  pub fn sync(&mut self) {
     self.0.sync()
   }
   #[inline(always)]
-  pub fn trace(&mut self, point: &'static TracePoint, args: &[Ptr]) {
+  pub fn trace(&self, point: &'static TracePoint, args: &[Ptr]) {
     self.0.trace(point, args)
   }
   #[inline(always)]
-  pub fn set_tid(&mut self, tid: usize) {
+  pub fn set_tid(&self, tid: usize) {
     self.0.set_tid(tid)
   }
 }

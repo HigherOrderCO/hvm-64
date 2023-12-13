@@ -21,13 +21,9 @@ fn main() {
   }
   let s = Instant::now();
   for i in 0 .. 100000 {
-    unsafe {
-      _reset_traces();
-    }
+    unsafe { _reset_traces() };
     println!("{} {:?}", i, s.elapsed());
     cli_main();
-    // return;
-    // unsafe { std::ptr::read_volatile(std::hint::black_box(usize::MAX as *mut u8)) };
   }
   // if cfg!(feature = "hvm_cli_options") { cli_main() } else { bare_main() }
 }
