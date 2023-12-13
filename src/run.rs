@@ -294,16 +294,16 @@ impl<'a> Net<'a> {
 
   #[inline(always)]
   pub fn half_free(&mut self, loc: Loc) {
-    trace!(self.tracer, Ptr::new(Red, 0, loc));
+    trace!(self.tracer, loc);
     loc.target().store(Ptr::NULL);
     if loc.other().target().load() == Ptr::NULL {
       trace!(self.tracer, "other free");
       let loc = loc.p0();
-      let wrt = Ptr::new(Red, 1, self.head);
-      trace!(self.tracer, wrt);
-      if let Ok(x) = loc.target().cas_strong(Ptr::NULL, wrt) {
-        trace!(self.tracer, "appended", Ptr::new(Red, 0, self.head), Ptr::new(Red, 0, loc), x);
-        self.head = loc;
+      if let Ok(_) = loc.target().cas_strong(Ptr::NULL, Ptr::new(Red, 1, self.head)) {
+        let old_head = self.head;
+        let new_head = loc;
+        trace!(self.tracer, "appended", old_head, new_head);
+        self.head = new_head;
       } else {
         trace!(self.tracer, "too slow");
       }
@@ -312,7 +312,7 @@ impl<'a> Net<'a> {
 
   #[inline(always)]
   pub fn alloc(&mut self) -> Loc {
-    trace!(self.tracer, Ptr::new(Red, 0, self.head));
+    trace!(self.tracer, self.head);
     let loc = if self.head != Loc::NULL {
       let loc = self.head;
       let next = self.head.target().load();
@@ -324,7 +324,7 @@ impl<'a> Net<'a> {
       self.next += 1;
       Loc(&self.area.get(index).expect("OOM").0 as _)
     };
-    trace!(self.tracer, Ptr::new(Red, 0, loc), Ptr::new(Red, 0, self.head));
+    trace!(self.tracer, loc, self.head);
     loc.target().store(Ptr::LOCK);
     loc.p2().target().store(Ptr::LOCK);
     loc
@@ -830,12 +830,12 @@ impl<'a> Net<'a> {
     }
     // Load nodes, adjusted.
     for i in 0 .. len {
+      let loc = *unsafe { self.locs.get_unchecked(i) };
       let p1 = self.adjust(unsafe { net.node.get_unchecked(i) }.0);
       let p2 = self.adjust(unsafe { net.node.get_unchecked(i) }.1);
-      let lc = *unsafe { self.locs.get_unchecked(i) };
-      trace!(self.tracer, Ptr::new(Red, 0, lc), p1, p2);
-      lc.p1().target().store(p1);
-      lc.p2().target().store(p2);
+      trace!(self.tracer, loc, p1, p2);
+      loc.p1().target().store(p1);
+      loc.p2().target().store(p2);
     }
     // Load redexes, adjusted.
     for r in &net.rdex {
