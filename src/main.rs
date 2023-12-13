@@ -17,13 +17,15 @@ use std::{collections::HashSet, env, fs, time::Instant};
 fn main() {
   #[cfg(feature = "trace")]
   if std::hint::black_box(false) {
-    hvmc::trace::_read_traces(0)
+    unsafe { hvmc::trace::_read_traces(0) }
   }
   let s = Instant::now();
-  for _ in 0 .. 100000 {
+  for i in 0 .. 100000 {
     _reset_traces();
-    println!("{:?}", s.elapsed());
-    cli_main()
+    println!("{} {:?}", i, s.elapsed());
+    cli_main();
+    return;
+    // unsafe { std::ptr::read_volatile(std::hint::black_box(usize::MAX as *mut u8)) };
   }
   // if cfg!(feature = "hvm_cli_options") { cli_main() } else { bare_main() }
 }
@@ -46,8 +48,7 @@ fn bare_main() {
 }
 
 fn cli_main() {
-  // let data = run::Heap::init(1 << 16);
-  let data = run::Heap::init(1 << 28);
+  let data = run::Net::init_heap(1 << 28);
   let args: Vec<String> = env::args().collect();
   let help = "help".to_string();
   let opts = args.iter().skip(3).map(|s| s.as_str()).collect::<HashSet<_>>();
@@ -76,7 +77,7 @@ fn cli_main() {
     "compiled" => {
       let host: ast::Host = Default::default();
       // let host = hvmc::gen::host();
-      let mut net = run::Net::new(run::Heap::new(&data));
+      let mut net = run::Net::new(&data);
       net.boot(&host.defs["main"]);
       let start_time = std::time::Instant::now();
       if opts.contains("-1") {
@@ -148,7 +149,7 @@ fn load<'a>(data: &'a run::Data, file: &str) -> (ast::Book, ast::Host, run::Net<
   };
   let book = ast::do_parse_book(&file);
   let host = ast::Host::new(&book);
-  let mut net = run::Net::new(run::Heap::new(data));
+  let mut net = run::Net::new(data);
   net.boot(&host.defs["main"]);
   return (book, host, net);
 }

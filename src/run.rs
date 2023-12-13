@@ -7,14 +7,20 @@
 // they interact with nodes, and are cleared when they interact with Ptr::ERAs, allowing for constant
 // space evaluation of recursive functions on Scott encoded datatypes.
 
-use crate::{ops::Op, trace, trace::Tracer};
+use crate::{
+  ops::Op,
+  trace,
+  trace::{Tracer, _read_traces},
+};
 use std::{
+  alloc::{self, Layout},
   collections::HashMap,
   default, fmt,
   sync::{
     atomic::{AtomicU64, AtomicUsize, Ordering::Relaxed},
     Arc, Barrier,
   },
+  thread,
 };
 
 #[repr(u8)]
@@ -128,8 +134,7 @@ impl fmt::Debug for Ptr {
       &Ptr::LOCK => write!(f, "[Ptr::LOCK]"),
       _ => match self.tag() {
         Num => write!(f, "[Num {}]", self.num()),
-        Var | Red => write!(f, "[{:?} {} {:?}]", self.tag(), self.loc().port(), self.loc()),
-        Ref | Mat => write!(f, "[{:?} {:?}]", self.tag(), self.loc()),
+        Var | Red | Ref | Mat => write!(f, "[{:?} {:?}]", self.tag(), self.loc()),
         Op2 | Op1 | Ctr => write!(f, "[{:?} {:?} {:?}]", self.tag(), self.lab(), self.loc()),
       },
     }
@@ -277,46 +282,54 @@ impl APtr {
   }
 }
 
-// A handy wrapper around Data.
-pub struct Heap<'a> {
-  pub head: Loc,
-  pub area: &'a Data,
-  pub next: usize,
-}
-
-impl<'a> Heap<'a> {
-  pub fn init(size: usize) -> Box<[ANode]> {
-    let mut data = Vec::with_capacity(size);
-    data.resize_with(size, Default::default);
-    return data.into_boxed_slice();
-  }
-
-  pub fn new(data: &'a Data) -> Self {
-    Heap { area: data, next: 0, head: Loc::NULL }
+impl<'a> Net<'a> {
+  pub fn init_heap(size: usize) -> Box<[ANode]> {
+    unsafe {
+      Box::from_raw(std::slice::from_raw_parts_mut::<ANode>(
+        alloc::alloc(Layout::array::<ANode>(size).unwrap()) as *mut _,
+        size,
+      ) as *mut _)
+    }
   }
 
   #[inline(always)]
   pub fn half_free(&mut self, loc: Loc) {
+    trace!(self.tracer, Ptr::new(Red, 0, loc));
     loc.target().store(Ptr::NULL);
     if loc.other().target().load() == Ptr::NULL {
+      trace!(self.tracer, "other free");
       let loc = loc.p0();
       if let Ok(x) = loc.target().cas_strong(Ptr::NULL, Ptr::new(Red, 1, self.head)) {
+        trace!(self.tracer, "appended", Ptr::new(Red, 0, self.head), Ptr::new(Red, 0, loc));
         self.head = loc;
+      } else {
+        trace!(self.tracer, "too slow");
       }
     }
   }
 
   #[inline(always)]
   pub fn alloc(&mut self) -> Loc {
+    trace!(self.tracer, Ptr::new(Red, 0, self.head));
     let loc = if self.head != Loc::NULL {
       let loc = self.head;
-      self.head = self.head.target().load().loc();
+      let ld = self.head.target().load();
+      trace!(self.tracer, ld);
+      if ld.tag() != Red || ld.lab() != 1 {
+        panic!("wat");
+        // unsafe {
+        //   std::ptr::read_volatile(std::ptr::null::<u64>());
+        // }
+      }
+      assert_eq!(ld.lab(), 1);
+      self.head = ld.loc();
       loc
     } else {
       let index = self.next;
       self.next += 1;
-      Loc(&unsafe { self.area.get_unchecked(index) }.0 as _)
+      Loc(&self.area.get(index).expect("OOM").0 as _)
     };
+    trace!(self.tracer, Ptr::new(Red, 0, loc), Ptr::new(Red, 0, self.head));
     loc.target().store(Ptr::LOCK);
     loc.p2().target().store(Ptr::LOCK);
     loc
@@ -406,33 +419,41 @@ pub struct DefNet {
 pub struct Net<'a> {
   pub tid: usize,            // thread id
   pub tids: usize,           // thread count
-  pub heap: Heap<'a>,        // allocator
   pub rdex: Vec<(Ptr, Ptr)>, // redexes
   pub locs: Vec<Loc>,
   pub rwts: Rewrites, // rewrite count
   pub quik: Rewrites, // quick rewrite count
   pub root: Loc,
+  // allocator
+  pub area: &'a Data,
+  pub head: Loc,
+  pub next: usize,
+  //
   pub tracer: Tracer,
 }
 
 impl<'a> Net<'a> {
   // Creates an empty net with a given heap.
-  pub fn new(mut heap: Heap<'a>) -> Self {
-    let root = heap.alloc();
-    Net::new_with_root(heap, root)
+  pub fn new(area: &'a Data) -> Self {
+    let mut net = Net::new_with_root(area, Loc::NULL);
+    let root = net.alloc();
+    net.root = root;
+    net
   }
 
   // Creates an empty net with a given heap.
-  pub fn new_with_root(heap: Heap<'a>, root: Loc) -> Self {
+  pub fn new_with_root(area: &'a Data, root: Loc) -> Self {
     Net {
       tid: 0,
       tids: 1,
-      heap,
       rdex: vec![],
       locs: vec![Loc::NULL; 1 << 16],
       rwts: Rewrites::default(),
       quik: Rewrites::default(),
       root,
+      area,
+      head: Loc::NULL,
+      next: 0,
       tracer: Tracer::new(),
     }
   }
@@ -474,8 +495,8 @@ impl<'a> Net<'a> {
     let b_ptr = b_dir.target().take();
     trace!(self.tracer, a_ptr, b_ptr);
     if a_ptr.is_pri() && b_ptr.is_pri() {
-      self.heap.half_free(a_dir.loc());
-      self.heap.half_free(b_dir.loc());
+      self.half_free(a_dir.loc());
+      self.half_free(b_dir.loc());
       return self.redux(a_ptr, b_ptr);
     } else {
       self.atomic_linker(a_ptr, a_dir, b_ptr);
@@ -490,7 +511,7 @@ impl<'a> Net<'a> {
     let a_ptr = a_dir.target().take();
     trace!(self.tracer, a_ptr);
     if a_ptr.is_pri() && b_ptr.is_pri() {
-      self.heap.half_free(a_dir.loc());
+      self.half_free(a_dir.loc());
       return self.redux(a_ptr, b_ptr);
     } else {
       self.atomic_linker(a_ptr, a_dir, b_ptr);
@@ -510,14 +531,14 @@ impl<'a> Net<'a> {
   // When two threads interfere, uses the lock-free link algorithm described on the 'paper/'.
   #[inline(always)]
   pub fn atomic_linker(&mut self, a_ptr: Ptr, a_dir: Ptr, b_ptr: Ptr) {
-    trace!(self.tracer, a_ptr, b_ptr);
+    trace!(self.tracer, a_ptr, a_dir, b_ptr);
     // If 'a_ptr' is a var...
     if a_ptr.tag() == Var {
       let got = a_ptr.target().cas(a_dir, b_ptr);
       // Attempts to link using a compare-and-swap.
       if got.is_ok() {
         trace!(self.tracer, "cas ok");
-        self.heap.half_free(a_dir.loc());
+        self.half_free(a_dir.loc());
       // If the CAS failed, resolve by using redirections.
       } else {
         trace!(self.tracer, "cas fail", got.unwrap_err());
@@ -533,7 +554,7 @@ impl<'a> Net<'a> {
         }
       }
     } else {
-      self.heap.half_free(a_dir.loc());
+      self.half_free(a_dir.loc());
     }
   }
 
@@ -553,7 +574,7 @@ impl<'a> Net<'a> {
       }
       // If target is a redirection, we own it. Clear and move forward.
       if t_ptr.tag() == Red {
-        self.heap.half_free(t_dir.loc());
+        self.half_free(t_dir.loc());
         a_ptr = t_ptr;
         continue;
       }
@@ -562,13 +583,13 @@ impl<'a> Net<'a> {
         if t_dir.target().cas(t_ptr, b_ptr).is_ok() {
           trace!(self.tracer, "var cas ok");
           // Clear source location.
-          self.heap.half_free(a_dir.loc());
+          self.half_free(a_dir.loc());
           // Collect the orphaned backward path.
           t_dir = t_ptr;
           t_ptr = t_ptr.target().load();
           while t_ptr.tag() == Red {
             trace!(self.tracer, t_dir, t_ptr);
-            self.heap.half_free(t_dir.loc());
+            self.half_free(t_dir.loc());
             t_dir = t_ptr;
             t_ptr = t_dir.target().load();
           }
@@ -595,9 +616,9 @@ impl<'a> Net<'a> {
         // Second to arrive clears up the memory.
         } else {
           trace!(self.tracer, "snd", x_dir, y_dir);
-          self.heap.half_free(x_dir.loc());
+          self.half_free(x_dir.loc());
           while y_dir.target().cas(Ptr::GONE, Ptr::NULL).is_err() {}
-          self.heap.half_free(y_dir.loc());
+          self.half_free(y_dir.loc());
           return;
         }
       }
@@ -618,7 +639,7 @@ impl<'a> Net<'a> {
         if trg_ptr.tag() == Red {
           let neo_ptr = trg_ptr.unredirect();
           if ste_dir.target().cas(ste_ptr, neo_ptr).is_ok() {
-            self.heap.half_free(trg_dir.loc());
+            self.half_free(trg_dir.loc());
             continue;
           }
         }
@@ -630,6 +651,10 @@ impl<'a> Net<'a> {
   // Performs an interaction over a redex.
   #[inline(always)]
   pub fn interact(&mut self, a: Ptr, b: Ptr) {
+    if self.rwts.anni > 1000 {
+      panic!("boop");
+    }
+    self.tracer.sync_nonce();
     trace!(self.tracer, a, b);
     match (a.tag(), b.tag()) {
       // not actually an active pair
@@ -686,18 +711,18 @@ impl<'a> Net<'a> {
   pub fn anni1(&mut self, a: Ptr, b: Ptr) {
     trace!(self.tracer, a, b);
     self.rwts.anni += 1;
-    self.heap.half_free(a.p1().loc());
-    self.heap.half_free(b.p1().loc());
+    self.half_free(a.p1().loc());
+    self.half_free(b.p1().loc());
     self.atomic_link(a.p2(), b.p2());
   }
 
   pub fn comm22(&mut self, a: Ptr, b: Ptr) {
     trace!(self.tracer, a, b);
     self.rwts.comm += 1;
-    let B1 = Ptr::new(Ctr, b.lab(), self.heap.alloc());
-    let B2 = Ptr::new(Ctr, b.lab(), self.heap.alloc());
-    let A1 = Ptr::new(Ctr, a.lab(), self.heap.alloc());
-    let A2 = Ptr::new(Ctr, a.lab(), self.heap.alloc());
+    let B1 = Ptr::new(Ctr, b.lab(), self.alloc());
+    let B2 = Ptr::new(Ctr, b.lab(), self.alloc());
+    let A1 = Ptr::new(Ctr, a.lab(), self.alloc());
+    let A2 = Ptr::new(Ctr, a.lab(), self.alloc());
     trace!(self.tracer, B1, B2, A1, A2);
     B1.p1().target().store(A1.p1());
     B1.p2().target().store(A2.p1());
@@ -718,10 +743,10 @@ impl<'a> Net<'a> {
     trace!(self.tracer, a, b);
     self.rwts.comm += 1;
     let n = a.p1().target().load();
-    self.heap.half_free(a.p1().loc());
-    let B2 = Ptr::new(Ctr, b.lab(), self.heap.alloc());
-    let A1 = Ptr::new(Ctr, a.lab(), self.heap.alloc());
-    let A2 = Ptr::new(Ctr, a.lab(), self.heap.alloc());
+    self.half_free(a.p1().loc());
+    let B2 = Ptr::new(Ctr, b.lab(), self.alloc());
+    let A1 = Ptr::new(Ctr, a.lab(), self.alloc());
+    let A2 = Ptr::new(Ctr, a.lab(), self.alloc());
     trace!(self.tracer, B2, A1, A2);
     B2.p1().target().store(A1.p2());
     B2.p2().target().store(A2.p2());
@@ -745,7 +770,7 @@ impl<'a> Net<'a> {
   pub fn comm01(&mut self, a: Ptr, b: Ptr) {
     trace!(self.tracer, a, b);
     self.rwts.comm += 1;
-    self.heap.half_free(b.p1().loc());
+    self.half_free(b.p1().loc());
     self.half_atomic_link(b.p2(), a);
   }
 
@@ -753,15 +778,15 @@ impl<'a> Net<'a> {
     trace!(self.tracer, a, b);
     self.rwts.oper += 1;
     if b.num() == 0 {
-      let x = Ptr::new(Ctr, 0, self.heap.alloc());
+      let x = Ptr::new(Ctr, 0, self.alloc());
       trace!(self.tracer, x);
       x.p2().target().store(Ptr::ERA);
       trace!(self.tracer);
       self.half_atomic_link(a.p2(), x.p1());
       self.half_atomic_link(a.p1(), x);
     } else {
-      let x = Ptr::new(Ctr, 0, self.heap.alloc());
-      let y = Ptr::new(Ctr, 0, self.heap.alloc());
+      let x = Ptr::new(Ctr, 0, self.alloc());
+      let y = Ptr::new(Ctr, 0, self.alloc());
       trace!(self.tracer, x, y);
       x.p1().target().store(Ptr::ERA);
       x.p2().target().store(y);
@@ -775,7 +800,7 @@ impl<'a> Net<'a> {
   pub fn op2_num(&mut self, a: Ptr, b: Ptr) {
     trace!(self.tracer, a, b);
     self.rwts.oper += 1;
-    let x = Ptr::new(Op1, a.lab(), self.heap.alloc());
+    let x = Ptr::new(Op1, a.lab(), self.alloc());
     trace!(self.tracer, x);
     x.p1().target().store(b);
     trace!(self.tracer);
@@ -788,7 +813,7 @@ impl<'a> Net<'a> {
     self.rwts.oper += 1;
     let op = a.op();
     let v0 = a.p1().target().load().num();
-    self.heap.half_free(b.p1().loc());
+    self.half_free(b.p1().loc());
     let v1 = b.num();
     let v2 = op.op(v0, v1);
     self.half_atomic_link(a.p2(), Ptr::new_num(v2));
@@ -808,7 +833,7 @@ impl<'a> Net<'a> {
     let len = net.node.len();
     // Allocate space.
     for i in 0 .. len {
-      *unsafe { self.locs.get_unchecked_mut(i) } = self.heap.alloc();
+      *unsafe { self.locs.get_unchecked_mut(i) } = self.alloc();
     }
     // Load nodes, adjusted.
     for i in 0 .. len {
@@ -899,16 +924,15 @@ impl<'a> Net<'a> {
 
   // Forks into child threads, returning a Net for the (tid/tids)'th thread.
   pub fn fork(&self, tid: usize, tids: usize) -> Self {
-    let heap_size = self.heap.area.len() / tids;
+    let heap_size = self.area.len() / tids;
     let heap_start = heap_size * tid;
-    let heap = Heap {
-      area: &self.heap.area[heap_start .. heap_start + heap_size],
-      next: self.heap.next.saturating_sub(heap_start),
-      head: if tid == 0 { self.heap.head } else { Loc::NULL },
-    };
-    let mut net = Net::new_with_root(heap, self.root);
+    let area = &self.area[heap_start .. heap_start + heap_size];
+    let mut net = Net::new_with_root(area, self.root);
+    net.next = self.next.saturating_sub(heap_start);
+    net.head = if tid == 0 { self.head } else { Loc::NULL };
     net.tid = tid;
     net.tids = tids;
+    net.tracer.set_tid(tid);
     let from = self.rdex.len() * (tid + 0) / tids;
     let upto = self.rdex.len() * (tid + 1) / tids;
     for i in from .. upto {
@@ -965,7 +989,7 @@ impl<'a> Net<'a> {
           total: &total,
           barry: Arc::clone(&barry),
         };
-        s.spawn(move || main(&mut ctx));
+        thread::Builder::new().name(format!("t{:02x?}", ctx.net.tid)).spawn_scoped(s, move || main(&mut ctx)).unwrap();
       }
     });
 
