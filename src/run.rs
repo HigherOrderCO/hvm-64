@@ -295,7 +295,11 @@ impl<'a> Net<'a> {
   #[inline(always)]
   pub fn half_free(&mut self, loc: Loc) {
     trace!(self.tracer, Ptr::new(Red, 0, loc));
-    loc.target().store(Ptr::NULL);
+    let got = loc.target().swap(Ptr::NULL);
+    trace!(self.tracer, got);
+    if got.tag() == Red && got.lab() == 1 {
+      panic!("hey! {:?}", got);
+    }
     if loc.other().target().load() == Ptr::NULL {
       trace!(self.tracer, "other free");
       let loc = loc.p0();
@@ -317,13 +321,12 @@ impl<'a> Net<'a> {
       let loc = self.head;
       let ld = self.head.target().load();
       trace!(self.tracer, ld);
-      if ld.tag() != Red || ld.lab() != 1 {
-        panic!("wat");
+      if (ld.tag() != Red || ld.lab() != 1) && ld != Ptr::NULL {
+        panic!("wat {:?}", ld);
         // unsafe {
         //   std::ptr::read_volatile(std::ptr::null::<u64>());
         // }
       }
-      assert_eq!(ld.lab(), 1);
       self.head = ld.loc();
       loc
     } else {
@@ -601,6 +604,7 @@ impl<'a> Net<'a> {
         // If the CAS failed, the var changed, so we try again.
         continue;
       }
+
       // If it is a node, two threads will reach this branch.
       if t_ptr.is_pri() || t_ptr == Ptr::GONE {
         // Sort references, to avoid deadlocks.
@@ -619,7 +623,7 @@ impl<'a> Net<'a> {
         } else {
           trace!(self.tracer, "snd", x_dir, y_dir);
           self.half_free(x_dir.loc());
-          while y_dir.target().cas(Ptr::GONE, Ptr::NULL).is_err() {}
+          while y_dir.target().cas(Ptr::GONE, Ptr::LOCK).is_err() {}
           self.half_free(y_dir.loc());
           return;
         }

@@ -1,3 +1,65 @@
+//! An efficient debugging utility to trace the execution of hvm-core.
+//!
+//! Some bugs in hvm-core occur so rarely (once in hundreds of millions of
+//! interactions) that standard debugging tools are ineffective. Traditional
+//! `println!` debugging can slow down the process to the point where the bug in
+//! question will never be reached.
+//!
+//! When the `trace` feature is enabled, the `trace!` macro writes a compact
+//! binary execution log to an in-memory ring buffer. When a segfault/panic is
+//! encountered, the `_read_traces` function can read the data from these
+//! buffers out in a human-readable format. The `trace!` macro is sufficiently
+//! performant that it can reasonably be called even inside hvmc's hot reduction
+//! loop.
+//!
+//! To use this utility, compile with `--features trace`, run the resulting
+//! binary in a debugger, and – when the bug occurs – call `_read_traces(-1)` to
+//! dump all traces to stderr.
+//!
+//! ```sh
+//! $ cargo build --release --features trace; rust-lldb -- ./target/release/hvmc run path/to/file.hvmc -s
+//! (lldb) process launch -e path/to/trace/output
+//! ...
+//! Process ##### stopped
+//! * thread ###, name = 't##', stop reason = signal SIGABRT
+//! ...
+//! (lldb) image lookup -s _read_traces
+//! 1 symbols match '_read_traces' in .../hvm-core/target/release/hvmc:
+//!   Address: hvmc[0x000000010002fe94] (hvmc.__TEXT.__text + 191024)
+//!   Summary: hvmc`_read_traces
+//! (lldb) expr ((void(*)(long long))0x000000010002fe94)(-1)
+//! (lldb) ^D
+//! $ less path/to/trace/output
+//! 0ct0b half_atomic_link [src/run.rs:510] #1854603
+//!         a_dir: 00000002b02968f1 [Var 0002b02968f0]
+//!         b_ptr: 0001600002ac8582 [Ref 600002ac8580]
+//! 0ct0b comm02 [src/run.rs:761] #1854603
+//!         a: 0001600002ac8582 [Ref 600002ac8580]
+//!         b: 00020002b02968f7 [Ctr 2 0002b02968f0]
+//! 0ct0b interact [src/run.rs:655] #1854603
+//!         a: 0001600002ac8582 [Ref 600002ac8580]
+//!         b: 00020002b02968f7 [Ctr 2 0002b02968f0]
+//! 0ct0b linker [src/run.rs:525] #1854602
+//!         a_ptr: 0001600002ac8142 [Ref 600002ac8140]
+//!         b_ptr: 0000000330795f71 [Var 000330795f70]
+//! ...
+//! ```
+//!
+//! The initial five characters identifies the thread an entry corresponds to
+//! (the first two hex chars are the index of the thread, and the last two are
+//! the net's `tid`).
+//!
+//! Entries are reverse-chronological (the top is the most recent). Note that
+//! chronology between threads is only synced periodically (currently, at each
+//! interaction). However, updates propagate between threads unpredictably, so
+//! the timeline is only guaranteed to be consistent between entries for the
+//! same thread.
+//!
+//! For certain bugs, it may be useful to modify `main.rs` to repeatedly run the
+//! program (until an error is encountered). In this case, one can run
+//! `_reset_traces()` before each iteration, to discard the traces of the
+//! previous iteration.
+
 use std::{
   cell::UnsafeCell,
   fmt::{self, Formatter, Write},
@@ -13,11 +75,11 @@ use crate::run::Ptr;
 #[cfg(not(feature = "trace"))]
 #[macro_export]
 macro_rules! trace {
-  ($tracer:expr, $str:lit $(, $x:expr)* $(,)?) => {
-    if false { let _: (&mut $crate::trace::Tracer, [$crate::run::Ptr]) = (&mut $tracer, &[$($x as Ptr),*]); }
+  ($tracer:expr, $str:literal $(, $x:expr)* $(,)?) => {
+    if false { let _: (&mut $crate::trace::Tracer, &[$crate::run::Ptr]) = (&mut $tracer, &[$($x),*]); }
   };
   ($tracer:expr $(, $x:expr)* $(,)?) => {
-    if false { let _: (&mut $crate::trace::Tracer, [$crate::run::Ptr]) = (&mut $tracer, &[$($x as Ptr),*]); }
+    if false { let _: (&mut $crate::trace::Tracer, &[$crate::run::Ptr]) = (&mut $tracer, &[$($x),*]); }
   };
 }
 
@@ -218,7 +280,7 @@ impl<'a> TraceReader<'a> {
   }
 }
 
-#[no_mangle]
+#[cfg_attr(feature = "trace", no_mangle)]
 pub fn _read_traces(limit: usize) {
   let active_tracers = &*ACTIVE_TRACERS.lock().unwrap();
   let mut readers = active_tracers
