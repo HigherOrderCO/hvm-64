@@ -11,12 +11,19 @@ use crate::{ops::Op, trace, trace::Tracer};
 use std::{
   alloc::{self, Layout},
   fmt,
+  hint::unreachable_unchecked,
   sync::{
     atomic::{AtomicU64, AtomicUsize, Ordering::Relaxed},
     Arc, Barrier,
   },
   thread,
 };
+
+// -------------------
+//   Primitive Types
+// -------------------
+
+pub type Lab = u16;
 
 #[repr(u8)]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -52,98 +59,20 @@ impl TryFrom<u8> for Tag {
   }
 }
 
-pub type Lab = u16;
-
-#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-#[must_use]
-pub struct Wire(pub *const APtr);
-
-impl fmt::Debug for Wire {
-  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    write!(f, "{:012x?}", self.0 as usize)
-  }
-}
-
-unsafe impl Send for Wire {}
-
-const PORT_MASK: Val = 0b1000;
-
-impl Wire {
-  pub const NULL: Wire = Wire(std::ptr::null());
-
-  #[inline(always)]
-  pub fn index(&self) -> usize {
-    self.0 as usize >> 4
-  }
-
-  #[inline(always)]
-  pub fn port(&self) -> u8 {
-    (((self.0 as usize as Val) & PORT_MASK) >> 3) as u8
-  }
-
-  #[inline(always)]
-  pub fn local(index: usize, port: u8) -> Wire {
-    Wire(((index << 4) | ((port as usize) << 3)) as *const _)
-  }
-
-  #[inline(always)]
-  pub fn with_port(&self, port: u8) -> Wire {
-    Wire(((self.0 as Val) & !PORT_MASK | ((port as Val) << 3)) as _)
-  }
-
-  #[inline(always)]
-  pub fn p0(&self) -> Wire {
-    Wire(((self.0 as Val) & !PORT_MASK) as _)
-  }
-
-  #[inline(always)]
-  pub fn p1(&self) -> Wire {
-    Wire(((self.0 as Val) & !PORT_MASK) as _)
-  }
-
-  #[inline(always)]
-  pub fn p2(&self) -> Wire {
-    Wire(((self.0 as Val) | PORT_MASK) as _)
-  }
-
-  #[inline(always)]
-  pub fn other(&self) -> Wire {
-    Wire(((self.0 as Val) ^ PORT_MASK) as _)
-  }
-
-  #[inline(always)]
-  pub fn target<'a>(&self) -> &'a APtr {
-    unsafe { &*self.0 }
-  }
-
-  #[inline(always)]
-  pub fn def<'a>(&self) -> &'a Def {
-    unsafe { &*(self.0 as *const _) }
-  }
-
-  #[inline(always)]
-  pub fn var(&self) -> Port {
-    Port::new(Var, 0, self.clone())
-  }
-}
-
-pub type Val = u64;
-pub type AVal = AtomicU64;
-
 /// A tagged pointer.
 #[derive(Clone, Eq, PartialEq, PartialOrd, Hash, Default)]
 #[repr(transparent)]
 #[must_use]
-pub struct Port(pub Val);
+pub struct Port(pub u64);
 
 impl fmt::Debug for Port {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     write!(f, "{:016x?} ", self.0)?;
     match self {
       &Port::ERA => write!(f, "[ERA]"),
-      &Port::NULL => write!(f, "[Ptr::NULL]"),
-      &Port::GONE => write!(f, "[Ptr::GONE]"),
-      &Port::LOCK => write!(f, "[Ptr::LOCK]"),
+      &Port::FREE => write!(f, "[FREE]"),
+      &Port::GONE => write!(f, "[GONE]"),
+      &Port::LOCK => write!(f, "[LOCK]"),
       _ => match self.tag() {
         Num => write!(f, "[Num {}]", self.num()),
         Var | Red | Ref | Mat => write!(f, "[{:?} {:?}]", self.tag(), self.loc()),
@@ -155,23 +84,28 @@ impl fmt::Debug for Port {
 
 impl Port {
   pub const ERA: Port = Port(Ref as _);
-  pub const NULL: Port = Port(0x0000_0000_0000_0000);
+  pub const FREE: Port = Port(0x8000_0000_0000_0000);
   pub const LOCK: Port = Port(0xFFFF_FFFF_FFFF_FFF0);
   pub const GONE: Port = Port(0xFFFF_FFFF_FFFF_FFFF);
 
   #[inline(always)]
-  pub fn new(tag: Tag, lab: Lab, loc: Wire) -> Self {
-    Port(((lab as Val) << 48) | (loc.0 as usize as Val) | (tag as Val))
+  pub fn new(tag: Tag, lab: Lab, loc: Loc) -> Self {
+    Port(((lab as u64) << 48) | (loc.0 as u64) | (tag as u64))
   }
 
   #[inline(always)]
-  pub const fn new_num(val: Val) -> Self {
-    Port((val << 4) | (Num as Val))
+  pub fn new_var(loc: Loc) -> Self {
+    Port::new(Var, 0, loc)
+  }
+
+  #[inline(always)]
+  pub const fn new_num(val: u64) -> Self {
+    Port((val << 4) | (Num as u64))
   }
 
   #[inline(always)]
   pub fn new_ref(def: &Def) -> Port {
-    Port::new(Ref, def.lab, Wire(def as *const _ as _))
+    Port::new(Ref, def.lab, Loc(def as *const _ as _))
   }
 
   #[inline(always)]
@@ -190,48 +124,33 @@ impl Port {
   }
 
   #[inline(always)]
-  pub const fn loc(&self) -> Wire {
-    Wire((self.0 & 0x0000_FFFF_FFFF_FFF8) as usize as _)
+  pub const fn loc(&self) -> Loc {
+    Loc((self.0 & 0x0000_FFFF_FFFF_FFF8) as usize as _)
   }
 
   #[inline(always)]
-  pub const fn num(&self) -> Val {
+  pub const fn num(&self) -> u64 {
     self.0 >> 4
   }
 
   #[inline(always)]
-  pub fn is_null(&self) -> bool {
-    return self.0 == 0;
+  pub fn wire(&self) -> Wire {
+    Wire::new(self.loc())
   }
 
   #[inline(always)]
-  pub fn is_pri(&self) -> bool {
+  pub fn is_principal(&self) -> bool {
     return self.tag() >= Ref;
   }
 
   #[inline(always)]
-  pub fn is_nilary(&self) -> bool {
+  pub fn is_skippable(&self) -> bool {
     return matches!(self.tag(), Num | Ref);
   }
 
   #[inline(always)]
   pub fn is_ctr(&self, lab: Lab) -> bool {
     return self.tag() == Ctr && self.lab() == lab;
-  }
-
-  #[inline(always)]
-  pub fn p1(&self) -> Wire {
-    self.loc().p1()
-  }
-
-  #[inline(always)]
-  pub fn p2(&self) -> Wire {
-    self.loc().p2()
-  }
-
-  #[inline(always)]
-  pub fn target(&self) -> &APtr {
-    self.loc().target()
   }
 
   #[inline(always)]
@@ -243,78 +162,165 @@ impl Port {
   pub fn unredirect(&self) -> Port {
     return Port::new(Var, 0, self.loc());
   }
-
-  #[inline(always)]
-  pub fn consume_node(self) -> ConsumedNode {
-    ConsumedNode { lab: self.lab(), p1: self.p1(), p2: self.p2() }
-  }
-
-  #[inline(always)]
-  pub fn consume_op1(self) -> ConsumedOp1 {
-    let n = self.p1().target().swap(Port::NULL);
-    ConsumedOp1 { op: self.op(), num: n, p2: self.p2() }
-  }
 }
 
-pub struct ConsumedNode {
+pub struct TraverseNode {
   pub lab: Lab,
   pub p1: Wire,
   pub p2: Wire,
 }
 
-pub struct ConsumedOp1 {
+pub struct TraverseOp1 {
   pub op: Op,
   pub num: Port,
   pub p2: Wire,
 }
 
-pub struct CreatedNode {
-  pub p0: Port,
-  pub p1: Port,
-  pub p2: Port,
+impl Port {
+  #[inline(always)]
+  pub fn consume_node(self) -> TraverseNode {
+    self.traverse_node()
+  }
+
+  #[inline(always)]
+  pub fn traverse_node(self) -> TraverseNode {
+    TraverseNode { lab: self.lab(), p1: Wire::new(self.loc()), p2: Wire::new(self.loc().other_half()) }
+  }
+
+  #[inline(always)]
+  pub fn consume_op1(self) -> TraverseOp1 {
+    let op = self.op();
+    let s = self.consume_node();
+    let num = s.p1.swap_target(Port::FREE);
+    TraverseOp1 { op, num, p2: s.p2 }
+  }
+
+  #[inline(always)]
+  pub fn traverse_op1(self) -> TraverseOp1 {
+    let op = self.op();
+    let s = self.traverse_node();
+    let num = s.p1.load_target();
+    TraverseOp1 { op, num, p2: s.p2 }
+  }
 }
 
-/// An atomic tagged pointer.
-#[repr(transparent)]
-#[derive(Default)]
-pub struct APtr(pub AVal);
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[repr(u8)]
+pub enum Half {
+  Left,
+  Right,
+}
 
-impl APtr {
+#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[must_use]
+pub struct Loc(pub usize);
+
+impl fmt::Debug for Loc {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    write!(f, "{:012x?}", self.0 as usize)
+  }
+}
+
+impl Loc {
+  pub const NULL: Loc = Loc(0);
+
+  const HALF_MASK: usize = 0b1000;
+
   #[inline(always)]
-  pub fn new(port: Port) -> Self {
-    APtr(AtomicU64::new(port.0))
+  pub fn index(&self) -> usize {
+    self.0 as usize >> 4
   }
 
   #[inline(always)]
-  pub fn load(&self) -> Port {
-    Port(self.0.load(Relaxed))
+  pub fn val<'a>(&self) -> &'a AtomicU64 {
+    unsafe { &*(self.0 as *const _) }
   }
 
   #[inline(always)]
-  pub fn store(&self, port: Port) {
-    self.0.store(port.0, Relaxed);
+  pub fn half(&self) -> Half {
+    match (self.0 & Loc::HALF_MASK) >> 3 {
+      0 => Half::Left,
+      1 => Half::Right,
+      _ => unsafe { unreachable_unchecked() },
+    }
   }
 
   #[inline(always)]
-  pub fn cas(&self, expected: Port, value: Port) -> Result<Port, Port> {
-    self.0.compare_exchange_weak(expected.0, value.0, Relaxed, Relaxed).map(Port).map_err(Port)
+  pub fn new_local(index: usize, half: Half) -> Self {
+    Loc(index << 4 | (half as usize) << 3)
   }
 
   #[inline(always)]
-  pub fn cas_strong(&self, expected: Port, value: Port) -> Result<Port, Port> {
-    self.0.compare_exchange(expected.0, value.0, Relaxed, Relaxed).map(Port).map_err(Port)
+  pub fn with_half(&self, half: Half) -> Self {
+    Loc(self.0 & !Loc::HALF_MASK | (half as usize) << 3)
   }
 
   #[inline(always)]
-  pub fn swap(&self, value: Port) -> Port {
-    Port(self.0.swap(value.0, Relaxed))
+  pub fn other_half(&self) -> Self {
+    Loc(self.0 ^ Loc::HALF_MASK)
+  }
+
+  #[inline(always)]
+  pub fn def<'a>(&self) -> &'a Def {
+    unsafe { &*(self.0 as *const _) }
+  }
+}
+
+#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[must_use]
+pub struct Wire(pub *const AtomicU64);
+
+impl fmt::Debug for Wire {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    write!(f, "{:012x?}", self.0 as usize)
+  }
+}
+
+unsafe impl Send for Wire {}
+
+impl Wire {
+  pub const NULL: Wire = Wire(std::ptr::null());
+
+  #[inline(always)]
+  pub fn loc(&self) -> Loc {
+    Loc(self.0 as _)
+  }
+
+  #[inline(always)]
+  pub fn new(loc: Loc) -> Wire {
+    Wire(loc.0 as _)
+  }
+
+  #[inline(always)]
+  fn target<'a>(&self) -> &'a AtomicU64 {
+    unsafe { &*self.0 }
+  }
+
+  #[inline(always)]
+  pub fn load_target(&self) -> Port {
+    Port(self.target().load(Relaxed))
+  }
+
+  #[inline(always)]
+  pub fn set_target(&self, port: Port) {
+    self.target().store(port.0, Relaxed);
+  }
+
+  #[inline(always)]
+  pub fn cas_target(&self, expected: Port, value: Port) -> Result<Port, Port> {
+    self.target().compare_exchange_weak(expected.0, value.0, Relaxed, Relaxed).map(Port).map_err(Port)
+  }
+
+  #[inline(always)]
+  pub fn swap_target(&self, value: Port) -> Port {
+    Port(self.target().swap(value.0, Relaxed))
   }
 
   // Takes a pointer's target.
   #[inline(always)]
-  pub fn take(&self) -> Port {
+  pub fn lock_target(&self) -> Port {
     loop {
-      let got = self.swap(Port::LOCK);
+      let got = self.swap_target(Port::LOCK);
       if got != Port::LOCK {
         return got;
       }
@@ -322,80 +328,38 @@ impl APtr {
   }
 }
 
-impl<'a> Net<'a> {
-  pub fn init_heap(size: usize) -> Box<[ANode]> {
-    unsafe {
-      Box::from_raw(std::slice::from_raw_parts_mut::<ANode>(
-        alloc::alloc(Layout::array::<ANode>(size).unwrap()) as *mut _,
-        size,
-      ) as *mut _)
-    }
-  }
-
-  #[inline(never)]
-  pub fn weak_half_free(&mut self, loc: Wire) {
-    trace!(self.tracer, loc);
-    loc.target().store(Port::NULL);
-  }
-
-  #[inline(never)]
-  pub fn half_free(&mut self, loc: Wire) {
-    trace!(self.tracer, loc);
-    loc.target().store(Port::NULL);
-    if loc.other().target().load() == Port::NULL {
-      trace!(self.tracer, "other free");
-      let loc = loc.p0();
-      // use a label of 1 to distinguish from Ptr::NULL
-      if let Ok(_) = loc.target().cas_strong(Port::NULL, Port::new(Red, 1, self.head.clone())) {
-        let old_head = &self.head;
-        let new_head = loc;
-        trace!(self.tracer, "appended", old_head, new_head);
-        self.head = new_head;
-      } else {
-        trace!(self.tracer, "too slow");
-      };
-    }
-  }
-
-  #[inline(never)]
-  pub fn alloc(&mut self) -> Wire {
-    trace!(self.tracer, self.head);
-    let loc = if self.head != Wire::NULL {
-      let loc = self.head.clone();
-      let next = self.head.target().load();
-      trace!(self.tracer, next);
-      self.head = next.loc();
-      loc
-    } else {
-      let index = self.next;
-      self.next += 1;
-      Wire(&self.area.get(index).expect("OOM").0 as _)
-    };
-    trace!(self.tracer, loc, self.head);
-    loc
-  }
-
-  #[inline(never)]
-  pub fn safe_alloc(&mut self) -> Wire {
-    let loc = self.alloc();
-    loc.target().store(Port::LOCK);
-    loc.p2().target().store(Port::LOCK);
-    loc
-  }
+#[derive(Clone, Debug)]
+#[repr(align(16))]
+pub struct Def {
+  pub lab: Lab,
+  pub inner: DefType,
 }
 
-#[repr(C)]
-#[repr(align(16))]
-#[derive(Default, Debug, Clone)]
-pub struct Node(pub Port, pub Port);
+#[derive(Clone, Debug)]
+pub enum DefType {
+  Native(fn(&mut Net, Port)),
+  Net(DefNet),
+}
+
+/// A compact closed net, used for dereferences.
+#[derive(Clone, Debug, Default)]
+pub struct DefNet {
+  pub root: Port,
+  pub rdex: Vec<(Port, Port)>,
+  pub node: Vec<(Port, Port)>,
+}
+
+// -----------
+//   The Net
+// -----------
 
 #[repr(C)]
 #[repr(align(16))]
 #[derive(Default)]
-pub struct ANode(pub APtr, pub APtr);
+pub struct Node(pub AtomicU64, pub AtomicU64);
 
 // The global node buffer.
-pub type Data = [ANode];
+pub type Area = [Node];
 
 /// Rewrite counter.
 #[derive(Clone, Copy, Debug, Default)]
@@ -442,39 +406,18 @@ impl AtomicRewrites {
   }
 }
 
-#[derive(Clone, Debug)]
-#[repr(align(16))]
-pub struct Def {
-  pub lab: Lab,
-  pub inner: DefType,
-}
-
-#[derive(Clone, Debug)]
-pub enum DefType {
-  Native(fn(&mut Net, Port)),
-  Net(DefNet),
-}
-
-/// A compact closed net, used for dereferences.
-#[derive(Clone, Debug, Default)]
-pub struct DefNet {
-  pub root: Port,
-  pub rdex: Vec<(Port, Port)>,
-  pub node: Vec<Node>,
-}
-
 // A interaction combinator net.
 pub struct Net<'a> {
   pub tid: usize,              // thread id
   pub tids: usize,             // thread count
   pub rdex: Vec<(Port, Port)>, // redexes
-  pub locs: Vec<Wire>,
+  pub locs: Vec<Loc>,
   pub rwts: Rewrites, // rewrite count
   pub quik: Rewrites, // quick rewrite count
   pub root: Wire,
   // allocator
-  pub area: &'a Data,
-  pub head: Wire,
+  pub area: &'a Area,
+  pub head: Loc,
   pub next: usize,
   //
   pub tracer: Tracer,
@@ -482,62 +425,119 @@ pub struct Net<'a> {
 
 impl<'a> Net<'a> {
   // Creates an empty net with a given heap.
-  pub fn new(area: &'a Data) -> Self {
+  pub fn new(area: &'a Area) -> Self {
     let mut net = Net::new_with_root(area, Wire::NULL);
-    let root = net.safe_alloc();
-    net.root = root;
+    net.root = Wire::new(net.alloc());
     net
   }
 
   // Creates an empty net with a given heap.
-  pub fn new_with_root(area: &'a Data, root: Wire) -> Self {
+  pub fn new_with_root(area: &'a Area, root: Wire) -> Self {
     Net {
       tid: 0,
       tids: 1,
       rdex: vec![],
-      locs: vec![Wire::NULL; 1 << 16],
+      locs: vec![Loc::NULL; 1 << 16],
       rwts: Rewrites::default(),
       quik: Rewrites::default(),
       root,
       area,
-      head: Wire::NULL,
+      head: Loc::NULL,
       next: 0,
       tracer: Tracer::new(),
     }
   }
 
-  // Creates a net and boots from a REF.
+  // Boots a net from a Ref.
   pub fn boot(&mut self, def: &Def) {
     let def = Port::new_ref(def);
     trace!(self.tracer, def);
-    self.root.target().store(def);
+    self.root.set_target(def);
   }
+}
 
-  #[inline(always)]
-  pub fn redux(&mut self, a: Port, b: Port) {
-    trace!(self.tracer, a, b);
-    if a.is_nilary() && b.is_nilary() {
-      self.rwts.eras += 1;
-    } else {
-      self.rdex.push((a, b));
+// -------------
+//   Allocator
+// -------------
+
+impl<'a> Net<'a> {
+  pub fn init_heap(size: usize) -> Box<[Node]> {
+    unsafe {
+      Box::from_raw(std::slice::from_raw_parts_mut::<Node>(
+        alloc::alloc(Layout::array::<Node>(size).unwrap()) as *mut _,
+        size,
+      ) as *mut _)
     }
   }
 
+  #[inline(never)]
+  pub fn half_free(&mut self, loc: Loc) {
+    const FREE: u64 = Port::FREE.0;
+    trace!(self.tracer, loc);
+    loc.val().store(FREE, Relaxed);
+    if loc.other_half().val().load(Relaxed) == FREE {
+      trace!(self.tracer, "other free");
+      let loc = loc.with_half(Half::Left);
+      if let Ok(_) = loc.val().compare_exchange(FREE, self.head.0 as u64, Relaxed, Relaxed) {
+        let old_head = &self.head;
+        let new_head = loc;
+        trace!(self.tracer, "appended", old_head, new_head);
+        self.head = new_head;
+      } else {
+        trace!(self.tracer, "too slow");
+      };
+    }
+  }
+
+  #[inline(never)]
+  pub fn alloc(&mut self) -> Loc {
+    trace!(self.tracer, self.head);
+    let loc = if self.head != Loc::NULL {
+      let loc = self.head.clone();
+      let next = Loc(self.head.val().load(Relaxed) as usize);
+      trace!(self.tracer, next);
+      self.head = next;
+      loc
+    } else {
+      let index = self.next;
+      self.next += 1;
+      Loc(&self.area.get(index).expect("OOM").0 as *const _ as _)
+    };
+    trace!(self.tracer, loc, self.head);
+    loc.val().store(Port::LOCK.0, Relaxed);
+    loc.other_half().val().store(Port::LOCK.0, Relaxed);
+    loc
+  }
+}
+
+pub struct CreatedNode {
+  pub p0: Port,
+  pub p1: Port,
+  pub p2: Port,
+}
+
+impl<'a> Net<'a> {
   #[inline(always)]
   pub fn create_node(&mut self, tag: Tag, lab: Lab) -> CreatedNode {
     let loc = self.alloc();
     CreatedNode {
       p0: Port::new(tag, lab, loc.clone()),
-      p1: Port::new(Var, 0, loc.clone()),
-      p2: Port::new(Var, 0, loc.p2()),
+      p1: Port::new_var(loc.clone()),
+      p2: Port::new_var(loc.other_half()),
     }
   }
+}
 
+// ----------
+//   Linker
+// ----------
+
+impl<'a> Net<'a> {
   // Links two pointers, forming a new wire. Assumes ownership.
   #[inline(always)]
   pub fn link_port_port(&mut self, a_port: Port, b_port: Port) {
     trace!(self.tracer, a_port, b_port);
-    if a_port.is_pri() && b_port.is_pri() {
+    if a_port.is_principal() && b_port.is_principal() {
       return self.redux(a_port, b_port);
     } else {
       self.half_link_port_port(a_port.clone(), b_port.clone());
@@ -549,12 +549,12 @@ impl<'a> Net<'a> {
   #[inline(always)]
   pub fn link_wire_wire(&mut self, a_wire: Wire, b_wire: Wire) {
     trace!(self.tracer, a_wire, b_wire);
-    let a_port = a_wire.target().take();
-    let b_port = b_wire.target().take();
+    let a_port = a_wire.lock_target();
+    let b_port = b_wire.lock_target();
     trace!(self.tracer, a_port, b_port);
-    if a_port.is_pri() && b_port.is_pri() {
-      self.half_free(a_wire);
-      self.half_free(b_wire);
+    if a_port.is_principal() && b_port.is_principal() {
+      self.half_free(a_wire.loc());
+      self.half_free(b_wire.loc());
       return self.redux(a_port, b_port);
     } else {
       self.half_link_wire_port(a_port.clone(), a_wire, b_port.clone());
@@ -566,14 +566,24 @@ impl<'a> Net<'a> {
   #[inline(always)]
   pub fn link_wire_port(&mut self, a_wire: Wire, b_port: Port) {
     trace!(self.tracer, a_wire, b_port);
-    let a_port = a_wire.target().take();
+    let a_port = a_wire.lock_target();
     trace!(self.tracer, a_port);
-    if a_port.is_pri() && b_port.is_pri() {
-      self.half_free(a_wire);
+    if a_port.is_principal() && b_port.is_principal() {
+      self.half_free(a_wire.loc());
       return self.redux(a_port, b_port);
     } else {
       self.half_link_wire_port(a_port.clone(), a_wire, b_port.clone());
       self.half_link_port_port(b_port, a_port);
+    }
+  }
+
+  #[inline(always)]
+  pub fn redux(&mut self, a: Port, b: Port) {
+    trace!(self.tracer, a, b);
+    if a.is_skippable() && b.is_skippable() {
+      self.rwts.eras += 1;
+    } else {
+      self.rdex.push((a, b));
     }
   }
 
@@ -582,7 +592,7 @@ impl<'a> Net<'a> {
   pub fn half_link_port_port(&mut self, a_port: Port, b_port: Port) {
     trace!(self.tracer, a_port, b_port);
     if a_port.tag() == Var {
-      a_port.target().store(b_port);
+      a_port.wire().set_target(b_port);
     }
   }
 
@@ -592,27 +602,27 @@ impl<'a> Net<'a> {
     trace!(self.tracer, a_port, a_wire, b_port);
     // If 'a_port' is a var...
     if a_port.tag() == Var {
-      let got = a_port.target().cas(a_wire.var(), b_port.clone());
+      let got = a_port.wire().cas_target(Port::new_var(a_wire.loc()), b_port.clone());
       // Attempts to link using a compare-and-swap.
       if got.is_ok() {
         trace!(self.tracer, "cas ok");
-        self.half_free(a_wire);
+        self.half_free(a_wire.loc());
       // If the CAS failed, resolve by using redirections.
       } else {
-        trace!(self.tracer, "cas fail", got.unwrap_err());
+        trace!(self.tracer, "cas fail", got.clone().unwrap_err());
         if b_port.tag() == Var {
           let port = b_port.redirect();
-          a_wire.target().store(port);
+          a_wire.set_target(port);
           //self.atomic_linker_var(a_port, a_wire, b_port);
-        } else if b_port.is_pri() {
-          a_wire.target().store(b_port.clone());
+        } else if b_port.is_principal() {
+          a_wire.set_target(b_port.clone());
           self.atomic_linker_pri(a_port, a_wire, b_port);
         } else {
           unreachable!();
         }
       }
     } else {
-      self.half_free(a_wire);
+      self.half_free(a_wire.loc());
     }
   }
 
@@ -622,8 +632,8 @@ impl<'a> Net<'a> {
     loop {
       trace!(self.tracer, a_port, a_wire, b_port);
       // Peek the target, which may not be owned by us.
-      let mut t_wire = a_port.loc();
-      let mut t_port = t_wire.target().load();
+      let mut t_wire = a_port.wire();
+      let mut t_port = t_wire.load_target();
       trace!(self.tracer, t_port);
       // If it is taken, we wait.
       if t_port == Port::LOCK {
@@ -631,24 +641,24 @@ impl<'a> Net<'a> {
       }
       // If target is a rewireection, we own it. Clear and move forward.
       if t_port.tag() == Red {
-        self.half_free(t_wire);
+        self.half_free(t_wire.loc());
         a_port = t_port;
         continue;
       }
       // If target is a variable, we don't own it. Try replacing it.
       if t_port.tag() == Var {
-        if t_wire.target().cas(t_port.clone(), b_port.clone()).is_ok() {
+        if t_wire.cas_target(t_port.clone(), b_port.clone()).is_ok() {
           trace!(self.tracer, "var cas ok");
           // Clear source location.
-          self.half_free(a_wire);
+          self.half_free(a_wire.loc());
           // Collect the orphaned backward path.
-          t_wire = t_port.loc();
-          t_port = t_port.target().load();
+          t_wire = t_port.wire();
+          t_port = t_wire.load_target();
           while t_port.tag() == Red {
             trace!(self.tracer, t_wire, t_port);
-            self.half_free(t_wire);
-            t_wire = t_port.loc();
-            t_port = t_wire.target().load();
+            self.half_free(t_wire.loc());
+            t_wire = t_port.wire();
+            t_port = t_wire.load_target();
           }
           return;
         }
@@ -658,25 +668,25 @@ impl<'a> Net<'a> {
       }
 
       // If it is a node, two threads will reach this branch.
-      if t_port.is_pri() || t_port == Port::GONE {
+      if t_port.is_principal() || t_port == Port::GONE {
         // Sort references, to avoid deadlocks.
         let x_wire = if a_wire < t_wire { a_wire.clone() } else { t_wire.clone() };
         let y_wire = if a_wire < t_wire { t_wire.clone() } else { a_wire.clone() };
         trace!(self.tracer, x_wire, y_wire);
         // Swap first reference by Ptr::GONE placeholder.
-        let x_port = x_wire.target().swap(Port::GONE);
+        let x_port = x_wire.swap_target(Port::GONE);
         // First to arrive creates a redex.
         if x_port != Port::GONE {
-          let y_port = y_wire.target().swap(Port::GONE);
+          let y_port = y_wire.swap_target(Port::GONE);
           trace!(self.tracer, "fst", x_wire, y_wire, x_port, y_port);
           self.redux(x_port, y_port);
           return;
         // Second to arrive clears up the memory.
         } else {
           trace!(self.tracer, "snd", x_wire, y_wire);
-          self.half_free(x_wire);
-          while y_wire.target().cas(Port::GONE, Port::LOCK).is_err() {}
-          self.half_free(y_wire);
+          self.half_free(x_wire.loc());
+          while y_wire.cas_target(Port::GONE, Port::LOCK).is_err() {}
+          self.half_free(y_wire.loc());
           return;
         }
       }
@@ -689,15 +699,15 @@ impl<'a> Net<'a> {
   // Atomic linker for when 'b_port' is an aux port.
   pub fn atomic_linker_var(&mut self, _: Port, _: Wire, b_port: Port) {
     loop {
-      let ste_wire = b_port.clone();
-      let ste_port = ste_wire.target().load();
+      let ste_wire = b_port.clone().wire();
+      let ste_port = ste_wire.load_target();
       if ste_port.tag() == Var {
-        let trg_wire = ste_port.loc();
-        let trg_port = trg_wire.target().load();
+        let trg_wire = ste_port.wire();
+        let trg_port = trg_wire.load_target();
         if trg_port.tag() == Red {
           let neo_port = trg_port.unredirect();
-          if ste_wire.target().cas(ste_port, neo_port).is_ok() {
-            self.half_free(trg_wire);
+          if ste_wire.cas_target(ste_port, neo_port).is_ok() {
+            self.half_free(trg_wire.loc());
             continue;
           }
         }
@@ -705,7 +715,13 @@ impl<'a> Net<'a> {
       break;
     }
   }
+}
 
+// ---------------------
+//   Interaction Rules
+// ---------------------
+
+impl<'a> Net<'a> {
   // Performs an interaction over a redex.
   #[inline(always)]
   pub fn interact(&mut self, a: Port, b: Port) {
@@ -1134,7 +1150,7 @@ impl<'a> Net<'a> {
     let len = net.node.len();
     // Allocate space.
     for i in 0 .. len {
-      *unsafe { self.locs.get_unchecked_mut(i) } = self.safe_alloc();
+      *unsafe { self.locs.get_unchecked_mut(i) } = self.alloc();
     }
     // Load nodes, adjusted.
     for i in 0 .. len {
@@ -1142,8 +1158,8 @@ impl<'a> Net<'a> {
       let p1 = self.adjust(&unsafe { net.node.get_unchecked(i) }.0);
       let p2 = self.adjust(&unsafe { net.node.get_unchecked(i) }.1);
       trace!(self.tracer, loc, p1, p2);
-      loc.p1().target().store(p1);
-      loc.p2().target().store(p2);
+      Wire::new(loc.clone()).set_target(p1);
+      Wire::new(loc.other_half()).set_target(p2);
     }
     // Load redexes, adjusted.
     for r in &net.rdex {
@@ -1160,17 +1176,23 @@ impl<'a> Net<'a> {
   // Adjusts dereferenced pointer locations.
   #[inline(always)]
   fn adjust(&self, port: &Port) -> Port {
-    if !port.is_nilary() && !port.is_null() {
+    if !port.is_skippable() && port != &Port::FREE {
       Port::new(
         port.tag(),
         port.lab(),
-        (*unsafe { self.locs.get_unchecked(port.loc().index()) }).with_port(port.loc().port()),
+        (*unsafe { self.locs.get_unchecked(port.loc().index()) }).with_half(port.loc().half()),
       )
     } else {
       port.clone()
     }
   }
+}
 
+// -----------------
+//   Normalization
+// -----------------
+
+impl<'a> Net<'a> {
   // Reduces all redexes.
   #[inline(always)]
   pub fn reduce(&mut self, limit: usize) -> usize {
@@ -1190,23 +1212,24 @@ impl<'a> Net<'a> {
   pub fn expand(&mut self) {
     fn go(net: &mut Net, wire: Wire, len: usize, key: usize) {
       trace!(net.tracer, wire);
-      let port = wire.target().load();
+      let port = wire.load_target();
       trace!(net.tracer, port);
       if port == Port::LOCK {
         return;
       }
       if port.tag() == Ctr {
+        let node = port.traverse_node();
         if len >= net.tids || key % 2 == 0 {
-          go(net, port.p1(), len * 2, key / 2);
+          go(net, node.p1, len * 2, key / 2);
         }
         if len >= net.tids || key % 2 == 1 {
-          go(net, port.p2(), len * 2, key / 2);
+          go(net, node.p2, len * 2, key / 2);
         }
       } else if port.tag() == Ref && port != Port::ERA {
-        let got = wire.target().swap(Port::LOCK);
+        let got = wire.swap_target(Port::LOCK);
         if got != Port::LOCK {
           trace!(net.tracer, port, wire);
-          net.call(port, wire.var());
+          net.call(port, Port::new_var(wire.loc()));
         }
       }
     }
@@ -1223,13 +1246,13 @@ impl<'a> Net<'a> {
   }
 
   // Forks into child threads, returning a Net for the (tid/tids)'th thread.
-  pub fn fork(&self, tid: usize, tids: usize) -> Self {
+  fn fork(&self, tid: usize, tids: usize) -> Self {
     let heap_size = self.area.len() / tids;
     let heap_start = heap_size * tid;
     let area = &self.area[heap_start .. heap_start + heap_size];
     let mut net = Net::new_with_root(area, self.root.clone());
     net.next = self.next.saturating_sub(heap_start);
-    net.head = if tid == 0 { self.head.clone() } else { Wire::NULL };
+    net.head = if tid == 0 { self.head.clone() } else { Loc::NULL };
     net.tid = tid;
     net.tids = tids;
     net.tracer.set_tid(tid);
@@ -1248,17 +1271,17 @@ impl<'a> Net<'a> {
 
     // Local thread context
     struct ThreadContext<'a> {
-      tid: usize,                   // thread id
-      tids: usize,                  // thread count
-      tlog2: usize,                 // log2 of thread count
-      tick: usize,                  // current tick
-      net: Net<'a>,                 // thread's own net object
-      delta: &'a AtomicRewrites,    // global delta rewrites
-      quick: &'a AtomicRewrites,    // global delta rewrites
-      share: &'a Vec<(APtr, APtr)>, // global share buffer
-      rlens: &'a Vec<AtomicUsize>,  // global redex lengths
-      total: &'a AtomicUsize,       // total redex length
-      barry: Arc<Barrier>,          // synchronization barrier
+      tid: usize,                             // thread id
+      tids: usize,                            // thread count
+      tlog2: usize,                           // log2 of thread count
+      tick: usize,                            // current tick
+      net: Net<'a>,                           // thread's own net object
+      delta: &'a AtomicRewrites,              // global delta rewrites
+      quick: &'a AtomicRewrites,              // global delta rewrites
+      share: &'a Vec<(AtomicU64, AtomicU64)>, // global share buffer
+      rlens: &'a Vec<AtomicUsize>,            // global redex lengths
+      total: &'a AtomicUsize,                 // total redex length
+      barry: Arc<Barrier>,                    // synchronization barrier
     }
 
     // Initialize global objects
@@ -1268,8 +1291,7 @@ impl<'a> Net<'a> {
     let delta = AtomicRewrites::default(); // delta rewrite counter
     let quick = AtomicRewrites::default(); // quick rewrite counter
     let rlens = (0 .. tids).map(|_| AtomicUsize::new(0)).collect::<Vec<_>>();
-    let share =
-      (0 .. SHARE_LIMIT * tids).map(|_| (APtr(AtomicU64::new(0)), APtr(AtomicU64::new(0)))).collect::<Vec<_>>();
+    let share = (0 .. SHARE_LIMIT * tids).map(|_| Default::default()).collect::<Vec<_>>();
     let total = AtomicUsize::new(0); // sum of redex bag length
     let barry = Arc::new(Barrier::new(tids)); // global barrier
 
@@ -1365,14 +1387,14 @@ impl<'a> Net<'a> {
           //*ref1    = (Ptr(0), Ptr(0));
           let targ = ctx.share.get_unchecked(b_tid * SHARE_LIMIT + i);
           *ctx.net.rdex.get_unchecked_mut(init + i) = rdx0;
-          targ.0.store(rdx1.0);
-          targ.1.store(rdx1.1);
+          targ.0.store(rdx1.0.0, Relaxed);
+          targ.1.store(rdx1.1.0, Relaxed);
         }
         ctx.net.rdex.truncate(a_len - send);
         ctx.barry.wait();
         for i in 0 .. recv {
           let got = ctx.share.get_unchecked(a_tid * SHARE_LIMIT + i);
-          ctx.net.rdex.push((got.0.load(), got.1.load()));
+          ctx.net.rdex.push((Port(got.0.load(Relaxed)), Port(got.1.load(Relaxed))));
         }
       }
     }

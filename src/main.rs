@@ -15,9 +15,12 @@ use hvmc::{
 use std::{collections::HashSet, env, fs, time::Instant};
 
 fn main() {
-  #[cfg(feature = "trace")]
-  if std::hint::black_box(false) {
-    hvmc::trace::_read_traces(0)
+  if cfg!(feature = "trace") {
+    let hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+      hook(info);
+      hvmc::trace::_read_traces(usize::MAX);
+    }))
   }
   let s = Instant::now();
   for i in 0 .. 100000 {
@@ -142,7 +145,7 @@ fn print_stats(net: &run::Net, elapsed: std::time::Duration) {
 }
 
 // Load file and generate net
-fn load<'a>(data: &'a run::Data, file: &str) -> (ast::Book, ast::Host, run::Net<'a>) {
+fn load<'a>(data: &'a run::Area, file: &str) -> (ast::Book, ast::Host, run::Net<'a>) {
   let Ok(file) = fs::read_to_string(file) else {
     eprintln!("Input file not found");
     std::process::exit(1);

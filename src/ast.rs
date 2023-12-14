@@ -7,7 +7,7 @@
 
 use crate::{
   ops::Op,
-  run::{self, Def, DefNet, DefType, Lab, Port, Tag, Wire},
+  run::{self, Def, DefNet, DefType, Half, Lab, Loc, Port, Tag, Wire},
 };
 use std::collections::{hash_map::Entry, BTreeMap, HashMap};
 
@@ -335,7 +335,7 @@ impl std::ops::Deref for DefRef {
 #[derive(Debug, Clone, Default)]
 pub struct Host {
   pub defs: HashMap<String, DefRef>,
-  pub back: HashMap<Wire, String>,
+  pub back: HashMap<Loc, String>,
 }
 
 impl Host {
@@ -370,36 +370,42 @@ impl Host {
 
     struct State<'a> {
       runtime: &'a Host,
-      vars: HashMap<Wire, usize>,
+      vars: HashMap<Loc, usize>,
       next_var: usize,
     }
 
     impl<'a> State<'a> {
       fn read_dir(&mut self, dir: Wire) -> Tree {
-        let ptr = dir.target().load();
+        let ptr = dir.load_target();
         self.read_ptr(ptr, Some(dir))
       }
       fn read_ptr(&mut self, ptr: Port, dir: Option<Wire>) -> Tree {
         match ptr.tag() {
           Tag::Var => Tree::Var {
-            nam: num_to_str(self.vars.remove(&dir.unwrap()).unwrap_or_else(|| {
+            nam: num_to_str(self.vars.remove(&dir.unwrap().loc()).unwrap_or_else(|| {
               let nam = self.next_var;
               self.next_var += 1;
               self.vars.insert(ptr.loc(), nam);
               nam
             })),
           },
-          Tag::Red => self.read_dir(ptr.loc()),
+          Tag::Red => self.read_dir(ptr.wire()),
           Tag::Ref if ptr == Port::ERA => Tree::Era,
           Tag::Ref => Tree::Ref { nam: self.runtime.back[&ptr.loc()].clone() },
           Tag::Num => Tree::Num { val: ptr.num() },
           Tag::Op2 | Tag::Op1 => {
-            Tree::Op2 { opr: ptr.op(), lft: Box::new(self.read_dir(ptr.p1())), rgt: Box::new(self.read_dir(ptr.p2())) }
+            let opr = ptr.op();
+            let node = ptr.traverse_node();
+            Tree::Op2 { opr, lft: Box::new(self.read_dir(node.p1)), rgt: Box::new(self.read_dir(node.p2)) }
           }
           Tag::Ctr => {
-            Tree::Ctr { lab: ptr.lab(), lft: Box::new(self.read_dir(ptr.p1())), rgt: Box::new(self.read_dir(ptr.p2())) }
+            let node = ptr.traverse_node();
+            Tree::Ctr { lab: node.lab, lft: Box::new(self.read_dir(node.p1)), rgt: Box::new(self.read_dir(node.p2)) }
           }
-          Tag::Mat => Tree::Mat { sel: Box::new(self.read_dir(ptr.p1())), ret: Box::new(self.read_dir(ptr.p2())) },
+          Tag::Mat => {
+            let node = ptr.traverse_node();
+            Tree::Mat { sel: Box::new(self.read_dir(node.p1)), ret: Box::new(self.read_dir(node.p2)) }
+          }
         }
       }
     }
@@ -407,7 +413,7 @@ impl Host {
 }
 
 fn net_to_runtime_def(book: &Book, defs: &HashMap<String, DefRef>, net: &Net) -> DefNet {
-  let mut state = State { book, defs, scope: Default::default(), nodes: Default::default(), root: Port::NULL };
+  let mut state = State { book, defs, scope: Default::default(), nodes: Default::default(), root: Port::FREE };
 
   enum Place {
     Ptr(Port),
@@ -415,7 +421,7 @@ fn net_to_runtime_def(book: &Book, defs: &HashMap<String, DefRef>, net: &Net) ->
     Root,
   }
 
-  state.root = state.visit_tree(&net.root, Some(Port::NULL));
+  state.root = state.visit_tree(&net.root, Some(Port::FREE));
 
   let rdex = net.rdex.iter().map(|(a, b)| (state.visit_tree(a, None), state.visit_tree(b, None))).collect();
 
@@ -428,7 +434,7 @@ fn net_to_runtime_def(book: &Book, defs: &HashMap<String, DefRef>, net: &Net) ->
     book: &'a Book,
     defs: &'a HashMap<String, DefRef>,
     scope: HashMap<&'a str, Port>,
-    nodes: Vec<run::Node>,
+    nodes: Vec<(Port, Port)>,
     root: Port,
   }
 
@@ -443,21 +449,20 @@ fn net_to_runtime_def(book: &Book, defs: &HashMap<String, DefRef>, net: &Net) ->
           match self.scope.entry(nam) {
             Entry::Occupied(e) => {
               let other = e.remove();
-              if other == Port::NULL {
+              if other == Port::FREE {
                 self.root = place;
               } else {
                 let node = &mut self.nodes[other.loc().index()];
-                if other.loc().port() == 0 {
-                  node.0 = place;
-                } else {
-                  node.1 = place;
+                match other.loc().half() {
+                  Half::Left => node.0 = place,
+                  Half::Right => node.1 = place,
                 }
               }
               other
             }
             Entry::Vacant(e) => {
               e.insert(place);
-              Port::NULL
+              Port::FREE
             }
           }
         }
@@ -467,8 +472,8 @@ fn net_to_runtime_def(book: &Book, defs: &HashMap<String, DefRef>, net: &Net) ->
           let index = self.nodes.len();
           self.nodes.push(Default::default());
           self.nodes[index].0 = Port::new_num(*lft);
-          self.nodes[index].1 = self.visit_tree(rgt, Some(Port::new(Tag::Var, 0, Wire::local(index, 1))));
-          Port::new(Tag::Op1, *opr as Lab, Wire::local(index, 0))
+          self.nodes[index].1 = self.visit_tree(rgt, Some(Port::new(Tag::Var, 0, Loc::new_local(index, Half::Right))));
+          Port::new(Tag::Op1, *opr as Lab, Loc::new_local(index, Half::Left))
         }
         Tree::Mat { sel, ret } => self.node(Tag::Mat, 0, sel, ret),
       }
@@ -476,9 +481,9 @@ fn net_to_runtime_def(book: &Book, defs: &HashMap<String, DefRef>, net: &Net) ->
     fn node(&mut self, tag: Tag, lab: Lab, lft: &'a Tree, rgt: &'a Tree) -> Port {
       let index = self.nodes.len();
       self.nodes.push(Default::default());
-      self.nodes[index].0 = self.visit_tree(lft, Some(Port::new(Tag::Var, 0, Wire::local(index, 0))));
-      self.nodes[index].1 = self.visit_tree(rgt, Some(Port::new(Tag::Var, 0, Wire::local(index, 1))));
-      Port::new(tag, lab, Wire::local(index, 0))
+      self.nodes[index].0 = self.visit_tree(lft, Some(Port::new(Tag::Var, 0, Loc::new_local(index, Half::Left))));
+      self.nodes[index].1 = self.visit_tree(rgt, Some(Port::new(Tag::Var, 0, Loc::new_local(index, Half::Right))));
+      Port::new(tag, lab, Loc::new_local(index, Half::Left))
     }
   }
 }

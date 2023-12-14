@@ -69,7 +69,7 @@ use std::{
   },
 };
 
-use crate::run::{Port, Wire};
+use crate::run::{Loc, Port, Wire};
 
 #[cfg(not(feature = "trace"))]
 pub struct Tracer;
@@ -347,6 +347,15 @@ impl TraceArg for Wire {
   }
   fn from_word(word: u64) -> Self {
     Wire(word as _)
+  }
+}
+
+impl TraceArg for Loc {
+  fn to_word(&self) -> u64 {
+    self.0 as u64
+  }
+  fn from_word(word: u64) -> Self {
+    Loc(word as _)
   }
 }
 
