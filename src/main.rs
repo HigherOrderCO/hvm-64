@@ -154,7 +154,7 @@ fn load<'a>(data: &'a run::Area, file: &str) -> (ast::Book, ast::Host, run::Net<
   let host = ast::Host::new(&book);
   let mut net = run::Net::new(data);
   net.boot(&host.defs["main"]);
-  return (book, host, net);
+  (book, host, net)
 }
 
 // pub fn compile_book_to_rust_crate(f_name: &str, book: &run::Book) -> Result<(), std::io::Error> {
@@ -185,7 +185,7 @@ pub fn compile_rust_crate_to_executable(f_name: &str) -> Result<(), std::io::Err
     fs::remove_file(&target)?;
   }
   fs::copy("./.hvm/target/release/hvmc", target)?;
-  return Ok(());
+  Ok(())
 }
 
 // // TODO: move to hvm-cuda repo

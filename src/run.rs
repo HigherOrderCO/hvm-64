@@ -68,11 +68,11 @@ pub struct Port(pub u64);
 impl fmt::Debug for Port {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     write!(f, "{:016x?} ", self.0)?;
-    match self {
-      &Port::ERA => write!(f, "[ERA]"),
-      &Port::FREE => write!(f, "[FREE]"),
-      &Port::GONE => write!(f, "[GONE]"),
-      &Port::LOCK => write!(f, "[LOCK]"),
+    match *self {
+      Port::ERA => write!(f, "[ERA]"),
+      Port::FREE => write!(f, "[FREE]"),
+      Port::GONE => write!(f, "[GONE]"),
+      Port::LOCK => write!(f, "[LOCK]"),
       _ => match self.tag() {
         Num => write!(f, "[Num {}]", self.num()),
         Var | Red | Ref | Mat => write!(f, "[{:?} {:?}]", self.tag(), self.loc()),
@@ -140,27 +140,27 @@ impl Port {
 
   #[inline(always)]
   pub fn is_principal(&self) -> bool {
-    return self.tag() >= Ref;
+    self.tag() >= Ref
   }
 
   #[inline(always)]
   pub fn is_skippable(&self) -> bool {
-    return matches!(self.tag(), Num | Ref);
+    matches!(self.tag(), Num | Ref)
   }
 
   #[inline(always)]
   pub fn is_ctr(&self, lab: Lab) -> bool {
-    return self.tag() == Ctr && self.lab() == lab;
+    self.tag() == Ctr && self.lab() == lab
   }
 
   #[inline(always)]
   pub fn redirect(&self) -> Port {
-    return Port::new(Red, 0, self.loc());
+    Port::new(Red, 0, self.loc())
   }
 
   #[inline(always)]
   pub fn unredirect(&self) -> Port {
-    return Port::new(Var, 0, self.loc());
+    Port::new(Var, 0, self.loc())
   }
 }
 
@@ -217,7 +217,7 @@ pub struct Loc(pub usize);
 
 impl fmt::Debug for Loc {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    write!(f, "{:012x?}", self.0 as usize)
+    write!(f, "{:012x?}", self.0)
   }
 }
 
@@ -228,7 +228,7 @@ impl Loc {
 
   #[inline(always)]
   pub fn index(&self) -> usize {
-    self.0 as usize >> 4
+    self.0 >> 4
   }
 
   #[inline(always)]
@@ -382,7 +382,7 @@ impl Rewrites {
 
   // Total rewrite count.
   pub fn total(&self) -> usize {
-    return self.anni + self.comm + self.eras + self.dref + self.oper;
+    self.anni + self.comm + self.eras + self.dref + self.oper
   }
 }
 
@@ -444,7 +444,7 @@ impl<'a> Net<'a> {
       area,
       head: Loc::NULL,
       next: 0,
-      tracer: Tracer::new(),
+      tracer: Tracer::default(),
     }
   }
 
@@ -463,10 +463,10 @@ impl<'a> Net<'a> {
 impl<'a> Net<'a> {
   pub fn init_heap(size: usize) -> Box<[Node]> {
     unsafe {
-      Box::from_raw(std::slice::from_raw_parts_mut::<Node>(
+      Box::from_raw(core::ptr::slice_from_raw_parts_mut(
         alloc::alloc(Layout::array::<Node>(size).unwrap()) as *mut _,
         size,
-      ) as *mut _)
+      ))
     }
   }
 
@@ -478,7 +478,7 @@ impl<'a> Net<'a> {
     if loc.other_half().val().load(Relaxed) == FREE {
       trace!(self.tracer, "other free");
       let loc = loc.with_half(Half::Left);
-      if let Ok(_) = loc.val().compare_exchange(FREE, self.head.0 as u64, Relaxed, Relaxed) {
+      if loc.val().compare_exchange(FREE, self.head.0 as u64, Relaxed, Relaxed).is_ok() {
         let old_head = &self.head;
         let new_head = loc;
         trace!(self.tracer, "appended", old_head, new_head);
@@ -538,7 +538,7 @@ impl<'a> Net<'a> {
   pub fn link_port_port(&mut self, a_port: Port, b_port: Port) {
     trace!(self.tracer, a_port, b_port);
     if a_port.is_principal() && b_port.is_principal() {
-      return self.redux(a_port, b_port);
+      self.redux(a_port, b_port);
     } else {
       self.half_link_port_port(a_port.clone(), b_port.clone());
       self.half_link_port_port(b_port, a_port);
@@ -555,7 +555,7 @@ impl<'a> Net<'a> {
     if a_port.is_principal() && b_port.is_principal() {
       self.half_free(a_wire.loc());
       self.half_free(b_wire.loc());
-      return self.redux(a_port, b_port);
+      self.redux(a_port, b_port);
     } else {
       self.half_link_wire_port(a_port.clone(), a_wire, b_port.clone());
       self.half_link_wire_port(b_port, b_wire, a_port);
@@ -570,7 +570,7 @@ impl<'a> Net<'a> {
     trace!(self.tracer, a_port);
     if a_port.is_principal() && b_port.is_principal() {
       self.half_free(a_wire.loc());
-      return self.redux(a_port, b_port);
+      self.redux(a_port, b_port);
     } else {
       self.half_link_wire_port(a_port.clone(), a_wire, b_port.clone());
       self.half_link_port_port(b_port, a_port);
@@ -1204,7 +1204,7 @@ impl<'a> Net<'a> {
         break;
       }
     }
-    return count;
+    count
   }
 
   // Expands heads.
@@ -1239,7 +1239,7 @@ impl<'a> Net<'a> {
   // Reduce a net to normal form.
   pub fn normal(&mut self) {
     self.expand();
-    while self.rdex.len() > 0 {
+    while !self.rdex.is_empty() {
       self.reduce(usize::MAX);
       self.expand();
     }
@@ -1261,7 +1261,7 @@ impl<'a> Net<'a> {
     for i in from .. upto {
       net.rdex.push(self.rdex[i].clone());
     }
-    return net;
+    net
   }
 
   // Evaluates a term to normal form in parallel
@@ -1357,7 +1357,7 @@ impl<'a> Net<'a> {
       ctx.rlens[ctx.tid].store(ctx.net.rdex.len(), Relaxed);
       ctx.total.fetch_add(ctx.net.rdex.len(), Relaxed);
       ctx.barry.wait();
-      return ctx.total.load(Relaxed);
+      ctx.total.load(Relaxed)
     }
 
     // Share redexes with target thread

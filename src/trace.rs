@@ -72,14 +72,11 @@ use std::{
 use crate::run::{Loc, Port, Wire};
 
 #[cfg(not(feature = "trace"))]
+#[derive(Default)]
 pub struct Tracer;
 
 #[cfg(not(feature = "trace"))]
 impl Tracer {
-  #[inline(always)]
-  pub fn new() -> Self {
-    Tracer
-  }
   #[inline(always)]
   pub fn sync(&mut self) {}
   #[inline(always)]
@@ -115,14 +112,11 @@ macro_rules! trace {
 }
 
 #[cfg(feature = "trace")]
+#[derive(Default)]
 pub struct Tracer(TraceWriter);
 
 #[cfg(feature = "trace")]
 impl Tracer {
-  #[inline(always)]
-  pub fn new() -> Tracer {
-    Tracer(TraceWriter::new())
-  }
   #[inline(always)]
   pub fn sync(&mut self) {
     self.0.sync()
@@ -192,8 +186,8 @@ struct TraceWriter {
 
 unsafe impl Send for TraceWriter {}
 
-impl TraceWriter {
-  fn new() -> Self {
+impl Default for TraceWriter {
+  fn default() -> Self {
     let boxed = Box::new(TraceLock {
       locked: AtomicBool::new(false),
       data: UnsafeCell::new(TraceData { tid: 0, cursor: 0, data: Box::new([0; TRACE_SIZE]) }),
@@ -203,6 +197,9 @@ impl TraceWriter {
     active_tracers.push(boxed);
     TraceWriter { lock, nonce: TRACE_NONCE.fetch_add(1, Ordering::Relaxed) }
   }
+}
+
+impl TraceWriter {
   fn sync(&mut self) {
     self.nonce = TRACE_NONCE.fetch_add(1, Ordering::Relaxed);
   }
@@ -324,7 +321,7 @@ trait TraceArg {
 
 impl<'a, T: TraceArg> TraceArg for &'a T {
   fn to_word(&self) -> u64 {
-    (&**self).to_word()
+    (*self).to_word()
   }
 
   fn from_word(word: u64) -> impl Debug {

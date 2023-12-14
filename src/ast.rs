@@ -88,17 +88,17 @@ pub fn consume(chars: &mut Peekable<Chars>, text: &str) -> Result<(), String> {
       return Err(format!("Expected '{}', found {:?}", text, chars.peek()));
     }
   }
-  return Ok(());
+  Ok(())
 }
 
 pub fn parse_decimal(chars: &mut Peekable<Chars>) -> Result<u64, String> {
   let mut num: u64 = 0;
   skip(chars);
-  if !chars.peek().map_or(false, |c| c.is_digit(10)) {
+  if !chars.peek().map_or(false, |c| c.is_ascii_digit()) {
     return Err(format!("Expected a decimal number, found {:?}", chars.peek()));
   }
   while let Some(c) = chars.peek() {
-    if !c.is_digit(10) {
+    if !c.is_ascii_digit() {
       break;
     }
     num = num * 10 + c.to_digit(10).unwrap() as u64;
@@ -276,36 +276,36 @@ pub fn show_tree(tree: &Tree) -> String {
   match tree {
     Tree::Era => "*".to_string(),
     Tree::Ctr { lab, lft, rgt } => match lab {
-      0 => format!("({} {})", show_tree(&*lft), show_tree(&*rgt)),
-      1 => format!("[{} {}]", show_tree(&*lft), show_tree(&*rgt)),
-      _ => format!("{{{} {} {}}}", lab, show_tree(&*lft), show_tree(&*rgt)),
+      0 => format!("({} {})", show_tree(lft), show_tree(rgt)),
+      1 => format!("[{} {}]", show_tree(lft), show_tree(rgt)),
+      _ => format!("{{{} {} {}}}", lab, show_tree(lft), show_tree(rgt)),
     },
     Tree::Var { nam } => nam.clone(),
     Tree::Ref { nam } => {
       format!("@{}", nam)
     }
     Tree::Num { val } => {
-      format!("#{}", (*val).to_string())
+      format!("#{}", (*val))
     }
     Tree::Op2 { opr, lft, rgt } => {
-      format!("<{} {} {}>", opr, show_tree(&*lft), show_tree(&*rgt))
+      format!("<{} {} {}>", opr, show_tree(lft), show_tree(rgt))
     }
     Tree::Op1 { opr, lft, rgt } => {
-      format!("<{}{} {}>", lft, opr, show_tree(&*rgt))
+      format!("<{}{} {}>", lft, opr, show_tree(rgt))
     }
     Tree::Mat { sel, ret } => {
-      format!("?<{} {}>", show_tree(&*sel), show_tree(&*ret))
+      format!("?<{} {}>", show_tree(sel), show_tree(ret))
     }
   }
 }
 
 pub fn show_net(net: &Net) -> String {
   let mut result = String::new();
-  result.push_str(&format!("{}", show_tree(&net.root)));
+  result.push_str(&show_tree(&net.root));
   for (a, b) in &net.rdex {
     result.push_str(&format!("\n& {} ~ {}", show_tree(a), show_tree(b)));
   }
-  return result;
+  result
 }
 
 pub fn show_book(book: &Book) -> String {
@@ -313,7 +313,7 @@ pub fn show_book(book: &Book) -> String {
   for (name, net) in book {
     result.push_str(&format!("@{} = {}\n", name, show_net(net)));
   }
-  return result;
+  result
 }
 
 #[derive(Debug, Clone)]
@@ -488,7 +488,7 @@ fn net_to_runtime_def(book: &Book, defs: &HashMap<String, DefRef>, net: &Net) ->
   }
 }
 
-pub fn calculate_min_safe_labels<'a>(book: &'a Book) -> impl Iterator<Item = (&'a str, Lab)> {
+pub fn calculate_min_safe_labels(book: &Book) -> impl Iterator<Item = (&str, Lab)> {
   let mut state = State { book, labels: HashMap::with_capacity(book.len()) };
 
   for name in book.keys() {
@@ -576,5 +576,5 @@ pub fn num_to_str(mut num: usize) -> String {
     num /= 26;
   }
   txt.reverse();
-  return String::from_utf8(txt).unwrap();
+  String::from_utf8(txt).unwrap()
 }

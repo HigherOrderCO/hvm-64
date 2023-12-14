@@ -37,7 +37,7 @@ pub fn compile_book(book: &ast::Book, host: &ast::Host) -> Result<String, fmt::E
     writeln!(code, "pub static DEF_{name}: Def = Def {{ lab: {lab}, inner: DefType::Native(call_{name}) }};")?;
   }
 
-  writeln!(code, "")?;
+  writeln!(code)?;
 
   for (raw_name, net) in book.iter() {
     compile_def(&mut code, raw_name, net)?;
@@ -49,7 +49,7 @@ pub fn compile_book(book: &ast::Book, host: &ast::Host) -> Result<String, fmt::E
 fn compile_def(code: &mut Code, raw_name: &str, net: &ast::Net) -> fmt::Result {
   let mut state = State::default();
 
-  state.write_tree(&net.root, format!("rt"))?;
+  state.write_tree(&net.root, "rt".to_string())?;
 
   for (i, (a, b)) in net.rdex.iter().enumerate() {
     state.write_redex(a, b, format!("rd{i}"))?;
@@ -128,7 +128,7 @@ fn compile_def(code: &mut Code, raw_name: &str, net: &ast::Net) -> fmt::Result {
           self.write_tree(lft, x)?;
           self.write_tree(rgt, y)?;
         }
-        Tree::Var { nam } => match self.vars.entry(&nam) {
+        Tree::Var { nam } => match self.vars.entry(nam) {
           Entry::Occupied(e) => {
             writeln!(self.code, "net.link_trg({}, {trg});", e.remove())?;
           }
