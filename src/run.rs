@@ -7,7 +7,12 @@
 // they interact with nodes, and are cleared when they interact with Ptr::ERAs, allowing for constant
 // space evaluation of recursive functions on Scott encoded datatypes.
 
-use crate::{ops::Op, trace, trace::Tracer};
+use crate::{
+  jit::{Instruction, Trg},
+  ops::Op,
+  trace,
+  trace::Tracer,
+};
 use std::{
   alloc::{self, Layout},
   fmt,
@@ -227,32 +232,13 @@ impl Loc {
   const HALF_MASK: usize = 0b1000;
 
   #[inline(always)]
-  pub fn index(&self) -> usize {
-    self.0 >> 4
-  }
-
-  #[inline(always)]
   pub fn val<'a>(&self) -> &'a AtomicU64 {
     unsafe { &*(self.0 as *const _) }
   }
 
   #[inline(always)]
-  pub fn half(&self) -> Half {
-    match (self.0 & Loc::HALF_MASK) >> 3 {
-      0 => Half::Left,
-      1 => Half::Right,
-      _ => unsafe { unreachable_unchecked() },
-    }
-  }
-
-  #[inline(always)]
-  pub fn new_local(index: usize, half: Half) -> Self {
-    Loc(index << 4 | (half as usize) << 3)
-  }
-
-  #[inline(always)]
-  pub fn with_half(&self, half: Half) -> Self {
-    Loc(self.0 & !Loc::HALF_MASK | (half as usize) << 3)
+  pub fn left_half(&self) -> Self {
+    Loc(self.0 & !Loc::HALF_MASK)
   }
 
   #[inline(always)]
@@ -344,9 +330,7 @@ pub enum DefType {
 /// A compact closed net, used for dereferences.
 #[derive(Clone, Debug, Default)]
 pub struct DefNet {
-  pub root: Port,
-  pub rdex: Vec<(Port, Port)>,
-  pub node: Vec<(Port, Port)>,
+  pub instr: Vec<Instruction>,
 }
 
 // -----------
@@ -411,7 +395,7 @@ pub struct Net<'a> {
   pub tid: usize,              // thread id
   pub tids: usize,             // thread count
   pub rdex: Vec<(Port, Port)>, // redexes
-  pub locs: Vec<Loc>,
+  pub trgs: Vec<Trg>,
   pub rwts: Rewrites, // rewrite count
   pub quik: Rewrites, // quick rewrite count
   pub root: Wire,
@@ -437,7 +421,7 @@ impl<'a> Net<'a> {
       tid: 0,
       tids: 1,
       rdex: vec![],
-      locs: vec![Loc::NULL; 1 << 16],
+      trgs: vec![Trg::Port(Port::FREE); 1 << 16],
       rwts: Rewrites::default(),
       quik: Rewrites::default(),
       root,
@@ -477,7 +461,7 @@ impl<'a> Net<'a> {
     loc.val().store(FREE, Relaxed);
     if loc.other_half().val().load(Relaxed) == FREE {
       trace!(self.tracer, "other free");
-      let loc = loc.with_half(Half::Left);
+      let loc = loc.left_half();
       if loc.val().compare_exchange(FREE, self.head.0 as u64, Relaxed, Relaxed).is_ok() {
         let old_head = &self.head;
         let new_head = loc;
@@ -1147,44 +1131,51 @@ impl<'a> Net<'a> {
       DefType::Native(native) => return native(self, trg),
       DefType::Net(net) => net,
     };
-    let len = net.node.len();
-    // Allocate space.
-    for i in 0 .. len {
-      *unsafe { self.locs.get_unchecked_mut(i) } = self.alloc();
+
+    self.set_trg(0, Trg::Port(trg));
+    for i in &net.instr {
+      unsafe {
+        match *i {
+          Instruction::Const(ref port, trg) => self.set_trg(trg, Trg::Port(port.clone())),
+          Instruction::Link(a, b) => self.link_trg(self.get_trg(a), self.get_trg(b)),
+          Instruction::Set(t, ref p) => {
+            if !p.is_principal() {
+              unreachable_unchecked()
+            }
+            self.link_trg_port(self.get_trg(t), p.clone())
+          }
+          Instruction::Ctr(lab, t, a, b) => {
+            let (at, bt) = self.do_ctr(self.get_trg(t), lab);
+            self.set_trg(a, at);
+            self.set_trg(b, bt);
+          }
+          Instruction::Op2(op, t, a, b) => {
+            let (at, bt) = self.do_op2(self.trgs[t].clone(), op);
+            self.set_trg(a, at);
+            self.set_trg(b, bt);
+          }
+          Instruction::Op1(op, n, t, b) => {
+            let bt = self.do_op1(self.trgs[t].clone(), op, n);
+            self.set_trg(b, bt);
+          }
+          Instruction::Mat(t, a, b) => {
+            let (at, bt) = self.do_mat(self.trgs[t].clone());
+            self.set_trg(a, at);
+            self.set_trg(b, bt);
+          }
+        }
+      }
     }
-    // Load nodes, adjusted.
-    for i in 0 .. len {
-      let loc = unsafe { self.locs.get_unchecked(i) }.clone();
-      let p1 = self.adjust(&unsafe { net.node.get_unchecked(i) }.0);
-      let p2 = self.adjust(&unsafe { net.node.get_unchecked(i) }.1);
-      trace!(self.tracer, loc, p1, p2);
-      Wire::new(loc.clone()).set_target(p1);
-      Wire::new(loc.other_half()).set_target(p2);
-    }
-    // Load redexes, adjusted.
-    for r in &net.rdex {
-      let p1 = self.adjust(&r.0);
-      let p2 = self.adjust(&r.1);
-      trace!(self.tracer, p1, p2);
-      self.rdex.push((p1, p2));
-    }
-    trace!(self.tracer);
-    // Load root, adjusted.
-    self.link_port_port(self.adjust(&net.root), trg);
   }
 
-  // Adjusts dereferenced pointer locations.
   #[inline(always)]
-  fn adjust(&self, port: &Port) -> Port {
-    if !port.is_skippable() && port != &Port::FREE {
-      Port::new(
-        port.tag(),
-        port.lab(),
-        (*unsafe { self.locs.get_unchecked(port.loc().index()) }).with_half(port.loc().half()),
-      )
-    } else {
-      port.clone()
-    }
+  fn get_trg(&self, i: usize) -> Trg {
+    unsafe { self.trgs.get_unchecked(i).clone() }
+  }
+
+  #[inline(always)]
+  fn set_trg(&mut self, i: usize, trg: Trg) {
+    unsafe { *self.trgs.get_unchecked_mut(i) = trg }
   }
 }
 

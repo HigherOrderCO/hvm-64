@@ -191,6 +191,7 @@ fn compile_def(code: &mut Code, raw_name: &str, net: &ast::Net) -> fmt::Result {
 // }
 
 // A target pointer, with implied ownership.
+#[derive(Clone)]
 pub enum Trg {
   // Lcl(&'t mut Lcl<'l>),
   Wire(Wire), // we don't own the pointer, so we point to its location
@@ -205,6 +206,17 @@ impl Trg {
       Trg::Port(port) => port.clone(),
     }
   }
+}
+
+#[derive(Debug, Clone)]
+pub enum Instruction {
+  Const(Port, usize),
+  Link(usize, usize),
+  Set(usize, Port),
+  Ctr(Lab, usize, usize, usize),
+  Op2(Op, usize, usize, usize),
+  Op1(Op, u64, usize, usize),
+  Mat(usize, usize, usize),
 }
 
 impl<'a> run::Net<'a> {

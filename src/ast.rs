@@ -6,8 +6,9 @@
 // syntax reflects this representation. The grammar is specified on this repo's README.
 
 use crate::{
+  jit::Instruction,
   ops::Op,
-  run::{self, Def, DefNet, DefType, Half, Lab, Loc, Port, Tag, Wire},
+  run::{self, Def, DefNet, DefType, Lab, Loc, Port, Tag, Wire},
 };
 use std::collections::{hash_map::Entry, BTreeMap, HashMap};
 
@@ -413,70 +414,89 @@ impl Host {
 }
 
 fn net_to_runtime_def(defs: &HashMap<String, DefRef>, net: &Net) -> DefNet {
-  let mut state = State { defs, scope: Default::default(), nodes: Default::default(), root: Port::FREE };
+  let mut state = State { defs, scope: Default::default(), instr: Default::default(), next_index: 1 };
 
-  state.root = state.visit_tree(&net.root, Some(Port::FREE));
+  state.visit_tree(&net.root, 0);
 
-  let rdex = net.rdex.iter().map(|(a, b)| (state.visit_tree(a, None), state.visit_tree(b, None))).collect();
+  net.rdex.iter().for_each(|(a, b)| state.visit_redex(a, b));
 
   assert!(state.scope.is_empty());
 
-  return DefNet { root: state.root, rdex, node: state.nodes };
+  return DefNet { instr: state.instr };
 
   #[derive(Debug)]
   struct State<'a> {
     defs: &'a HashMap<String, DefRef>,
-    scope: HashMap<&'a str, Port>,
-    nodes: Vec<(Port, Port)>,
-    root: Port,
+    scope: HashMap<&'a str, usize>,
+    instr: Vec<Instruction>,
+    next_index: usize,
   }
 
   impl<'a> State<'a> {
-    fn visit_tree(&mut self, tree: &'a Tree, place: Option<Port>) -> Port {
-      match tree {
-        Tree::Era => Port::ERA,
-        Tree::Ref { nam } => Port::new_ref(&self.defs[nam]),
-        Tree::Num { val } => Port::new_num(*val),
-        Tree::Var { nam } => {
-          let place = place.expect("cannot have variables in active pairs");
-          match self.scope.entry(nam) {
-            Entry::Occupied(e) => {
-              let other = e.remove();
-              if other == Port::FREE {
-                self.root = place;
-              } else {
-                let node = &mut self.nodes[other.loc().index()];
-                match other.loc().half() {
-                  Half::Left => node.0 = place,
-                  Half::Right => node.1 = place,
-                }
-              }
-              other
-            }
-            Entry::Vacant(e) => {
-              e.insert(place);
-              Port::FREE
-            }
-          }
-        }
-        Tree::Ctr { lab, lft, rgt } => self.node(Tag::Ctr, *lab, lft, rgt),
-        Tree::Op2 { opr, lft, rgt } => self.node(Tag::Op2, *opr as Lab, lft, rgt),
-        Tree::Op1 { opr, lft, rgt } => {
-          let index = self.nodes.len();
-          self.nodes.push(Default::default());
-          self.nodes[index].0 = Port::new_num(*lft);
-          self.nodes[index].1 = self.visit_tree(rgt, Some(Port::new(Tag::Var, 0, Loc::new_local(index, Half::Right))));
-          Port::new(Tag::Op1, *opr as Lab, Loc::new_local(index, Half::Left))
-        }
-        Tree::Mat { sel, ret } => self.node(Tag::Mat, 0, sel, ret),
-      }
+    fn visit_redex(&mut self, a: &'a Tree, b: &'a Tree) {
+      let (port, tree) = match (a, b) {
+        (Tree::Era, t) | (t, Tree::Era) => (Port::ERA, t),
+        (Tree::Ref { nam }, t) | (t, Tree::Ref { nam }) => (Port::new_ref(&self.defs[nam]), t),
+        (Tree::Num { val }, t) | (t, Tree::Num { val }) => (Port::new_num(*val), t),
+        _ => panic!("Invalid redex"),
+      };
+      let index = self.next_index;
+      self.next_index += 1;
+      self.instr.push(Instruction::Const(port, index));
+      self.visit_tree(tree, index);
     }
-    fn node(&mut self, tag: Tag, lab: Lab, lft: &'a Tree, rgt: &'a Tree) -> Port {
-      let index = self.nodes.len();
-      self.nodes.push(Default::default());
-      self.nodes[index].0 = self.visit_tree(lft, Some(Port::new(Tag::Var, 0, Loc::new_local(index, Half::Left))));
-      self.nodes[index].1 = self.visit_tree(rgt, Some(Port::new(Tag::Var, 0, Loc::new_local(index, Half::Right))));
-      Port::new(tag, lab, Loc::new_local(index, Half::Left))
+    fn visit_tree(&mut self, tree: &'a Tree, trg: usize) {
+      let mut index = || {
+        let i = self.next_index;
+        self.next_index += 1;
+        i
+      };
+      match tree {
+        Tree::Era => {
+          self.instr.push(Instruction::Set(trg, Port::ERA));
+        }
+        Tree::Ref { nam } => {
+          self.instr.push(Instruction::Set(trg, Port::new_ref(&self.defs[nam])));
+        }
+        Tree::Num { val } => {
+          self.instr.push(Instruction::Set(trg, Port::new_num(*val)));
+        }
+        Tree::Var { nam } => match self.scope.entry(nam) {
+          Entry::Occupied(e) => {
+            let other = e.remove();
+            self.instr.push(Instruction::Link(other, trg));
+          }
+          Entry::Vacant(e) => {
+            e.insert(trg);
+          }
+        },
+        Tree::Ctr { lab, lft, rgt } => {
+          let l = index();
+          let r = index();
+          self.instr.push(Instruction::Ctr(*lab, trg, l, r));
+          self.visit_tree(lft, l);
+          self.visit_tree(rgt, r);
+        }
+        Tree::Op2 { opr, lft, rgt } => {
+          let l = index();
+          let r = index();
+          self.instr.push(Instruction::Op2(*opr, trg, l, r));
+          self.visit_tree(lft, l);
+          self.visit_tree(rgt, r);
+        }
+        Tree::Op1 { opr, lft, rgt } => {
+          let r = index();
+          self.instr.push(Instruction::Op1(*opr, *lft, trg, r));
+          self.visit_tree(rgt, r);
+        }
+        Tree::Mat { sel, ret } => {
+          let l = index();
+          let r = index();
+          self.instr.push(Instruction::Mat(trg, l, r));
+          self.visit_tree(sel, l);
+          self.visit_tree(ret, r);
+        }
+      }
     }
   }
 }
