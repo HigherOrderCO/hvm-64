@@ -7,7 +7,7 @@
 
 use crate::{
   ops::Op,
-  run::{self, APtr, Def, DefNet, DefType, Lab, Loc, Ptr, Tag},
+  run::{self, Def, DefNet, DefType, Lab, Port, Tag, Wire},
 };
 use std::collections::{hash_map::Entry, BTreeMap, HashMap};
 
@@ -157,7 +157,6 @@ pub fn parse_tree(chars: &mut Peekable<Chars>) -> Result<Tree, String> {
     }
     Some('[') => {
       chars.next();
-      let lab = 1;
       let lft = Box::new(parse_tree(chars)?);
       let rgt = Box::new(parse_tree(chars)?);
       consume(chars, "]")?;
@@ -336,7 +335,7 @@ impl std::ops::Deref for DefRef {
 #[derive(Debug, Clone, Default)]
 pub struct Host {
   pub defs: HashMap<String, DefRef>,
-  pub back: HashMap<Loc, String>,
+  pub back: HashMap<Wire, String>,
 }
 
 impl Host {
@@ -346,14 +345,14 @@ impl Host {
       .collect::<HashMap<_, _>>();
 
     for (nam, net) in book.iter() {
-      let net = net_to_runtime_def(book, &defs, nam, net);
+      let net = net_to_runtime_def(book, &defs, net);
       match defs.get_mut(nam).unwrap() {
         DefRef::Owned(def) => def.inner = DefType::Net(net),
         DefRef::Static(_) => unreachable!(),
       }
     }
 
-    let back = defs.iter().map(|(nam, def)| (Ptr::new_ref(def).loc(), nam.clone())).collect();
+    let back = defs.iter().map(|(nam, def)| (Port::new_ref(def).loc(), nam.clone())).collect();
 
     Host { defs, back }
   }
@@ -361,26 +360,26 @@ impl Host {
     let mut state = State { runtime: self, vars: Default::default(), next_var: 0 };
     let mut net = Net::default();
 
-    net.root = state.read_dir(rt_net.root);
+    net.root = state.read_dir(rt_net.root.clone());
 
-    for &(a, b) in &rt_net.rdex {
-      net.rdex.push((state.read_ptr(a, None), state.read_ptr(b, None)))
+    for (a, b) in &rt_net.rdex {
+      net.rdex.push((state.read_ptr(a.clone(), None), state.read_ptr(b.clone(), None)))
     }
 
     return net;
 
     struct State<'a> {
       runtime: &'a Host,
-      vars: HashMap<Loc, usize>,
+      vars: HashMap<Wire, usize>,
       next_var: usize,
     }
 
     impl<'a> State<'a> {
-      fn read_dir(&mut self, dir: Loc) -> Tree {
+      fn read_dir(&mut self, dir: Wire) -> Tree {
         let ptr = dir.target().load();
         self.read_ptr(ptr, Some(dir))
       }
-      fn read_ptr(&mut self, ptr: Ptr, dir: Option<Loc>) -> Tree {
+      fn read_ptr(&mut self, ptr: Port, dir: Option<Wire>) -> Tree {
         match ptr.tag() {
           Tag::Var => Tree::Var {
             nam: num_to_str(self.vars.remove(&dir.unwrap()).unwrap_or_else(|| {
@@ -391,7 +390,7 @@ impl Host {
             })),
           },
           Tag::Red => self.read_dir(ptr.loc()),
-          Tag::Ref if ptr == Ptr::ERA => Tree::Era,
+          Tag::Ref if ptr == Port::ERA => Tree::Era,
           Tag::Ref => Tree::Ref { nam: self.runtime.back[&ptr.loc()].clone() },
           Tag::Num => Tree::Num { val: ptr.num() },
           Tag::Op2 | Tag::Op1 => {
@@ -407,16 +406,16 @@ impl Host {
   }
 }
 
-fn net_to_runtime_def(book: &Book, defs: &HashMap<String, DefRef>, nam: &str, net: &Net) -> DefNet {
-  let mut state = State { book, defs, scope: Default::default(), nodes: Default::default(), root: Ptr::NULL };
+fn net_to_runtime_def(book: &Book, defs: &HashMap<String, DefRef>, net: &Net) -> DefNet {
+  let mut state = State { book, defs, scope: Default::default(), nodes: Default::default(), root: Port::NULL };
 
   enum Place {
-    Ptr(Ptr),
+    Ptr(Port),
     Redex,
     Root,
   }
 
-  state.root = state.visit_tree(&net.root, Some(Ptr::NULL));
+  state.root = state.visit_tree(&net.root, Some(Port::NULL));
 
   let rdex = net.rdex.iter().map(|(a, b)| (state.visit_tree(a, None), state.visit_tree(b, None))).collect();
 
@@ -428,23 +427,23 @@ fn net_to_runtime_def(book: &Book, defs: &HashMap<String, DefRef>, nam: &str, ne
   struct State<'a> {
     book: &'a Book,
     defs: &'a HashMap<String, DefRef>,
-    scope: HashMap<&'a str, Ptr>,
+    scope: HashMap<&'a str, Port>,
     nodes: Vec<run::Node>,
-    root: Ptr,
+    root: Port,
   }
 
   impl<'a> State<'a> {
-    fn visit_tree(&mut self, tree: &'a Tree, place: Option<Ptr>) -> Ptr {
+    fn visit_tree(&mut self, tree: &'a Tree, place: Option<Port>) -> Port {
       match tree {
-        Tree::Era => Ptr::ERA,
-        Tree::Ref { nam } => Ptr::new_ref(&self.defs[nam]),
-        Tree::Num { val } => Ptr::new_num(*val),
+        Tree::Era => Port::ERA,
+        Tree::Ref { nam } => Port::new_ref(&self.defs[nam]),
+        Tree::Num { val } => Port::new_num(*val),
         Tree::Var { nam } => {
           let place = place.expect("cannot have variables in active pairs");
           match self.scope.entry(nam) {
             Entry::Occupied(e) => {
               let other = e.remove();
-              if other == Ptr::NULL {
+              if other == Port::NULL {
                 self.root = place;
               } else {
                 let node = &mut self.nodes[other.loc().index()];
@@ -458,7 +457,7 @@ fn net_to_runtime_def(book: &Book, defs: &HashMap<String, DefRef>, nam: &str, ne
             }
             Entry::Vacant(e) => {
               e.insert(place);
-              Ptr::NULL
+              Port::NULL
             }
           }
         }
@@ -467,19 +466,19 @@ fn net_to_runtime_def(book: &Book, defs: &HashMap<String, DefRef>, nam: &str, ne
         Tree::Op1 { opr, lft, rgt } => {
           let index = self.nodes.len();
           self.nodes.push(Default::default());
-          self.nodes[index].0 = Ptr::new_num(*lft);
-          self.nodes[index].1 = self.visit_tree(rgt, Some(Ptr::new(Tag::Var, 0, Loc::local(index, 1))));
-          Ptr::new(Tag::Op1, *opr as Lab, Loc::local(index, 0))
+          self.nodes[index].0 = Port::new_num(*lft);
+          self.nodes[index].1 = self.visit_tree(rgt, Some(Port::new(Tag::Var, 0, Wire::local(index, 1))));
+          Port::new(Tag::Op1, *opr as Lab, Wire::local(index, 0))
         }
         Tree::Mat { sel, ret } => self.node(Tag::Mat, 0, sel, ret),
       }
     }
-    fn node(&mut self, tag: Tag, lab: Lab, lft: &'a Tree, rgt: &'a Tree) -> Ptr {
+    fn node(&mut self, tag: Tag, lab: Lab, lft: &'a Tree, rgt: &'a Tree) -> Port {
       let index = self.nodes.len();
       self.nodes.push(Default::default());
-      self.nodes[index].0 = self.visit_tree(lft, Some(Ptr::new(Tag::Var, 0, Loc::local(index, 0))));
-      self.nodes[index].1 = self.visit_tree(rgt, Some(Ptr::new(Tag::Var, 0, Loc::local(index, 1))));
-      Ptr::new(tag, lab, Loc::local(index, 0))
+      self.nodes[index].0 = self.visit_tree(lft, Some(Port::new(Tag::Var, 0, Wire::local(index, 0))));
+      self.nodes[index].1 = self.visit_tree(rgt, Some(Port::new(Tag::Var, 0, Wire::local(index, 1))));
+      Port::new(tag, lab, Wire::local(index, 0))
     }
   }
 }

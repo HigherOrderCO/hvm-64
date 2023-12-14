@@ -63,14 +63,13 @@
 use std::{
   cell::UnsafeCell,
   fmt::{self, Debug, Formatter, Write},
-  io::stdout,
   sync::{
-    atomic::{AtomicBool, AtomicU64, AtomicU8, AtomicUsize, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
     Mutex,
   },
 };
 
-use crate::run::{Loc, Ptr};
+use crate::run::{Port, Wire};
 
 #[cfg(not(feature = "trace"))]
 pub struct Tracer;
@@ -107,7 +106,7 @@ macro_rules! trace {
       };
     }
     if cfg!(feature = "trace") {
-      $tracer.trace::<__, _>(($($x,)*));
+      $tracer.trace::<__, _>(($(&$x,)*));
     }
   }};
   ($tracer:expr $(, $x:expr)* $(,)?) => {
@@ -318,34 +317,44 @@ pub unsafe fn _reset_traces() {
   TRACE_NONCE.store(1, Ordering::Relaxed);
 }
 
-trait TraceArg: Debug {
-  fn to_word(self) -> u64;
-  fn from_word(word: u64) -> Self;
+trait TraceArg {
+  fn to_word(&self) -> u64;
+  fn from_word(word: u64) -> impl Debug;
 }
 
-impl TraceArg for Ptr {
-  fn to_word(self) -> u64 {
+impl<'a, T: TraceArg> TraceArg for &'a T {
+  fn to_word(&self) -> u64 {
+    (&**self).to_word()
+  }
+
+  fn from_word(word: u64) -> impl Debug {
+    T::from_word(word)
+  }
+}
+
+impl TraceArg for Port {
+  fn to_word(&self) -> u64 {
     self.0
   }
   fn from_word(word: u64) -> Self {
-    Ptr(word)
+    Port(word)
   }
 }
 
-impl TraceArg for Loc {
-  fn to_word(self) -> u64 {
+impl TraceArg for Wire {
+  fn to_word(&self) -> u64 {
     self.0 as u64
   }
   fn from_word(word: u64) -> Self {
-    Loc(word as _)
+    Wire(word as _)
   }
 }
 
 macro_rules! impl_trace_num {
   ($num:ty) => {
     impl TraceArg for $num {
-      fn to_word(self) -> u64 {
-        self as _
+      fn to_word(&self) -> u64 {
+        *self as _
       }
       fn from_word(word: u64) -> Self {
         word as _
@@ -366,9 +375,16 @@ pub trait TraceArgs {
   fn to_words(self) -> impl DoubleEndedIterator<Item = u64>;
 }
 
+impl TraceArgs for () {
+  const FMTS: &'static [fn(u64, &mut fmt::Formatter) -> fmt::Result] = &[];
+  fn to_words(self) -> impl DoubleEndedIterator<Item = u64> {
+    [].into_iter()
+  }
+}
+
 macro_rules! impl_trace_args_tuple {
   ($($T:ident)*) => {
-    impl<$($T: TraceArg,)*> TraceArgs for ($($T,)*) {
+    impl<'a, $($T: TraceArg,)*> TraceArgs for ($(&'a $T,)*) {
       const FMTS: &'static [fn(u64, &mut fmt::Formatter) -> fmt::Result] = &[$(fmt::<$T>,)*];
       fn to_words(self) -> impl DoubleEndedIterator<Item = u64> {
         let ($($T,)*) = self;
@@ -378,7 +394,6 @@ macro_rules! impl_trace_args_tuple {
   };
 }
 
-impl_trace_args_tuple!();
 impl_trace_args_tuple!(A);
 impl_trace_args_tuple!(A B);
 impl_trace_args_tuple!(A B C);

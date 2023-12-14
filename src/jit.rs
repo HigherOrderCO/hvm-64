@@ -1,17 +1,17 @@
 // Despite the file name, this is not actually a JIT (yet).
 
 use crate::{
-  ast::{self, calculate_min_safe_labels, Book, DefRef, Net, Tree},
-  ops::Op,
-  run::{
-    self, ANode, Lab, Loc, Ptr,
-    Tag::{self, *},
-  },
+  ast::{self, Tree},
+  // ops::Op,
+  // run::{
+  //   self, Lab, Port,
+  //   Tag::{self, *},
+  //   Wire,
+  // },
 };
 use std::{
   collections::{hash_map::Entry, HashMap},
-  fmt::{self, format, Write},
-  hint::unreachable_unchecked,
+  fmt::{self, Write},
 };
 
 pub fn compile_book(book: &ast::Book, host: &ast::Host) -> Result<String, fmt::Error> {
@@ -22,7 +22,7 @@ pub fn compile_book(book: &ast::Book, host: &ast::Host) -> Result<String, fmt::E
   writeln!(code, "pub fn host() -> Host {{")?;
   code.indent(|code| {
     writeln!(code, "let mut host = Host::default();")?;
-    for (raw_name, net) in book.iter() {
+    for raw_name in book.keys() {
       let name = sanitize_name(raw_name);
       writeln!(code, r##"host.defs.insert(r#"{raw_name}"#.to_owned(), DefRef::Static(&DEF_{name}));"##)?;
       writeln!(code, r##"host.back.insert(Ptr::new_ref(&DEF_{name}).loc(), r#"{raw_name}"#.to_owned());"##)?;
@@ -40,13 +40,13 @@ pub fn compile_book(book: &ast::Book, host: &ast::Host) -> Result<String, fmt::E
   writeln!(code, "")?;
 
   for (raw_name, net) in book.iter() {
-    compile_def(&mut code, book, raw_name, net)?;
+    compile_def(&mut code, raw_name, net)?;
   }
 
   Ok(code.code)
 }
 
-fn compile_def(code: &mut Code, book: &ast::Book, raw_name: &str, net: &ast::Net) -> fmt::Result {
+fn compile_def(code: &mut Code, raw_name: &str, net: &ast::Net) -> fmt::Result {
   let mut state = State::default();
 
   state.write_tree(&net.root, format!("rt"))?;
@@ -154,7 +154,7 @@ fn compile_def(code: &mut Code, book: &ast::Book, raw_name: &str, net: &ast::Net
           writeln!(self.code, "let {r} = net.do_op1({trg}, {opr:?}, {lft});")?;
           self.write_tree(rgt, r)?;
         }
-        Tree::Mat { sel, ret } => {
+        Tree::Mat { .. } => {
           todo!()
           // let (r0, r1) = self.create_pair(format!("{trg}r"))?;
           // let s = format!("{trg}s");
@@ -189,222 +189,222 @@ fn compile_def(code: &mut Code, book: &ast::Book, raw_name: &str, net: &ast::Net
 //   Todo(usize),
 // }
 
-// A target pointer, with implied ownership.
-pub(crate) enum Trg {
-  // Lcl(&'t mut Lcl<'l>),
-  Dir(Loc), // we don't own the pointer, so we point to its location
-  Ptr(Ptr), // we own the pointer, so we store it directly
-}
+// // A target pointer, with implied ownership.
+// pub(crate) enum Trg {
+//   // Lcl(&'t mut Lcl<'l>),
+//   Dir(Wire), // we don't own the pointer, so we point to its location
+//   Ptr(Port), // we own the pointer, so we store it directly
+// }
 
-impl Trg {
-  #[inline(always)]
-  pub fn target(&self) -> Ptr {
-    match self {
-      Trg::Dir(dir) => dir.target().load(),
-      Trg::Ptr(ptr) => *ptr,
-    }
-  }
-}
+// impl Trg {
+//   #[inline(always)]
+//   pub fn target(&self) -> Port {
+//     match self {
+//       Trg::Dir(dir) => dir.target().load(),
+//       Trg::Ptr(ptr) => *ptr,
+//     }
+//   }
+// }
 
-impl<'a> run::Net<'a> {
-  #[inline(always)]
-  pub(crate) fn free_trg(&mut self, trg: Trg) {
-    match trg {
-      Trg::Dir(dir) => self.half_free(dir),
-      Trg::Ptr(_) => {}
-    }
-  }
-  // Links two targets, using atomics when necessary, based on implied ownership.
-  #[inline(always)]
-  pub(crate) fn link_trg_ptr(&mut self, a: Trg, b: Ptr) {
-    todo!()
-    // match a {
-    //   Trg::Dir(a_dir) => self.half_atomic_link(a_dir, b),
-    //   Trg::Ptr(a_ptr) => self.link(a_ptr, b),
-    //   // Trg::Lcl(Lcl::Bound(_)) => unsafe { unreachable_unchecked() },
-    //   // Trg::Lcl(t) => {
-    //   //   *t = Lcl::Bound(Trg::Ptr(b));
-    //   // }
-    // }
-  }
+// impl<'a> run::Net<'a> {
+//   #[inline(always)]
+//   pub(crate) fn free_trg(&mut self, trg: Trg) {
+//     match trg {
+//       Trg::Dir(dir) => self.half_free(dir),
+//       Trg::Ptr(_) => {}
+//     }
+//   }
+//   // Links two targets, using atomics when necessary, based on implied ownership.
+//   #[inline(always)]
+//   pub(crate) fn link_trg_ptr(&mut self, _: Trg, _: Port) {
+//     todo!()
+//     // match a {
+//     //   Trg::Dir(a_dir) => self.half_atomic_link(a_dir, b),
+//     //   Trg::Ptr(a_ptr) => self.link(a_ptr, b),
+//     //   // Trg::Lcl(Lcl::Bound(_)) => unsafe { unreachable_unchecked() },
+//     //   // Trg::Lcl(t) => {
+//     //   //   *t = Lcl::Bound(Trg::Ptr(b));
+//     //   // }
+//     // }
+//   }
 
-  // Links two targets, using atomics when necessary, based on implied ownership.
-  #[inline(always)]
-  pub(crate) fn link_trg(&mut self, a: Trg, b: Trg) {
-    todo!()
-    // match (a, b) {
-    //   (Trg::Dir(a_dir), Trg::Dir(b_dir)) => self.atomic_link(a_dir, b_dir),
-    //   (Trg::Dir(a_dir), Trg::Ptr(b_ptr)) => self.half_atomic_link(a_dir, b_ptr),
-    //   (Trg::Ptr(a_ptr), Trg::Dir(b_dir)) => self.half_atomic_link(b_dir, a_ptr),
-    //   (Trg::Ptr(a_ptr), Trg::Ptr(b_ptr)) => self.link(a_ptr, b_ptr),
-    //   // (Trg::Lcl(Lcl::Bound(_)), _) | (_, Trg::Lcl(Lcl::Bound(_))) => unsafe { unreachable_unchecked() },
-    //   // (Trg::Lcl(a), Trg::Lcl(b)) => {
-    //   //   let (&Lcl::Todo(an), &Lcl::Todo(bn)) = (&*a, &*b) else { unsafe { unreachable_unchecked() } };
-    //   //   let (a, b) = if an < bn { (a, b) } else { (b, a) };
-    //   //   *b = Lcl::Bound(Trg::Lcl(a));
-    //   // }
-    //   // _ => todo!(), // (Trg::Lcl(t), u) | (u, Trg::Lcl(t)) => *t = Lcl::Bound(u),
-    // }
-  }
+//   // Links two targets, using atomics when necessary, based on implied ownership.
+//   #[inline(always)]
+//   pub(crate) fn link_trg(&mut self, _: Trg, _: Trg) {
+//     todo!()
+//     // match (a, b) {
+//     //   (Trg::Dir(a_dir), Trg::Dir(b_dir)) => self.atomic_link(a_dir, b_dir),
+//     //   (Trg::Dir(a_dir), Trg::Ptr(b_ptr)) => self.half_atomic_link(a_dir, b_ptr),
+//     //   (Trg::Ptr(a_ptr), Trg::Dir(b_dir)) => self.half_atomic_link(b_dir, a_ptr),
+//     //   (Trg::Ptr(a_ptr), Trg::Ptr(b_ptr)) => self.link(a_ptr, b_ptr),
+//     //   // (Trg::Lcl(Lcl::Bound(_)), _) | (_, Trg::Lcl(Lcl::Bound(_))) => unsafe { unreachable_unchecked() },
+//     //   // (Trg::Lcl(a), Trg::Lcl(b)) => {
+//     //   //   let (&Lcl::Todo(an), &Lcl::Todo(bn)) = (&*a, &*b) else { unsafe { unreachable_unchecked() } };
+//     //   //   let (a, b) = if an < bn { (a, b) } else { (b, a) };
+//     //   //   *b = Lcl::Bound(Trg::Lcl(a));
+//     //   // }
+//     //   // _ => todo!(), // (Trg::Lcl(t), u) | (u, Trg::Lcl(t)) => *t = Lcl::Bound(u),
+//     // }
+//   }
 
-  #[inline(always)]
-  /// {#lab x y}
-  pub(crate) fn do_ctr(&mut self, trg: Trg, lab: Lab) -> (Trg, Trg) {
-    let ptr = trg.target();
-    if ptr.is_ctr(lab) {
-      self.quik.anni += 1;
-      self.free_trg(trg);
-      (Trg::Dir(ptr.p1()), Trg::Dir(ptr.p2()))
-    // TODO: fast copy?
-    // } else if ptr.tag() == Num || ptr.tag() == Ref && lab >= ptr.lab() {
-    //   self.quik.comm += 1;
-    //   (Trg::Ptr(ptr), Trg::Ptr(ptr))
-    } else {
-      let loc = self.safe_alloc();
-      let n = Ptr::new(Ctr, lab, loc);
-      self.link_trg_ptr(trg, n);
-      (Trg::Ptr(n.p1().var()), Trg::Ptr(n.p2().var()))
-    }
-  }
-  #[inline(always)]
-  /// <op #b x>
-  pub(crate) fn do_op2_num(&mut self, trg: Trg, op: Op, b: u64) -> Trg {
-    let ptr = trg.target();
-    if ptr.tag() == Num {
-      self.quik.oper += 2;
-      self.free_trg(trg);
-      Trg::Ptr(Ptr::new_num(op.op(ptr.num(), b)))
-    } else if ptr == Ptr::ERA {
-      Trg::Ptr(Ptr::ERA)
-    } else {
-      let n = Ptr::new(Op2, op as Lab, self.safe_alloc());
-      self.link_trg_ptr(trg, n);
-      n.p1().target().store(Ptr::new_num(b));
-      Trg::Ptr(n.p2().var())
-    }
-  }
-  #[inline(always)]
-  /// <op x y>
-  pub(crate) fn do_op2(&mut self, trg: Trg, op: Op) -> (Trg, Trg) {
-    let ptr = trg.target();
-    if ptr.tag() == Num {
-      self.quik.oper += 1;
-      self.free_trg(trg);
-      let n = Ptr::new(Op1, op as Lab, self.safe_alloc());
-      n.p1().target().store(Ptr::new_num(ptr.num()));
-      (Trg::Ptr(n), Trg::Ptr(n.p2().var()))
-    } else if ptr == Ptr::ERA {
-      (Trg::Ptr(Ptr::ERA), Trg::Ptr(Ptr::ERA))
-    } else {
-      let n = Ptr::new(Op2, op as Lab, self.safe_alloc());
-      self.link_trg_ptr(trg, n);
-      (Trg::Ptr(n.p1().var()), Trg::Ptr(n.p2().var()))
-    }
-  }
-  #[inline(always)]
-  /// <a op x>
-  pub(crate) fn do_op1(&mut self, trg: Trg, op: Op, a: u64) -> Trg {
-    let ptr = trg.target();
-    if trg.target().tag() == Num {
-      self.quik.oper += 1;
-      self.free_trg(trg);
-      Trg::Ptr(Ptr::new_num(op.op(a, ptr.num())))
-    } else if ptr == Ptr::ERA {
-      Trg::Ptr(Ptr::ERA)
-    } else {
-      let n = Ptr::new(Op1, op as Lab, self.safe_alloc());
-      self.link_trg_ptr(trg, n);
-      n.p1().target().store(Ptr::new_num(a));
-      Trg::Ptr(n.p2().var())
-    }
-  }
-  #[inline(always)]
-  /// ?<(x (y z)) out>
-  pub(crate) fn do_mat_con_con(&mut self, trg: Trg, out: Trg) -> (Trg, Trg, Trg) {
-    let ptr = trg.target();
-    if trg.target().tag() == Num {
-      self.quik.oper += 1;
-      self.free_trg(trg);
-      let num = ptr.num();
-      if num == 0 {
-        (out, Trg::Ptr(Ptr::ERA), Trg::Ptr(Ptr::ERA))
-      } else {
-        (Trg::Ptr(Ptr::ERA), Trg::Ptr(Ptr::new_num(num - 1)), out)
-      }
-    } else if ptr == Ptr::ERA {
-      self.link_trg_ptr(out, Ptr::ERA);
-      (Trg::Ptr(Ptr::ERA), Trg::Ptr(Ptr::ERA), Trg::Ptr(Ptr::ERA))
-    } else {
-      let m = Ptr::new(Mat, 0, self.safe_alloc());
-      let c1 = Ptr::new(Ctr, 0, self.safe_alloc());
-      let c2 = Ptr::new(Ctr, 0, self.safe_alloc());
-      m.p1().target().store(c1);
-      c1.p2().target().store(c2);
-      self.link_trg_ptr(out, m.p2().var());
-      (Trg::Ptr(c1.p1().var()), Trg::Ptr(c2.p1().var()), Trg::Ptr(c2.p2().var()))
-    }
-  }
-  #[inline(always)]
-  /// ?<(x y) out>
-  pub(crate) fn do_mat_con<'t, 'l>(&mut self, trg: Trg, out: Trg) -> (Trg, Trg) {
-    let ptr = trg.target();
-    if trg.target().tag() == Num {
-      self.quik.oper += 1;
-      self.free_trg(trg);
-      let num = ptr.num();
-      if num == 0 {
-        (out, Trg::Ptr(Ptr::ERA))
-      } else {
-        let c2 = Ptr::new(Ctr, 0, self.safe_alloc());
-        c2.p1().target().store(Ptr::new_num(num - 1));
-        self.link_trg_ptr(out, c2.p2().var());
-        (Trg::Ptr(Ptr::ERA), Trg::Ptr(c2))
-      }
-    } else if ptr == Ptr::ERA {
-      self.link_trg_ptr(out, Ptr::ERA);
-      (Trg::Ptr(Ptr::ERA), Trg::Ptr(Ptr::ERA))
-    } else {
-      let m = Ptr::new(Mat, 0, self.safe_alloc());
-      let c1 = Ptr::new(Ctr, 0, self.safe_alloc());
-      m.p1().target().store(c1);
-      self.link_trg_ptr(out, m.p2().var());
-      (Trg::Ptr(c1.p1().var()), Trg::Ptr(c1.p2().var()))
-    }
-  }
-  #[inline(always)]
-  /// ?<x y>
-  pub(crate) fn do_mat<'t, 'l>(&mut self, trg: Trg) -> (Trg, Trg) {
-    let ptr = trg.target();
-    if trg.target().tag() == Num {
-      self.quik.oper += 1;
-      self.free_trg(trg);
-      let num = ptr.num();
-      let c1 = Ptr::new(Ctr, 0, self.safe_alloc());
-      if num == 0 {
-        c1.p2().target().store(Ptr::ERA);
-        (Trg::Ptr(c1.p1().var()), Trg::Ptr(c1))
-      } else {
-        let c2 = Ptr::new(Ctr, 0, self.safe_alloc());
-        c1.p1().target().store(Ptr::ERA);
-        c1.p2().target().store(c2);
-        c2.p1().target().store(Ptr::new_num(num - 1));
-        (Trg::Ptr(c2.p2().var()), Trg::Ptr(c1))
-      }
-    } else if ptr == Ptr::ERA {
-      (Trg::Ptr(Ptr::ERA), Trg::Ptr(Ptr::ERA))
-    } else {
-      let m = Ptr::new(Mat, 0, self.safe_alloc());
-      (Trg::Ptr(m.p2().var()), Trg::Ptr(m.p1().var()))
-    }
-  }
-  #[inline(always)]
-  pub(crate) fn make(&mut self, tag: Tag, lab: Lab, x: Trg, y: Trg) -> Trg {
-    let n = Ptr::new(tag, lab, self.safe_alloc());
-    self.link_trg_ptr(x, n.p1().var());
-    self.link_trg_ptr(y, n.p2().var());
-    Trg::Ptr(n)
-  }
-}
+//   #[inline(always)]
+//   /// {#lab x y}
+//   pub(crate) fn do_ctr(&mut self, trg: Trg, lab: Lab) -> (Trg, Trg) {
+//     let ptr = trg.target();
+//     if ptr.is_ctr(lab) {
+//       self.quik.anni += 1;
+//       self.free_trg(trg);
+//       (Trg::Dir(ptr.p1()), Trg::Dir(ptr.p2()))
+//     // TODO: fast copy?
+//     // } else if ptr.tag() == Num || ptr.tag() == Ref && lab >= ptr.lab() {
+//     //   self.quik.comm += 1;
+//     //   (Trg::Ptr(ptr), Trg::Ptr(ptr))
+//     } else {
+//       let loc = self.safe_alloc();
+//       let n = Port::new(Ctr, lab, loc);
+//       self.link_trg_ptr(trg, n);
+//       (Trg::Ptr(n.p1().var()), Trg::Ptr(n.p2().var()))
+//     }
+//   }
+//   #[inline(always)]
+//   /// <op #b x>
+//   pub(crate) fn do_op2_num(&mut self, trg: Trg, op: Op, b: u64) -> Trg {
+//     let ptr = trg.target();
+//     if ptr.tag() == Num {
+//       self.quik.oper += 2;
+//       self.free_trg(trg);
+//       Trg::Ptr(Port::new_num(op.op(ptr.num(), b)))
+//     } else if ptr == Port::ERA {
+//       Trg::Ptr(Port::ERA)
+//     } else {
+//       let n = Port::new(Op2, op as Lab, self.safe_alloc());
+//       self.link_trg_ptr(trg, n);
+//       n.p1().target().store(Port::new_num(b));
+//       Trg::Ptr(n.p2().var())
+//     }
+//   }
+//   #[inline(always)]
+//   /// <op x y>
+//   pub(crate) fn do_op2(&mut self, trg: Trg, op: Op) -> (Trg, Trg) {
+//     let ptr = trg.target();
+//     if ptr.tag() == Num {
+//       self.quik.oper += 1;
+//       self.free_trg(trg);
+//       let n = Port::new(Op1, op as Lab, self.safe_alloc());
+//       n.p1().target().store(Port::new_num(ptr.num()));
+//       (Trg::Ptr(n), Trg::Ptr(n.p2().var()))
+//     } else if ptr == Port::ERA {
+//       (Trg::Ptr(Port::ERA), Trg::Ptr(Port::ERA))
+//     } else {
+//       let n = Port::new(Op2, op as Lab, self.safe_alloc());
+//       self.link_trg_ptr(trg, n);
+//       (Trg::Ptr(n.p1().var()), Trg::Ptr(n.p2().var()))
+//     }
+//   }
+//   #[inline(always)]
+//   /// <a op x>
+//   pub(crate) fn do_op1(&mut self, trg: Trg, op: Op, a: u64) -> Trg {
+//     let ptr = trg.target();
+//     if trg.target().tag() == Num {
+//       self.quik.oper += 1;
+//       self.free_trg(trg);
+//       Trg::Ptr(Port::new_num(op.op(a, ptr.num())))
+//     } else if ptr == Port::ERA {
+//       Trg::Ptr(Port::ERA)
+//     } else {
+//       let n = Port::new(Op1, op as Lab, self.safe_alloc());
+//       self.link_trg_ptr(trg, n);
+//       n.p1().target().store(Port::new_num(a));
+//       Trg::Ptr(n.p2().var())
+//     }
+//   }
+//   #[inline(always)]
+//   /// ?<(x (y z)) out>
+//   pub(crate) fn do_mat_con_con(&mut self, trg: Trg, out: Trg) -> (Trg, Trg, Trg) {
+//     let ptr = trg.target();
+//     if trg.target().tag() == Num {
+//       self.quik.oper += 1;
+//       self.free_trg(trg);
+//       let num = ptr.num();
+//       if num == 0 {
+//         (out, Trg::Ptr(Port::ERA), Trg::Ptr(Port::ERA))
+//       } else {
+//         (Trg::Ptr(Port::ERA), Trg::Ptr(Port::new_num(num - 1)), out)
+//       }
+//     } else if ptr == Port::ERA {
+//       self.link_trg_ptr(out, Port::ERA);
+//       (Trg::Ptr(Port::ERA), Trg::Ptr(Port::ERA), Trg::Ptr(Port::ERA))
+//     } else {
+//       let m = Port::new(Mat, 0, self.safe_alloc());
+//       let c1 = Port::new(Ctr, 0, self.safe_alloc());
+//       let c2 = Port::new(Ctr, 0, self.safe_alloc());
+//       m.p1().target().store(c1);
+//       c1.p2().target().store(c2);
+//       self.link_trg_ptr(out, m.p2().var());
+//       (Trg::Ptr(c1.p1().var()), Trg::Ptr(c2.p1().var()), Trg::Ptr(c2.p2().var()))
+//     }
+//   }
+//   #[inline(always)]
+//   /// ?<(x y) out>
+//   pub(crate) fn do_mat_con<'t, 'l>(&mut self, trg: Trg, out: Trg) -> (Trg, Trg) {
+//     let ptr = trg.target();
+//     if trg.target().tag() == Num {
+//       self.quik.oper += 1;
+//       self.free_trg(trg);
+//       let num = ptr.num();
+//       if num == 0 {
+//         (out, Trg::Ptr(Port::ERA))
+//       } else {
+//         let c2 = Port::new(Ctr, 0, self.safe_alloc());
+//         c2.p1().target().store(Port::new_num(num - 1));
+//         self.link_trg_ptr(out, c2.p2().var());
+//         (Trg::Ptr(Port::ERA), Trg::Ptr(c2))
+//       }
+//     } else if ptr == Port::ERA {
+//       self.link_trg_ptr(out, Port::ERA);
+//       (Trg::Ptr(Port::ERA), Trg::Ptr(Port::ERA))
+//     } else {
+//       let m = Port::new(Mat, 0, self.safe_alloc());
+//       let c1 = Port::new(Ctr, 0, self.safe_alloc());
+//       m.p1().target().store(c1);
+//       self.link_trg_ptr(out, m.p2().var());
+//       (Trg::Ptr(c1.p1().var()), Trg::Ptr(c1.p2().var()))
+//     }
+//   }
+//   #[inline(always)]
+//   /// ?<x y>
+//   pub(crate) fn do_mat<'t, 'l>(&mut self, trg: Trg) -> (Trg, Trg) {
+//     let ptr = trg.target();
+//     if trg.target().tag() == Num {
+//       self.quik.oper += 1;
+//       self.free_trg(trg);
+//       let num = ptr.num();
+//       let c1 = Port::new(Ctr, 0, self.safe_alloc());
+//       if num == 0 {
+//         c1.p2().target().store(Port::ERA);
+//         (Trg::Ptr(c1.p1().var()), Trg::Ptr(c1))
+//       } else {
+//         let c2 = Port::new(Ctr, 0, self.safe_alloc());
+//         c1.p1().target().store(Port::ERA);
+//         c1.p2().target().store(c2);
+//         c2.p1().target().store(Port::new_num(num - 1));
+//         (Trg::Ptr(c2.p2().var()), Trg::Ptr(c1))
+//       }
+//     } else if ptr == Port::ERA {
+//       (Trg::Ptr(Port::ERA), Trg::Ptr(Port::ERA))
+//     } else {
+//       let m = Port::new(Mat, 0, self.safe_alloc());
+//       (Trg::Ptr(m.p2().var()), Trg::Ptr(m.p1().var()))
+//     }
+//   }
+//   #[inline(always)]
+//   pub(crate) fn make(&mut self, tag: Tag, lab: Lab, x: Trg, y: Trg) -> Trg {
+//     let n = Port::new(tag, lab, self.safe_alloc());
+//     self.link_trg_ptr(x, n.p1().var());
+//     self.link_trg_ptr(y, n.p2().var());
+//     Trg::Ptr(n)
+//   }
+// }
 
 #[derive(Default)]
 struct Code {

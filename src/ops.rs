@@ -1,6 +1,6 @@
 // Implements u48: 48-bit unsigned integers using u64 and u128
 
-use std::{fmt, path::Display, str::FromStr};
+use std::{fmt, str::FromStr};
 
 use crate::run::Lab;
 
