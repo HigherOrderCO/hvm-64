@@ -345,7 +345,7 @@ impl Host {
       .collect::<HashMap<_, _>>();
 
     for (nam, net) in book.iter() {
-      let net = net_to_runtime_def(book, &defs, net);
+      let net = net_to_runtime_def(&defs, net);
       match defs.get_mut(nam).unwrap() {
         DefRef::Owned(def) => def.inner = DefType::Net(net),
         DefRef::Static(_) => unreachable!(),
@@ -412,14 +412,8 @@ impl Host {
   }
 }
 
-fn net_to_runtime_def(book: &Book, defs: &HashMap<String, DefRef>, net: &Net) -> DefNet {
-  let mut state = State { book, defs, scope: Default::default(), nodes: Default::default(), root: Port::FREE };
-
-  enum Place {
-    Ptr(Port),
-    Redex,
-    Root,
-  }
+fn net_to_runtime_def(defs: &HashMap<String, DefRef>, net: &Net) -> DefNet {
+  let mut state = State { defs, scope: Default::default(), nodes: Default::default(), root: Port::FREE };
 
   state.root = state.visit_tree(&net.root, Some(Port::FREE));
 
@@ -431,7 +425,6 @@ fn net_to_runtime_def(book: &Book, defs: &HashMap<String, DefRef>, net: &Net) ->
 
   #[derive(Debug)]
   struct State<'a> {
-    book: &'a Book,
     defs: &'a HashMap<String, DefRef>,
     scope: HashMap<&'a str, Port>,
     nodes: Vec<(Port, Port)>,

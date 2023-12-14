@@ -1272,7 +1272,6 @@ impl<'a> Net<'a> {
     // Local thread context
     struct ThreadContext<'a> {
       tid: usize,                             // thread id
-      tids: usize,                            // thread count
       tlog2: usize,                           // log2 of thread count
       tick: usize,                            // current tick
       net: Net<'a>,                           // thread's own net object
@@ -1300,7 +1299,6 @@ impl<'a> Net<'a> {
       for tid in 0 .. tids {
         let mut ctx = ThreadContext {
           tid,
-          tids,
           tick: 0,
           net: self.fork(tid, tids),
           tlog2,

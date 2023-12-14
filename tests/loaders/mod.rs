@@ -51,7 +51,7 @@ pub fn normal(book: Book, size: usize) -> (run::Net, Net) {
   fn normal_cpu(book: run::Book, size: usize) -> run::Net {
     let mut rnet = run::Net::new(size);
     rnet.boot(name_to_val("main"));
-    rnet.normal(&book);
+    rnet.normal();
     rnet
   }
 
