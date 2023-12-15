@@ -387,26 +387,29 @@ impl<'a> run::Net<'a> {
   /// ?<x y>
   pub fn do_mat<'t, 'l>(&mut self, trg: Trg) -> (Trg, Trg) {
     let port = trg.target();
-    if trg.target().tag() == Num {
+    if port.tag() == Num {
       self.quik.oper += 1;
       self.free_trg(trg);
       let num = port.num();
       let c1 = self.create_node(Ctr, 0);
       if num == 0 {
         self.link_port_port(c1.p2, Port::ERA);
-        (Trg::Port(c1.p0), Trg::Port(c1.p1))
+        (Trg::Port(c1.p0), Trg::Wire(self.create_wire(c1.p1)))
       } else {
         let c2 = self.create_node(Ctr, 0);
         self.link_port_port(c1.p1, Port::ERA);
         self.link_port_port(c1.p2, c2.p0);
         self.link_port_port(c2.p1, Port::new_num(num - 1));
-        (Trg::Port(c1.p0), Trg::Port(c2.p2))
+        (Trg::Port(c1.p0), Trg::Wire(self.create_wire(c2.p2)))
       }
     } else if port == Port::ERA {
+      self.quik.eras += 1;
+      self.free_trg(trg);
       (Trg::Port(Port::ERA), Trg::Port(Port::ERA))
     } else {
       let m = self.create_node(Mat, 0);
-      (Trg::Port(m.p2), Trg::Port(m.p1))
+      self.link_trg_port(trg, m.p0);
+      (Trg::Port(m.p1), Trg::Port(m.p2))
     }
   }
   #[inline(always)]

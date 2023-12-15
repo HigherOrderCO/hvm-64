@@ -510,6 +510,15 @@ impl<'a> Net<'a> {
       p2: Port::new_var(loc.other_half()),
     }
   }
+
+  #[inline(always)]
+  pub fn create_wire(&mut self, port: Port) -> Wire {
+    let loc = self.alloc();
+    self.half_free(loc.other_half());
+    let wire = Wire::new(loc);
+    self.link_port_port(port, Port::new_var(wire.loc()));
+    wire
+  }
 }
 
 // ----------
