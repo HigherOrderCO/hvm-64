@@ -1,0 +1,10 @@
+@Id.next = ({10 {2 x <+ #1 y>} y} x)
+
+@tree = (?<(@tree_0 @tree_s) (i (x1 [x2 R]))> ({10 x0 x2} R))
+& @Id.next ~ ({10 x0 x1} i)
+@tree_0 = (i (x0 [x0 i]))
+@tree_s = ({3 dp0 dp1} (i (x0 [x2 [i [t0 t1]]])))
+& @tree ~ (dp0 ({10 x0 x1} t0))
+& @tree ~ (dp1 ({10 x1 x2} t1))
+
+@main = R & @tree ~ (#3 ({10 #0 *} R))
