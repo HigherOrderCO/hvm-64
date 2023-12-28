@@ -94,7 +94,7 @@ HVM-Core's textual syntax represents interaction combinators via an AST:
   <RDEX> ::= "&" <TERM> "~" <TERM> <NET>
 
 <BOOK> ::= 
-  <DEF> ::= "@" <NET> <BOOK>
+  <DEF> ::= "@" <name> "=" <NET> <BOOK>
   <END> ::= <EOF> 
 ```
 
