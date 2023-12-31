@@ -791,9 +791,9 @@ impl<'a> Net<'a> {
     let a2 = Ptr::new(VR2, 0, a.loc());
     self.half_atomic_link(a2, Ptr::new(b.tag(), b.lab(), loc0));
     let b1 = Ptr::new(VR1, 0, b.loc());
-    self.half_atomic_link(b1, Ptr::new(a.tag(), b.lab(), loc1));
+    self.half_atomic_link(b1, Ptr::new(a.tag(), a.lab(), loc1));
     let b2 = Ptr::new(VR2, 0, b.loc());
-    self.half_atomic_link(b2, Ptr::new(a.tag(), b.lab(), loc2));
+    self.half_atomic_link(b2, Ptr::new(a.tag(), a.lab(), loc2));
   }
 
   pub fn copy(&mut self, a: Ptr, b: Ptr) {
