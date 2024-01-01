@@ -41,7 +41,7 @@ pub fn hvm_lang_readback(net: &Net, book: &DefinitionBook, id_map: HashMap<run::
 }
 
 pub fn hvm_lang_normal<'a>(book: &mut DefinitionBook, size: usize) -> (run::Net<'a>, Net, HashMap<run::Val, DefId>) {
-  let result = hvml::compile_book(book).unwrap();
+  let result = hvml::compile_book(book, hvml::OptimizationLevel::Heavy).unwrap();
   let (root, res_lnet) = normal(result.core_book, size);
   (root, res_lnet, result.hvmc_names.hvmc_name_to_id)
 }
