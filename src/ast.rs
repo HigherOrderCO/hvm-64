@@ -274,7 +274,7 @@ pub fn do_parse_book(code: &str) -> Book {
 // Stringifier
 // -----------
 
-fn show_opr(opr: run::Lab) -> String {
+pub fn show_opr(opr: run::Lab) -> String {
   match opr {
     run::ADD => "+".to_string(),
     run::SUB => "-".to_string(),

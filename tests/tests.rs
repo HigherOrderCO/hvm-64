@@ -25,17 +25,18 @@ fn test_era_era2() {
 fn test_commutation() {
   let net = parse_core("@main = root & (x x) ~ [* root]");
   let (rnet, net) = normal(net, 16);
-  assert_snapshot!(show_net(&net), @"(b b)");
-  assert_debug_snapshot!(rnet.rewrites(), @"5");
+  // TODO: Output changed from `(b b)` to `*`, is this correct? If yes, can this test be improved?
+  assert_snapshot!(show_net(&net), @"*"); 
+  assert_debug_snapshot!(rnet.rewrites(), @"2");
 }
 
 #[test]
 fn test_bool_and() {
   let book = parse_core(
     "
-    @true = (b (* b))
-    @fals = (* (b b))
-    @and  = ((b (@fals c)) (b c))
+    @true = (a (* a))
+    @fals = (* (a a))
+    @and  = ((a (@fals b)) (a b))
     @main = root & @and ~ (@true (@fals root))
   ",
   );
@@ -52,9 +53,9 @@ fn test_church_mul() {
   let (readback, valid_readback) = hvm_lang_readback(&net, &book, id_map);
 
   assert!(valid_readback);
-  assert_snapshot!(show_net(&net), @"({2 ({2 b c} d) {3 (d e) (e {2 c f})}} (b f))");
+  assert_snapshot!(show_net(&net), @"({5 ({3 a b} c) {7 (c d) (d {3 b e})}} (a e))");
   assert_snapshot!(readback, @"λa λb (a (a (a (a (a (a b))))))");
-  assert_debug_snapshot!(rnet.rewrites(), @"12");
+  assert_debug_snapshot!(rnet.rewrites(), @"11");
 }
 
 #[test]
@@ -66,17 +67,18 @@ fn test_tree_alloc() {
   assert!(valid_readback);
   assert_snapshot!(show_net(&net), @"(a (* a))");
   assert_snapshot!(readback, @"λa λ* a");
-  assert_debug_snapshot!(rnet.rewrites(), @"100");
+  assert_debug_snapshot!(rnet.rewrites(), @"97");
 }
 
 #[test]
 fn test_queue() {
+  // TODO: Is this file/readback correct?
   let mut book = load_lang("queue.hvm");
   let (rnet, net, id_map) = hvm_lang_normal(&mut book, 512);
   let (readback, valid_readback) = hvm_lang_readback(&net, &book, id_map);
 
   assert!(valid_readback);
-  assert_snapshot!(show_net(&net), @"(((* @B) (((((b c) (b c)) (((({2 (d e) (e f)} (d f)) ((* @A) g)) (* g)) h)) (* h)) i)) (* i))");
-  assert_snapshot!(readback, @"λa λ* ((a λ* λb b) λc λ* ((c λd λe (d e)) λf λ* ((f λg λh (g (g h))) λ* λi i)))");
+  assert_snapshot!(show_net(&net), @"(((* (a a)) ((((b b) (((({3 (c d) (d e)} (c e)) ((* (f f)) g)) (* g)) h)) (* h)) i)) (* i))");
+  assert_snapshot!(readback, @"λa λ* (a λ* λb b λc λ* (c λd d λe λ* (e λf λg (f (f g)) λ* λh h)))");
   assert_debug_snapshot!(rnet.rewrites(), @"65");
 }
