@@ -25,9 +25,8 @@ fn test_era_era2() {
 fn test_commutation() {
   let net = parse_core("@main = root & (x x) ~ [* root]");
   let (rnet, net) = normal(net, 16);
-  // TODO: Output changed from `(b b)` to `*`, is this correct? If yes, can this test be improved?
-  assert_snapshot!(show_net(&net), @"*"); 
-  assert_debug_snapshot!(rnet.rewrites(), @"2");
+  assert_snapshot!(show_net(&net), @"(a a)"); 
+  assert_debug_snapshot!(rnet.rewrites(), @"5");
 }
 
 #[test]
