@@ -85,8 +85,8 @@ HVM-Core's textual syntax represents interaction combinators via an AST:
   <DUP> ::= "{" <label> " " <TERM> " " <TERM> "}"
   <REF> ::= "@" <name>
   <U60> ::= "#" <value>
-  <OP2> ::= "<" <TERM> " " <TERM> ">"
-  <MAT> ::= "?" "<" <TERM> <TERM> ">"
+  <OP2> ::= "<" <op> " " <TERM> " " <TERM> ">"
+  <MAT> ::= "?" "<" <TERM> " " <TERM> ">"
   <VAR> ::= <name>
 
 <NET> ::=
@@ -94,7 +94,7 @@ HVM-Core's textual syntax represents interaction combinators via an AST:
   <RDEX> ::= "&" <TERM> "~" <TERM> <NET>
 
 <BOOK> ::= 
-  <DEF> ::= "@" <NET> <BOOK>
+  <DEF> ::= "@" <name> "=" <NET> <BOOK>
   <END> ::= <EOF> 
 ```
 
