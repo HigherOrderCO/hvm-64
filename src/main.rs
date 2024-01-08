@@ -16,23 +16,22 @@ use std::{collections::HashSet, env, fs, os::unix::thread, time::Instant};
 
 fn main() {
   use fuzz::*;
-  fuzz(|c| {
+  Fuzzer::fuzz(|c| {
     let x = AtomicU64::new(0);
     let y = AtomicU64::new(1);
-    std::thread::scope(|s| {
-      c.spawn(s, || {
+    c.scope(|s| {
+      s.spawn(|| {
         y.store(3, Ordering::Relaxed);
         x.store(1, Ordering::Relaxed);
       });
-      c.spawn(s, || {
+      s.spawn(|| {
         if x.load(Ordering::Relaxed) == 1 {
           y.store(y.load(Ordering::Relaxed) * 2, Ordering::Relaxed);
         }
       });
-      c.start();
     });
-    println!("y = {}", y.final_value());
-  })
+    println!("y = {}", y.read());
+  });
   // if cfg!(feature = "trace") {
   //   let hook = std::panic::take_hook();
   //   std::panic::set_hook(Box::new(move |info| {
