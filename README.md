@@ -85,8 +85,8 @@ HVM-Core's textual syntax represents interaction combinators via an AST:
   <DUP> ::= "{" <label> " " <TERM> " " <TERM> "}"
   <REF> ::= "@" <name>
   <U60> ::= "#" <value>
-  <OP2> ::= "<" <opr> " " <TERM> " " <TERM> ">"
-  <MAT> ::= "?" "<" <TERM> <TERM> ">"
+  <OP2> ::= "<" <op> " " <TERM> " " <TERM> ">"
+  <MAT> ::= "?" "<" <TERM> " " <TERM> ">"
   <VAR> ::= <name>
 
 <NET> ::=
@@ -94,8 +94,8 @@ HVM-Core's textual syntax represents interaction combinators via an AST:
   <RDEX> ::= "&" <TERM> "~" <TERM> <RDEX>
 
 <BOOK> ::= 
-  <DEF> ::= "@" <name> "=" <NET> <DEF>
-  <END> ::= <EOF>
+  <DEF> ::= "@" <name> "=" <NET> <BOOK>
+  <END> ::= <EOF> 
 ```
 
 As you can see, HVMC extends the original system with some performance-relevant
