@@ -12,25 +12,43 @@ use hvmc::{
   *,
 };
 
-use std::{collections::HashSet, env, fs, time::Instant};
+use std::{collections::HashSet, env, fs, os::unix::thread, time::Instant};
 
 fn main() {
-  if cfg!(feature = "trace") {
-    let hook = std::panic::take_hook();
-    std::panic::set_hook(Box::new(move |info| {
-      hook(info);
-      hvmc::trace::_read_traces(usize::MAX);
-    }))
-  }
-  let s = Instant::now();
-  // for i in 0 .. 100000 {
-  //   // unsafe { _reset_traces() };
-  //   println!("{} {:?}", i, s.elapsed());
-  //   cli_main();
-  //   // _read_traces(100);
-  //   // return;
+  use fuzz::*;
+  fuzz(|c| {
+    let x = AtomicU64::new(0);
+    let y = AtomicU64::new(1);
+    std::thread::scope(|s| {
+      c.spawn(s, || {
+        y.store(3, Ordering::Relaxed);
+        x.store(1, Ordering::Relaxed);
+      });
+      c.spawn(s, || {
+        if x.load(Ordering::Relaxed) == 1 {
+          y.store(y.load(Ordering::Relaxed) * 2, Ordering::Relaxed);
+        }
+      });
+      c.start();
+    });
+    println!("y = {}", y.final_value());
+  })
+  // if cfg!(feature = "trace") {
+  //   let hook = std::panic::take_hook();
+  //   std::panic::set_hook(Box::new(move |info| {
+  //     hook(info);
+  //     hvmc::trace::_read_traces(usize::MAX);
+  //   }))
   // }
-  if cfg!(feature = "hvm_cli_options") { cli_main() } else { bare_main() }
+  // let s = Instant::now();
+  // // for i in 0 .. 100000 {
+  // //   // unsafe { _reset_traces() };
+  // //   println!("{} {:?}", i, s.elapsed());
+  // //   cli_main();
+  // //   // _read_traces(100);
+  // //   // return;
+  // // }
+  // if cfg!(feature = "hvm_cli_options") { cli_main() } else { bare_main() }
 }
 
 fn bare_main() {
