@@ -354,11 +354,11 @@ pub type Area = [Node];
 /// Rewrite counter.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Rewrites {
-  pub anni: usize, // anni rewrites
-  pub comm: usize, // comm rewrites
-  pub eras: usize, // eras rewrites
-  pub dref: usize, // dref rewrites
-  pub oper: usize, // oper rewrites
+  pub anni: u64, // anni rewrites
+  pub comm: u64, // comm rewrites
+  pub eras: u64, // eras rewrites
+  pub dref: u64, // dref rewrites
+  pub oper: u64, // oper rewrites
 }
 
 impl Rewrites {
@@ -371,7 +371,7 @@ impl Rewrites {
   }
 
   // Total rewrite count.
-  pub fn total(&self) -> usize {
+  pub fn total(&self) -> u64 {
     self.anni + self.comm + self.eras + self.dref + self.oper
   }
 }
@@ -379,11 +379,11 @@ impl Rewrites {
 /// Rewrite counter, atomic.
 #[derive(Default)]
 pub struct AtomicRewrites {
-  pub anni: AtomicUsize, // anni rewrites
-  pub comm: AtomicUsize, // comm rewrites
-  pub eras: AtomicUsize, // eras rewrites
-  pub dref: AtomicUsize, // dref rewrites
-  pub oper: AtomicUsize, // oper rewrites
+  pub anni: AtomicU64, // anni rewrites
+  pub comm: AtomicU64, // comm rewrites
+  pub eras: AtomicU64, // eras rewrites
+  pub dref: AtomicU64, // dref rewrites
+  pub oper: AtomicU64, // oper rewrites
 }
 
 impl AtomicRewrites {
