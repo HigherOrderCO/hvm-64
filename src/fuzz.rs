@@ -9,6 +9,11 @@ use std::{
 
 use nohash_hasher::IntMap;
 
+use crate::{
+  trace,
+  trace::{TraceArg, Tracer},
+};
+
 #[repr(transparent)]
 pub struct Atomic<T: HasAtomic> {
   value: T::Atomic,
@@ -24,7 +29,7 @@ impl<T: HasAtomic> Atomic<T> {
   pub fn new(value: T) -> Self {
     Atomic { value: T::new_atomic(value) }
   }
-  pub fn read(self) -> T {
+  pub fn read(&self) -> T {
     T::load(&self.value)
   }
   fn with<R>(&self, yield_point: bool, f: impl FnOnce(&Fuzzer, &mut Vec<T>, &mut usize) -> R) -> R {
@@ -55,7 +60,8 @@ impl<T: HasAtomic> Atomic<T> {
       dbg!(history.len(), *index);
       *index += fuzzer.decide(history.len() - *index);
       dbg!(history.len(), *index);
-      history[*index]
+      let value = history[*index];
+      value
     })
   }
   pub fn store(&self, value: T, _: Ordering) {
@@ -65,22 +71,22 @@ impl<T: HasAtomic> Atomic<T> {
       T::store(&self.value, value);
     })
   }
-  pub fn swap(&self, value: T, _: Ordering) -> T {
+  pub fn swap(&self, new: T, _: Ordering) -> T {
     self.with(true, |_, history, index| {
       *index = history.len();
       let old = *history.last().unwrap();
-      history.push(value);
-      T::store(&self.value, value);
+      history.push(new);
+      T::store(&self.value, new);
       old
     })
   }
-  pub fn compare_exchange(&self, expected: T, value: T, _: Ordering, _: Ordering) -> Result<T, T> {
+  pub fn compare_exchange(&self, expected: T, new: T, _: Ordering, _: Ordering) -> Result<T, T> {
     self.with(true, |_, history, index| {
       let old = *history.last().unwrap();
       if old == expected {
         *index = history.len();
-        history.push(value);
-        T::store(&self.value, value);
+        history.push(new);
+        T::store(&self.value, new);
         Ok(old)
       } else {
         *index = history.len() - 1;
@@ -88,13 +94,13 @@ impl<T: HasAtomic> Atomic<T> {
       }
     })
   }
-  pub fn compare_exchange_weak(&self, expected: T, value: T, _: Ordering, _: Ordering) -> Result<T, T> {
+  pub fn compare_exchange_weak(&self, expected: T, new: T, _: Ordering, _: Ordering) -> Result<T, T> {
     self.with(true, |fuzzer, history, index| {
       let old = *history.last().unwrap();
       if old == expected && fuzzer.decide(2) == 1 {
         *index = history.len();
-        history.push(value);
-        T::store(&self.value, value);
+        history.push(new);
+        T::store(&self.value, new);
         Ok(old)
       } else {
         *index = history.len() - 1;
@@ -106,9 +112,9 @@ impl<T: HasAtomic> Atomic<T> {
     self.with(true, |_, history, index| {
       *index = history.len();
       let old = *history.last().unwrap();
-      let value = old + delta;
-      history.push(value);
-      T::store(&self.value, value);
+      let new = old + delta;
+      history.push(new);
+      T::store(&self.value, new);
       old
     })
   }
@@ -154,10 +160,10 @@ struct DecisionPath {
 
 impl DecisionPath {
   fn decide(&mut self, choices: usize) -> usize {
-    println!("decide {}", choices);
-    if choices == 1 {
-      println!("{:?}", &self.path);
-    }
+    // println!("decide {}", choices);
+    // if choices == 1 {
+    //   println!("{:?}", &self.path);
+    // }
     if choices == 1 {
       return 0;
     }
@@ -169,6 +175,7 @@ impl DecisionPath {
     choice
   }
   fn next_path(&mut self) -> bool {
+    println!("{:?}", &self.path);
     // println!("---");
     self.index = 0;
     while self.path.last() == Some(&0) || self.path.len() > 100 {
@@ -296,7 +303,7 @@ impl<'s, 'p: 's, 'e: 's> FuzzScope<'s, 'p, 'e> {
   }
 }
 
-pub trait HasAtomic: 'static + Copy + Eq + Send + Add<Output = Self> {
+pub trait HasAtomic: 'static + Copy + Eq + Send + Add<Output = Self> + TraceArg {
   type Atomic;
   fn new_atomic(value: Self) -> Self::Atomic;
   fn load(atomic: &Self::Atomic) -> Self;

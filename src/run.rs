@@ -546,6 +546,12 @@ impl<'a> Net<'a> {
     if b.tag() == Var {
       b.wire().set_target(a.clone());
     }
+    if a.tag() == Red {
+      return self.link_wire_port(a.wire(), b);
+    }
+    if b.tag() == Red {
+      return self.link_wire_port(b.wire(), a);
+    }
     if a.tag() != Var && b.tag() != Var {
       self.redux(a, b);
     }
@@ -592,11 +598,12 @@ impl<'a> Net<'a> {
 
   #[inline(always)]
   pub fn link_wire_port(&mut self, a_wire: Wire, b_port: Port) {
-    match b_port.tag() {
-      Var => self._link_wire_port_var(a_wire, b_port),
-      Red => self._link_wire_port_red(a_wire, b_port),
-      _ => self._link_wire_port_pri(a_wire, b_port),
-    }
+    self._link_wire_port(a_wire, b_port)
+    // match b_port.tag() {
+    //   Var => self._link_wire_port_var(a_wire, b_port),
+    //   Red => self._link_wire_port_red(a_wire, b_port),
+    //   _ => self._link_wire_port_pri(a_wire, b_port),
+    // }
   }
 
   #[inline(never)]
@@ -617,10 +624,10 @@ impl<'a> Net<'a> {
 
   #[inline(never)]
   fn _link_wire_port_pri(&mut self, a_wire: Wire, b_port: Port) {
-    // if b_port.tag() == Var || b_port.tag() == Red {
-    //   unsafe { unreachable_unchecked() }
-    // }
-    // return self._link_wire_port(a_wire, b_port);
+    if b_port.tag() == Var || b_port.tag() == Red {
+      unsafe { unreachable_unchecked() }
+    }
+    return self._link_wire_port(a_wire, b_port);
     trace!(self.tracer, a_wire, b_port);
     let a_port = a_wire.swap_target(b_port.clone());
     if a_port == Port::LOCK {
@@ -649,37 +656,42 @@ impl<'a> Net<'a> {
   // When two threads interfere, uses the lock-free link algorithm described on the 'paper/'.
   #[inline(always)]
   fn _link_wire_port(&mut self, a_wire: Wire, b_port: Port) {
-    // trace!(self.tracer, a_wire, b_port);
+    trace!(self.tracer, a_wire, b_port);
     if b_port.tag() == Var {
+      trace!(self.tracer, "lock", b_port);
       b_port.wire().set_target(Port::LOCK);
     }
-    let x = b_port.clone();
-    // trace!(self.tracer, b_port, x);
-    let a_port = a_wire.swap_target(x);
-    // trace!(self.tracer, a_port, b_port);
+    let a_port = a_wire.swap_target(b_port.clone());
+    trace!(self.tracer, a_port);
     // if a_port == b_port {
     //   trace!(self.tracer, "panic!", a_port, b_port);
     //   panic!("circle")
     // }
     // dbg!(&a_wire, &a_port, &b_port);
     if a_port == Port::LOCK {
+      panic!("whoops");
       return; // I think?
     }
-    dbg!(&b_port);
+    // dbg!(&b_port);
     // todo: b_port isn't ready?
     if a_port.tag() == Var {
       let x_wire = a_port.wire();
       if let Err(x_port) = x_wire.cas_target(Port::new_var(a_wire.loc()), b_port.clone()) {
+        trace!(self.tracer, "cas fail", x_port);
         if x_port == Port::LOCK {
-          if let Err(y_port) = x_wire.cas_target(Port::LOCK, b_port) {
-            self.half_free(x_wire.loc());
-            return self.link_port_port(x_port, y_port);
+          if let Err(y_port) = x_wire.cas_target(Port::LOCK, b_port.clone()) {
+            trace!(self.tracer, "lock cas fail", y_port);
+            // self.half_free(x_wire.loc());
+            return self.link_port_port(a_port, b_port);
           } else {
+            trace!(self.tracer, "lock cas ok");
             return;
           }
         }
         self.half_free(x_wire.loc());
         return self.half_link_port_port(b_port, x_port);
+      } else {
+        trace!(self.tracer, "cas ok");
       }
     }
     self.half_free(a_wire.loc());
@@ -689,9 +701,15 @@ impl<'a> Net<'a> {
     match b_port.tag() {
       Var => {
         let x_port = b_port.wire().swap_target(a_port.clone());
+        trace!(self.tracer, "var swap", x_port);
         if x_port != Port::LOCK {
-          self.half_free(b_port.loc());
-          return self.link_port_port(x_port, a_port);
+          self.link_port_port(x_port, b_port);
+          //   if x_port == b_port {
+          //     // self.half_free(b_port.loc());
+          //     return self.link_port_port(a_port.wire().swap_target(Port::ERA), x_port);
+          //   } else {
+          //     return self.link_wire_port(b_port.wire(), x_port);
+          //   }
         }
       }
       Red => self.link_wire_port(b_port.wire(), a_port),

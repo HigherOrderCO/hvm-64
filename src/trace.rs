@@ -81,9 +81,9 @@ impl Tracer {
   pub fn sync(&mut self) {}
   #[inline(always)]
   #[doc(hidden)]
-  pub fn trace<S: TraceSourceBearer, A: TraceArgs>(&self, _: A) {}
+  pub fn trace<S: TraceSourceBearer, A: TraceArgs>(&mut self, _: A) {}
   #[inline(always)]
-  pub fn set_tid(&mut self, tid: usize) {}
+  pub fn set_tid(&self, tid: usize) {}
 }
 
 #[macro_export]
@@ -257,7 +257,7 @@ impl<'a> TraceReader<'a> {
         "{:02x}t{:02x} {}{}{} [{}:{}] #{}",
         self.id,
         self.data.tid,
-        meta.source.func.strip_suffix("::__").unwrap_or(meta.source.func).rsplit("::").next().unwrap(),
+        meta.source.func.trim_end_matches("::__").trim_end_matches("::{{closure}}").rsplit("::").next().unwrap(),
         if meta.source.str.is_empty() { "" } else { " " },
         meta.source.str,
         meta.source.file,
@@ -309,7 +309,6 @@ pub fn _read_traces(limit: usize) {
     r.read_entry(&mut out);
   }
   eprintln!("{}", out);
-  active_tracers.iter().for_each(|t| t.locked.store(false, Ordering::Relaxed));
 }
 
 pub unsafe fn _reset_traces() {
@@ -317,7 +316,7 @@ pub unsafe fn _reset_traces() {
   TRACE_NONCE.store(1, Ordering::Relaxed);
 }
 
-trait TraceArg {
+pub trait TraceArg {
   fn to_word(&self) -> u64;
   fn from_word(word: u64) -> impl Debug;
 }
@@ -336,7 +335,7 @@ impl TraceArg for Port {
   fn to_word(&self) -> u64 {
     self.0
   }
-  fn from_word(word: u64) -> Self {
+  fn from_word(word: u64) -> impl Debug {
     Port(word)
   }
 }
@@ -345,7 +344,7 @@ impl TraceArg for Wire {
   fn to_word(&self) -> u64 {
     self.0 as u64
   }
-  fn from_word(word: u64) -> Self {
+  fn from_word(word: u64) -> impl Debug {
     Wire(word as _)
   }
 }
@@ -354,7 +353,7 @@ impl TraceArg for Loc {
   fn to_word(&self) -> u64 {
     self.0 as u64
   }
-  fn from_word(word: u64) -> Self {
+  fn from_word(word: u64) -> impl Debug {
     Loc(word as _)
   }
 }
@@ -365,8 +364,8 @@ macro_rules! impl_trace_num {
       fn to_word(&self) -> u64 {
         *self as _
       }
-      fn from_word(word: u64) -> Self {
-        word as _
+      fn from_word(word: u64) -> impl Debug {
+        word as Self
       }
     }
   };
@@ -377,6 +376,15 @@ impl_trace_num!(u16);
 impl_trace_num!(u32);
 impl_trace_num!(u64);
 impl_trace_num!(usize);
+
+impl<T> TraceArg for *const T {
+  fn to_word(&self) -> u64 {
+    *self as _
+  }
+  fn from_word(word: u64) -> impl Debug {
+    word as Self
+  }
+}
 
 #[doc(hidden)]
 pub trait TraceArgs {
@@ -422,7 +430,7 @@ impl fmt::Debug for FmtWord {
   }
 }
 
-pub fn set_panic_hook() {
+pub fn set_hook() {
   static ONCE: Once = Once::new();
   if cfg!(feature = "trace") {
     ONCE.call_once(|| {
@@ -430,7 +438,20 @@ pub fn set_panic_hook() {
       std::panic::set_hook(Box::new(move |info| {
         hook(info);
         _read_traces(usize::MAX);
-      }))
+      }));
+      #[cfg(feature = "trace_crash")]
+      {
+        use crash_handler::CrashHandler;
+        dbg!("attached");
+        CrashHandler::attach(unsafe {
+          crash_handler::make_crash_event(|ctx| {
+            dbg!(ctx);
+            _read_traces(usize::MAX);
+            true.into()
+          })
+        })
+        .unwrap();
+      }
     })
   }
 }

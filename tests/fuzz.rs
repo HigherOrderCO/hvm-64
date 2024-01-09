@@ -32,7 +32,7 @@ use hvmc::{
 
 #[test]
 fn fuzz_link() {
-  trace::set_panic_hook();
+  trace::set_hook();
   Fuzzer::with_path(vec![]).fuzz(|fuzz| {
     unsafe { trace::_reset_traces() };
     let heap = Net::init_heap(256);
@@ -51,6 +51,8 @@ fn fuzz_link() {
     net.link_port_port(e.clone(), f.clone());
     let mut n0 = net.fork(0, 2);
     let mut n1 = net.fork(1, 2);
+    // n0.link_wire_wire(c.wire(), b.wire());
+    // n1.link_wire_wire(e.wire(), d.wire());
     fuzz.scope(move |s| {
       s.spawn(move || {
         let (x, y) = fuzz.maybe_swap(b, c);
@@ -61,5 +63,11 @@ fn fuzz_link() {
         n1.link_wire_wire(x.wire(), y.wire());
       });
     });
+    let at = Port(a.loc().val().read());
+    let ft = Port(f.loc().val().read());
+    dbg!(&a, &f, &at, &ft);
+    if at != f || ft != a {
+      panic!("invalid link")
+    }
   })
 }

@@ -26,10 +26,12 @@ debug = "full"
 default = ["hvm_cli_options"]
 hvm_cli_options = []
 trace = []
+trace_crash = ["trace", "dep:crash-handler"]
 _fuzz = []
 
 [dependencies]
 nohash-hasher = "0.2.0"
+crash-handler = { version = "0.6.0", optional = true }
 
 ##--COMPILER-CUTOFF--##
 
