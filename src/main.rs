@@ -15,30 +15,6 @@ use hvmc::{
 use std::{collections::HashSet, env, fs, os::unix::thread, time::Instant};
 
 fn main() {
-  use fuzz::*;
-  Fuzzer::fuzz(|c| {
-    let x = AtomicU64::new(0);
-    let y = AtomicU64::new(1);
-    c.scope(|s| {
-      s.spawn(|| {
-        y.store(3, Ordering::Relaxed);
-        x.store(1, Ordering::Relaxed);
-      });
-      s.spawn(|| {
-        if x.load(Ordering::Relaxed) == 1 {
-          y.store(y.load(Ordering::Relaxed) * 2, Ordering::Relaxed);
-        }
-      });
-    });
-    println!("y = {}", y.read());
-  });
-  // if cfg!(feature = "trace") {
-  //   let hook = std::panic::take_hook();
-  //   std::panic::set_hook(Box::new(move |info| {
-  //     hook(info);
-  //     hvmc::trace::_read_traces(usize::MAX);
-  //   }))
-  // }
   // let s = Instant::now();
   // // for i in 0 .. 100000 {
   // //   // unsafe { _reset_traces() };

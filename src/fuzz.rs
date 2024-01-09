@@ -2,6 +2,7 @@ use std::{
   any::Any,
   cell::{OnceCell, RefCell},
   marker::PhantomData,
+  ops::Add,
   sync::{atomic, Arc, Condvar, Mutex},
   thread::{self, Scope, ThreadId},
 };
@@ -51,7 +52,9 @@ impl<T: HasAtomic> Atomic<T> {
   }
   pub fn load(&self, _: Ordering) -> T {
     self.with(true, |fuzzer, history, index| {
+      dbg!(history.len(), *index);
       *index += fuzzer.decide(history.len() - *index);
+      dbg!(history.len(), *index);
       history[*index]
     })
   }
@@ -99,6 +102,16 @@ impl<T: HasAtomic> Atomic<T> {
       }
     })
   }
+  pub fn fetch_add(&self, delta: T, _: Ordering) -> T {
+    self.with(true, |_, history, index| {
+      *index = history.len();
+      let old = *history.last().unwrap();
+      let value = old + delta;
+      history.push(value);
+      T::store(&self.value, value);
+      old
+    })
+  }
 }
 
 struct AtomicView<H: ?Sized> {
@@ -141,6 +154,10 @@ struct DecisionPath {
 
 impl DecisionPath {
   fn decide(&mut self, choices: usize) -> usize {
+    println!("decide {}", choices);
+    if choices == 1 {
+      println!("{:?}", &self.path);
+    }
     if choices == 1 {
       return 0;
     }
@@ -152,8 +169,9 @@ impl DecisionPath {
     choice
   }
   fn next_path(&mut self) -> bool {
+    // println!("---");
     self.index = 0;
-    while self.path.last() == Some(&0) {
+    while self.path.last() == Some(&0) || self.path.len() > 100 {
       self.path.pop();
     }
     if let Some(branch) = self.path.last_mut() {
@@ -175,10 +193,13 @@ pub struct Fuzzer {
 }
 
 impl Fuzzer {
-  pub fn fuzz(mut f: impl FnMut(&Arc<Fuzzer>) + Send) {
+  pub fn with_path(path: Vec<usize>) -> Self {
+    Fuzzer { path: Mutex::new(DecisionPath { path, index: 0 }), ..Default::default() }
+  }
+  pub fn fuzz(self, mut f: impl FnMut(&Arc<Fuzzer>) + Send) {
     thread::scope(move |s| {
       s.spawn(move || {
-        let fuzzer = Arc::new(Fuzzer::default());
+        let fuzzer = Arc::new(self);
         ThreadContext::init(fuzzer.clone());
         loop {
           fuzzer.atomics.lock().unwrap().clear();
@@ -195,21 +216,30 @@ impl Fuzzer {
     self.path.lock().unwrap().decide(options)
   }
   pub fn yield_point(&self) {
-    self.switch_thread();
-    self.block_thread();
+    if self.switch_thread() {
+      self.block_thread();
+    }
   }
 
-  fn switch_thread(&self) {
+  pub fn maybe_swap<T>(&self, a: T, b: T) -> (T, T) {
+    if self.decide(2) == 1 { (b, a) } else { (a, b) }
+  }
+
+  fn switch_thread(&self) -> bool {
     let thread_id = thread::current().id();
     let active_threads = self.active_threads.lock().unwrap();
+    if active_threads.is_empty() {
+      return false;
+    }
     let new_idx = self.decide(active_threads.len());
     let new_thread = active_threads[new_idx];
     if new_thread == thread_id {
-      return;
+      return false;
     }
     let mut current_thread = self.current_thread.lock().unwrap();
     *current_thread = Some(new_thread);
     self.condvar.notify_all();
+    true
   }
 
   fn block_thread(&self) {
@@ -266,7 +296,7 @@ impl<'s, 'p: 's, 'e: 's> FuzzScope<'s, 'p, 'e> {
   }
 }
 
-pub trait HasAtomic: 'static + Copy + Eq + Send {
+pub trait HasAtomic: 'static + Copy + Eq + Send + Add<Output = Self> {
   type Atomic;
   fn new_atomic(value: Self) -> Self::Atomic;
   fn load(atomic: &Self::Atomic) -> Self;

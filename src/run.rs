@@ -17,12 +17,16 @@ use std::{
   alloc::{self, Layout},
   fmt,
   hint::unreachable_unchecked,
-  sync::{
-    atomic::{AtomicU64, AtomicUsize, Ordering::Relaxed},
-    Arc, Barrier,
-  },
+  sync::{Arc, Barrier},
   thread,
 };
+
+#[cfg(feature = "_fuzz")]
+use crate::fuzz as atomic;
+#[cfg(not(feature = "_fuzz"))]
+use std::sync::atomic;
+
+use atomic::{AtomicU64, AtomicUsize, Ordering::Relaxed};
 
 // -------------------
 //   Primitive Types
@@ -464,19 +468,19 @@ impl<'a> Net<'a> {
   pub fn half_free(&mut self, loc: Loc) {
     const FREE: u64 = Port::FREE.0;
     trace!(self.tracer, loc);
-    loc.val().store(FREE, Relaxed);
-    if loc.other_half().val().load(Relaxed) == FREE {
-      trace!(self.tracer, "other free");
-      let loc = loc.left_half();
-      if loc.val().compare_exchange(FREE, self.head.0 as u64, Relaxed, Relaxed).is_ok() {
-        let old_head = &self.head;
-        let new_head = loc;
-        trace!(self.tracer, "appended", old_head, new_head);
-        self.head = new_head;
-      } else {
-        trace!(self.tracer, "too slow");
-      };
-    }
+    // loc.val().store(FREE, Relaxed);
+    // if loc.other_half().val().load(Relaxed) == FREE {
+    //   trace!(self.tracer, "other free");
+    //   let loc = loc.left_half();
+    //   if loc.val().compare_exchange(FREE, self.head.0 as u64, Relaxed, Relaxed).is_ok() {
+    //     let old_head = &self.head;
+    //     let new_head = loc;
+    //     trace!(self.tracer, "appended", old_head, new_head);
+    //     self.head = new_head;
+    //   } else {
+    //     trace!(self.tracer, "too slow");
+    //   };
+    // }
   }
 
   #[inline(never)]
@@ -613,6 +617,10 @@ impl<'a> Net<'a> {
 
   #[inline(never)]
   fn _link_wire_port_pri(&mut self, a_wire: Wire, b_port: Port) {
+    // if b_port.tag() == Var || b_port.tag() == Red {
+    //   unsafe { unreachable_unchecked() }
+    // }
+    // return self._link_wire_port(a_wire, b_port);
     trace!(self.tracer, a_wire, b_port);
     let a_port = a_wire.swap_target(b_port.clone());
     if a_port == Port::LOCK {
@@ -641,15 +649,35 @@ impl<'a> Net<'a> {
   // When two threads interfere, uses the lock-free link algorithm described on the 'paper/'.
   #[inline(always)]
   fn _link_wire_port(&mut self, a_wire: Wire, b_port: Port) {
-    trace!(self.tracer, a_wire, b_port);
-    let a_port = a_wire.swap_target(b_port.clone());
+    // trace!(self.tracer, a_wire, b_port);
+    if b_port.tag() == Var {
+      b_port.wire().set_target(Port::LOCK);
+    }
+    let x = b_port.clone();
+    // trace!(self.tracer, b_port, x);
+    let a_port = a_wire.swap_target(x);
+    // trace!(self.tracer, a_port, b_port);
+    // if a_port == b_port {
+    //   trace!(self.tracer, "panic!", a_port, b_port);
+    //   panic!("circle")
+    // }
+    // dbg!(&a_wire, &a_port, &b_port);
     if a_port == Port::LOCK {
       return; // I think?
     }
+    dbg!(&b_port);
     // todo: b_port isn't ready?
     if a_port.tag() == Var {
       let x_wire = a_port.wire();
       if let Err(x_port) = x_wire.cas_target(Port::new_var(a_wire.loc()), b_port.clone()) {
+        if x_port == Port::LOCK {
+          if let Err(y_port) = x_wire.cas_target(Port::LOCK, b_port) {
+            self.half_free(x_wire.loc());
+            return self.link_port_port(x_port, y_port);
+          } else {
+            return;
+          }
+        }
         self.half_free(x_wire.loc());
         return self.half_link_port_port(b_port, x_port);
       }
@@ -659,7 +687,13 @@ impl<'a> Net<'a> {
       return self.link_wire_port(a_port.wire(), b_port);
     }
     match b_port.tag() {
-      Var => b_port.wire().set_target(a_port),
+      Var => {
+        let x_port = b_port.wire().swap_target(a_port.clone());
+        if x_port != Port::LOCK {
+          self.half_free(b_port.loc());
+          return self.link_port_port(x_port, a_port);
+        }
+      }
       Red => self.link_wire_port(b_port.wire(), a_port),
       _ if a_port.tag() != Var => self.redux(a_port, b_port),
       _ => {}
@@ -1203,7 +1237,7 @@ impl<'a> Net<'a> {
   }
 
   // Forks into child threads, returning a Net for the (tid/tids)'th thread.
-  fn fork(&self, tid: usize, tids: usize) -> Self {
+  pub fn fork(&self, tid: usize, tids: usize) -> Self {
     let heap_size = self.area.len() / tids;
     let heap_start = heap_size * tid;
     let area = &self.area[heap_start .. heap_start + heap_size];

@@ -1,0 +1,8 @@
+
+(O p) = @o @i @e (o p o i e)
+(I p) = @o @i @e (i p o i e)
+E = @o @i @e e
+(Inc x) = @o @i @e (x (@p @* @* @* (i p o i e)) (@p @Io @Ii @Ie (o (p Io Ii Ie) o i e)) (e))
+main = (Inc (O (O (O (O E)))))
+
+

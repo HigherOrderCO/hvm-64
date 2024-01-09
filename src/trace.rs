@@ -65,7 +65,7 @@ use std::{
   fmt::{self, Debug, Formatter, Write},
   sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
-    Mutex,
+    Mutex, Once,
   },
 };
 
@@ -123,7 +123,7 @@ impl Tracer {
   }
   #[inline(always)]
   #[doc(hidden)]
-  pub fn trace<S: TraceSourceBearer, A: TraceArgs>(&self, args: A) {
+  pub fn trace<S: TraceSourceBearer, A: TraceArgs>(&mut self, args: A) {
     self.0.trace::<S, A>(args)
   }
   #[inline(always)]
@@ -210,7 +210,10 @@ impl TraceWriter {
     cb(unsafe { &mut *self.lock.data.get() });
     self.lock.locked.store(false, Ordering::Release);
   }
-  fn trace<S: TraceSourceBearer, A: TraceArgs>(&self, args: A) {
+  fn trace<S: TraceSourceBearer, A: TraceArgs>(&mut self, args: A) {
+    if cfg!(feature = "_fuzz") {
+      self.sync();
+    }
     let meta: &'static _ = &TraceMetadata { source: S::SOURCE, arg_fmts: A::FMTS };
     self.acquire(|data| {
       let nonce = self.nonce;
@@ -416,5 +419,18 @@ struct FmtWord(fn(word: u64, f: &mut fmt::Formatter) -> fmt::Result, u64);
 impl fmt::Debug for FmtWord {
   fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
     self.0(self.1, f)
+  }
+}
+
+pub fn set_panic_hook() {
+  static ONCE: Once = Once::new();
+  if cfg!(feature = "trace") {
+    ONCE.call_once(|| {
+      let hook = std::panic::take_hook();
+      std::panic::set_hook(Box::new(move |info| {
+        hook(info);
+        _read_traces(usize::MAX);
+      }))
+    })
   }
 }
