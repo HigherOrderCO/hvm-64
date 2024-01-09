@@ -217,7 +217,7 @@ impl TraceWriter {
     let meta: &'static _ = &TraceMetadata { source: S::SOURCE, arg_fmts: A::FMTS };
     self.acquire(|data| {
       let nonce = self.nonce;
-      for arg in args.to_words() {
+      for arg in args.to_words().rev() {
         data.write_word(arg);
       }
       data.write_word(meta as *const _ as u64);
