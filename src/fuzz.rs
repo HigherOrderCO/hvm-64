@@ -175,7 +175,6 @@ impl DecisionPath {
     choice
   }
   fn next_path(&mut self) -> bool {
-    println!("{:?}", &self.path);
     // println!("---");
     self.index = 0;
     while self.path.last() == Some(&0) || self.path.len() > 100 {
@@ -209,6 +208,7 @@ impl Fuzzer {
         let fuzzer = Arc::new(self);
         ThreadContext::init(fuzzer.clone());
         loop {
+          println!("{:?}", &fuzzer.path.lock().unwrap().path);
           fuzzer.atomics.lock().unwrap().clear();
           f(&fuzzer);
           if !fuzzer.path.lock().unwrap().next_path() {
