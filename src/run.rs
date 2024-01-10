@@ -561,7 +561,11 @@ impl<'a> Net<'a> {
   pub fn half_link_port_port(&mut self, a: Port, b: Port) {
     trace!(self.tracer, a, b);
     match (a.tag(), b.tag()) {
-      (Red, Red) if a < b => self.link_wire_port(a.wire(), b),
+      (Red, Red) => {
+        if a < b {
+          self.link_wire_port(a.wire(), b)
+        }
+      }
       (Red, _) => self.link_wire_port(a.wire(), b),
       (_, Red) => {}
       (Var, _) => a.wire().set_target(b),
@@ -611,7 +615,7 @@ impl<'a> Net<'a> {
     if b_port.tag() != Var {
       unsafe { unreachable_unchecked() }
     }
-    self._link_wire_port(a_wire, b_port);
+    // self._link_wire_port(a_wire, b_port);
   }
 
   #[inline(never)]
@@ -619,7 +623,7 @@ impl<'a> Net<'a> {
     if b_port.tag() != Red {
       unsafe { unreachable_unchecked() }
     }
-    self._link_wire_port(a_wire, b_port);
+    // self._link_wire_port(a_wire, b_port);
   }
 
   #[inline(never)]
@@ -627,7 +631,7 @@ impl<'a> Net<'a> {
     if b_port.tag() == Var || b_port.tag() == Red {
       unsafe { unreachable_unchecked() }
     }
-    return self._link_wire_port(a_wire, b_port);
+    // return self._link_wire_port(a_wire, b_port);
     trace!(self.tracer, a_wire, b_port);
     let a_port = a_wire.swap_target(b_port.clone());
     if a_port == Port::LOCK {
@@ -657,10 +661,18 @@ impl<'a> Net<'a> {
   #[inline(always)]
   fn _link_wire_port(&mut self, a_wire: Wire, b_port: Port) {
     trace!(self.tracer, a_wire, b_port);
-    // if b_port.tag() == Var {
-    //   trace!(self.tracer, "lock", b_port);
-    //   b_port.wire().set_target(Port::LOCK);
-    // }
+    if b_port.tag() == Var {
+      let x_port = b_port.wire().swap_target(Port::LOCK);
+      trace!(self.tracer, "lock", b_port, x_port);
+      if x_port != Port::new(Red, 0, a_wire.loc()) && x_port != Port::LOCK {
+        trace!(self.tracer, "uhhhh");
+        // self.half_link_port_port(b_port, x_port);
+        // return self.link_wire_port(b_port.wire(), x_port);
+        // return self.link_port_port(x_port, b_port);
+        // todo!();
+        return;
+      }
+    }
     let a_port = a_wire.swap_target(b_port.clone());
     trace!(self.tracer, a_port);
     // if a_port == b_port {
@@ -669,7 +681,7 @@ impl<'a> Net<'a> {
     // }
     // dbg!(&a_wire, &a_port, &b_port);
     if a_port == Port::LOCK {
-      panic!("whoops");
+      trace!(self.tracer, "whoops");
       return; // I think?
     }
     // dbg!(&b_port);
@@ -691,34 +703,57 @@ impl<'a> Net<'a> {
         // }
         self.half_free(x_wire.loc());
 
+        if x_port == Port::LOCK {
+          // panic!("wtf");
+          return;
+        } else {
+          trace!(self.tracer, "HUH!", b_port, x_port);
+          // return self.half_link_port_port(x_port, b_port);
+          return self.half_link_port_port(b_port, x_port);
+          todo!();
+        }
+
         // TODO: how do we differentiate between these two cases?
         // the former line makes sense if matching against 718
         // but the latter line makes sense if matching against itself
         // case [1, 1, 1, 1, 1, 0, 1, 0] is fixed with the latter line
         // but it breaks lots of other stuff
 
-        self.half_link_port_port(b_port, a_port);
+        // self.half_link_port_port(b_port, a_port);
         // self.half_link_port_port(b_port, x_port);
 
-        // panic!("hmm");
-        return;
+        // // panic!("hmm");
+        // return;
       } else {
         trace!(self.tracer, "cas ok");
       }
     }
-    self.half_free(a_wire.loc());
+    // self.half_free(a_wire.loc());
     if a_port.tag() == Red {
       // panic!("sus");
       trace!(self.tracer, "sus");
-      return;
+      // return;
       return self.link_wire_port(a_port.wire(), b_port);
+      // return self.half_link_port_port(a_port, b_port);
     }
     match b_port.tag() {
       Var => {
-        if let Err(x_port) = b_port.wire().cas_target(Port::new(Red, 0, a_wire.loc()), a_port.clone()) {
+        let x_port = b_port.wire().swap_target(a_port.clone());
+        if x_port != Port::LOCK {
           trace!(self.tracer, "var swap", x_port);
-          trace!(self.tracer, "maybe?");
-          self.half_link_port_port(b_port, x_port);
+          if a_port.tag() != Var {
+            todo!();
+          }
+          let y_port = a_port.wire().swap_target(Port::GONE);
+          trace!(self.tracer, "maybe?", y_port);
+          if y_port == b_port {
+            let foo = a_port.wire().swap_target(y_port);
+            assert_eq!(foo, Port::GONE);
+            // todo!();
+            return self.link_wire_port(b_port.wire(), x_port);
+          } else {
+            return self.link_port_port(b_port, x_port);
+          }
         } else {
           trace!(self.tracer, "var swap ok");
         }
@@ -736,7 +771,8 @@ impl<'a> Net<'a> {
       }
       Red => {
         trace!(self.tracer, "HMM!");
-        self.half_link_port_port(b_port, a_port);
+        self.link_wire_port(b_port.wire(), a_port);
+        // self.half_link_port_port(b_port, a_port);
         // self.half_link_port_port(Port::new(Red, 0, a_wire.loc()), a_port);
       }
       _ if a_port.tag() != Var => self.redux(a_port, b_port),

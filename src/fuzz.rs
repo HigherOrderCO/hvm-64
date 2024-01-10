@@ -3,7 +3,10 @@ use std::{
   cell::{OnceCell, RefCell},
   marker::PhantomData,
   ops::Add,
-  sync::{atomic, Arc, Condvar, Mutex},
+  sync::{
+    atomic::{self, AtomicBool},
+    Arc, Condvar, Mutex,
+  },
   thread::{self, Scope, ThreadId},
 };
 
@@ -258,11 +261,9 @@ impl Fuzzer {
   }
 
   pub fn scope<'e>(self: &Arc<Self>, f: impl for<'s, 'p> FnOnce(&FuzzScope<'s, 'p, 'e>)) {
-    let pending = &atomic::AtomicUsize::new(0);
     thread::scope(|scope| {
-      let scope = FuzzScope { fuzzer: self.clone(), scope, pending, __: PhantomData };
+      let scope = FuzzScope { fuzzer: self.clone(), scope, __: PhantomData };
       f(&scope);
-      while scope.pending.load(std::sync::atomic::Ordering::Relaxed) != 0 {}
       assert_eq!(*self.current_thread.lock().unwrap(), None);
       self.switch_thread();
     });
@@ -272,34 +273,36 @@ impl Fuzzer {
 pub struct FuzzScope<'s, 'p: 's, 'e: 'p> {
   fuzzer: Arc<Fuzzer>,
   scope: &'s Scope<'s, 'p>,
-  pending: &'p std::sync::atomic::AtomicUsize,
   __: PhantomData<&'e mut &'e ()>,
 }
 
 impl<'s, 'p: 's, 'e: 's> FuzzScope<'s, 'p, 'e> {
   pub fn spawn<F: FnOnce() + Send + 's>(&self, f: F) {
-    self.pending.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let pending = self.pending;
     let fuzzer = self.fuzzer.clone();
     let ready = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    self.scope.spawn(move || {
-      ThreadContext::init(fuzzer.clone());
-      let thread_id = thread::current().id();
-      fuzzer.active_threads.lock().unwrap().push(thread_id);
-      ready.store(true, std::sync::atomic::Ordering::Relaxed);
-      pending.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
-      fuzzer.block_thread();
-      f();
-      let mut active_threads = fuzzer.active_threads.lock().unwrap();
-      let i = active_threads.iter().position(|&t| t == thread_id).unwrap();
-      active_threads.swap_remove(i);
-      if !active_threads.is_empty() {
-        drop(active_threads);
-        fuzzer.switch_thread();
-      } else {
-        *fuzzer.current_thread.lock().unwrap() = None;
+    self.scope.spawn({
+      let ready = ready.clone();
+      move || {
+        ThreadContext::init(fuzzer.clone());
+        let thread_id = thread::current().id();
+        fuzzer.active_threads.lock().unwrap().push(thread_id);
+        ready.store(true, std::sync::atomic::Ordering::Relaxed);
+        fuzzer.block_thread();
+        f();
+        let mut active_threads = fuzzer.active_threads.lock().unwrap();
+        let i = active_threads.iter().position(|&t| t == thread_id).unwrap();
+        active_threads.swap_remove(i);
+        if !active_threads.is_empty() {
+          drop(active_threads);
+          fuzzer.switch_thread();
+        } else {
+          *fuzzer.current_thread.lock().unwrap() = None;
+        }
       }
     });
+    while !ready.load(atomic::Ordering::Relaxed) {
+      std::hint::spin_loop()
+    }
   }
 }
 

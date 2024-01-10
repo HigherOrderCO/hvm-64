@@ -377,6 +377,15 @@ impl_trace_num!(u32);
 impl_trace_num!(u64);
 impl_trace_num!(usize);
 
+impl TraceArg for bool {
+  fn to_word(&self) -> u64 {
+    *self as _
+  }
+  fn from_word(word: u64) -> impl Debug {
+    word != 0
+  }
+}
+
 impl<T> TraceArg for *const T {
   fn to_word(&self) -> u64 {
     *self as _

@@ -65,7 +65,7 @@ fn fuzz_link() {
     });
     let at = Port(a.loc().val().read());
     let ft = Port(f.loc().val().read());
-    dbg!(&a, &f, &at, &ft);
+    // dbg!(&a, &f, &at, &ft);
     if at != f || ft != a {
       panic!("invalid link")
     }
