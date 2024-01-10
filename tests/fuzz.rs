@@ -97,7 +97,6 @@ fn fuzz_pri_link_link_pri() {
         n1.link_wire_port(b.wire(), q);
       });
     });
-    dbg!(&net.rdex);
     assert!(n0.rdex.len() == 1 || n1.rdex.len() == 1);
   })
 }
