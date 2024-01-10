@@ -15,6 +15,7 @@ use crate::{
 };
 use std::{
   alloc::{self, Layout},
+  backtrace::Backtrace,
   fmt,
   hint::unreachable_unchecked,
   sync::{Arc, Barrier},

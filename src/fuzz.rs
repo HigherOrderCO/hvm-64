@@ -210,7 +210,9 @@ impl Fuzzer {
       s.spawn(move || {
         let fuzzer = Arc::new(self);
         ThreadContext::init(fuzzer.clone());
+        let mut paths = 0;
         loop {
+          paths += 1;
           println!("{:?}", &fuzzer.path.lock().unwrap().path);
           fuzzer.atomics.lock().unwrap().clear();
           f(&fuzzer);
@@ -218,6 +220,7 @@ impl Fuzzer {
             break;
           }
         }
+        println!("checked all {} paths", paths);
       });
     });
   }
