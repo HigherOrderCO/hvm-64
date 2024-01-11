@@ -694,6 +694,31 @@ impl<'a> Net<'a> {
           if a_port.tag() != Var {
             todo!();
           }
+
+          // TODO: this is really hacky and though it technically works,
+          // it's really really hacky
+          // the issue here is that we need to determine whether `x_port` was set by defer 1 or defer 2
+          // in order to figure out which branch should be here
+          // to convey this information over the wire, we'd need a free bit in every port
+          // and this overhead isn't really acceptable
+
+          // however, I believe this is solvable with only a single bit needed in *var* ports
+          // which we can easily fit into the label
+          // in particular, there are "two sides" to every var
+          // usually, this is represented by the distinction between ports and wires
+          // *however*, within this linker function, when we get a_port from a_wire
+          // if a_port is a var, we get a var port, but it's still the "wire side"
+          // this information is, currently, stored in the stack
+          // but! that doesn't work when we send the port across a wire
+
+          // if we represent these "two sides" within the port, a couple of things are made possible
+          // for one, at this check, we can simply check which side we're on here
+          // and then execute as though we were the *other side*
+          // because we're executing this link on behalf of another thread
+
+          // but additionally, I think we can stop storing this information in the stack
+          // and potentially drastically simplify this algorithm?
+
           if a_port.wire().cas_target(b_port.clone(), b_port.clone()).is_ok() {
             trace!(self.tracer, "resume wire");
             return self.link_wire_port(b_port.wire(), x_port);
