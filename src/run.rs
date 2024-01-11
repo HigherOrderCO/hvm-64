@@ -1172,6 +1172,14 @@ impl<'a> Net<'a> {
             self.set_trg(a, at);
             self.set_trg(b, bt);
           }
+          Instruction::Pair(a, b) => {
+            let x = self.alloc();
+            let av = Port::new_var(x.other_half());
+            let bv = Port::new_var(x);
+            self.link_port_port(av.clone(), bv.clone());
+            self.set_trg(a, Trg::Wire(av.wire()));
+            self.set_trg(b, Trg::Wire(bv.wire()));
+          }
         }
       }
     }

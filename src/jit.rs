@@ -217,6 +217,7 @@ pub enum Instruction {
   Op2(Op, usize, usize, usize),
   Op1(Op, u64, usize, usize),
   Mat(usize, usize, usize),
+  Pair(usize, usize),
 }
 
 impl<'a> run::Net<'a> {

@@ -438,7 +438,15 @@ fn net_to_runtime_def(defs: &HashMap<String, DefRef>, net: &Net) -> DefNet {
         (Tree::Era, t) | (t, Tree::Era) => (Port::ERA, t),
         (Tree::Ref { nam }, t) | (t, Tree::Ref { nam }) => (Port::new_ref(&self.defs[nam]), t),
         (Tree::Num { val }, t) | (t, Tree::Num { val }) => (Port::new_num(*val), t),
-        _ => panic!("Invalid redex"),
+        (t, u) => {
+          let a = self.next_index;
+          let b = self.next_index + 1;
+          self.next_index += 2;
+          self.instr.push(Instruction::Pair(a, b));
+          self.visit_tree(t, a);
+          self.visit_tree(u, b);
+          return;
+        }
       };
       let index = self.next_index;
       self.next_index += 1;
