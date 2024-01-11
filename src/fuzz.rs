@@ -32,7 +32,10 @@ impl<T: HasAtomic> Atomic<T> {
   fn with<R>(&self, yield_point: bool, f: impl FnOnce(&Fuzzer, &mut Vec<T>, &mut usize) -> R) -> R {
     ThreadContext::with(|ctx| {
       if yield_point {
-        ctx.fuzzer.yield_point()
+        if !ctx.just_started {
+          ctx.fuzzer.yield_point();
+        }
+        ctx.just_started = false;
       }
       let key = &self.value as *const _ as usize;
       let view = ctx.views.entry(key).or_insert_with(|| AtomicView {
@@ -131,13 +134,14 @@ pub enum Ordering {
 struct ThreadContext {
   fuzzer: Arc<Fuzzer>,
   views: IntMap<usize, AtomicView<dyn Any>>,
+  just_started: bool,
 }
 
 impl ThreadContext {
   fn init(fuzzer: Arc<Fuzzer>) {
     CONTEXT.with(|ctx| {
       assert!(ctx.get().is_none(), "thread context already initialized");
-      ctx.get_or_init(|| RefCell::new(ThreadContext { fuzzer, views: Default::default() }));
+      ctx.get_or_init(|| RefCell::new(ThreadContext { fuzzer, views: Default::default(), just_started: true }));
     });
   }
   fn with<T>(f: impl FnOnce(&mut ThreadContext) -> T) -> T {

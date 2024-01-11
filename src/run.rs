@@ -540,17 +540,25 @@ impl<'a> Net<'a> {
   #[inline(always)]
   pub fn link_port_port(&mut self, a: Port, b: Port) {
     trace!(self.tracer, a, b);
-    if a.tag() == Var {
-      a.wire().set_target(b.clone());
-    }
-    if b.tag() == Var {
-      b.wire().set_target(a.clone());
-    }
     if a.tag() == Red {
       return self.link_wire_port(a.wire(), b);
     }
     if b.tag() == Red {
       return self.link_wire_port(b.wire(), a);
+    }
+    if a.tag() == Var {
+      let x = a.wire().swap_target(b.clone());
+      if x != Port::LOCK {
+        todo!()
+      }
+    }
+    if b.tag() == Var {
+      let x = b.wire().swap_target(a.clone());
+      if x != Port::LOCK {
+        trace!(self.tracer, "TODO", x);
+        return self.link_wire_port(b.wire(), x);
+        todo!()
+      }
     }
     if a.tag() != Var && b.tag() != Var {
       self.redux(a, b);
@@ -560,22 +568,25 @@ impl<'a> Net<'a> {
   #[inline(always)]
   pub fn half_link_port_port(&mut self, a: Port, b: Port) {
     trace!(self.tracer, a, b);
-    match (a.tag(), b.tag()) {
-      (Red, Red) => {
-        if a < b {
-          self.link_wire_port(a.wire(), b)
-        }
-      }
-      (Red, _) => self.link_wire_port(a.wire(), b),
-      (_, Red) => {}
-      (Var, _) => a.wire().set_target(b),
-      (_, Var) => {}
-      (_, _) => {
-        if a < b {
-          self.redux(a, b);
-        }
-      }
+    if a < b {
+      self.link_port_port(a, b);
     }
+    // match (a.tag(), b.tag()) {
+    //   (Red, Red) => {
+    //     if a < b {
+    //       self.link_wire_port(a.wire(), b)
+    //     }
+    //   }
+    //   (Red, _) => self.link_wire_port(a.wire(), b),
+    //   (_, Red) => {}
+    //   (Var, _) => a.wire().set_target(b),
+    //   (_, Var) => {}
+    //   (_, _) => {
+    //     if a < b {
+    //       self.redux(a, b);
+    //     }
+    //   }
+    // }
   }
 
   // Given two locations, links both stored pointers, atomically.
@@ -638,16 +649,20 @@ impl<'a> Net<'a> {
   fn _link_wire_port(&mut self, a_wire: Wire, b_port: Port) {
     trace!(self.tracer, a_wire, b_port);
     if b_port.tag() == Var {
-      let got = b_port.wire().swap_target(Port::LOCK);
-      trace!(self.tracer, "lock", b_port, got);
-      if got != Port::new(Red, 0, a_wire.loc()) && got != Port::LOCK {
-        // another thread already took responsibility
-        return;
+      if let Err(got) = b_port.wire().cas_target(Port::new(Red, 0, a_wire.loc()), Port::LOCK) {
+        trace!(self.tracer, "b_port cas fail", got);
+        if got != Port::LOCK {
+          // another thread already took responsibility
+          return;
+        }
+      } else {
+        trace!(self.tracer, "b_port cas ok");
       }
     }
     let a_port = a_wire.swap_target(b_port.clone());
     trace!(self.tracer, a_port);
     if a_port == Port::LOCK {
+      trace!(self.tracer, "defer 1");
       // this is now the locking thread's responsibility
       return;
     }
@@ -659,6 +674,7 @@ impl<'a> Net<'a> {
         trace!(self.tracer, "swap a mismatch");
         self.half_free(x_wire.loc());
         if x_port == Port::LOCK {
+          trace!(self.tracer, "defer 2");
           // this is now the locking thread's responsibility
           return;
         } else {
@@ -683,6 +699,7 @@ impl<'a> Net<'a> {
             return self.link_wire_port(b_port.wire(), x_port);
           } else {
             trace!(self.tracer, "resume var");
+            b_port.wire().set_target(Port::LOCK);
             return self.link_port_port(b_port, x_port);
           }
         }

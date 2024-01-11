@@ -66,7 +66,7 @@ fn fuzz_var_link_link_var() {
     });
     let at = Port(a.loc().val().read());
     let ft = Port(f.loc().val().read());
-    // dbg!(&a, &f, &at, &ft);
+    dbg!(&a, &f, &at, &ft);
     if at != f || ft != a {
       panic!("invalid link")
     }
@@ -130,5 +130,55 @@ fn fuzz_var_link_link_pri() {
     });
     let at = Port(a.loc().val().read());
     assert_eq!(at, Port::ERA);
+  })
+}
+
+#[test]
+#[serial]
+fn fuzz_var_link_link_link_var() {
+  trace::set_hook();
+  let heap = Net::init_heap(256);
+  Fuzzer::with_path(vec![2, 1, 2, 2, 2, 1, 0, 1, 1, 1, 2, 1, 1, 0, 1, 0]).fuzz(|fuzz| {
+    unsafe { trace::_reset_traces() };
+    let mut net = Net::new(&heap);
+    let x = net.alloc();
+    let y = net.alloc();
+    let z = net.alloc();
+    let w = net.alloc();
+    let a = Port::new_var(x.clone());
+    let b = Port::new_var(x.other_half());
+    let c = Port::new_var(y.clone());
+    let d = Port::new_var(y.other_half());
+    let e = Port::new_var(z.clone());
+    let f = Port::new_var(z.other_half());
+    let g = Port::new_var(w.clone());
+    let h = Port::new_var(w.other_half());
+    net.link_port_port(a.clone(), b.clone());
+    net.link_port_port(c.clone(), d.clone());
+    net.link_port_port(e.clone(), f.clone());
+    net.link_port_port(g.clone(), h.clone());
+    let mut n0 = net.fork(0, 2);
+    let mut n1 = net.fork(1, 2);
+    let mut n2 = net.fork(1, 2);
+    fuzz.scope(move |s| {
+      s.spawn(move || {
+        let (x, y) = fuzz.maybe_swap(b, c);
+        n0.link_wire_wire(x.wire(), y.wire());
+      });
+      s.spawn(move || {
+        let (x, y) = fuzz.maybe_swap(d, e);
+        n1.link_wire_wire(x.wire(), y.wire());
+      });
+      s.spawn(move || {
+        let (x, y) = fuzz.maybe_swap(f, g);
+        n2.link_wire_wire(x.wire(), y.wire());
+      });
+    });
+    let at = Port(a.loc().val().read());
+    let ht = Port(h.loc().val().read());
+    dbg!(&a, &h, &at, &ht);
+    if at != h || ht != a {
+      panic!("invalid link")
+    }
   })
 }
