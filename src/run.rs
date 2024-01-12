@@ -536,64 +536,14 @@ impl<'a> Net<'a> {
 // ----------
 
 impl<'a> Net<'a> {
-  // Links two pointers, forming a new wire. Assumes ownership.
   #[inline(always)]
-  pub fn link_port_port(&mut self, a: Port, b: Port) {
-    trace!(self.tracer, a, b);
-    if a.tag() == Red {
-      return self.link_wire_port(a.wire(), b);
-    }
-    if b.tag() == Red {
-      return self.link_wire_port(b.wire(), a);
-    }
-    if a.tag() == Var {
-      let x = a.wire().swap_target(b.clone());
-      if x != Port::LOCK {
-        todo!()
-      }
-    }
-    if b.tag() == Var {
-      let x = b.wire().swap_target(a.clone());
-      if x != Port::LOCK {
-        trace!(self.tracer, "TODO", x);
-        return self.link_wire_port(b.wire(), x);
-        todo!()
-      }
-    }
-    if a.tag() != Var && b.tag() != Var {
-      self.redux(a, b);
-    }
+  pub fn link_wire_wire(&mut self, a: Wire, b: Wire) {
+    self.link_port_port(Port::new(Red, 0, a.loc()), Port::new(Red, 0, b.loc()));
   }
 
   #[inline(always)]
-  pub fn half_link_port_port(&mut self, a: Port, b: Port) {
-    trace!(self.tracer, a, b);
-    if a < b {
-      self.link_port_port(a, b);
-    }
-    // match (a.tag(), b.tag()) {
-    //   (Red, Red) => {
-    //     if a < b {
-    //       self.link_wire_port(a.wire(), b)
-    //     }
-    //   }
-    //   (Red, _) => self.link_wire_port(a.wire(), b),
-    //   (_, Red) => {}
-    //   (Var, _) => a.wire().set_target(b),
-    //   (_, Var) => {}
-    //   (_, _) => {
-    //     if a < b {
-    //       self.redux(a, b);
-    //     }
-    //   }
-    // }
-  }
-
-  // Given two locations, links both stored pointers, atomically.
-  #[inline(always)]
-  pub fn link_wire_wire(&mut self, a_wire: Wire, b_wire: Wire) {
-    trace!(self.tracer, a_wire, b_wire);
-    self.link_wire_port(a_wire, Port::new(Red, 0, b_wire.loc()));
+  pub fn link_wire_port(&mut self, a: Wire, b: Port) {
+    self.link_port_port(Port::new(Red, 0, a.loc()), b);
   }
 
   #[inline(always)]
@@ -611,128 +561,103 @@ impl<'a> Net<'a> {
     self.rdex.push((a, b));
   }
 
-  #[inline(always)]
-  pub fn link_wire_port(&mut self, a_wire: Wire, b_port: Port) {
-    match b_port.tag() {
-      Var => self._link_wire_port_var(a_wire, b_port),
-      Red => self._link_wire_port_red(a_wire, b_port),
-      _ => self._link_wire_port_pri(a_wire, b_port),
-    }
-  }
-
-  #[inline(never)]
-  fn _link_wire_port_var(&mut self, a_wire: Wire, b_port: Port) {
-    if b_port.tag() != Var {
-      unsafe { unreachable_unchecked() }
-    }
-    self._link_wire_port(a_wire, b_port);
-  }
-
-  #[inline(never)]
-  fn _link_wire_port_red(&mut self, a_wire: Wire, b_port: Port) {
-    if b_port.tag() != Red {
-      unsafe { unreachable_unchecked() }
-    }
-    self._link_wire_port(a_wire, b_port);
-  }
-
-  #[inline(never)]
-  fn _link_wire_port_pri(&mut self, a_wire: Wire, b_port: Port) {
-    if b_port.tag() == Var || b_port.tag() == Red {
-      unsafe { unreachable_unchecked() }
-    }
-    self._link_wire_port(a_wire, b_port);
-  }
-
-  // When two threads interfere, uses the lock-free link algorithm described on the 'paper/'.
-  #[inline(always)]
-  fn _link_wire_port(&mut self, a_wire: Wire, b_port: Port) {
-    trace!(self.tracer, a_wire, b_port);
-    if b_port.tag() == Var {
-      if let Err(got) = b_port.wire().cas_target(Port::new(Red, 0, a_wire.loc()), Port::LOCK) {
-        trace!(self.tracer, "b_port cas fail", got);
-        if got != Port::LOCK {
-          // another thread already took responsibility
-          return;
-        }
-      } else {
-        trace!(self.tracer, "b_port cas ok");
-      }
-    }
-    let a_port = a_wire.swap_target(b_port.clone());
-    trace!(self.tracer, a_port);
-    if a_port == Port::LOCK {
-      trace!(self.tracer, "defer 1");
-      // this is now the locking thread's responsibility
-      return;
-    }
-    if a_port.tag() == Var {
-      let x_wire = a_port.wire();
-      let x_port = x_wire.swap_target(b_port.clone());
-      trace!(self.tracer, "swap a", x_port);
-      if x_port != Port::new_var(a_wire.loc()) {
-        trace!(self.tracer, "swap a mismatch");
-        self.half_free(x_wire.loc());
-        if x_port == Port::LOCK {
-          trace!(self.tracer, "defer 2");
-          // this is now the locking thread's responsibility
-          return;
-        } else {
-          // two threads will reach this branch; each should do half of the link
-          return self.half_link_port_port(b_port, x_port);
-        }
-      }
-    }
-    if a_port.tag() == Red {
-      return self.link_wire_port(a_port.wire(), b_port);
-    }
+  pub fn cont_link_port_port(&mut self, a_port: Port, b_port: Port) {
     match b_port.tag() {
       Var => {
         let x_port = b_port.wire().swap_target(a_port.clone());
-        trace!(self.tracer, "swap b", x_port);
+        trace!(self.tracer, "unlock b", x_port);
         if x_port != Port::LOCK {
-          if a_port.tag() != Var {
-            todo!();
-          }
-
-          // TODO: this is really hacky and though it technically works,
-          // it's really really hacky
-          // the issue here is that we need to determine whether `x_port` was set by defer 1 or defer 2
-          // in order to figure out which branch should be here
-          // to convey this information over the wire, we'd need a free bit in every port
-          // and this overhead isn't really acceptable
-
-          // however, I believe this is solvable with only a single bit needed in *var* ports
-          // which we can easily fit into the label
-          // in particular, there are "two sides" to every var
-          // usually, this is represented by the distinction between ports and wires
-          // *however*, within this linker function, when we get a_port from a_wire
-          // if a_port is a var, we get a var port, but it's still the "wire side"
-          // this information is, currently, stored in the stack
-          // but! that doesn't work when we send the port across a wire
-
-          // if we represent these "two sides" within the port, a couple of things are made possible
-          // for one, at this check, we can simply check which side we're on here
-          // and then execute as though we were the *other side*
-          // because we're executing this link on behalf of another thread
-
-          // but additionally, I think we can stop storing this information in the stack
-          // and potentially drastically simplify this algorithm?
-
-          if a_port.wire().cas_target(b_port.clone(), b_port.clone()).is_ok() {
-            trace!(self.tracer, "resume wire");
-            return self.link_wire_port(b_port.wire(), x_port);
-          } else {
+          if x_port.tag() == Red && x_port.lab() == 1 {
             trace!(self.tracer, "resume var");
             b_port.wire().set_target(Port::LOCK);
             return self.link_port_port(b_port, x_port);
+          } else {
+            trace!(self.tracer, "resume wire");
+            return self.link_port_port(Port::new(Red, 0, b_port.loc()), x_port);
           }
         }
       }
-      Red => self.link_wire_port(b_port.wire(), a_port),
-      _ if a_port.tag() != Var => self.redux(a_port, b_port),
-      _ => {}
+      Red => {
+        if a_port.tag() == Var && a_port.wire().cas_target(b_port.clone(), Port::LOCK).is_err() {
+          trace!(self.tracer, "lock fail");
+          return;
+        }
+        trace!(self.tracer, "lock ok");
+        return self.link_port_port(b_port, a_port);
+      }
+      _ => {
+        if a_port.is_principal() {
+          self.redux(a_port, b_port);
+        }
+      }
     }
+  }
+
+  pub fn link_port_port(&mut self, a_port: Port, b_port: Port) {
+    trace!(self.tracer, a_port, b_port);
+    dbg!(&a_port, &b_port);
+    match a_port.tag() {
+      Var => {
+        // if b_port.tag() == Red {
+        //   return self.link_port_port(b_port, a_port);
+        // }
+        let x_port = a_port.wire().swap_target(b_port.clone());
+        trace!(self.tracer, "unlock a", x_port);
+        if x_port != Port::LOCK {
+          if x_port.tag() == Red && x_port.lab() == 1 {
+            trace!(self.tracer, "resume var");
+            a_port.wire().set_target(Port::LOCK);
+            return self.link_port_port(a_port, x_port);
+          } else {
+            trace!(self.tracer, "resume wire");
+            return self.link_port_port(Port::new(Red, 0, a_port.loc()), x_port);
+          }
+        }
+      }
+      Red => {
+        let a_wire = a_port.wire();
+        let a_port = a_wire.swap_target(b_port.clone());
+        trace!(self.tracer, "wire swap", a_wire, a_port);
+        if a_port == Port::LOCK {
+          trace!(self.tracer, "defer wire");
+          return;
+        }
+        if a_port.tag() == Var {
+          let x_wire = a_port.wire();
+          let x_port = x_wire.swap_target(Port::new(Red, 1, a_wire.loc()));
+          trace!(self.tracer, "far swap", x_wire, x_port);
+          if x_port != Port::new_var(a_wire.loc()) {
+            if x_port == Port::LOCK {
+              if b_port.tag() == Var {
+                let y_port = b_port.wire().swap_target(Port::new_var(a_wire.loc()));
+                if y_port != Port::LOCK {
+                  trace!(self.tracer, "defer unlock err");
+                  return self.link_port_port(Port::new_var(a_wire.loc()), y_port);
+                } else {
+                  trace!(self.tracer, "defer unlock ok");
+                }
+              }
+              trace!(self.tracer, "defer var");
+              return;
+            } else {
+              trace!(self.tracer, "half link", a_wire, x_port.wire());
+              if a_wire < x_port.wire() {
+                return self.link_wire_wire(a_wire, x_port.wire());
+              }
+            }
+          }
+          trace!(self.tracer, "far swap ok");
+          if x_wire.cas_target(Port::new(Red, 1, a_wire.loc()), Port::LOCK).is_err() {
+            trace!(self.tracer, "lock fail");
+            return;
+          }
+          trace!(self.tracer, "lock ok");
+        }
+        return self.link_port_port(a_port, b_port);
+      }
+      _ => {}
+    };
+    self.cont_link_port_port(a_port, b_port);
   }
 }
 
