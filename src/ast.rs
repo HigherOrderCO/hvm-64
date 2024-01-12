@@ -8,6 +8,7 @@
 use crate::run;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::iter::Peekable;
 use std::str::Chars;
 
@@ -559,8 +560,57 @@ pub fn net_to_runtime(rt_net: &mut run::Net, net: &Net) {
   }
 }
 
+#[derive(Debug)]
+pub struct Inside {
+  dups: bool, // has dups; TODO: collect dup labels
+  refs: HashSet<run::Val>, // ref names
+}
+
+// Checks if a runtime net has dups, and collects its ref ids
+pub fn runtime_net_inside(def: &run::Def) -> Inside {
+  let mut inside = Inside { dups: false, refs: HashSet::new() };
+  fn register(inside: &mut Inside, ptr: run::Ptr) {
+    if ptr.is_dup() {
+      inside.dups = true;
+    }
+    if ptr.is_ref() {
+      inside.refs.insert(ptr.val());
+    }
+  }
+  for i in 0 .. def.node.len() {
+    register(&mut inside, def.node[i].0);
+    register(&mut inside, def.node[i].1);
+  }
+  for i in 0 .. def.rdex.len() {
+    register(&mut inside, def.rdex[i].0);
+    register(&mut inside, def.rdex[i].1);
+  }
+  return inside;
+}
+
+// A runtime def is safe when neither it nor any of its dependencies have dup nodes.
+// FIXME: memoize to avoid duplicated work
+pub fn runtime_def_is_safe(inside: &Inside, rt_book: &run::Book, fid: run::Val, seen: &mut HashSet<run::Val>) -> bool {
+  if seen.contains(&fid) {
+    return true;
+  }
+  if inside.dups {
+    return false;
+  }
+  seen.insert(fid);
+  for ref_id in &inside.refs {
+    if !runtime_def_is_safe(inside, rt_book, *ref_id, seen) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Converts a book from the pure AST representation to the runtime representation.
 pub fn book_to_runtime(book: &Book) -> run::Book {
   let mut rt_book = run::Book::new();
+
+  // Convert each network in 'book' to a runtime network and add to 'rt_book'
   for (name, net) in book {
     let fid = name_to_val(name);
     let data = run::Heap::init(1 << 16);
@@ -568,19 +618,36 @@ pub fn book_to_runtime(book: &Book) -> run::Book {
     net_to_runtime(&mut rt, net);
     rt_book.def(fid, runtime_net_to_runtime_def(&rt));
   }
+
+  // Calculate the 'insides' of each runtime definition
+  let mut insides = HashMap::new();
+  for (fid, def) in &rt_book.defs {
+    insides.insert(*fid, runtime_net_inside(&def));
+  }
+
+  // Determine which definitions are safe and store their 'fid' in 'is_safe'
+  let mut is_safe = HashSet::new();
+  for (fid, _def) in &rt_book.defs {
+    if runtime_def_is_safe(&insides[&fid], &rt_book, *fid, &mut HashSet::new()) {
+      is_safe.insert(*fid);
+    }
+  }
+
+  // Set the 'safe' flag for each definition in 'rt_book' that is safe
+  for (fid, def) in &mut rt_book.defs {
+    if is_safe.contains(fid) {
+      def.safe = true;
+    }
+  }
+
   rt_book
 }
 
 // Converts to a def.
 pub fn runtime_net_to_runtime_def(net: &run::Net) -> run::Def {
-  // Checks if a ptr blocks the fast dup-ref optimization
-  // FIXME: this is too restrictive; make more flexible
-  fn is_unsafe(ptr: run::Ptr) -> bool {
-    return ptr.is_dup() || ptr.is_ref();
-  }
   let mut node = vec![];
   let mut rdex = vec![];
-  let mut safe = true;
+  let safe = false;
   for i in 0 .. net.heap.data.len() {
     let p1 = net.heap.get(node.len() as run::Loc, run::P1);
     let p2 = net.heap.get(node.len() as run::Loc, run::P2);
@@ -589,17 +656,10 @@ pub fn runtime_net_to_runtime_def(net: &run::Net) -> run::Def {
     } else {
       break;
     }
-    // TODO: this is too restrictive and should be 
-    if is_unsafe(p1) || is_unsafe(p2) {
-      safe = false;
-    }
   }
   for i in 0 .. net.rdex.len() {
     let p1 = net.rdex[i].0;
     let p2 = net.rdex[i].1;
-    if is_unsafe(p1) || is_unsafe(p2) {
-      safe = false;
-    }
     rdex.push((p1, p2));
   }
   return run::Def { safe, rdex, node };
