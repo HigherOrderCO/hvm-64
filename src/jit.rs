@@ -412,13 +412,19 @@ pub fn compile_term(book: &run::Book, tab: usize, fid: run::Val) -> String {
   let def = &book.get(fid).unwrap();
 
   let mut code = String::new();
-  code.push_str(&format!("{}pub fn F_{}(&mut self, ptr: Ptr, trg: Trg) -> bool {{\n", ident(tab), fun));
-  if def.safe {
-    code.push_str(&format!("{}if self.get(trg).is_dup() {{\n", ident(tab+1)));
-    code.push_str(&format!("{}self.copy(self.swap(trg, NULL), ptr);\n", ident(tab+2)));
-    code.push_str(&format!("{}return true;\n", ident(tab+2)));
-    code.push_str(&format!("{}}}\n", ident(tab+1)));
+  // Given a label, returns true if the definition contains that dup label, directly or not
+  code.push_str(&format!("{}pub fn L_{}(&mut self, lab: Lab) -> bool {{\n", ident(tab), fun));
+  for dup in &def.labs {
+    code.push_str(&format!("{}if lab == 0x{:x} {{ return true; }}\n", ident(tab+1), dup));
   }
+  code.push_str(&format!("{}return false;\n", ident(tab+1)));
+  code.push_str(&format!("{}}}\n", ident(tab)));
+  // Calls the definition, performing inline rewrites when possible, and expanding it when not
+  code.push_str(&format!("{}pub fn F_{}(&mut self, ptr: Ptr, trg: Trg) -> bool {{\n", ident(tab), fun));
+  code.push_str(&format!("{}if self.get(trg).is_dup() && !self.L_{}(self.get(trg).lab()) {{\n", ident(tab+1), fun));
+  code.push_str(&format!("{}self.copy(self.swap(trg, NULL), ptr);\n", ident(tab+2)));
+  code.push_str(&format!("{}return true;\n", ident(tab+2)));
+  code.push_str(&format!("{}}}\n", ident(tab+1)));
   code.push_str(&call(book, tab+1, None, &mut 0, &mut HashMap::new(), fid, &Target { nam: "trg".to_string() }));
   code.push_str(&format!("{}return true;\n", ident(tab+1)));
   code.push_str(&format!("{}}}\n", ident(tab)));

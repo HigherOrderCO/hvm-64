@@ -10,6 +10,7 @@
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Barrier};
 use std::collections::HashMap;
+use std::collections::HashSet;
 use crate::u60;
 
 pub type Tag  = u8;
@@ -123,9 +124,9 @@ pub struct Net<'a> {
 }
 
 // A compact closed net, used for dereferences.
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Def {
-  pub safe: bool,
+  pub labs: HashSet<Lab, nohash_hasher::BuildNoHashHasher<Lab>>,
   pub rdex: Vec<(Ptr, Ptr)>,
   pub node: Vec<(Ptr, Ptr)>,
 }
@@ -294,7 +295,7 @@ impl Book {
 impl Def {
   pub fn new() -> Self {
     Def {
-      safe: true,
+      labs: HashSet::with_hasher(std::hash::BuildHasherDefault::default()),
       rdex: vec![],
       node: vec![],
     }
@@ -883,7 +884,7 @@ impl<'a> Net<'a> {
       //println!("{:08x?}", book.defs);
       //println!("{:08x} {}", ptr.0, crate::ast::val_to_name(ptr.val()));
       let got = book.get(ptr.val()).unwrap();
-      if got.safe && trg.is_dup() {
+      if trg.is_dup() && !got.labs.contains(&trg.lab()) {
         return self.copy(trg, ptr);
       } else if got.node.len() > 0 {
         let len = got.node.len() - 1;

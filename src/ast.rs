@@ -560,18 +560,24 @@ pub fn net_to_runtime(rt_net: &mut run::Net, net: &Net) {
   }
 }
 
+// Holds dup labels and ref ids used by a definition
+type InsideLabs = HashSet<run::Lab, nohash_hasher::BuildNoHashHasher<run::Lab>>;
+type InsideRefs = HashSet<run::Val>;
 #[derive(Debug)]
 pub struct Inside {
-  dups: bool, // has dups; TODO: collect dup labels
-  refs: HashSet<run::Val>, // ref names
+  labs: InsideLabs,
+  refs: InsideRefs,
 }
 
-// Checks if a runtime net has dups, and collects its ref ids
-pub fn runtime_net_inside(def: &run::Def) -> Inside {
-  let mut inside = Inside { dups: false, refs: HashSet::new() };
+// Collects dup labels and ref ids used by a definition
+pub fn runtime_def_get_inside(def: &run::Def) -> Inside {
+  let mut inside = Inside {
+    labs: HashSet::with_hasher(std::hash::BuildHasherDefault::default()),
+    refs: HashSet::new(),
+  };
   fn register(inside: &mut Inside, ptr: run::Ptr) {
     if ptr.is_dup() {
-      inside.dups = true;
+      inside.labs.insert(ptr.lab());
     }
     if ptr.is_ref() {
       inside.refs.insert(ptr.val());
@@ -588,22 +594,20 @@ pub fn runtime_net_inside(def: &run::Def) -> Inside {
   return inside;
 }
 
-// A runtime def is safe when neither it nor any of its dependencies have dup nodes.
+// Computes all dup labels used by a definition, direct or not.
 // FIXME: memoize to avoid duplicated work
-pub fn runtime_def_is_safe(inside: &Inside, rt_book: &run::Book, fid: run::Val, seen: &mut HashSet<run::Val>) -> bool {
+pub fn runtime_def_get_all_labs(labs: &mut InsideLabs, insides: &HashMap<run::Val, Inside>, fid: run::Val, seen: &mut HashSet<run::Val>) {
   if seen.contains(&fid) {
-    return true;
-  }
-  if inside.dups {
-    return false;
-  }
-  seen.insert(fid);
-  for ref_id in &inside.refs {
-    if !runtime_def_is_safe(inside, rt_book, *ref_id, seen) {
-      return false;
+    return;
+  } else {
+    seen.insert(fid);
+    for dup in &insides[&fid].labs {
+      labs.insert(*dup);
+    }
+    for child_fid in &insides[&fid].refs {
+      runtime_def_get_all_labs(labs, insides, *child_fid, seen);
     }
   }
-  return true;
 }
 
 // Converts a book from the pure AST representation to the runtime representation.
@@ -622,22 +626,22 @@ pub fn book_to_runtime(book: &Book) -> run::Book {
   // Calculate the 'insides' of each runtime definition
   let mut insides = HashMap::new();
   for (fid, def) in &rt_book.defs {
-    insides.insert(*fid, runtime_net_inside(&def));
+    insides.insert(*fid, runtime_def_get_inside(&def));
   }
 
-  // Determine which definitions are safe and store their 'fid' in 'is_safe'
-  let mut is_safe = HashSet::new();
-  for (fid, _def) in &rt_book.defs {
-    if runtime_def_is_safe(&insides[&fid], &rt_book, *fid, &mut HashSet::new()) {
-      is_safe.insert(*fid);
-    }
+  // Compute labs labels used in each runtime definition
+  let mut labs_by_fid = HashMap::new();
+  for (fid, _) in &rt_book.defs {
+    let mut labs = HashSet::with_hasher(std::hash::BuildHasherDefault::default());
+    let mut seen = HashSet::new();
+    runtime_def_get_all_labs(&mut labs, &insides, *fid, &mut seen);
+    labs_by_fid.insert(*fid, labs);
   }
 
-  // Set the 'safe' flag for each definition in 'rt_book' that is safe
+  // Set the 'labs' field for each definition
   for (fid, def) in &mut rt_book.defs {
-    if is_safe.contains(fid) {
-      def.safe = true;
-    }
+    def.labs = labs_by_fid.get(fid).unwrap().clone();
+    //println!("{} {:?}", val_to_name(*fid), def.labs);
   }
 
   rt_book
@@ -647,7 +651,7 @@ pub fn book_to_runtime(book: &Book) -> run::Book {
 pub fn runtime_net_to_runtime_def(net: &run::Net) -> run::Def {
   let mut node = vec![];
   let mut rdex = vec![];
-  let safe = false;
+  let labs = HashSet::with_hasher(std::hash::BuildHasherDefault::default());
   for i in 0 .. net.heap.data.len() {
     let p1 = net.heap.get(node.len() as run::Loc, run::P1);
     let p2 = net.heap.get(node.len() as run::Loc, run::P2);
@@ -662,7 +666,7 @@ pub fn runtime_net_to_runtime_def(net: &run::Net) -> run::Def {
     let p2 = net.rdex[i].1;
     rdex.push((p1, p2));
   }
-  return run::Def { safe, rdex, node };
+  return run::Def { labs, rdex, node };
 }
 
 // Reads back from a def.
