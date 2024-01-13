@@ -746,7 +746,7 @@ pub fn tree_from_runtime_go(rt_net: &run::Net, ptr: run::Ptr, parent: Parent, va
       Tree::Dup { lab: ptr.lab(), lft: Box::new(lft), rgt: Box::new(rgt) }
     }
     _ => {
-      unreachable!()
+      unreachable!("Reached unknown tag '{}' on readback", ptr.tag());
     }
   }
 }

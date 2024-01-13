@@ -726,7 +726,7 @@ impl<'a> Net<'a> {
       (LAM.. , MAT  ) => self.comm(b, a),
       (MAT   , ERA  ) => self.era2(a),
       (ERA   , MAT  ) => self.era2(b),
-      _               => { println!("{:016x} {:016x}", a.0, b.0); unreachable!() },
+      _               => panic!("Invalid interaction {:016x} ~ {:016x}", a.0, b.0),
     };
   }
 
