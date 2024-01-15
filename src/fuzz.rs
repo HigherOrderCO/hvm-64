@@ -3,6 +3,7 @@ use std::{
   cell::{OnceCell, RefCell},
   marker::PhantomData,
   ops::Add,
+  panic::{catch_unwind, AssertUnwindSafe},
   sync::{atomic, Arc, Condvar, Mutex},
   thread::{self, Scope, ThreadId},
 };

@@ -15,11 +15,14 @@ name = "hvmc"
 path = "src/lib.rs"
 bench = false
 
+[profile.test]
+panic = "unwind"
+
 [profile.release]
 codegen-units = 1
 lto = "fat"
 opt-level = 3
-panic = "abort"
+# panic = "abort"
 debug = "full"
 
 [features]
