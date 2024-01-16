@@ -8,6 +8,7 @@
 use crate::run;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::iter::Peekable;
 use std::str::Chars;
 
@@ -274,7 +275,7 @@ pub fn do_parse_book(code: &str) -> Book {
 // Stringifier
 // -----------
 
-fn show_opr(opr: run::Lab) -> String {
+pub fn show_opr(opr: run::Lab) -> String {
   match opr {
     run::ADD => "+".to_string(),
     run::SUB => "-".to_string(),
@@ -480,7 +481,7 @@ pub fn tree_to_runtime_go(rt_net: &mut run::Net, tree: &Tree, vars: &mut HashMap
       rt_net.heap.set(loc, run::P1, p1);
       let p2 = tree_to_runtime_go(rt_net, &*rgt, vars, Parent::Node { loc, port: run::P2 });
       rt_net.heap.set(loc, run::P2, p2);
-      run::Ptr::new(run::TUP, 0, loc)
+      run::Ptr::new(run::TUP, 1, loc)
     }
     Tree::Dup { lab, lft, rgt } => {
       let loc = rt_net.alloc();
@@ -559,8 +560,61 @@ pub fn net_to_runtime(rt_net: &mut run::Net, net: &Net) {
   }
 }
 
+// Holds dup labels and ref ids used by a definition
+type InsideLabs = HashSet<run::Lab, nohash_hasher::BuildNoHashHasher<run::Lab>>;
+type InsideRefs = HashSet<run::Val>;
+#[derive(Debug)]
+pub struct Inside {
+  labs: InsideLabs,
+  refs: InsideRefs,
+}
+
+// Collects dup labels and ref ids used by a definition
+pub fn runtime_def_get_inside(def: &run::Def) -> Inside {
+  let mut inside = Inside {
+    labs: HashSet::with_hasher(std::hash::BuildHasherDefault::default()),
+    refs: HashSet::new(),
+  };
+  fn register(inside: &mut Inside, ptr: run::Ptr) {
+    if ptr.is_dup() {
+      inside.labs.insert(ptr.lab());
+    }
+    if ptr.is_ref() {
+      inside.refs.insert(ptr.val());
+    }
+  }
+  for i in 0 .. def.node.len() {
+    register(&mut inside, def.node[i].0);
+    register(&mut inside, def.node[i].1);
+  }
+  for i in 0 .. def.rdex.len() {
+    register(&mut inside, def.rdex[i].0);
+    register(&mut inside, def.rdex[i].1);
+  }
+  return inside;
+}
+
+// Computes all dup labels used by a definition, direct or not.
+// FIXME: memoize to avoid duplicated work
+pub fn runtime_def_get_all_labs(labs: &mut InsideLabs, insides: &HashMap<run::Val, Inside>, fid: run::Val, seen: &mut HashSet<run::Val>) {
+  if seen.contains(&fid) {
+    return;
+  } else {
+    seen.insert(fid);
+    for dup in &insides[&fid].labs {
+      labs.insert(*dup);
+    }
+    for child_fid in &insides[&fid].refs {
+      runtime_def_get_all_labs(labs, insides, *child_fid, seen);
+    }
+  }
+}
+
+// Converts a book from the pure AST representation to the runtime representation.
 pub fn book_to_runtime(book: &Book) -> run::Book {
   let mut rt_book = run::Book::new();
+
+  // Convert each network in 'book' to a runtime network and add to 'rt_book'
   for (name, net) in book {
     let fid = name_to_val(name);
     let data = run::Heap::init(1 << 16);
@@ -568,19 +622,36 @@ pub fn book_to_runtime(book: &Book) -> run::Book {
     net_to_runtime(&mut rt, net);
     rt_book.def(fid, runtime_net_to_runtime_def(&rt));
   }
+
+  // Calculate the 'insides' of each runtime definition
+  let mut insides = HashMap::new();
+  for (fid, def) in &rt_book.defs {
+    insides.insert(*fid, runtime_def_get_inside(&def));
+  }
+
+  // Compute labs labels used in each runtime definition
+  let mut labs_by_fid = HashMap::new();
+  for (fid, _) in &rt_book.defs {
+    let mut labs = HashSet::with_hasher(std::hash::BuildHasherDefault::default());
+    let mut seen = HashSet::new();
+    runtime_def_get_all_labs(&mut labs, &insides, *fid, &mut seen);
+    labs_by_fid.insert(*fid, labs);
+  }
+
+  // Set the 'labs' field for each definition
+  for (fid, def) in &mut rt_book.defs {
+    def.labs = labs_by_fid.get(fid).unwrap().clone();
+    //println!("{} {:?}", val_to_name(*fid), def.labs);
+  }
+
   rt_book
 }
 
 // Converts to a def.
 pub fn runtime_net_to_runtime_def(net: &run::Net) -> run::Def {
-  // Checks if a ptr blocks the fast dup-ref optimization
-  // FIXME: this is too restrictive; make more flexible
-  fn is_unsafe(ptr: run::Ptr) -> bool {
-    return ptr.is_dup() || ptr.is_ref();
-  }
   let mut node = vec![];
   let mut rdex = vec![];
-  let mut safe = true;
+  let labs = HashSet::with_hasher(std::hash::BuildHasherDefault::default());
   for i in 0 .. net.heap.data.len() {
     let p1 = net.heap.get(node.len() as run::Loc, run::P1);
     let p2 = net.heap.get(node.len() as run::Loc, run::P2);
@@ -589,20 +660,13 @@ pub fn runtime_net_to_runtime_def(net: &run::Net) -> run::Def {
     } else {
       break;
     }
-    // TODO: this is too restrictive and should be 
-    if is_unsafe(p1) || is_unsafe(p2) {
-      safe = false;
-    }
   }
   for i in 0 .. net.rdex.len() {
     let p1 = net.rdex[i].0;
     let p2 = net.rdex[i].1;
-    if is_unsafe(p1) || is_unsafe(p2) {
-      safe = false;
-    }
     rdex.push((p1, p2));
   }
-  return run::Def { safe, rdex, node };
+  return run::Def { labs, rdex, node };
 }
 
 // Reads back from a def.
