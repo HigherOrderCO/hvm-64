@@ -24,6 +24,7 @@ panic = "abort"
 [features]
 default = ["hvm_cli_options"]
 hvm_cli_options = []
+lazy_mode = []
 
 [dependencies]
 nohash-hasher = "0.2.0"

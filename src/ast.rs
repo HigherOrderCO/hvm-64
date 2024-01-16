@@ -350,11 +350,11 @@ pub fn show_book(book: &Book) -> String {
   return result;
 }
 
-pub fn show_runtime_tree(rt_net: &run::Net, ptr: run::Ptr) -> String {
+pub fn show_runtime_tree(rt_net: &run::Net<false>, ptr: run::Ptr) -> String {
   show_tree(&tree_from_runtime_go(rt_net, ptr, PARENT_ROOT, &mut HashMap::new(), &mut 0))
 }
 
-pub fn show_runtime_net(rt_net: &run::Net) -> String {
+pub fn show_runtime_net(rt_net: &run::Net<false>) -> String {
   show_net(&net_from_runtime(rt_net))
 }
 
@@ -462,7 +462,7 @@ pub enum Parent {
 }
 const PARENT_ROOT: Parent = Parent::Node { loc: run::ROOT.loc(), port: tag_to_port(run::ROOT.tag()) };
 
-pub fn tree_to_runtime_go(rt_net: &mut run::Net, tree: &Tree, vars: &mut HashMap<String, Parent>, parent: Parent) -> run::Ptr {
+pub fn tree_to_runtime_go(rt_net: &mut run::Net<false>, tree: &Tree, vars: &mut HashMap<String, Parent>, parent: Parent) -> run::Ptr {
   match tree {
     Tree::Era => {
       run::ERAS
@@ -545,11 +545,11 @@ pub fn tree_to_runtime_go(rt_net: &mut run::Net, tree: &Tree, vars: &mut HashMap
   }
 }
 
-pub fn tree_to_runtime(rt_net: &mut run::Net, tree: &Tree) -> run::Ptr {
+pub fn tree_to_runtime(rt_net: &mut run::Net<false>, tree: &Tree) -> run::Ptr {
   tree_to_runtime_go(rt_net, tree, &mut HashMap::new(), PARENT_ROOT)
 }
 
-pub fn net_to_runtime(rt_net: &mut run::Net, net: &Net) {
+pub fn net_to_runtime(rt_net: &mut run::Net<false>, net: &Net) {
   let mut vars = HashMap::new();
   let root = tree_to_runtime_go(rt_net, &net.root, &mut vars, PARENT_ROOT);
   rt_net.heap.set_root(root);
@@ -584,8 +584,8 @@ pub fn runtime_def_get_inside(def: &run::Def) -> Inside {
     }
   }
   for i in 0 .. def.node.len() {
-    register(&mut inside, def.node[i].0);
     register(&mut inside, def.node[i].1);
+    register(&mut inside, def.node[i].2);
   }
   for i in 0 .. def.rdex.len() {
     register(&mut inside, def.rdex[i].0);
@@ -617,7 +617,7 @@ pub fn book_to_runtime(book: &Book) -> run::Book {
   // Convert each network in 'book' to a runtime network and add to 'rt_book'
   for (name, net) in book {
     let fid = name_to_val(name);
-    let data = run::Heap::init(1 << 16);
+    let data = run::Heap::<false>::init(1 << 16);
     let mut rt = run::Net::new(&data);
     net_to_runtime(&mut rt, net);
     rt_book.def(fid, runtime_net_to_runtime_def(&rt));
@@ -648,15 +648,16 @@ pub fn book_to_runtime(book: &Book) -> run::Book {
 }
 
 // Converts to a def.
-pub fn runtime_net_to_runtime_def(net: &run::Net) -> run::Def {
+pub fn runtime_net_to_runtime_def(net: &run::Net<false>) -> run::Def {
   let mut node = vec![];
   let mut rdex = vec![];
   let labs = HashSet::with_hasher(std::hash::BuildHasherDefault::default());
   for i in 0 .. net.heap.data.len() {
+    let p0 = run::APtr::new(run::Ptr(0));
     let p1 = net.heap.get(node.len() as run::Loc, run::P1);
     let p2 = net.heap.get(node.len() as run::Loc, run::P2);
     if p1 != run::NULL || p2 != run::NULL {
-      node.push((p1, p2));
+      node.push(((), p1, p2));
     } else {
       break;
     }
@@ -670,9 +671,9 @@ pub fn runtime_net_to_runtime_def(net: &run::Net) -> run::Def {
 }
 
 // Reads back from a def.
-pub fn runtime_def_to_runtime_net<'a>(data: &'a run::Data, def: &run::Def) -> run::Net<'a> {
+pub fn runtime_def_to_runtime_net<'a>(data: &'a run::Data<false>, def: &run::Def) -> run::Net<'a, false> {
   let mut net = run::Net::new(&data);
-  for (i, &(p1, p2)) in def.node.iter().enumerate() {
+  for (i, &(p0, p1, p2)) in def.node.iter().enumerate() {
     net.heap.set(i as run::Loc, run::P1, p1);
     net.heap.set(i as run::Loc, run::P2, p2);
   }
@@ -680,7 +681,7 @@ pub fn runtime_def_to_runtime_net<'a>(data: &'a run::Data, def: &run::Def) -> ru
   net
 }
 
-pub fn tree_from_runtime_go(rt_net: &run::Net, ptr: run::Ptr, parent: Parent, vars: &mut HashMap<Parent, String>, fresh: &mut usize) -> Tree {
+pub fn tree_from_runtime_go(rt_net: &run::Net<false>, ptr: run::Ptr, parent: Parent, vars: &mut HashMap<Parent, String>, fresh: &mut usize) -> Tree {
   match ptr.tag() {
     run::ERA => {
       Tree::Era
@@ -751,13 +752,13 @@ pub fn tree_from_runtime_go(rt_net: &run::Net, ptr: run::Ptr, parent: Parent, va
   }
 }
 
-pub fn tree_from_runtime(rt_net: &run::Net, ptr: run::Ptr) -> Tree {
+pub fn tree_from_runtime(rt_net: &run::Net<false>, ptr: run::Ptr) -> Tree {
   let mut vars = HashMap::new();
   let mut fresh = 0;
   tree_from_runtime_go(rt_net, ptr, PARENT_ROOT, &mut vars, &mut fresh)
 }
 
-pub fn net_from_runtime(rt_net: &run::Net) -> Net {
+pub fn net_from_runtime(rt_net: &run::Net<false>) -> Net {
   let mut vars = HashMap::new();
   let mut fresh = 0;
   let mut rdex = Vec::new();
@@ -775,7 +776,7 @@ pub fn book_from_runtime(rt_book: &run::Book) -> Book {
   for (fid, def) in rt_book.defs.iter() {
     if def.node.len() > 0 {
       let name = val_to_name(*fid);
-      let data = run::Heap::init(def.node.len());
+      let data = run::Heap::<false>::init(def.node.len());
       let net  = net_from_runtime(&runtime_def_to_runtime_net(&data, &def));
       book.insert(name, net);
     }

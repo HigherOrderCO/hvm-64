@@ -1,7 +1,7 @@
 use crate::run::{*};
 
-impl<'a> Net<'a> {
-
+impl<'a, const LAZY: bool> Net<'a, LAZY> 
+where [(); LAZY as usize]: {
   pub fn call_native(&mut self, book: &Book, ptr: Ptr, x: Ptr) -> bool {
     match ptr.loc() {
       _ => { return false; }

@@ -80,11 +80,12 @@ pub enum Trg {
 }
 
 // The global node buffer.
-pub type Data = [(APtr, APtr)];
+pub type Data<const LAZY: bool> = [([APtr; LAZY as usize], APtr, APtr)];
 
 // A handy wrapper around Data.
-pub struct Heap<'a> {
-  pub data: &'a Data,
+pub struct Heap<'a, const LAZY: bool> 
+where [(); LAZY as usize]: {
+  pub data: &'a Data<LAZY>,
 }
 
 // Rewrite counter.
@@ -112,10 +113,11 @@ pub struct Area {
 }
 
 // A interaction combinator net.
-pub struct Net<'a> {
+pub struct Net<'a, const LAZY: bool> 
+where [(); LAZY as usize]: {
   pub tid : usize, // thread id
   pub tids: usize, // thread count
-  pub heap: Heap<'a>, // nodes
+  pub heap: Heap<'a, LAZY>, // nodes
   pub rdex: Vec<(Ptr,Ptr)>, // redexes
   pub locs: Vec<Loc>,
   pub area: Area, // allocation area
@@ -128,7 +130,7 @@ pub struct Net<'a> {
 pub struct Def {
   pub labs: HashSet<Lab, nohash_hasher::BuildNoHashHasher<Lab>>,
   pub rdex: Vec<(Ptr, Ptr)>,
-  pub node: Vec<(Ptr, Ptr)>,
+  pub node: Vec<((), Ptr, Ptr)>,
 }
 
 // A map of id to definitions (closed nets).
@@ -302,16 +304,9 @@ impl Def {
   }
 }
 
-impl<'a> Heap<'a> {
-  pub fn init(size: usize) -> Box<[(APtr, APtr)]> {
-    let mut data = vec![];
-    for _ in 0..size {
-      data.push((APtr::new(NULL), APtr::new(NULL)));
-    }
-    return data.into_boxed_slice();
-  }
-
-  pub fn new(data: &'a Data) -> Self {
+impl<'a, const LAZY: bool> Heap<'a, LAZY> 
+where [(); LAZY as usize]: {
+  pub fn new(data: &'a Data<LAZY>) -> Self {
     Heap { data }
   }
 
@@ -320,9 +315,9 @@ impl<'a> Heap<'a> {
     unsafe {
       let node = self.data.get_unchecked(index as usize);
       if port == P1 {
-        return node.0.load();
-      } else {
         return node.1.load();
+      } else {
+        return node.2.load();
       }
     }
   }
@@ -332,9 +327,9 @@ impl<'a> Heap<'a> {
     unsafe {
       let node = self.data.get_unchecked(index as usize);
       if port == P1 {
-        node.0.store(value);
-      } else {
         node.1.store(value);
+      } else {
+        node.2.store(value);
       }
     }
   }
@@ -343,7 +338,7 @@ impl<'a> Heap<'a> {
   pub fn cas(&self, index: Loc, port: Port, expected: Ptr, value: Ptr) -> Result<Ptr,Ptr> {
     unsafe {
       let node = self.data.get_unchecked(index as usize);
-      let data = if port == P1 { &node.0.0 } else { &node.1.0 };
+      let data = if port == P1 { &node.1.0 } else { &node.2.0 };
       let done = data.compare_exchange_weak(expected.0, value.0, Ordering::Relaxed, Ordering::Relaxed);
       return done.map(Ptr).map_err(Ptr);
     }
@@ -353,7 +348,7 @@ impl<'a> Heap<'a> {
   pub fn swap(&self, index: Loc, port: Port, value: Ptr) -> Ptr {
     unsafe {
       let node = self.data.get_unchecked(index as usize);
-      let data = if port == P1 { &node.0.0 } else { &node.1.0 };
+      let data = if port == P1 { &node.1.0 } else { &node.2.0 };
       return Ptr(data.swap(value.0, Ordering::Relaxed));
     }
   }
@@ -366,6 +361,32 @@ impl<'a> Heap<'a> {
   #[inline(always)]
   pub fn set_root(&self, value: Ptr) {
     self.set(ROOT.loc(), P2, value);
+  }
+}
+
+impl<'a> Heap<'a, true> {
+  pub fn init(size: usize) -> Box<[([APtr; 1], APtr, APtr)]> {
+    let mut data = vec![];
+    for _ in 0..size {
+      let p0 = [APtr::new(NULL)];
+      let p1 = APtr::new(NULL);
+      let p2 = APtr::new(NULL);
+      data.push((p0, p1, p2));
+    }
+    return data.into_boxed_slice();
+  }
+}
+
+impl<'a> Heap<'a, false> {
+  pub fn init(size: usize) -> Box<[([APtr; 0], APtr, APtr)]> {
+    let mut data = vec![];
+    for _ in 0..size {
+      let p0 = [];
+      let p1 = APtr::new(NULL);
+      let p2 = APtr::new(NULL);
+      data.push((p0, p1, p2));
+    }
+    return data.into_boxed_slice();
   }
 }
 
@@ -410,9 +431,10 @@ impl AtomicRewrites {
   }
 }
 
-impl<'a> Net<'a> {
+impl<'a, const LAZY: bool> Net<'a, LAZY> 
+where [(); LAZY as usize]: {
   // Creates an empty net with given size.
-  pub fn new(data: &'a Data) -> Self {
+  pub fn new(data: &'a Data<LAZY>) -> Self {
     Net {
       tid : 0,
       tids: 1,
@@ -708,6 +730,8 @@ impl<'a> Net<'a> {
       (NUM   , ERA  ) => self.rwts.eras += 1,
       (ERA   , NUM  ) => self.rwts.eras += 1,
       (NUM   , NUM  ) => self.rwts.eras += 1,
+      //(OP2   , OP2  ) => self.anni(a, b),
+      //(MAT   , MAT  ) => self.anni(a, b),
       (OP2   , NUM  ) => self.op2n(a, b),
       (NUM   , OP2  ) => self.op2n(b, a),
       (OP1   , NUM  ) => self.op1n(a, b),
@@ -894,8 +918,8 @@ impl<'a> Net<'a> {
         }
         // Load nodes, adjusted.
         for i in 0 .. len {
-          let p1 = self.adjust(unsafe { got.node.get_unchecked(1 + i) }.0);
-          let p2 = self.adjust(unsafe { got.node.get_unchecked(1 + i) }.1);
+          let p1 = self.adjust(unsafe { got.node.get_unchecked(1 + i) }.1);
+          let p2 = self.adjust(unsafe { got.node.get_unchecked(1 + i) }.2);
           let lc = *unsafe { self.locs.get_unchecked(1 + i) };
           self.heap.set(lc, P1, p1);
           self.heap.set(lc, P2, p2);
@@ -907,7 +931,7 @@ impl<'a> Net<'a> {
           self.rdex.push((p1, p2));
         }
         // Load root, adjusted.
-        ptr = self.adjust(got.node[0].1);
+        ptr = self.adjust(got.node[0].2);
       }
     }
     self.link(ptr, trg);
@@ -922,7 +946,9 @@ impl<'a> Net<'a> {
       return ptr;
     }
   }
+}
 
+impl<'a> Net<'a, false> {
   // Reduces all redexes.
   #[inline(always)]
   pub fn reduce(&mut self, book: &Book, limit: usize) -> usize {
@@ -942,7 +968,8 @@ impl<'a> Net<'a> {
   // Expands heads.
   #[inline(always)]
   pub fn expand(&mut self, book: &Book) {
-    fn go(net: &mut Net, book: &Book, dir: Ptr, len: usize, key: usize) {
+    fn go<const LAZY: bool>(net: &mut Net<LAZY>, book: &Book, dir: Ptr, len: usize, key: usize) 
+    where [(); LAZY as usize]: {
       //println!("[{:04x}] expand dir: {:016x}", net.tid, dir.0);
       let ptr = net.get_target(dir);
       if ptr.is_ctr() {
@@ -1004,7 +1031,7 @@ impl<'a> Net<'a> {
       tids: usize, // thread count
       tlog2: usize, // log2 of thread count
       tick: usize, // current tick
-      net: Net<'a>, // thread's own net object
+      net: Net<'a, false>, // thread's own net object
       book: &'a Book, // definition book
       delta: &'a AtomicRewrites, // global delta rewrites
       share: &'a Vec<(APtr, APtr)>, // global share buffer
@@ -1133,5 +1160,4 @@ impl<'a> Net<'a> {
       }
     }
   }
-
 }

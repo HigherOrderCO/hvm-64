@@ -20,7 +20,7 @@ pub fn compile_book(book: &run::Book) -> String {
 
   code.push_str(&format!("\n"));
 
-  code.push_str(&format!("impl<'a> Net<'a> {{\n"));
+  code.push_str(&format!("impl<'a, const LAZY: bool> Net<'a, LAZY> where [(); LAZY as usize]: {{\n"));
   code.push_str(&format!("\n"));
 
   code.push_str(&format!("{}pub fn call_native(&mut self, book: &Book, ptr: Ptr, x: Ptr) -> bool {{\n", ident(1)));
@@ -161,7 +161,7 @@ pub fn compile_term(book: &run::Book, tab: usize, fid: run::Val) -> String {
     for rdex in &def.rdex {
       code.push_str(&call_redex(book, tab, newx, vars, def, *rdex));
     }
-    code.push_str(&burn(book, tab, Some(fid), newx, vars, def, def.node[0].1, &trg));
+    code.push_str(&burn(book, tab, Some(fid), newx, vars, def, def.node[0].2, &trg));
     return code;
   }
   
@@ -188,16 +188,16 @@ pub fn compile_term(book: &run::Book, tab: usize, fid: run::Val) -> String {
     //   ifs ~ (#(X-1) R)
     // When ifs is REF, tail-call optimization is applied.
     if ptr.tag() == run::LAM {
-      let mat = def.node[ptr.loc() as usize].0;
-      let rty = def.node[ptr.loc() as usize].1;
+      let mat = def.node[ptr.loc() as usize].1;
+      let rty = def.node[ptr.loc() as usize].2;
       if mat.tag() == run::MAT {
-        let cse = def.node[mat.loc() as usize].0;
-        let rtx = def.node[mat.loc() as usize].1;
+        let cse = def.node[mat.loc() as usize].1;
+        let rtx = def.node[mat.loc() as usize].2;
         let got = def.node[rty.loc() as usize];
-        let rtz = if rty.tag() == run::VR1 { got.0 } else { got.1 };
+        let rtz = if rty.tag() == run::VR1 { got.1 } else { got.2 };
         if cse.tag() == run::LAM && rtx.is_var() && rtx == rtz {
-          let ifz = def.node[cse.loc() as usize].0;
-          let ifs = def.node[cse.loc() as usize].1;
+          let ifz = def.node[cse.loc() as usize].1;
+          let ifs = def.node[cse.loc() as usize].2;
           let c_z = Target { nam: fresh(newx) };
           let c_s = Target { nam: fresh(newx) };
           let num = Target { nam: format!("{}x", trg.show()) };
@@ -246,8 +246,8 @@ pub fn compile_term(book: &run::Book, tab: usize, fid: run::Val) -> String {
     // ----------------- fast op
     // r <~ #(op(+,A,B))
     if ptr.is_op2() {
-      let val = def.node[ptr.loc() as usize].0;
-      let ret = def.node[ptr.loc() as usize].1;
+      let val = def.node[ptr.loc() as usize].1;
+      let ret = def.node[ptr.loc() as usize].2;
       if let Some(val) = got(vars, def, val) {
         let val = Target { nam: val };
         let nxt = Target { nam: fresh(newx) };
@@ -277,8 +277,8 @@ pub fn compile_term(book: &run::Book, tab: usize, fid: run::Val) -> String {
     if ptr.is_dup() {
       let x1 = Target { nam: format!("{}x", trg.show()) };
       let x2 = Target { nam: format!("{}y", trg.show()) };
-      let p1 = def.node[ptr.loc() as usize].0;
-      let p2 = def.node[ptr.loc() as usize].1;
+      let p1 = def.node[ptr.loc() as usize].1;
+      let p2 = def.node[ptr.loc() as usize].2;
       let lc = fresh(newx);
       code.push_str(&format!("{}let {} : Trg;\n", ident(tab), &x1.show()));
       code.push_str(&format!("{}let {} : Trg;\n", ident(tab), &x2.show()));
@@ -306,8 +306,8 @@ pub fn compile_term(book: &run::Book, tab: usize, fid: run::Val) -> String {
     if ptr.is_ctr() && ptr.tag() == run::LAM {
       let x1 = Target { nam: format!("{}x", trg.show()) };
       let x2 = Target { nam: format!("{}y", trg.show()) };
-      let p1 = def.node[ptr.loc() as usize].0;
-      let p2 = def.node[ptr.loc() as usize].1;
+      let p1 = def.node[ptr.loc() as usize].1;
+      let p2 = def.node[ptr.loc() as usize].2;
       let lc = fresh(newx);
       code.push_str(&format!("{}let {} : Trg;\n", ident(tab), &x1.show()));
       code.push_str(&format!("{}let {} : Trg;\n", ident(tab), &x2.show()));
@@ -371,8 +371,8 @@ pub fn compile_term(book: &run::Book, tab: usize, fid: run::Val) -> String {
     let mut code = String::new();
     if ptr.is_nod() {
       let lc = fresh(newx);
-      let p1 = def.node[ptr.loc() as usize].0;
-      let p2 = def.node[ptr.loc() as usize].1;
+      let p1 = def.node[ptr.loc() as usize].1;
+      let p2 = def.node[ptr.loc() as usize].2;
       code.push_str(&format!("{}let {} = self.alloc();\n", ident(tab), lc));
       code.push_str(&make(tab, newx, vars, def, p2, &format!("Trg::Ptr(Ptr::new(VR2, 0, {}))", lc)));
       code.push_str(&make(tab, newx, vars, def, p1, &format!("Trg::Ptr(Ptr::new(VR1, 0, {}))", lc)));
@@ -401,7 +401,7 @@ pub fn compile_term(book: &run::Book, tab: usize, fid: run::Val) -> String {
   ) -> Option<String> {
     if ptr.is_var() {
       let got = def.node[ptr.loc() as usize];
-      let slf = if ptr.tag() == run::VR1 { got.0 } else { got.1 };
+      let slf = if ptr.tag() == run::VR1 { got.1 } else { got.2 };
       return vars.get(&slf).cloned();
     } else {
       return None;

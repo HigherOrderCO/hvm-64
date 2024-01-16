@@ -1,3 +1,6 @@
+#![feature(generic_const_exprs)]
+#![allow(incomplete_features)]
+
 #![allow(dead_code)]
 #![allow(non_snake_case)]
 #![allow(non_upper_case_globals)]
@@ -20,7 +23,7 @@ fn main() {
   let args: Vec<String> = env::args().collect();
   let opts = args.iter().skip(3).map(|s| s.as_str()).collect::<HashSet<_>>();
   let book = run::Book::new();
-  let data = run::Heap::init(1 << 28);
+  let data = run::Heap::<false>::init(1 << 28);
   let mut net = run::Net::new(&data);
   net.boot(ast::name_to_val("main"));
   let start_time = std::time::Instant::now();
@@ -35,7 +38,7 @@ fn main() {
 
 #[cfg(feature = "hvm_cli_options")]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-  let data = run::Heap::init(1 << 28);
+  let data = run::Heap::<false>::init(1 << 28);
   let args: Vec<String> = env::args().collect();
   let help = "help".to_string();
   let opts = args.iter().skip(3).map(|s| s.as_str()).collect::<HashSet<_>>();
@@ -93,7 +96,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
   Ok(())
 }
 
-fn print_stats(net: &run::Net, start_time: std::time::Instant) {
+fn print_stats(net: &run::Net<false>, start_time: std::time::Instant) {
   println!("RWTS   : {}", net.rewrites());
   println!("- ANNI : {}", net.rwts.anni);
   println!("- COMM : {}", net.rwts.comm);
@@ -105,7 +108,7 @@ fn print_stats(net: &run::Net, start_time: std::time::Instant) {
 }
 
 // Load file and generate net
-fn load<'a>(data: &'a run::Data, file: &str) -> (run::Book, run::Net<'a>) {
+fn load<'a>(data: &'a run::Data<false>, file: &str) -> (run::Book, run::Net<'a, false>) {
     let Ok(file) = fs::read_to_string(file) else {
         eprintln!("Input file not found");
         std::process::exit(1);
@@ -187,8 +190,8 @@ pub fn gen_cuda_book(book: &run::Book) -> String {
     // .node
     code.push_str("  // .node\n");
     for (i, node) in net.node.iter().enumerate() {
-      code.push_str(&format!("  0x{:08X},", node.0.0));
-      code.push_str(&format!(" 0x{:08X},", node.1.0));
+      code.push_str(&format!("  0x{:08X},", node.1.0));
+      code.push_str(&format!(" 0x{:08X},", node.2.0));
       if (i + 1) % 4 == 0 {
         code.push_str("\n");
       }
@@ -225,4 +228,3 @@ pub fn gen_cuda_book(book: &run::Book) -> String {
 
   return code;
 }
-
