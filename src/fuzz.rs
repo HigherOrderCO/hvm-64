@@ -1,6 +1,7 @@
 use std::{
   any::Any,
   cell::{OnceCell, RefCell},
+  hash::{DefaultHasher, Hash, Hasher},
   marker::PhantomData,
   ops::Add,
   panic::{catch_unwind, AssertUnwindSafe},
@@ -212,7 +213,12 @@ impl Fuzzer {
         let mut paths = 0;
         loop {
           paths += 1;
-          println!("{:?}", &fuzzer.path.lock().unwrap().path);
+          {
+            let path = &fuzzer.path.lock().unwrap().path;
+            let mut hasher = DefaultHasher::new();
+            path.hash(&mut hasher);
+            println!("{:x} {:?}", hasher.finish(), path);
+          }
           fuzzer.atomics.lock().unwrap().clear();
           f(&fuzzer);
           if !fuzzer.path.lock().unwrap().next_path() {

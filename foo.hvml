@@ -1,0 +1,15 @@
+
+data Tree = (N x y) | L
+
+all = {L (N all all)}
+
+data bool = true | false
+
+(and true true) = true
+(and * *) = false
+
+(equal L L) = true
+(equal (N a b) (N c d)) = (and (equal a c) (equal b d))
+(equal * *) = false
+
+main = (equal L L)

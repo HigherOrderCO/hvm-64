@@ -580,12 +580,8 @@ impl<'a> Net<'a> {
     self.link_foreign_port_port(a_wire, a_port, b_port);
   }
 
-  fn link_foreign_port_port(&mut self, a_wire: Wire, mut a_port: Port, b_port: Port) {
+  fn link_foreign_port_port(&mut self, a_wire: Wire, a_port: Port, b_port: Port) {
     trace!(self.tracer, a_wire, a_port, b_port);
-    if a_port.tag() == Var && a_port.lab() == 1 {
-      a_port = a_port.wire().swap_target(b_port.clone());
-      trace!(self.tracer, a_port);
-    }
     if a_port == Port::LOCK {
       return;
     }
@@ -596,13 +592,6 @@ impl<'a> Net<'a> {
     let x_port = x_wire.swap_target(b_port.clone());
     trace!(self.tracer, "swap", x_port);
     if x_port != Port::new_var(a_wire.loc()) {
-      if x_port.tag() == Var && x_port.lab() == 1 {
-        let y_port = x_port.wire().swap_target(Port::GONE);
-        if y_port != Port::LOCK {
-          // TODO
-        }
-        return;
-      }
       // if x_port is lock, this condition will fail
       if x_port < b_port {
         self.link_port_port(x_port, b_port);
@@ -638,47 +627,35 @@ impl<'a> Net<'a> {
         todo!()
       }
       a_port = x_port;
-      if a_port.tag() == Var {
-        let y_port = a_port.wire().swap_target(Port::new(Var, 1, x_wire.loc()));
-        if y_port == Port::LOCK {
-          todo!();
-        }
-        if y_port != Port::new_var(x_wire.loc()) {
-          a_port = y_port;
-          continue;
-        }
-      }
       if a_port.tag() != Red {
         break;
       }
     }
-    trace!(self.tracer, a_wire, a_port, x_wire);
-    if a_port.tag() != Var {
-      let x_port = a_wire.swap_target(a_port);
-      if x_port != Port::LOCK {
-        return self.link_wire_port(a_wire, x_port);
-      }
-      return;
-    }
-    let y_port = a_wire.swap_target(a_port.clone());
+    trace!(self.tracer, a_wire, a_port);
+    let y_port = a_port.wire().swap_target(Port::new_var(a_wire.loc()));
     trace!(self.tracer, y_port);
-    if y_port != Port::LOCK {
-      // TODO:
-      // in theory, we can unlock x_wire, and then link x_wire to y_port
-      // but this is kind of sad, I think?
-      // can probably be much simpler if we just inline the second half of link_wire_port
-
-      // thought: term "owned" vs "foreign" ports
+    if y_port == Port::LOCK {
+    } else if y_port != Port::new_var(x_wire.loc()) {
       todo!()
     }
-    if a_port.wire().cas_target(Port::new(Var, 1, x_wire.loc()), Port::new_var(a_wire.loc())).is_ok() {
+    if let Err(y_port) = a_wire.cas_target(Port::LOCK, a_port.clone()) {
+      trace!(self.tracer, y_port);
+      if let Err(z_port) = a_port.wire().cas_target(Port::new_var(a_wire.loc()), y_port.clone()) {
+        trace!(self.tracer, z_port);
+        if y_port == z_port {
+          if y_port.tag() == Red {
+            return self.try_resolve_red(a_wire, y_port);
+          }
+        } else {
+          dbg!(y_port, z_port);
+          todo!()
+        }
+      }
+      trace!(self.tracer, "cas 2 ok");
       return;
     }
-    let z_port = x_wire.swap_target(Port::new_var(a_wire.loc()));
-    trace!(self.tracer, z_port);
-    if z_port != Port::LOCK && z_port != Port::GONE {
-      return self.link_foreign_port_port(a_port.wire(), Port::new_var(a_wire.loc()), z_port);
-    }
+    trace!(self.tracer, "cas 1 ok");
+    return;
   }
 }
 
