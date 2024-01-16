@@ -13,6 +13,8 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use crate::u60;
 
+pub const USE_LAZY : bool = true;
+
 pub type Tag  = u8;
 pub type Lab  = u32;
 pub type Loc  = u32;
@@ -1159,5 +1161,71 @@ impl<'a> Net<'a, false> {
         }
       }
     }
+  }
+}
+
+impl<'a> Net<'a, true> {
+  #[inline(always)]
+  pub fn reduce(&mut self, book: &Book, mut prev: Ptr) -> usize {
+    todo!()
+    //let mut count = 0;
+    //let mut path = vec![];
+
+    //loop {
+      //// Load ptrs
+      //let mut next = *self.target(prev);
+
+      //println!("reduce {:016x} -> {:016x}", prev.data(), next.data());
+
+      //// If next is ref, dereferences
+      //if next.is_ref() {
+        //self.call(book, next, prev);
+        //println!("call {:016x}", self.target(prev).0);
+        //continue;
+      //}
+
+      //// If next is root, stop.
+      //if next == ROOT {
+        //println!("root!");
+        //break ;
+      //}
+
+      //// If next is a main port...
+      //if next.is_pri() {
+        //// If prev is a main port, reduce the active pair.
+        //if prev.is_pri() {
+          //println!("redex!");
+          //self.interact(book, &mut prev, &mut next);
+          //prev = path.pop().unwrap();
+          //continue;
+        //}
+        //// Otherwise, we're done.
+        //println!("axiom!");
+        //break;
+      //}
+      //println!("next not pri");
+      //// If next is an aux port, pass through.
+      //path.push(prev);
+      //prev = Ptr::new(CON, next.val());
+    //}
+    //println!("done");
+    //return *self.target(prev);
+  }
+
+  #[inline(always)]
+  pub fn expand(&mut self, book: &Book) {
+    todo!()
+  }
+
+  pub fn lazy_normal(&mut self, book: &Book) {
+    todo!()
+  }
+
+  pub fn fork(&self, tid: usize, tids: usize) -> Self {
+    todo!()
+  }
+
+  pub fn parallel_normal(&mut self, book: &Book) {
+    todo!()
   }
 }

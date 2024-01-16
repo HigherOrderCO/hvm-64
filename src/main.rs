@@ -23,7 +23,7 @@ fn main() {
   let args: Vec<String> = env::args().collect();
   let opts = args.iter().skip(3).map(|s| s.as_str()).collect::<HashSet<_>>();
   let book = run::Book::new();
-  let data = run::Heap::<false>::init(1 << 28);
+  let data = run::Heap::init(1 << 28);
   let mut net = run::Net::new(&data);
   net.boot(ast::name_to_val("main"));
   let start_time = std::time::Instant::now();
@@ -38,7 +38,7 @@ fn main() {
 
 #[cfg(feature = "hvm_cli_options")]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-  let data = run::Heap::<false>::init(1 << 28);
+  let data = run::Heap::<{run::USE_LAZY}>::init(1 << 28);
   let args: Vec<String> = env::args().collect();
   let help = "help".to_string();
   let opts = args.iter().skip(3).map(|s| s.as_str()).collect::<HashSet<_>>();
@@ -96,7 +96,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
   Ok(())
 }
 
-fn print_stats(net: &run::Net<false>, start_time: std::time::Instant) {
+fn print_stats(net: &run::Net<{run::USE_LAZY}>, start_time: std::time::Instant) {
   println!("RWTS   : {}", net.rewrites());
   println!("- ANNI : {}", net.rwts.anni);
   println!("- COMM : {}", net.rwts.comm);
@@ -108,7 +108,7 @@ fn print_stats(net: &run::Net<false>, start_time: std::time::Instant) {
 }
 
 // Load file and generate net
-fn load<'a>(data: &'a run::Data<false>, file: &str) -> (run::Book, run::Net<'a, false>) {
+fn load<'a>(data: &'a run::Data<{run::USE_LAZY}>, file: &str) -> (run::Book, run::Net<'a, {run::USE_LAZY}>) {
     let Ok(file) = fs::read_to_string(file) else {
         eprintln!("Input file not found");
         std::process::exit(1);
