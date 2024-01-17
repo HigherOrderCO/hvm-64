@@ -49,11 +49,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
       if let Some(file_name) = f_name {
         let (book, mut net) = load(&data, file_name);
         let start_time = std::time::Instant::now();
-        if opts.contains("-1") {
-          net.normal(&book);
-        } else {
-          net.parallel_normal(&book);
-        }
+        net.normal(&book);
+        //if opts.contains("-1") {
+          //net.normal(&book);
+        //} else {
+          //net.parallel_normal(&book);
+        //}
         println!("{}", ast::show_runtime_net(&net));
         if opts.contains("-s") {
           print_stats(&net, start_time);

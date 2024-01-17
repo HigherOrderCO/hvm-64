@@ -82,7 +82,7 @@ pub enum Trg {
 }
 
 // The global node buffer.
-pub type Data<const LAZY: bool> = [([APtr; LAZY as usize], APtr, APtr)];
+pub type Data<const LAZY: bool> = [([(APtr,APtr); LAZY as usize], APtr, APtr)];
 
 // A handy wrapper around Data.
 pub struct Heap<'a, const LAZY: bool> 
@@ -337,6 +337,25 @@ where [(); LAZY as usize]: {
   }
 
   #[inline(always)]
+  pub fn get_main(&self, index: Loc) -> (Ptr,Ptr) {
+    unsafe {
+      println!("main of: {:016x} = {:016x}", index, self.data.get_unchecked(index as usize).0[0].1.load().0);
+      let this = self.data.get_unchecked(index as usize).0[0].0.load();
+      let targ = self.data.get_unchecked(index as usize).0[0].1.load();
+      return (this, targ);
+    }
+  }
+
+  #[inline(always)]
+  pub fn set_main(&self, index: Loc, this: Ptr, targ: Ptr) {
+    println!("set main {:x} = {:016x} ~ {:016x}", index, this.0, targ.0);
+    unsafe {
+      self.data.get_unchecked(index as usize).0[0].0.store(this);
+      self.data.get_unchecked(index as usize).0[0].1.store(targ);
+    }
+  }
+
+  #[inline(always)]
   pub fn cas(&self, index: Loc, port: Port, expected: Ptr, value: Ptr) -> Result<Ptr,Ptr> {
     unsafe {
       let node = self.data.get_unchecked(index as usize);
@@ -367,20 +386,21 @@ where [(); LAZY as usize]: {
 }
 
 impl<'a> Heap<'a, true> {
-  pub fn init(size: usize) -> Box<[([APtr; 1], APtr, APtr)]> {
+  pub fn init(size: usize) -> Box<[([(APtr,APtr); 1], APtr, APtr)]> {
     let mut data = vec![];
     for _ in 0..size {
-      let p0 = [APtr::new(NULL)];
+      let p0 = [(APtr::new(NULL), APtr::new(NULL))];
       let p1 = APtr::new(NULL);
       let p2 = APtr::new(NULL);
       data.push((p0, p1, p2));
     }
     return data.into_boxed_slice();
   }
+
 }
 
 impl<'a> Heap<'a, false> {
-  pub fn init(size: usize) -> Box<[([APtr; 0], APtr, APtr)]> {
+  pub fn init(size: usize) -> Box<[([(APtr,APtr); 0], APtr, APtr)]> {
     let mut data = vec![];
     for _ in 0..size {
       let p0 = [];
@@ -518,10 +538,24 @@ where [(); LAZY as usize]: {
 
   #[inline(always)]
   pub fn redux(&mut self, a: Ptr, b: Ptr) {
+    println!("redux {:016x} ~ {:016x}", a.0, b.0);
     if Ptr::can_skip(a, b) {
+      println!("-skip");
       self.rwts.eras += 1;
     } else {
-      self.rdex.push((a, b));
+      if LAZY {
+        if a.is_nod() {
+          println!("A");
+          self.heap.set_main(a.loc(), a, b);
+        }
+        if b.is_nod() {
+          println!("B");
+          self.heap.set_main(b.loc(), b, a);
+        }
+      } else {
+        println!("-stct");
+        self.rdex.push((a, b));
+      }
     }
   }
 
@@ -584,8 +618,13 @@ where [(); LAZY as usize]: {
   // When two threads interfere, uses the lock-free link algorithm described on the 'paper/'.
   #[inline(always)]
   pub fn linker(&mut self, a_ptr: Ptr, b_ptr: Ptr) {
+    println!("... linker {:016x} {:016x}", a_ptr.0, b_ptr.0);
     if a_ptr.is_var() {
       self.set_target(a_ptr, b_ptr);
+    } else {
+      if LAZY && a_ptr.is_nod() {
+        println!("C"); self.heap.set_main(a_ptr.loc(), a_ptr, b_ptr);
+      }
     }
   }
 
@@ -613,6 +652,9 @@ where [(); LAZY as usize]: {
       }
     } else {
       self.set_target(a_dir, NULL);
+      if LAZY && a_ptr.is_nod() {
+        println!("D"); self.heap.set_main(a_ptr.loc(), a_ptr, b_ptr);
+      }
     }
   }
 
@@ -715,6 +757,7 @@ where [(); LAZY as usize]: {
   // Performs an interaction over a redex.
   #[inline(always)]
   pub fn interact(&mut self, book: &Book, a: Ptr, b: Ptr) {
+    println!("intr {:016x} {:016x}", a.0, b.0);
     match (a.tag(), b.tag()) {
       (REF   , OP2..) => self.call(book, a, b),
       (OP2.. , REF  ) => self.call(book, b, a),
@@ -898,6 +941,7 @@ where [(); LAZY as usize]: {
   // Expands a closed net.
   #[inline(always)]
   pub fn call(&mut self, book: &Book, ptr: Ptr, trg: Ptr) {
+    println!("call {:016x} {:016x}", ptr.0, trg.0);
     self.rwts.dref += 1;
     let mut ptr = ptr;
     // FIXME: change "while" to "if" once lang prevents refs from returning refs
@@ -910,7 +954,7 @@ where [(); LAZY as usize]: {
       //println!("{:08x?}", book.defs);
       //println!("{:08x} {}", ptr.0, crate::ast::val_to_name(ptr.val()));
       let got = book.get(ptr.val()).unwrap();
-      if trg.is_dup() && !got.labs.contains(&trg.lab()) {
+      if !LAZY && trg.is_dup() && !got.labs.contains(&trg.lab()) {
         return self.copy(trg, ptr);
       } else if got.node.len() > 0 {
         let len = got.node.len() - 1;
@@ -923,14 +967,17 @@ where [(); LAZY as usize]: {
           let p1 = self.adjust(unsafe { got.node.get_unchecked(1 + i) }.1);
           let p2 = self.adjust(unsafe { got.node.get_unchecked(1 + i) }.2);
           let lc = *unsafe { self.locs.get_unchecked(1 + i) };
-          self.heap.set(lc, P1, p1);
-          self.heap.set(lc, P2, p2);
+          self.link(Ptr::new(VR1, 0, lc), p1);
+          self.link(Ptr::new(VR2, 0, lc), p2);
+          //self.heap.set(lc, P1, p1);
+          //self.heap.set(lc, P2, p2);
         }
         // Load redexes, adjusted.
         for r in &got.rdex {
           let p1 = self.adjust(r.0);
           let p2 = self.adjust(r.1);
-          self.rdex.push((p1, p2));
+          self.redux(p1, p2);
+          //self.rdex.push((p1, p2));
         }
         // Load root, adjusted.
         ptr = self.adjust(got.node[0].2);
@@ -1165,51 +1212,75 @@ impl<'a> Net<'a, false> {
 }
 
 impl<'a> Net<'a, true> {
+  // Like get_target, but also for main ports
   #[inline(always)]
-  pub fn reduce(&mut self, book: &Book, mut prev: Ptr) -> usize {
-    todo!()
-    //let mut count = 0;
-    //let mut path = vec![];
+  pub fn get_target_full(&self, ptr: Ptr) -> Ptr {
+    println!("get_target_full {:016x}", ptr.0);
+    if ptr.is_var() || ptr.is_red() {
+      return self.get_target(ptr);
+    }
+    if ptr.is_nod() {
+      return self.heap.get_main(ptr.loc()).1;
+    }
+    panic!("Can't get target of: {:016x} {}", ptr.0, crate::ast::val_to_name(ptr.val()));
+  }
 
-    //loop {
-      //// Load ptrs
-      //let mut next = *self.target(prev);
+  #[inline(always)]
+  pub fn reduce(&mut self, book: &Book, mut prev: Ptr) -> Ptr {
+    println!("reduce {:016x}", prev.0);
+    let mut path : Vec<Ptr> = vec![];
 
-      //println!("reduce {:016x} -> {:016x}", prev.data(), next.data());
+    loop {
+      // Load ptrs
+      println!("move {:016x}", prev.0);
 
-      //// If next is ref, dereferences
-      //if next.is_ref() {
-        //self.call(book, next, prev);
-        //println!("call {:016x}", self.target(prev).0);
-        //continue;
-      //}
+      if prev.is_ref() {
+        println!("OXIIIII");
+        panic!();
+      }
 
-      //// If next is root, stop.
-      //if next == ROOT {
-        //println!("root!");
-        //break ;
-      //}
 
-      //// If next is a main port...
-      //if next.is_pri() {
-        //// If prev is a main port, reduce the active pair.
-        //if prev.is_pri() {
-          //println!("redex!");
-          //self.interact(book, &mut prev, &mut next);
-          //prev = path.pop().unwrap();
-          //continue;
-        //}
-        //// Otherwise, we're done.
-        //println!("axiom!");
-        //break;
-      //}
-      //println!("next not pri");
-      //// If next is an aux port, pass through.
-      //path.push(prev);
-      //prev = Ptr::new(CON, next.val());
-    //}
+      let next = self.get_target_full(prev);
+      println!("---> {:016x}", next.0);
+
+      // If next is ref, dereferences
+      if next.is_ref() {
+        self.call(book, next, prev);
+        println!("call {:016x} ... {}", self.get_target_full(prev).0, self.rdex.len());
+        continue;
+      }
+
+      // If next is root, stop.
+      if next == ROOT {
+        println!("root!");
+        break ;
+      }
+
+      // If next is a main port...
+      if next.is_pri() {
+        // If prev is a main port, reduce the active pair.
+        if prev.is_pri() {
+          println!("redex!");
+          self.interact(book, prev, next);
+          prev = path.pop().unwrap();
+          continue;
+        // Otherwise, we're done.
+        } else {
+          println!("axiom!");
+          break;
+        }
+      }
+
+      // If next is an aux port, pass through.
+      let main = self.heap.get_main(next.loc());
+      println!("AUX; next: {:016x} | main: {:016x} ~ {:016x}", next.0, main.0.0, main.1.0);
+      path.push(prev);
+      prev = main.0;
+      println!("going to {:016x}", main.0.0);
+    }
+
     //println!("done");
-    //return *self.target(prev);
+    return self.get_target_full(prev);
   }
 
   #[inline(always)]
@@ -1217,8 +1288,20 @@ impl<'a> Net<'a, true> {
     todo!()
   }
 
-  pub fn lazy_normal(&mut self, book: &Book) {
-    todo!()
+  pub fn normal(&mut self, book: &Book) {
+    let mut visit = vec![ROOT];
+    let mut count = 0;
+    while let Some(prev) = visit.pop() {
+      count += 1;
+      if count > 100 { break; }
+      println!("normal {:016x} | {}", prev.0, self.rewrites());
+      let next = self.reduce(book, prev);
+      if next.is_nod() { // FIXME: what if OP1?
+        visit.push(Ptr::new(VR1, 0, next.loc()));
+        visit.push(Ptr::new(VR2, 0, next.loc()));
+      }
+    }
+    println!("done {:016x}", self.get_target(ROOT).0);
   }
 
   pub fn fork(&self, tid: usize, tids: usize) -> Self {
@@ -1228,4 +1311,5 @@ impl<'a> Net<'a, true> {
   pub fn parallel_normal(&mut self, book: &Book) {
     todo!()
   }
+
 }
