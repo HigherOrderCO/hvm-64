@@ -18,46 +18,57 @@ use hvmc::u60;
 
 use std::collections::HashSet;
 
-#[cfg(not(feature = "hvm_cli_options"))]
-fn main() {
+struct Args {
+  func: String,
+  argm: String,
+  opts: HashSet<String>,
+}
+
+fn get_args() -> Args {
   let args: Vec<String> = env::args().collect();
-  let opts = args.iter().skip(3).map(|s| s.as_str()).collect::<HashSet<_>>();
-  let book = run::Book::new();
-  let data = run::Heap::init(1 << 28);
-  let mut net = run::Net::new(&data);
-  net.boot(ast::name_to_val("main"));
-  let start_time = std::time::Instant::now();
-  if opts.contains("-1") {
+  let func = args.get(1).unwrap_or(&"help".to_string()).to_string();
+  let argm = args.get(2).unwrap_or(&"".to_string()).to_string();
+  let opts = args.iter().skip(3).map(|s| s.to_string()).collect::<HashSet<_>>();
+  return Args { func, argm, opts };
+}
+
+// Runs 'main' without showing the CLI options
+fn run_without_cli(args: Args) {
+  let lazy    = args.opts.contains("-L");
+  let seq     = lazy || args.opts.contains("-1");
+  let file    = args.argm;
+  let book    = run::Book::new();
+  let mut net = run::Net::new(1 << 28, false);
+  let begin   = std::time::Instant::now();
+  if lazy { todo!() }
+  if seq {
     net.normal(&book);
   } else {
     net.parallel_normal(&book);
   }
-  println!("{}", ast::show_runtime_net(&net));
-  print_stats(&net, start_time);
+  println!("{}", net.show());
+  print_stats(&net, begin);
 }
 
-#[cfg(feature = "hvm_cli_options")]
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-  let data = run::Heap::<{run::USE_LAZY}>::init(1 << 28);
-  let args: Vec<String> = env::args().collect();
-  let help = "help".to_string();
-  let opts = args.iter().skip(3).map(|s| s.as_str()).collect::<HashSet<_>>();
-  let action = args.get(1).unwrap_or(&help);
-  let f_name = args.get(2);
-  match action.as_str() {
+fn run_with_cli(args: Args) -> Result<(), Box<dyn std::error::Error>> {
+  let lazy = args.opts.contains("-L");
+  let seq  = lazy || args.opts.contains("-1");
+  match args.func.as_str() {
     "run" => {
-      if let Some(file_name) = f_name {
-        let (book, mut net) = load(&data, file_name);
-        let start_time = std::time::Instant::now();
-        net.normal(&book);
-        //if opts.contains("-1") {
-          //net.normal(&book);
-        //} else {
-          //net.parallel_normal(&book);
-        //}
-        println!("{}", ast::show_runtime_net(&net));
-        if opts.contains("-s") {
-          print_stats(&net, start_time);
+      if args.argm.len() > 0 {
+        let file    = args.argm;
+        let book    = load_book(&file);
+        let mut net = run::Net::new(1 << 28, lazy);
+        let begin   = std::time::Instant::now();
+        if seq {
+          net.normal(&book);
+        } else {
+          net.parallel_normal(&book);
+        }
+        //println!("{}", net.show());
+        println!("{}", net.show());
+        if args.opts.contains("-s") {
+          print_stats(&net, begin);
         }
       } else {
         println!("Usage: hvmc run <file.hvmc> [-s]");
@@ -65,18 +76,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
       }
     }
     "compile" => {
-      if let Some(file_name) = f_name {
-        let (book, _) = load(&data, file_name);
-        compile_book_to_rust_crate(file_name, &book)?;
-        compile_rust_crate_to_executable(file_name)?;
+      if args.argm.len() > 0 {
+        let file  = args.argm;
+        let book  = load_book(&file);
+        let net   = run::Net::new(1 << 28, lazy);
+        let begin = std::time::Instant::now();
+        compile_book_to_rust_crate(&file, &book)?;
+        compile_rust_crate_to_executable(&file)?;
       } else {
         println!("Usage: hvmc compile <file.hvmc>");
         std::process::exit(1);
       }
     }
     "gen-cuda-book" => {
-      if let Some(file_name) = f_name {
-        let book = load(&data, file_name).0;
+      if args.argm.len() > 0 {
+        let file  = args.argm;
+        let book  = load_book(&file);
+        let net   = run::Net::new(1 << 28, lazy);
+        let begin = std::time::Instant::now();
         println!("{}", gen_cuda_book(&book));
       } else {
         println!("Usage: hvmc gen-cuda-book <file.hvmc>");
@@ -97,27 +114,35 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
   Ok(())
 }
 
-fn print_stats(net: &run::Net<{run::USE_LAZY}>, start_time: std::time::Instant) {
-  println!("RWTS   : {}", net.rewrites());
-  println!("- ANNI : {}", net.rwts.anni);
-  println!("- COMM : {}", net.rwts.comm);
-  println!("- ERAS : {}", net.rwts.eras);
-  println!("- DREF : {}", net.rwts.dref);
-  println!("- OPER : {}", net.rwts.oper);
-  println!("TIME   : {:.3} s", (start_time.elapsed().as_millis() as f64) / 1000.0);
-  println!("RPS    : {:.3} m", (net.rewrites() as f64) / (start_time.elapsed().as_millis() as f64) / 1000.0);
+#[cfg(not(feature = "hvm_cli_options"))]
+fn main() {
+  run_without_cli(get_args())
 }
 
-// Load file and generate net
-fn load<'a>(data: &'a run::Data<{run::USE_LAZY}>, file: &str) -> (run::Book, run::Net<'a, {run::USE_LAZY}>) {
-    let Ok(file) = fs::read_to_string(file) else {
-        eprintln!("Input file not found");
-        std::process::exit(1);
-    };
-  let book = ast::book_to_runtime(&ast::do_parse_book(&file));
-  let mut net = run::Net::new(&data);
-  net.boot(ast::name_to_val("main"));
-  return (book, net);
+#[cfg(feature = "hvm_cli_options")]
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+  run_with_cli(get_args())
+}
+
+fn print_stats(net: &run::Net, begin: std::time::Instant) {
+  let rewrites = net.get_rewrites();
+  println!("RWTS   : {}", rewrites.total());
+  println!("- ANNI : {}", rewrites.anni);
+  println!("- COMM : {}", rewrites.comm);
+  println!("- ERAS : {}", rewrites.eras);
+  println!("- DREF : {}", rewrites.dref);
+  println!("- OPER : {}", rewrites.oper);
+  println!("TIME   : {:.3} s", (begin.elapsed().as_millis() as f64) / 1000.0);
+  println!("RPS    : {:.3} m", (rewrites.total() as f64) / (begin.elapsed().as_millis() as f64) / 1000.0);
+}
+
+// Load file
+fn load_book(file: &str) -> run::Book {
+  let Ok(file) = fs::read_to_string(file) else {
+    eprintln!("Input file not found");
+    std::process::exit(1);
+  };
+  return ast::book_to_runtime(&ast::do_parse_book(&file));
 }
 
 pub fn compile_book_to_rust_crate(f_name: &str, book: &run::Book) -> Result<(), std::io::Error> {

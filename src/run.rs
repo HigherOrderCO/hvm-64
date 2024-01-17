@@ -13,8 +13,6 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use crate::u60;
 
-pub const USE_LAZY : bool = true;
-
 pub type Tag  = u8;
 pub type Lab  = u32;
 pub type Loc  = u32;
@@ -74,6 +72,26 @@ pub struct Ptr(pub Val);
 // An atomic tagged pointer.
 pub struct APtr(pub AVal);
 
+// FIXME: the 'this' pointer of headers is wasteful, since it is only used once in the lazy
+// reducer, and, there, only the tag/lab is needed, because the loc is already known. As such, we
+// could actually store only the tag/lab, saving up 32 bits per node.
+
+// A principal port, used on lazy mode.
+pub struct Head {
+  this: Ptr, // points to this node's port 0
+  targ: Ptr, // points to the target port 0
+}
+
+// An atomic principal port, used on lazy mode.
+pub struct AHead {
+  this: APtr, // points to this node's port 0
+  targ: APtr, // points to the target port 0
+}
+
+// An interaction combinator node.
+pub type  Node<const LAZY: bool> = ([ Head; LAZY as usize],  Ptr,  Ptr);
+pub type ANode<const LAZY: bool> = ([AHead; LAZY as usize], APtr, APtr);
+
 // A target pointer, with implied ownership.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 pub enum Trg {
@@ -82,15 +100,16 @@ pub enum Trg {
 }
 
 // The global node buffer.
-pub type Data<const LAZY: bool> = [([(APtr,APtr); LAZY as usize], APtr, APtr)];
+pub type Nodes<const LAZY: bool> = [ANode<LAZY>];
 
-// A handy wrapper around Data.
+// A handy wrapper around Nodes.
 pub struct Heap<'a, const LAZY: bool> 
 where [(); LAZY as usize]: {
-  pub data: &'a Data<LAZY>,
+  pub nodes: &'a Nodes<LAZY>,
 }
 
 // Rewrite counter.
+#[derive(Copy, Clone)]
 pub struct Rewrites {
   pub anni: usize, // anni rewrites
   pub comm: usize, // comm rewrites
@@ -115,7 +134,7 @@ pub struct Area {
 }
 
 // A interaction combinator net.
-pub struct Net<'a, const LAZY: bool> 
+pub struct NetFields<'a, const LAZY: bool> 
 where [(); LAZY as usize]: {
   pub tid : usize, // thread id
   pub tids: usize, // thread count
@@ -260,10 +279,35 @@ impl Ptr {
   pub fn can_skip(a: Ptr, b: Ptr) -> bool {
     return matches!(a.tag(), ERA | REF) && matches!(b.tag(), ERA | REF);
   }
+
+  #[inline(always)]
+  pub fn view(&self) -> String {
+    if *self == NULL {
+      return format!("(NUL)");
+    } else {
+      return match self.tag() {
+        VR1 => format!("(VR1 {:07x} {:08x})", self.lab(), self.loc()),
+        VR2 => format!("(VR2 {:07x} {:08x})", self.lab(), self.loc()),
+        RD1 => format!("(RD1 {:07x} {:08x})", self.lab(), self.loc()),
+        RD2 => format!("(RD2 {:07x} {:08x})", self.lab(), self.loc()),
+        REF => format!("(REF \"{}\")", crate::ast::val_to_name(self.val())),
+        ERA => format!("(ERA)"),
+        NUM => format!("(NUM {:x})", self.val()),
+        OP2 => format!("(OP2 {:07x} {:08x})", self.lab(), self.loc()),
+        OP1 => format!("(OP1 {:07x} {:08x})", self.lab(), self.loc()),
+        MAT => format!("(MAT {:07x} {:08x})", self.lab(), self.loc()),
+        LAM => format!("(LAM {:07x} {:08x})", self.lab(), self.loc()),
+        TUP => format!("(TUP {:07x} {:08x})", self.lab(), self.loc()),
+        DUP => format!("(DUP {:07x} {:08x})", self.lab(), self.loc()),
+        END => format!("(END)"),
+        _   => format!("???"),
+      };
+    };
+  }
 }
 
 impl APtr {
-  pub fn new(ptr: Ptr) -> Self {
+  pub const fn new(ptr: Ptr) -> Self {
     APtr(AtomicU64::new(ptr.0))
   }
 
@@ -308,14 +352,29 @@ impl Def {
 
 impl<'a, const LAZY: bool> Heap<'a, LAZY> 
 where [(); LAZY as usize]: {
-  pub fn new(data: &'a Data<LAZY>) -> Self {
-    Heap { data }
+  pub fn new(nodes: &'a Nodes<LAZY>) -> Self {
+    Heap { nodes }
+  }
+
+  pub fn init(size: usize) -> Box<[ANode<LAZY>]> {
+    let mut data = vec![];
+    const head : AHead = AHead {
+      this: APtr::new(NULL),
+      targ: APtr::new(NULL),
+    };
+    for _ in 0..size {
+      let p0 = [head; LAZY as usize];
+      let p1 = APtr::new(NULL);
+      let p2 = APtr::new(NULL);
+      data.push((p0, p1, p2));
+    }
+    return data.into_boxed_slice();
   }
 
   #[inline(always)]
   pub fn get(&self, index: Loc, port: Port) -> Ptr {
     unsafe {
-      let node = self.data.get_unchecked(index as usize);
+      let node = self.nodes.get_unchecked(index as usize);
       if port == P1 {
         return node.1.load();
       } else {
@@ -327,7 +386,7 @@ where [(); LAZY as usize]: {
   #[inline(always)]
   pub fn set(&self, index: Loc, port: Port, value: Ptr) {
     unsafe {
-      let node = self.data.get_unchecked(index as usize);
+      let node = self.nodes.get_unchecked(index as usize);
       if port == P1 {
         node.1.store(value);
       } else {
@@ -337,28 +396,28 @@ where [(); LAZY as usize]: {
   }
 
   #[inline(always)]
-  pub fn get_main(&self, index: Loc) -> (Ptr,Ptr) {
+  pub fn get_pri(&self, index: Loc) -> Head {
     unsafe {
-      println!("main of: {:016x} = {:016x}", index, self.data.get_unchecked(index as usize).0[0].1.load().0);
-      let this = self.data.get_unchecked(index as usize).0[0].0.load();
-      let targ = self.data.get_unchecked(index as usize).0[0].1.load();
-      return (this, targ);
+      //println!("main of: {:016x} = {:016x}", index, self.nodes.get_unchecked(index as usize).0[0].1.load().0);
+      let this = self.nodes.get_unchecked(index as usize).0[0].this.load();
+      let targ = self.nodes.get_unchecked(index as usize).0[0].targ.load();
+      return Head { this, targ };
     }
   }
 
   #[inline(always)]
-  pub fn set_main(&self, index: Loc, this: Ptr, targ: Ptr) {
-    println!("set main {:x} = {:016x} ~ {:016x}", index, this.0, targ.0);
+  pub fn set_pri(&self, index: Loc, this: Ptr, targ: Ptr) {
+    //println!("set main {:x} = {:016x} ~ {:016x}", index, this.0, targ.0);
     unsafe {
-      self.data.get_unchecked(index as usize).0[0].0.store(this);
-      self.data.get_unchecked(index as usize).0[0].1.store(targ);
+      self.nodes.get_unchecked(index as usize).0[0].this.store(this);
+      self.nodes.get_unchecked(index as usize).0[0].targ.store(targ);
     }
   }
 
   #[inline(always)]
   pub fn cas(&self, index: Loc, port: Port, expected: Ptr, value: Ptr) -> Result<Ptr,Ptr> {
     unsafe {
-      let node = self.data.get_unchecked(index as usize);
+      let node = self.nodes.get_unchecked(index as usize);
       let data = if port == P1 { &node.1.0 } else { &node.2.0 };
       let done = data.compare_exchange_weak(expected.0, value.0, Ordering::Relaxed, Ordering::Relaxed);
       return done.map(Ptr).map_err(Ptr);
@@ -368,7 +427,7 @@ where [(); LAZY as usize]: {
   #[inline(always)]
   pub fn swap(&self, index: Loc, port: Port, value: Ptr) -> Ptr {
     unsafe {
-      let node = self.data.get_unchecked(index as usize);
+      let node = self.nodes.get_unchecked(index as usize);
       let data = if port == P1 { &node.1.0 } else { &node.2.0 };
       return Ptr(data.swap(value.0, Ordering::Relaxed));
     }
@@ -382,33 +441,6 @@ where [(); LAZY as usize]: {
   #[inline(always)]
   pub fn set_root(&self, value: Ptr) {
     self.set(ROOT.loc(), P2, value);
-  }
-}
-
-impl<'a> Heap<'a, true> {
-  pub fn init(size: usize) -> Box<[([(APtr,APtr); 1], APtr, APtr)]> {
-    let mut data = vec![];
-    for _ in 0..size {
-      let p0 = [(APtr::new(NULL), APtr::new(NULL))];
-      let p1 = APtr::new(NULL);
-      let p2 = APtr::new(NULL);
-      data.push((p0, p1, p2));
-    }
-    return data.into_boxed_slice();
-  }
-
-}
-
-impl<'a> Heap<'a, false> {
-  pub fn init(size: usize) -> Box<[([(APtr,APtr); 0], APtr, APtr)]> {
-    let mut data = vec![];
-    for _ in 0..size {
-      let p0 = [];
-      let p1 = APtr::new(NULL);
-      let p2 = APtr::new(NULL);
-      data.push((p0, p1, p2));
-    }
-    return data.into_boxed_slice();
   }
 }
 
@@ -429,6 +461,10 @@ impl Rewrites {
     target.eras.fetch_add(self.eras, Ordering::Relaxed);
     target.dref.fetch_add(self.dref, Ordering::Relaxed);
     target.oper.fetch_add(self.oper, Ordering::Relaxed);
+  }
+
+  pub fn total(&self) -> usize {
+    self.anni + self.comm + self.eras + self.dref + self.oper
   }
 
 }
@@ -453,24 +489,23 @@ impl AtomicRewrites {
   }
 }
 
-impl<'a, const LAZY: bool> Net<'a, LAZY> 
-where [(); LAZY as usize]: {
+impl<'a, const LAZY: bool> NetFields<'a, LAZY> where [(); LAZY as usize]: {
   // Creates an empty net with given size.
-  pub fn new(data: &'a Data<LAZY>) -> Self {
-    Net {
+  pub fn new(nodes: &'a Nodes<LAZY>) -> Self {
+    NetFields {
       tid : 0,
       tids: 1,
-      heap: Heap { data },
+      heap: Heap { nodes },
       rdex: vec![],
       locs: vec![0; 1 << 16],
-      area: Area { init: 0, size: data.len() },
+      area: Area { init: 0, size: nodes.len() },
       next: 0,
       rwts: Rewrites::new(),
     }
   }
 
   // Creates a net and boots from a REF.
-  pub fn boot(&mut self, root_id: Val) {
+  pub fn boot(&self, root_id: Val) {
     self.heap.set_root(Ptr::big(REF, root_id));
   }
 
@@ -498,6 +533,7 @@ where [(); LAZY as usize]: {
     };
     self.heap.set(index, P1, LOCK);
     self.heap.set(index, P2, LOCK);
+    //println!("ALLOC {}", index);
     index
   }
 
@@ -538,22 +574,18 @@ where [(); LAZY as usize]: {
 
   #[inline(always)]
   pub fn redux(&mut self, a: Ptr, b: Ptr) {
-    println!("redux {:016x} ~ {:016x}", a.0, b.0);
+    //println!("redux {} ~ {}", a.view(), b.view());
     if Ptr::can_skip(a, b) {
-      println!("-skip");
       self.rwts.eras += 1;
     } else {
       if LAZY {
         if a.is_nod() {
-          println!("A");
-          self.heap.set_main(a.loc(), a, b);
+          self.heap.set_pri(a.loc(), a, b);
         }
         if b.is_nod() {
-          println!("B");
-          self.heap.set_main(b.loc(), b, a);
+          self.heap.set_pri(b.loc(), b, a);
         }
       } else {
-        println!("-stct");
         self.rdex.push((a, b));
       }
     }
@@ -618,12 +650,11 @@ where [(); LAZY as usize]: {
   // When two threads interfere, uses the lock-free link algorithm described on the 'paper/'.
   #[inline(always)]
   pub fn linker(&mut self, a_ptr: Ptr, b_ptr: Ptr) {
-    println!("... linker {:016x} {:016x}", a_ptr.0, b_ptr.0);
     if a_ptr.is_var() {
       self.set_target(a_ptr, b_ptr);
     } else {
       if LAZY && a_ptr.is_nod() {
-        println!("C"); self.heap.set_main(a_ptr.loc(), a_ptr, b_ptr);
+        self.heap.set_pri(a_ptr.loc(), a_ptr, b_ptr);
       }
     }
   }
@@ -653,7 +684,7 @@ where [(); LAZY as usize]: {
     } else {
       self.set_target(a_dir, NULL);
       if LAZY && a_ptr.is_nod() {
-        println!("D"); self.heap.set_main(a_ptr.loc(), a_ptr, b_ptr);
+        self.heap.set_pri(a_ptr.loc(), a_ptr, b_ptr);
       }
     }
   }
@@ -757,7 +788,7 @@ where [(); LAZY as usize]: {
   // Performs an interaction over a redex.
   #[inline(always)]
   pub fn interact(&mut self, book: &Book, a: Ptr, b: Ptr) {
-    println!("intr {:016x} {:016x}", a.0, b.0);
+    //println!("inter {} ~ {}", a.view(), b.view());
     match (a.tag(), b.tag()) {
       (REF   , OP2..) => self.call(book, a, b),
       (OP2.. , REF  ) => self.call(book, b, a),
@@ -775,8 +806,6 @@ where [(); LAZY as usize]: {
       (NUM   , ERA  ) => self.rwts.eras += 1,
       (ERA   , NUM  ) => self.rwts.eras += 1,
       (NUM   , NUM  ) => self.rwts.eras += 1,
-      //(OP2   , OP2  ) => self.anni(a, b),
-      //(MAT   , MAT  ) => self.anni(a, b),
       (OP2   , NUM  ) => self.op2n(a, b),
       (NUM   , OP2  ) => self.op2n(b, a),
       (OP1   , NUM  ) => self.op1n(a, b),
@@ -795,7 +824,10 @@ where [(); LAZY as usize]: {
       (LAM.. , MAT  ) => self.comm(b, a),
       (MAT   , ERA  ) => self.era2(a),
       (ERA   , MAT  ) => self.era2(b),
-      _               => { println!("{:016x} {:016x}", a.0, b.0); unreachable!() },
+      _ => {
+        println!("Invalid interaction: {} ~ {}", a.view(), b.view());
+        unreachable!();
+      },
     };
   }
 
@@ -880,15 +912,19 @@ where [(); LAZY as usize]: {
     let a2 = Ptr::new(VR2, 0, a.loc()); // return
     if b.val() == 0 {
       let loc0 = self.alloc();
-      self.heap.set(loc0, P2, ERAS);
+      //self.heap.set(loc0, P2, ERAS);
+      self.link(Ptr::new(VR2, 0, loc0), ERAS);
       self.half_atomic_link(a1, Ptr::new(LAM, 0, loc0));
       self.half_atomic_link(a2, Ptr::new(VR1, 0, loc0));
     } else {
       let loc0 = self.alloc();
       let loc1 = self.alloc();
-      self.heap.set(loc0, P1, ERAS);
-      self.heap.set(loc0, P2, Ptr::new(LAM, 0, loc1));
-      self.heap.set(loc1, P1, Ptr::big(NUM, b.val() - 1));
+      self.link(Ptr::new(VR1, 0, loc0), ERAS);
+      self.link(Ptr::new(VR2, 0, loc0), Ptr::new(LAM, 0, loc1));
+      self.link(Ptr::new(VR1, 0, loc1), Ptr::big(NUM, b.val() - 1));
+      //self.heap.set(loc0, P1, ERAS);
+      //self.heap.set(loc0, P2, Ptr::new(LAM, 0, loc1));
+      //self.heap.set(loc1, P1, Ptr::big(NUM, b.val() - 1));
       self.half_atomic_link(a1, Ptr::new(LAM, 0, loc0));
       self.half_atomic_link(a2, Ptr::new(VR2, 0, loc1));
     }
@@ -941,13 +977,13 @@ where [(); LAZY as usize]: {
   // Expands a closed net.
   #[inline(always)]
   pub fn call(&mut self, book: &Book, ptr: Ptr, trg: Ptr) {
-    println!("call {:016x} {:016x}", ptr.0, trg.0);
+    //println!("call {} {}", ptr.view(), trg.view());
     self.rwts.dref += 1;
     let mut ptr = ptr;
     // FIXME: change "while" to "if" once lang prevents refs from returning refs
     if ptr.is_ref() {
       // Intercepts with a native function, if available.
-      if self.call_native(book, ptr, trg) {
+      if !LAZY && self.call_native(book, ptr, trg) {
         return;
       }
       // Load the closed net.
@@ -967,10 +1003,9 @@ where [(); LAZY as usize]: {
           let p1 = self.adjust(unsafe { got.node.get_unchecked(1 + i) }.1);
           let p2 = self.adjust(unsafe { got.node.get_unchecked(1 + i) }.2);
           let lc = *unsafe { self.locs.get_unchecked(1 + i) };
-          self.link(Ptr::new(VR1, 0, lc), p1);
-          self.link(Ptr::new(VR2, 0, lc), p2);
-          //self.heap.set(lc, P1, p1);
-          //self.heap.set(lc, P2, p2);
+          //println!(":: link loc={} [{} {}]", lc, p1.view(), p2.view());
+          if p1 != ROOT { self.link(Ptr::new(VR1, 0, lc), p1); }
+          if p2 != ROOT { self.link(Ptr::new(VR2, 0, lc), p2); }
         }
         // Load redexes, adjusted.
         for r in &got.rdex {
@@ -995,9 +1030,22 @@ where [(); LAZY as usize]: {
       return ptr;
     }
   }
+
+  pub fn view(&self) -> String {
+    let mut txt = String::new();
+    for i in 0 .. self.heap.nodes.len() as Loc {
+      let p0 = self.heap.get_pri(i).targ;
+      let p1 = self.heap.get(i, P1);
+      let p2 = self.heap.get(i, P2);
+      if p1 != NULL || p2 != NULL {
+        txt.push_str(&format!("{:04x} | {:22} {:22} {:22}\n", i, p0.view(), p1.view(), p2.view()));
+      }
+    }
+    return txt;
+  }
 }
 
-impl<'a> Net<'a, false> {
+impl<'a> NetFields<'a, false> {
   // Reduces all redexes.
   #[inline(always)]
   pub fn reduce(&mut self, book: &Book, limit: usize) -> usize {
@@ -1017,7 +1065,7 @@ impl<'a> Net<'a, false> {
   // Expands heads.
   #[inline(always)]
   pub fn expand(&mut self, book: &Book) {
-    fn go<const LAZY: bool>(net: &mut Net<LAZY>, book: &Book, dir: Ptr, len: usize, key: usize) 
+    fn go<const LAZY: bool>(net: &mut NetFields<LAZY>, book: &Book, dir: Ptr, len: usize, key: usize) 
     where [(); LAZY as usize]: {
       //println!("[{:04x}] expand dir: {:016x}", net.tid, dir.0);
       let ptr = net.get_target(dir);
@@ -1048,14 +1096,14 @@ impl<'a> Net<'a, false> {
     }
   }
 
-  // Forks into child threads, returning a Net for the (tid/tids)'th thread.
+  // Forks into child threads, returning a NetFields for the (tid/tids)'th thread.
   pub fn fork(&self, tid: usize, tids: usize) -> Self {
-    let mut net = Net::new(self.heap.data);
+    let mut net = NetFields::new(self.heap.nodes);
     net.tid  = tid;
     net.tids = tids;
     net.area = Area {
-      init: self.heap.data.len() * tid / tids,
-      size: self.heap.data.len() / tids,
+      init: self.heap.nodes.len() * tid / tids,
+      size: self.heap.nodes.len() / tids,
     };
     let from = self.rdex.len() * (tid + 0) / tids;
     let upto = self.rdex.len() * (tid + 1) / tids;
@@ -1080,7 +1128,7 @@ impl<'a> Net<'a, false> {
       tids: usize, // thread count
       tlog2: usize, // log2 of thread count
       tick: usize, // current tick
-      net: Net<'a, false>, // thread's own net object
+      net: NetFields<'a, false>, // thread's own net object
       book: &'a Book, // definition book
       delta: &'a AtomicRewrites, // global delta rewrites
       share: &'a Vec<(APtr, APtr)>, // global share buffer
@@ -1211,48 +1259,45 @@ impl<'a> Net<'a, false> {
   }
 }
 
-impl<'a> Net<'a, true> {
+impl<'a> NetFields<'a, true> {
   // Like get_target, but also for main ports
   #[inline(always)]
   pub fn get_target_full(&self, ptr: Ptr) -> Ptr {
-    println!("get_target_full {:016x}", ptr.0);
     if ptr.is_var() || ptr.is_red() {
       return self.get_target(ptr);
     }
     if ptr.is_nod() {
-      return self.heap.get_main(ptr.loc()).1;
+      return self.heap.get_pri(ptr.loc()).targ;
     }
-    panic!("Can't get target of: {:016x} {}", ptr.0, crate::ast::val_to_name(ptr.val()));
+    panic!("Can't get target of: {}", ptr.view());
   }
 
   #[inline(always)]
   pub fn reduce(&mut self, book: &Book, mut prev: Ptr) -> Ptr {
-    println!("reduce {:016x}", prev.0);
+    //println!("reduce {}", prev.view());
     let mut path : Vec<Ptr> = vec![];
 
     loop {
       // Load ptrs
-      println!("move {:016x}", prev.0);
-
-      if prev.is_ref() {
-        println!("OXIIIII");
-        panic!();
-      }
-
+      //println!("move {}", prev.view());
 
       let next = self.get_target_full(prev);
-      println!("---> {:016x}", next.0);
+      //println!("---> {}", next.view());
+
+      //println!("ROOT={} {}", self.heap.get_root().view(), self.get_target(self.heap.get_root()).view());
 
       // If next is ref, dereferences
       if next.is_ref() {
+        //println!("CALL");
         self.call(book, next, prev);
-        println!("call {:016x} ... {}", self.get_target_full(prev).0, self.rdex.len());
+        //println!("{}", self.view());
+        //println!("{}", crate::ast::show_runtime_net(self));
         continue;
       }
 
       // If next is root, stop.
       if next == ROOT {
-        println!("root!");
+        //println!("DONE!");
         break ;
       }
 
@@ -1260,23 +1305,24 @@ impl<'a> Net<'a, true> {
       if next.is_pri() {
         // If prev is a main port, reduce the active pair.
         if prev.is_pri() {
-          println!("redex!");
+          //println!("REDEX {} {}", prev.view(), next.view());
           self.interact(book, prev, next);
+          //println!("{}", self.view());
+          //println!("{}", crate::ast::show_runtime_net(self));
           prev = path.pop().unwrap();
           continue;
         // Otherwise, we're done.
         } else {
-          println!("axiom!");
+          //println!("AXIOM!");
           break;
         }
       }
 
       // If next is an aux port, pass through.
-      let main = self.heap.get_main(next.loc());
-      println!("AUX; next: {:016x} | main: {:016x} ~ {:016x}", next.0, main.0.0, main.1.0);
+      let main = self.heap.get_pri(next.loc());
+      //println!("CONT next: {} | main: {} ~ {}", next.view(), main.0.view(), main.1.view());
       path.push(prev);
-      prev = main.0;
-      println!("going to {:016x}", main.0.0);
+      prev = main.this;
     }
 
     //println!("done");
@@ -1294,14 +1340,17 @@ impl<'a> Net<'a, true> {
     while let Some(prev) = visit.pop() {
       count += 1;
       if count > 100 { break; }
-      println!("normal {:016x} | {}", prev.0, self.rewrites());
+      //println!("normal {} | {}", prev.view(), self.rewrites());
       let next = self.reduce(book, prev);
       if next.is_nod() { // FIXME: what if OP1?
+        if next.is_op1() {
+          panic!("FAIL");
+        }
         visit.push(Ptr::new(VR1, 0, next.loc()));
         visit.push(Ptr::new(VR2, 0, next.loc()));
       }
     }
-    println!("done {:016x}", self.get_target(ROOT).0);
+    //println!("done {}", self.get_target(ROOT).view());
   }
 
   pub fn fork(&self, tid: usize, tids: usize) -> Self {
@@ -1312,4 +1361,73 @@ impl<'a> Net<'a, true> {
     todo!()
   }
 
+}
+
+// A net holding a static nodes buffer.
+pub struct StaticNet<const LAZY: bool> where [(); LAZY as usize]: {
+  pub mem: *mut [ANode<LAZY>],
+  pub net: NetFields<'static, LAZY>,
+}
+
+// A simple Net API. Holds its own nodes buffer, and knows its mode (lazy/eager).
+pub enum Net {
+  Lazy(StaticNet<true>),
+  Eager(StaticNet<false>),
+}
+
+impl Drop for Net {
+  fn drop(&mut self) {
+    match self {
+      Net::Lazy(this)  => { let _ = unsafe { Box::from_raw(this.mem) }; }
+      Net::Eager(this) => { let _ = unsafe { Box::from_raw(this.mem) }; }
+    }
+  }
+}
+
+impl Net {
+  // Creates a new net with the given size.
+  pub fn new(size: usize, lazy: bool) -> Self {
+    if lazy {
+      let mem = Box::leak(Heap::<true>::init(size)) as *mut _;
+      let net = NetFields::<true>::new(unsafe { &*mem });
+      net.boot(crate::ast::name_to_val("main"));
+      return Net::Lazy(StaticNet { mem, net });
+    } else {
+      let mem = Box::leak(Heap::<false>::init(size)) as *mut _;
+      let net = NetFields::<false>::new(unsafe { &*mem });
+      net.boot(crate::ast::name_to_val("main"));
+      return Net::Eager(StaticNet { mem, net });
+    }
+  }
+
+  // Pretty prints.
+  pub fn show(&self) -> String {
+    match self {
+      Net::Lazy(this)  => crate::ast::show_runtime_net(&this.net),
+      Net::Eager(this) => crate::ast::show_runtime_net(&this.net),
+    }
+  }
+
+  // Reduces to normal form.
+  pub fn normal(&mut self, book: &Book) {
+    match self {
+      Net::Lazy(this)  => this.net.normal(book),
+      Net::Eager(this) => this.net.normal(book),
+    }
+  }
+
+  // Reduces to normal form in parallel.
+  pub fn parallel_normal(&mut self, book: &Book) {
+    match self {
+      Net::Lazy(this)  => this.net.parallel_normal(book),
+      Net::Eager(this) => this.net.parallel_normal(book),
+    }
+  }
+
+  pub fn get_rewrites(&self) -> Rewrites {
+    match self {
+      Net::Lazy(this)  => this.net.rwts,
+      Net::Eager(this) => this.net.rwts,
+    }
+  }
 }

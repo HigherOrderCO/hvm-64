@@ -20,7 +20,7 @@ pub fn compile_book(book: &run::Book) -> String {
 
   code.push_str(&format!("\n"));
 
-  code.push_str(&format!("impl<'a, const LAZY: bool> Net<'a, LAZY> where [(); LAZY as usize]: {{\n"));
+  code.push_str(&format!("impl<'a, const LAZY: bool> NetFields<'a, LAZY> where [(); LAZY as usize]: {{\n"));
   code.push_str(&format!("\n"));
 
   code.push_str(&format!("{}pub fn call_native(&mut self, book: &Book, ptr: Ptr, x: Ptr) -> bool {{\n", ident(1)));
