@@ -138,6 +138,7 @@ pub struct NetFields<'a, const LAZY: bool>
 where [(); LAZY as usize]: {
   pub tid : usize, // thread id
   pub tids: usize, // thread count
+  pub labs: Lab, // dup labels
   pub heap: Heap<'a, LAZY>, // nodes
   pub rdex: Vec<(Ptr,Ptr)>, // redexes
   pub locs: Vec<Loc>,
@@ -495,6 +496,7 @@ impl<'a, const LAZY: bool> NetFields<'a, LAZY> where [(); LAZY as usize]: {
     NetFields {
       tid : 0,
       tids: 1,
+      labs: 0x100000,
       heap: Heap { nodes },
       rdex: vec![],
       locs: vec![0; 1 << 16],
@@ -982,6 +984,7 @@ impl<'a, const LAZY: bool> NetFields<'a, LAZY> where [(); LAZY as usize]: {
     let mut ptr = ptr;
     // FIXME: change "while" to "if" once lang prevents refs from returning refs
     if ptr.is_ref() {
+      self.labs += 1;
       // Intercepts with a native function, if available.
       if !LAZY && self.call_native(book, ptr, trg) {
         return;
@@ -1025,7 +1028,10 @@ impl<'a, const LAZY: bool> NetFields<'a, LAZY> where [(); LAZY as usize]: {
   #[inline(always)]
   fn adjust(&self, ptr: Ptr) -> Ptr {
     if ptr.has_loc() {
-      return Ptr::new(ptr.tag(), ptr.lab(), *unsafe { self.locs.get_unchecked(ptr.loc() as usize) });
+      let tag = ptr.tag();
+      let lab = if LAZY && ptr.is_dup() { self.labs } else { ptr.lab() }; // FIXME: should check if lab=0xFFFFFF (smart label)
+      let loc = *unsafe { self.locs.get_unchecked(ptr.loc() as usize) };
+      return Ptr::new(tag, lab, loc)
     } else {
       return ptr;
     }
