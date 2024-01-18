@@ -496,7 +496,7 @@ impl<'a, const LAZY: bool> NetFields<'a, LAZY> where [(); LAZY as usize]: {
     NetFields {
       tid : 0,
       tids: 1,
-      labs: 0x100000,
+      labs: 0x1,
       heap: Heap { nodes },
       rdex: vec![],
       locs: vec![0; 1 << 16],
@@ -984,7 +984,7 @@ impl<'a, const LAZY: bool> NetFields<'a, LAZY> where [(); LAZY as usize]: {
     let mut ptr = ptr;
     // FIXME: change "while" to "if" once lang prevents refs from returning refs
     if ptr.is_ref() {
-      self.labs += 1;
+      self.labs += 2;
       // Intercepts with a native function, if available.
       if !LAZY && self.call_native(book, ptr, trg) {
         return;
