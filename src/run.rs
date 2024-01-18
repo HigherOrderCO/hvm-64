@@ -1029,7 +1029,7 @@ impl<'a, const LAZY: bool> NetFields<'a, LAZY> where [(); LAZY as usize]: {
   fn adjust(&self, ptr: Ptr) -> Ptr {
     if ptr.has_loc() {
       let tag = ptr.tag();
-      let lab = if LAZY && ptr.is_dup() { self.labs } else { ptr.lab() }; // FIXME: should check if lab=0xFFFFFF (smart label)
+      let lab = if LAZY && ptr.is_dup() && ptr.lab() == 0 { self.labs } else { ptr.lab() }; // FIXME: should check if lab=0xFFFFFF (smart label)
       let loc = *unsafe { self.locs.get_unchecked(ptr.loc() as usize) };
       return Ptr::new(tag, lab, loc)
     } else {
