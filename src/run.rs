@@ -984,15 +984,13 @@ impl<'a, const LAZY: bool> NetFields<'a, LAZY> where [(); LAZY as usize]: {
     let mut ptr = ptr;
     // FIXME: change "while" to "if" once lang prevents refs from returning refs
     if ptr.is_ref() {
-      self.labs += 2;
       // Intercepts with a native function, if available.
       if !LAZY && self.call_native(book, ptr, trg) {
         return;
       }
       // Load the closed net.
-      //println!("{:08x?}", book.defs);
-      //println!("{:08x} {}", ptr.0, crate::ast::val_to_name(ptr.val()));
-      let got = book.get(ptr.val()).unwrap();
+      let fid = ptr.val();
+      let got = book.get(fid).unwrap();
       if !LAZY && trg.is_dup() && !got.labs.contains(&trg.lab()) {
         return self.copy(trg, ptr);
       } else if got.node.len() > 0 {
@@ -1026,10 +1024,17 @@ impl<'a, const LAZY: bool> NetFields<'a, LAZY> where [(); LAZY as usize]: {
 
   // Adjusts dereferenced pointer locations.
   #[inline(always)]
-  fn adjust(&self, ptr: Ptr) -> Ptr {
+  fn adjust(&mut self, ptr: Ptr) -> Ptr {
     if ptr.has_loc() {
       let tag = ptr.tag();
-      let lab = if LAZY && ptr.is_dup() && ptr.lab() == 0 { self.labs } else { ptr.lab() }; // FIXME: should check if lab=0xFFFFFF (smart label)
+      // FIXME
+      //let lab = if LAZY && ptr.is_dup() && ptr.lab() == 0 { 
+        //self.labs += 2;
+        //self.labs
+      //} else {
+        //ptr.lab()
+      //};
+      let lab = ptr.lab();
       let loc = *unsafe { self.locs.get_unchecked(ptr.loc() as usize) };
       return Ptr::new(tag, lab, loc)
     } else {
@@ -1342,21 +1347,15 @@ impl<'a> NetFields<'a, true> {
 
   pub fn normal(&mut self, book: &Book) {
     let mut visit = vec![ROOT];
-    let mut count = 0;
     while let Some(prev) = visit.pop() {
-      count += 1;
-      if count > 100 { break; }
       //println!("normal {} | {}", prev.view(), self.rewrites());
       let next = self.reduce(book, prev);
-      if next.is_nod() { // FIXME: what if OP1?
-        if next.is_op1() {
-          panic!("FAIL");
-        }
+      if next.is_nod() {
+        if next.is_op1() { todo!(); } // FIXME
         visit.push(Ptr::new(VR1, 0, next.loc()));
         visit.push(Ptr::new(VR2, 0, next.loc()));
       }
     }
-    //println!("done {}", self.get_target(ROOT).view());
   }
 
   pub fn fork(&self, tid: usize, tids: usize) -> Self {
