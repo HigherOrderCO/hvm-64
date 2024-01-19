@@ -30,9 +30,10 @@ pub const NUM: Tag = 0x6; // Unboxed number
 pub const OP2: Tag = 0x7; // Binary numeric operation
 pub const OP1: Tag = 0x8; // Unary numeric operation
 pub const MAT: Tag = 0x9; // Numeric pattern-matching
-pub const LAM: Tag = 0xA; // Main port of lam node
-pub const TUP: Tag = 0xB; // Main port of tup node
-pub const DUP: Tag = 0xC; // Main port of dup node
+pub const RDX: Tag = 0xA; // Pointer to redex
+pub const LAM: Tag = 0xB; // Main port of lam node
+pub const TUP: Tag = 0xC; // Main port of tup node
+pub const DUP: Tag = 0xD; // Main port of dup node
 pub const END: Tag = 0xE; // Last pointer tag
 
 // Numeric operations.
@@ -175,6 +176,11 @@ impl Ptr {
   #[inline(always)]
   pub fn is_var(&self) -> bool {
     return matches!(self.tag(), VR1..=VR2) && !self.is_nil();
+  }
+
+  #[inline(always)]
+  pub fn is_rdx(&self) -> bool {
+    return matches!(self.tag(), RDX) && !self.is_nil();
   }
 
   #[inline(always)]
@@ -592,6 +598,24 @@ impl<'a> Net<'a> {
     }
   }
 
+  pub fn reduce_deferred(&mut self, t_dir: Ptr, old: Ptr, new: Ptr) {
+    if self.cas_target(t_dir, old, new).is_ok() {
+      // Get the deferred redex located at 'old'
+      let p1 = self.heap.get(old.loc(), P1);
+      let p2 = self.heap.get(old.loc(), P2);
+
+      // free that node
+      self.heap.set(old.loc(), P1, NULL);
+      self.heap.set(old.loc(), P2, NULL);
+
+      // submit the reduction
+      self.redux(p1, p2);
+    } else {
+      unreachable!();
+    }
+    return;
+  }
+
   // Atomic linker for when 'b_ptr' is a principal port.
   pub fn atomic_linker_pri(&mut self, mut a_ptr: Ptr, a_dir: Ptr, b_ptr: Ptr) {
     loop {
@@ -622,6 +646,17 @@ impl<'a> Net<'a> {
         }
         // If the CAS failed, the var changed, so we try again.
         continue;
+      }
+      // If target is a deferred redex, we own it, so replace it.
+      // A stored redex can only be reached from a 'one way' wire
+      // so the only way this executes is when 'a_ptr' is a VR that's
+      // that's being written by us. Therefore, we own 't_dir'
+      if t_ptr.is_rdx() {
+        self.reduce_deferred(t_dir, t_ptr, b_ptr);
+
+        // Clear source location.
+        self.set_target(a_dir, NULL);
+        return;
       }
       // If it is a node, two threads will reach this branch.
       if t_ptr.is_pri() || t_ptr == GONE {
@@ -887,30 +922,35 @@ impl<'a> Net<'a> {
       if trg.is_dup() && !got.labs.contains(&trg.lab()) {
         return self.copy(trg, ptr);
       } else if got.node.len() > 0 {
-        let len = got.node.len() - 1;
-        // Allocate space.
-        for i in 0 .. len {
-          *unsafe { self.locs.get_unchecked_mut(1 + i) } = self.alloc();
-        }
-        // Load nodes, adjusted.
-        for i in 0 .. len {
-          let p1 = self.adjust(unsafe { got.node.get_unchecked(1 + i) }.0);
-          let p2 = self.adjust(unsafe { got.node.get_unchecked(1 + i) }.1);
-          let lc = *unsafe { self.locs.get_unchecked(1 + i) };
-          self.heap.set(lc, P1, p1);
-          self.heap.set(lc, P2, p2);
-        }
-        // Load redexes, adjusted.
-        for r in &got.rdex {
-          let p1 = self.adjust(r.0);
-          let p2 = self.adjust(r.1);
-          self.rdex.push((p1, p2));
-        }
-        // Load root, adjusted.
-        ptr = self.adjust(got.node[0].1);
+        ptr = self.load_net(got);
       }
     }
     self.link(ptr, trg);
+  }
+
+  #[inline(always)]
+  pub fn load_net(&mut self, got: &Def) -> Ptr {
+    let len = got.node.len() - 1;
+    // Allocate space.
+    for i in 0 .. len {
+      *unsafe { self.locs.get_unchecked_mut(1 + i) } = self.alloc();
+    }
+    // Load nodes, adjusted.
+    for i in 0 .. len {
+      let p1 = self.adjust(unsafe { got.node.get_unchecked(1 + i) }.0);
+      let p2 = self.adjust(unsafe { got.node.get_unchecked(1 + i) }.1);
+      let lc = *unsafe { self.locs.get_unchecked(1 + i) };
+      self.heap.set(lc, P1, p1);
+      self.heap.set(lc, P2, p2);
+    }
+    // Load redexes, adjusted.
+    for r in &got.rdex {
+      let p1 = self.adjust(r.0);
+      let p2 = self.adjust(r.1);
+      self.rdex.push((p1, p2));
+    }
+    // Load root, adjusted.
+    return self.adjust(got.node[0].1);
   }
 
   // Adjusts dereferenced pointer locations.
