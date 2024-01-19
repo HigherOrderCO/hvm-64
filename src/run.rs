@@ -1028,13 +1028,13 @@ impl<'a, const LAZY: bool> NetFields<'a, LAZY> where [(); LAZY as usize]: {
     if ptr.has_loc() {
       let tag = ptr.tag();
       // FIXME
-      //let lab = if LAZY && ptr.is_dup() && ptr.lab() == 0 { 
-        //self.labs += 2;
-        //self.labs
-      //} else {
-        //ptr.lab()
-      //};
-      let lab = ptr.lab();
+      let lab = if LAZY && ptr.is_dup() && ptr.lab() == 0 { 
+        self.labs += 2;
+        self.labs
+      } else {
+        ptr.lab()
+      };
+      //let lab = ptr.lab();
       let loc = *unsafe { self.locs.get_unchecked(ptr.loc() as usize) };
       return Ptr::new(tag, lab, loc)
     } else {
