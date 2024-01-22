@@ -564,12 +564,12 @@ impl<'a> Net<'a> {
     match (a_port.tag(), b_port.tag()) {
       (Red, _) => self.link_wire_port(a_port.wire(), b_port),
       (_, Red) => self.link_wire_port(b_port.wire(), a_port),
-      (Var, Var) => {
-        a_port.wire().set_target(b_port.clone());
-        b_port.wire().set_target(a_port.clone());
-      }
-      (Var, _) => a_port.wire().set_target(b_port.clone()),
-      (_, Var) => b_port.wire().set_target(a_port.clone()),
+      // (Var, Var) => {
+      //   a_port.wire().set_target(b_port.clone());
+      //   b_port.wire().set_target(a_port.clone());
+      // }
+      (Var, _) => self.link_wire_port(a_port.wire(), b_port),
+      (_, Var) => self.link_wire_port(b_port.wire(), a_port),
       (_, _) => self.redux(a_port, b_port),
     };
   }
@@ -583,6 +583,9 @@ impl<'a> Net<'a> {
   fn link_foreign_port_port(&mut self, a_wire: Wire, a_port: Port, b_port: Port) {
     trace!(self.tracer, a_wire, a_port, b_port);
     if a_port == Port::LOCK {
+      if b_port.tag() == Var {
+        return self.fun_name(b_port, Port::new_var(a_wire.loc()));
+      }
       return;
     }
     if a_port.tag() != Var {
@@ -590,23 +593,34 @@ impl<'a> Net<'a> {
     }
     let x_wire = a_port.wire();
     let x_port = x_wire.swap_target(b_port.clone());
-    trace!(self.tracer, "swap", x_port);
     if x_port != Port::new_var(a_wire.loc()) {
-      // if x_port is lock, this condition will fail
-      if x_port < b_port {
+      trace!(self.tracer, "cas fail", x_port);
+      if x_port != Port::LOCK && x_wire < a_wire {
         trace!(self.tracer, "lets do it");
         self.link_port_port(x_port, b_port);
       } else {
         trace!(self.tracer, "meh not my problem");
       }
       return;
+    } else {
+      trace!(self.tracer, "cas ok");
     }
     if b_port.tag() == Red {
       return self.try_resolve_red(x_wire, b_port);
     }
     if b_port.tag() == Var {
-      trace!(self.tracer, "HMM?2");
-      return self.fun_name(b_port.wire(), a_port);
+      return self.fun_name(b_port, a_port);
+    }
+  }
+
+  fn fun_name(&mut self, a_port: Port, b_port: Port) {
+    trace!(self.tracer, a_port, b_port);
+    if let Err(x_port) = a_port.wire().cas_target(Port::LOCK, b_port.clone()) {
+      trace!(self.tracer, "cas fail", x_port);
+      if a_port.wire() > b_port.wire() {
+        unreachable!();
+      }
+      todo!();
     }
   }
 
@@ -615,101 +629,7 @@ impl<'a> Net<'a> {
     if a_wire.cas_target(a_port.clone(), Port::LOCK).is_err() {
       return;
     }
-    let mut x_wire;
-    loop {
-      trace!(self.tracer, a_wire, a_port);
-      x_wire = a_port.wire();
-      let x_port = x_wire.swap_target(Port::LOCK);
-      trace!(self.tracer, x_port);
-      if x_port == Port::LOCK {
-        // TODO:
-        // not exactly sure what to do here but this *is* reachable
-        // and if we simply unlock a_wire, we may leave dangling refs
-        // worst case, we could always have a special type of Red
-        // that simply communicates an obligation to return here
-        // but I suspect there's something better than that
-        todo!()
-      }
-      a_port = x_port;
-      if a_port.tag() != Red {
-        break;
-      }
-    }
-    if a_port.is_principal() {
-      todo!();
-    }
-    trace!(self.tracer, "!!!", a_wire, a_port, x_wire);
-    let y_port = a_port.wire().swap_target(Port::new_var(a_wire.loc()));
-    trace!(self.tracer, y_port);
-    if y_port == Port::LOCK {
-      if let Err(x_port) =
-        x_wire.cas_target(Port::LOCK, if a_port.wire() < x_wire { Port::new_var(a_wire.loc()) } else { Port::LOCK })
-      {
-        trace!(self.tracer, "UHH", x_port, x_wire, a_port.wire());
-        if a_port.wire() < x_wire {
-          trace!(self.tracer, "LEFT");
-          if x_port.tag() != Var {
-            todo!();
-          }
-          return self.fun_name(x_port.wire(), a_port);
-        } else {
-          trace!(self.tracer, "right");
-        }
-      } else {
-        trace!(self.tracer, "tada");
-        if a_port.wire() < x_wire {
-          return self.fun_name(a_wire, Port::new_var(x_wire.loc()));
-        } else {
-          return;
-        }
-      }
-      return;
-    } else if y_port != Port::new_var(x_wire.loc()) {
-      trace!(self.tracer, "HMM?");
-      return self.link_foreign_port_port(a_port.wire(), y_port, Port::new_var(a_wire.loc()));
-    }
-    self.fun_name(a_wire, a_port);
-  }
-
-  fn fun_name(&mut self, a_wire: Wire, a_port: Port) {
-    trace!(self.tracer, a_wire, a_port);
-    if let Err(y_port) = a_wire.cas_target(Port::LOCK, a_port.clone()) {
-      trace!(self.tracer, y_port);
-      let z_port = a_port.wire().swap_target(y_port.clone());
-      if z_port != Port::new_var(a_wire.loc()) && z_port != Port::LOCK {
-        trace!(self.tracer, z_port);
-        if y_port == z_port {
-          trace!(self.tracer, "woot");
-          if y_port.tag() == Red {
-            return self.try_resolve_red(a_wire, y_port);
-          }
-        } else {
-          dbg!(y_port, z_port);
-          todo!()
-        }
-      } else if z_port == Port::LOCK {
-        trace!(self.tracer, "hah", y_port, a_port, a_wire);
-        if a_port.wire() < a_wire {
-          trace!(self.tracer, "LEFT");
-          if y_port.tag() != Var {
-            todo!();
-          }
-          return self.fun_name(y_port.wire(), Port::new_var(a_wire.loc()));
-        } else {
-          trace!(self.tracer, "right");
-        }
-        return;
-      } else {
-        trace!(self.tracer, "cas 2 ok");
-        // if y_port.tag() == Var {
-        //   return self.fun_name(y_port.wire(), Port::new_var(a_wire.loc()));
-        // } else {
-        //   todo!();
-        // }
-      }
-      return;
-    }
-    trace!(self.tracer, "cas 1 ok");
+    self.link_wire_port(a_port.wire(), Port::new_var(a_wire.loc()));
   }
 }
 
