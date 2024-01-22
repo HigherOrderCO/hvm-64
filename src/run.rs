@@ -82,6 +82,7 @@ impl fmt::Debug for Port {
       Port::FREE => write!(f, "[FREE]"),
       Port::GONE => write!(f, "[GONE]"),
       Port::LOCK => write!(f, "[LOCK]"),
+      ref x if x.is_lock() => write!(f, "[LOCK {}]", x.lab()),
       _ => match self.tag() {
         Num => write!(f, "[Num {}]", self.num()),
         Var | Red | Ref | Mat => write!(f, "[{:?} {:?}]", self.tag(), self.loc()),
@@ -94,17 +95,27 @@ impl fmt::Debug for Port {
 impl Port {
   pub const ERA: Port = Port(Ref as _);
   pub const FREE: Port = Port(0x8000_0000_0000_0000);
-  pub const LOCK: Port = Port(0xFFFF_FFFF_FFFF_FFF0);
+  pub const LOCK: Port = Port::new_lock(0xFFFF);
   pub const GONE: Port = Port(0xFFFF_FFFF_FFFF_FFFF);
 
   #[inline(always)]
-  pub fn new(tag: Tag, lab: Lab, loc: Loc) -> Self {
+  pub const fn new(tag: Tag, lab: Lab, loc: Loc) -> Self {
     Port(((lab as u64) << 48) | (loc.0 as u64) | (tag as u64))
   }
 
   #[inline(always)]
   pub fn new_var(loc: Loc) -> Self {
     Port::new(Var, 0, loc)
+  }
+
+  #[inline(always)]
+  pub const fn new_lock(tid: u16) -> Port {
+    Port::new(Var, tid, Loc(0))
+  }
+
+  #[inline(always)]
+  pub fn is_lock(&self) -> bool {
+    self.tag() == Var && self.loc() == Loc(0)
   }
 
   #[inline(always)]
@@ -284,7 +295,7 @@ impl Wire {
 
   #[inline(always)]
   fn target<'a>(&self) -> &'a AtomicU64 {
-    if (self.0 as usize) == 0xfffffffffff0 {
+    if (self.0 as usize) == 0xfffffffffff0 || (self.0 as usize) == 0 {
       panic!("wtf");
     }
     unsafe { &*self.0 }
@@ -313,17 +324,6 @@ impl Wire {
   #[inline(always)]
   pub fn swap_target(&self, value: Port) -> Port {
     Port(self.target().swap(value.0, Relaxed))
-  }
-
-  // Takes a pointer's target.
-  #[inline(always)]
-  pub fn lock_target(&self) -> Port {
-    loop {
-      let got = self.swap_target(Port::LOCK);
-      if got != Port::LOCK {
-        return got;
-      }
-    }
   }
 }
 
@@ -505,6 +505,10 @@ impl<'a> Net<'a> {
     loc.other_half().val().store(Port::LOCK.0, Relaxed);
     loc
   }
+
+  fn lock(&self) -> Port {
+    Port::new_lock(self.tid as u16)
+  }
 }
 
 pub struct CreatedNode {
@@ -564,12 +568,10 @@ impl<'a> Net<'a> {
     match (a_port.tag(), b_port.tag()) {
       (Red, _) => self.link_wire_port(a_port.wire(), b_port),
       (_, Red) => self.link_wire_port(b_port.wire(), a_port),
-      // (Var, Var) => {
-      //   a_port.wire().set_target(b_port.clone());
-      //   b_port.wire().set_target(a_port.clone());
-      // }
-      (Var, _) => self.link_wire_port(a_port.wire(), b_port),
-      (_, Var) => self.link_wire_port(b_port.wire(), a_port),
+      (Var, Var) if a_port > b_port => self.link_var_var(a_port, b_port),
+      (Var, Var) => self.link_var_var(b_port, a_port),
+      (Var, _) => self.link_var_pri(a_port, b_port),
+      (_, Var) => self.link_var_pri(b_port, a_port),
       (_, _) => self.redux(a_port, b_port),
     };
   }
@@ -582,54 +584,69 @@ impl<'a> Net<'a> {
 
   fn link_foreign_port_port(&mut self, a_wire: Wire, a_port: Port, b_port: Port) {
     trace!(self.tracer, a_wire, a_port, b_port);
-    if a_port == Port::LOCK {
-      if b_port.tag() == Var {
-        return self.fun_name(b_port, Port::new_var(a_wire.loc()));
-      }
+    if a_port.is_lock() {
       return;
     }
     if a_port.tag() != Var {
       return self.link_port_port(a_port, b_port);
     }
     let x_wire = a_port.wire();
-    let x_port = x_wire.swap_target(b_port.clone());
+    let x_port = x_wire.swap_target(Port::LOCK);
     if x_port != Port::new_var(a_wire.loc()) {
       trace!(self.tracer, "cas fail", x_port);
-      if x_port != Port::LOCK && x_wire < a_wire {
-        trace!(self.tracer, "lets do it");
-        self.link_port_port(x_port, b_port);
+      if x_port.is_lock() {
+        return;
+      }
+      if a_wire < x_wire {
+        trace!(self.tracer, "yay", a_wire, x_wire, b_port, x_port);
+        return self.link_port_port(b_port, x_port);
       } else {
-        trace!(self.tracer, "meh not my problem");
+        trace!(self.tracer, "nay", a_wire, x_wire, a_port, x_port);
+        return;
       }
-      return;
-    } else {
-      trace!(self.tracer, "cas ok");
     }
-    if b_port.tag() == Red {
-      return self.try_resolve_red(x_wire, b_port);
-    }
-    if b_port.tag() == Var {
-      return self.fun_name(b_port, a_port);
-    }
+    trace!(self.tracer, "cas ok");
+    return self.link_port_port(a_port, b_port);
   }
 
-  fn fun_name(&mut self, a_port: Port, b_port: Port) {
+  fn link_var_var(&mut self, a_port: Port, b_port: Port) {
+    assert!(a_port > b_port);
     trace!(self.tracer, a_port, b_port);
-    if let Err(x_port) = a_port.wire().cas_target(Port::LOCK, b_port.clone()) {
-      trace!(self.tracer, "cas fail", x_port);
-      if a_port.wire() > b_port.wire() {
-        unreachable!();
+    let x_port = b_port.wire().swap_target(self.lock());
+    if !x_port.is_lock() {
+      trace!(self.tracer, "relock fail", x_port);
+      return self.link_port_port(a_port, x_port);
+    }
+    trace!(self.tracer, "relock ok");
+    let x_port = a_port.wire().swap_target(b_port.clone());
+    trace!(self.tracer, x_port);
+    if x_port.is_lock() {
+      trace!(self.tracer, b_port, a_port);
+      if let Err(x_port) = b_port.wire().cas_target(self.lock(), a_port.clone()) {
+        trace!(self.tracer, "cas fail", x_port);
+        if x_port != Port::LOCK {
+          return self.link_foreign_port_port(b_port.wire(), a_port, x_port);
+        }
+        trace!(self.tracer, "cas fail", a_port, b_port);
+        let x_port = a_port.wire().swap_target(Port::GONE);
+        trace!(self.tracer, "cas fail", x_port);
+        self.link_port_port(b_port, x_port);
+      } else {
+        trace!(self.tracer, "cas ok");
       }
-      todo!();
+    } else {
+      trace!(self.tracer, "HMM!");
+      self.link_port_port(x_port, b_port);
     }
   }
 
-  fn try_resolve_red(&mut self, a_wire: Wire, mut a_port: Port) {
-    trace!(self.tracer, a_wire, a_port);
-    if a_wire.cas_target(a_port.clone(), Port::LOCK).is_err() {
-      return;
+  fn link_var_pri(&mut self, a_port: Port, b_port: Port) {
+    trace!(self.tracer, a_port, b_port);
+    let x_port = a_port.wire().swap_target(b_port.clone());
+    trace!(self.tracer, x_port);
+    if !x_port.is_lock() {
+      self.link_port_port(x_port, b_port);
     }
-    self.link_wire_port(a_port.wire(), Port::new_var(a_wire.loc()));
   }
 }
 
@@ -1137,7 +1154,7 @@ impl<'a> Net<'a> {
       trace!(net.tracer, wire);
       let port = wire.load_target();
       trace!(net.tracer, port);
-      if port == Port::LOCK {
+      if port.is_lock() {
         return;
       }
       if port.tag() == Ctr {
@@ -1149,8 +1166,8 @@ impl<'a> Net<'a> {
           go(net, node.p2, len * 2, key / 2);
         }
       } else if port.tag() == Ref && port != Port::ERA {
-        let got = wire.swap_target(Port::LOCK);
-        if got != Port::LOCK {
+        let got = wire.swap_target(net.lock());
+        if !got.is_lock() {
           trace!(net.tracer, port, wire);
           net.call(port, Port::new_var(wire.loc()));
         }

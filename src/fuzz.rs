@@ -4,7 +4,6 @@ use std::{
   hash::{DefaultHasher, Hash, Hasher},
   marker::PhantomData,
   ops::Add,
-  panic::{catch_unwind, AssertUnwindSafe},
   sync::{atomic, Arc, Condvar, Mutex},
   thread::{self, Scope, ThreadId},
 };
@@ -212,15 +211,15 @@ impl Fuzzer {
         ThreadContext::init(fuzzer.clone());
         let mut paths = 0;
         loop {
-          paths += 1;
           {
             let path = &fuzzer.path.lock().unwrap().path;
             let mut hasher = DefaultHasher::new();
             path.hash(&mut hasher);
-            println!("{:x} {:?}", hasher.finish(), path);
+            println!("{:6} {:x} {:?}", paths, hasher.finish(), path);
           }
           fuzzer.atomics.lock().unwrap().clear();
           f(&fuzzer);
+          paths += 1;
           if !fuzzer.path.lock().unwrap().next_path() {
             break;
           }
