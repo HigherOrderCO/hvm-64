@@ -80,7 +80,6 @@ impl fmt::Debug for Port {
     match *self {
       Port::ERA => write!(f, "[ERA]"),
       Port::FREE => write!(f, "[FREE]"),
-      Port::GONE => write!(f, "[GONE]"),
       Port::LOCK => write!(f, "[LOCK]"),
       ref x if x.is_lock() => write!(f, "[LOCK {}]", x.lab()),
       _ => match self.tag() {
@@ -96,7 +95,6 @@ impl Port {
   pub const ERA: Port = Port(Ref as _);
   pub const FREE: Port = Port(0x8000_0000_0000_0000);
   pub const LOCK: Port = Port::new_lock(0xFFFF);
-  pub const GONE: Port = Port(0xFFFF_FFFF_FFFF_FFFF);
 
   #[inline(always)]
   pub const fn new(tag: Tag, lab: Lab, loc: Loc) -> Self {
@@ -172,16 +170,6 @@ impl Port {
   #[inline(always)]
   pub fn is_ctr(&self, lab: Lab) -> bool {
     self.tag() == Ctr && self.lab() == lab
-  }
-
-  #[inline(always)]
-  pub fn redirect(&self) -> Port {
-    Port::new(Red, 0, self.loc())
-  }
-
-  #[inline(always)]
-  pub fn unredirect(&self) -> Port {
-    Port::new(Var, 0, self.loc())
   }
 }
 
@@ -295,9 +283,9 @@ impl Wire {
 
   #[inline(always)]
   fn target<'a>(&self) -> &'a AtomicU64 {
-    if (self.0 as usize) == 0xfffffffffff0 || (self.0 as usize) == 0 {
-      panic!("wtf");
-    }
+    // check for common invalid pointers
+    debug_assert_ne!(self.0 as usize, 0);
+    debug_assert_ne!(self.0 as usize, 0xfffffffffff0);
     unsafe { &*self.0 }
   }
 
@@ -314,11 +302,6 @@ impl Wire {
   #[inline(always)]
   pub fn cas_target(&self, expected: Port, value: Port) -> Result<Port, Port> {
     self.target().compare_exchange(expected.0, value.0, Relaxed, Relaxed).map(Port).map_err(Port)
-  }
-
-  #[inline(always)]
-  pub fn cas_target_weak(&self, expected: Port, value: Port) -> Result<Port, Port> {
-    self.target().compare_exchange_weak(expected.0, value.0, Relaxed, Relaxed).map(Port).map_err(Port)
   }
 
   #[inline(always)]
@@ -595,10 +578,10 @@ impl<'a> Net<'a> {
       }
       if !x_port.is_lock() {
         if a_wire < x_wire {
-          trace!(self.tracer, "yay", a_wire, x_wire, b_port, x_port);
+          trace!(self.tracer, "win", a_wire, x_wire, b_port, x_port);
           return self.link_port_port(b_port, x_port);
         } else {
-          trace!(self.tracer, "nay", a_wire, x_wire, a_port, x_port);
+          trace!(self.tracer, "lose", a_wire, x_wire, a_port, x_port);
           return;
         }
       }
@@ -609,7 +592,7 @@ impl<'a> Net<'a> {
   }
 
   fn link_var_var(&mut self, a_port: Port, b_port: Port) {
-    assert!(a_port < b_port);
+    debug_assert!(a_port < b_port);
     trace!(self.tracer, a_port, b_port);
     let unique_lock = Port::new_lock(self.tid as u16);
     let x_port = b_port.wire().swap_target(unique_lock.clone());
@@ -635,7 +618,6 @@ impl<'a> Net<'a> {
         trace!(self.tracer, "cas 1 ok");
       }
     } else {
-      trace!(self.tracer, "HMM!");
       self.link_port_port(x_port, b_port);
     }
   }
