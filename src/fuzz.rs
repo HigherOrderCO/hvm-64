@@ -1,7 +1,6 @@
 use std::{
   any::Any,
   cell::{OnceCell, RefCell},
-  hash::{DefaultHasher, Hash, Hasher},
   marker::PhantomData,
   ops::Add,
   sync::{atomic, Arc, Condvar, Mutex},
@@ -58,9 +57,7 @@ impl<T: HasAtomic> Atomic<T> {
   }
   pub fn load(&self, _: Ordering) -> T {
     self.with(true, |fuzzer, history, index| {
-      dbg!(history.len(), *index);
       *index += fuzzer.decide(history.len() - *index);
-      dbg!(history.len(), *index);
       let value = history[*index];
       value
     })
@@ -209,22 +206,17 @@ impl Fuzzer {
       s.spawn(move || {
         let fuzzer = Arc::new(self);
         ThreadContext::init(fuzzer.clone());
-        let mut paths = 0;
+        let mut i = 0;
         loop {
-          {
-            let path = &fuzzer.path.lock().unwrap().path;
-            let mut hasher = DefaultHasher::new();
-            path.hash(&mut hasher);
-            println!("{:6} {:x} {:?}", paths, hasher.finish(), path);
-          }
+          println!("{:6} {:?}", i, &fuzzer.path.lock().unwrap().path);
           fuzzer.atomics.lock().unwrap().clear();
           f(&fuzzer);
-          paths += 1;
+          i += 1;
           if !fuzzer.path.lock().unwrap().next_path() {
             break;
           }
         }
-        println!("checked all {} paths", paths);
+        println!("checked all {} paths", i);
       });
     });
   }

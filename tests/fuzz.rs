@@ -66,8 +66,8 @@ fn fuzz_var_link_link_var() {
     });
     let at = Port(a.loc().val().read());
     let ft = Port(f.loc().val().read());
-    dbg!(&a, &f, &at, &ft);
     if at != f || ft != a {
+      dbg!(&a, &f, &at, &ft);
       panic!("invalid link")
     }
   })
@@ -135,6 +135,7 @@ fn fuzz_var_link_link_pri() {
 
 #[test]
 #[serial]
+#[ignore = "very slow"]
 fn fuzz_var_link_link_link_var() {
   trace::set_hook();
   let heap = Net::init_heap(256);
@@ -157,9 +158,9 @@ fn fuzz_var_link_link_link_var() {
     net.link_port_port(c.clone(), d.clone());
     net.link_port_port(e.clone(), f.clone());
     net.link_port_port(g.clone(), h.clone());
-    let mut n0 = net.fork(0, 2);
-    let mut n1 = net.fork(1, 2);
-    let mut n2 = net.fork(1, 2);
+    let mut n0 = net.fork(0, 3);
+    let mut n1 = net.fork(1, 3);
+    let mut n2 = net.fork(2, 3);
     fuzz.scope(move |s| {
       s.spawn(move || {
         let (x, y) = fuzz.maybe_swap(b, c);
@@ -176,8 +177,8 @@ fn fuzz_var_link_link_link_var() {
     });
     let at = Port(a.loc().val().read());
     let ht = Port(h.loc().val().read());
-    dbg!(&a, &h, &at, &ht);
     if at != h || ht != a {
+      dbg!(&a, &h, &at, &ht);
       panic!("invalid link")
     }
   })

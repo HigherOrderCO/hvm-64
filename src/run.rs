@@ -109,8 +109,8 @@ impl Port {
   }
 
   #[inline(always)]
-  pub const fn new_lock(tid: u16) -> Port {
-    Port::new(Var, tid, Loc(0))
+  pub const fn new_lock(lab: u16) -> Port {
+    Port::new(Var, lab, Loc(0))
   }
 
   #[inline(always)]
@@ -505,10 +505,6 @@ impl<'a> Net<'a> {
     loc.other_half().val().store(Port::LOCK.0, Relaxed);
     loc
   }
-
-  fn lock(&self) -> Port {
-    Port::new_lock(self.tid as u16)
-  }
 }
 
 pub struct CreatedNode {
@@ -568,7 +564,7 @@ impl<'a> Net<'a> {
     match (a_port.tag(), b_port.tag()) {
       (Red, _) => self.link_wire_port(a_port.wire(), b_port),
       (_, Red) => self.link_wire_port(b_port.wire(), a_port),
-      (Var, Var) if a_port > b_port => self.link_var_var(a_port, b_port),
+      (Var, Var) if a_port < b_port => self.link_var_var(a_port, b_port),
       (Var, Var) => self.link_var_var(b_port, a_port),
       (Var, _) => self.link_var_pri(a_port, b_port),
       (_, Var) => self.link_var_pri(b_port, a_port),
@@ -594,25 +590,29 @@ impl<'a> Net<'a> {
     let x_port = x_wire.swap_target(Port::LOCK);
     if x_port != Port::new_var(a_wire.loc()) {
       trace!(self.tracer, "cas fail", x_port);
-      if x_port.is_lock() {
+      if x_port == Port::LOCK {
         return;
       }
-      if a_wire < x_wire {
-        trace!(self.tracer, "yay", a_wire, x_wire, b_port, x_port);
-        return self.link_port_port(b_port, x_port);
-      } else {
-        trace!(self.tracer, "nay", a_wire, x_wire, a_port, x_port);
-        return;
+      if !x_port.is_lock() {
+        if a_wire < x_wire {
+          trace!(self.tracer, "yay", a_wire, x_wire, b_port, x_port);
+          return self.link_port_port(b_port, x_port);
+        } else {
+          trace!(self.tracer, "nay", a_wire, x_wire, a_port, x_port);
+          return;
+        }
       }
+    } else {
+      trace!(self.tracer, "cas ok");
     }
-    trace!(self.tracer, "cas ok");
     return self.link_port_port(a_port, b_port);
   }
 
   fn link_var_var(&mut self, a_port: Port, b_port: Port) {
-    assert!(a_port > b_port);
+    assert!(a_port < b_port);
     trace!(self.tracer, a_port, b_port);
-    let x_port = b_port.wire().swap_target(self.lock());
+    let unique_lock = Port::new_lock(self.tid as u16);
+    let x_port = b_port.wire().swap_target(unique_lock.clone());
     if !x_port.is_lock() {
       trace!(self.tracer, "relock fail", x_port);
       return self.link_port_port(a_port, x_port);
@@ -622,17 +622,17 @@ impl<'a> Net<'a> {
     trace!(self.tracer, x_port);
     if x_port.is_lock() {
       trace!(self.tracer, b_port, a_port);
-      if let Err(x_port) = b_port.wire().cas_target(self.lock(), a_port.clone()) {
-        trace!(self.tracer, "cas fail", x_port);
-        if x_port != Port::LOCK {
-          return self.link_foreign_port_port(b_port.wire(), a_port, x_port);
+      if let Err(x_port) = b_port.wire().cas_target(unique_lock, a_port.clone()) {
+        trace!(self.tracer, "cas 1 fail", x_port);
+        if a_port.wire().cas_target(b_port, Port::LOCK).is_ok() {
+          trace!(self.tracer, "cas 2 ok", x_port);
+          return self.link_port_port(a_port, x_port);
+        } else {
+          trace!(self.tracer, "cas 2 fail", x_port);
+          return;
         }
-        trace!(self.tracer, "cas fail", a_port, b_port);
-        let x_port = a_port.wire().swap_target(Port::GONE);
-        trace!(self.tracer, "cas fail", x_port);
-        self.link_port_port(b_port, x_port);
       } else {
-        trace!(self.tracer, "cas ok");
+        trace!(self.tracer, "cas 1 ok");
       }
     } else {
       trace!(self.tracer, "HMM!");
@@ -1166,7 +1166,7 @@ impl<'a> Net<'a> {
           go(net, node.p2, len * 2, key / 2);
         }
       } else if port.tag() == Ref && port != Port::ERA {
-        let got = wire.swap_target(net.lock());
+        let got = wire.swap_target(Port::LOCK);
         if !got.is_lock() {
           trace!(net.tracer, port, wire);
           net.call(port, Port::new_var(wire.loc()));
