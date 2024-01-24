@@ -14,7 +14,8 @@
 //!
 //! To use this utility, compile with `--features trace`, run the resulting
 //! binary in a debugger, and – when the bug occurs – call `_read_traces(-1)` to
-//! dump all traces to stderr.
+//! dump all traces to stderr. You can also call the `set_hook()` function to
+//! automatically print traces on panic.
 //!
 //! ```sh
 //! $ cargo build --release --features trace; rust-lldb -- ./target/release/hvmc run path/to/file.hvmc -s
