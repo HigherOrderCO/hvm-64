@@ -448,19 +448,6 @@ pub fn set_hook() {
         hook(info);
         _read_traces(usize::MAX);
       }));
-      #[cfg(feature = "trace_crash")]
-      {
-        use crash_handler::CrashHandler;
-        dbg!("attached");
-        CrashHandler::attach(unsafe {
-          crash_handler::make_crash_event(|ctx| {
-            dbg!(ctx);
-            _read_traces(usize::MAX);
-            true.into()
-          })
-        })
-        .unwrap();
-      }
     })
   }
 }
