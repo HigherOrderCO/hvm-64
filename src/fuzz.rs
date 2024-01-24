@@ -1,3 +1,73 @@
+//! An 'atomic fuzzer' to exhaustively test an atomic algorithm for correctness.
+//!
+//! This fuzzer can test an algorithm with every possible ordering of parallel
+//! instructions / update propagation.
+//!
+//! This module implements a subset of the `std::sync::atomic` api. To test an
+//! algorithm with the fuzzer, it must first be compiled to use this module's
+//! atomics, rather than std's. Then, it can be called from within
+//! `Fuzzer::fuzz`.
+//!
+//! For example, here's a test of the ['nomicon][nomicon-example]'s example of
+//! atomic ordering:
+//!
+//! [nomicon-example]:
+//!     https://doc.rust-lang.org/nomicon/atomics.html#hardware-reordering
+//!
+//! ```
+//! use crate::fuzz::{Fuzzer, AtomicU64, Ordering};
+//! let mut results = HashSet::new();
+//! Fuzzer::default().fuzz(|f| {
+//!   let x = AtomicU64::new(0);
+//!   let y = AtomicU64::new(1);
+//!   f.scope(|s| { // use `f.scope` instead of `std::thread::scope`
+//!     s.spawn(|| {
+//!       y.store(3, Ordering::Relaxed);
+//!       x.store(1, Ordering::Relaxed);
+//!     });
+//!     s.spawn(|| {
+//!       if x.load(Ordering::Relaxed) == 1 {
+//!         y.store(y.load(Ordering::Relaxed) * 2, Ordering::Relaxed);
+//!       }
+//!     });
+//!   });
+//!   results.insert(y.read());
+//! });
+//! assert_eq!(results, [6, 3, 2].into_iter().collect());
+//! ```
+//!
+//! Note that the atomic types exposed by this module will panic if used outside
+//! of a thread spawned by `Fuzzer::fuzz`.
+//!
+//! Internally, the fuzzer works by iterating through *decision paths*,
+//! sequences of integers indicating which branch is taken at each
+//! non-deterministic instruction. This might, for example, correspond to which
+//! thread is switched to at a given yield point.
+//!
+//! The shape of the decision tree is not known ahead of time, and is instead
+//! progressively discovered through execution. Thus, when a path is first
+//! executed, it may not be the full path -- there may be branches that are not
+//! specified. In the extreme case, at the very beginning, the path starts as
+//! `[]`, with no branches specified that are not specified. In the extreme
+//! case, at the very beginning, the path starts as `[]`, with no branches
+//! specified.
+//!
+//! When a branching point is reached that is not specified in the path, the
+//! *last* branch is automatically chosen, and this decision is appended to the
+//! path. For example, executing path `[]` might disambiguate it to `[1, 2, 1]`.
+//! The last path is chosen because this alleviates the need to store the number
+//! of branches at any given point -- instead, branches are selected in
+//! decreasing order, so when the index reaches `0`, we know that there are no
+//! more branches to explore.
+//!
+//! By default, fuzzing starts at path `[]`, which will test the full decision
+//! tree. Alternatively, one can specify a different path to start at with
+//! `Fuzzer::with_path` -- this is useful, for example, to debug a failing path
+//! late in the tree. (It's important to note, though, that the semantics of the
+//! path are very dependent on the specifics of the algorithm, so if the
+//! algorithm is changed (particularly, the atomic instructions it executes),
+//! old paths may no longer be valid.)
+
 use std::{
   any::Any,
   cell::{OnceCell, RefCell},
@@ -8,8 +78,6 @@ use std::{
 };
 
 use nohash_hasher::IntMap;
-
-use crate::trace::TraceArg;
 
 #[repr(transparent)]
 pub struct Atomic<T: HasAtomic> {
@@ -26,6 +94,8 @@ impl<T: HasAtomic> Atomic<T> {
   pub fn new(value: T) -> Self {
     Atomic { value: T::new_atomic(value) }
   }
+  /// Reads the final value of this atomic -- should only be called in a
+  /// non-parallel context; i.e., at the end of a test.
   pub fn read(&self) -> T {
     T::load(&self.value)
   }
@@ -118,13 +188,19 @@ impl<T: HasAtomic> Atomic<T> {
   }
 }
 
+/// One thread's view of an atomic variable -- a reference to the history, and
+/// an index into it that denotes the currently propagated value.
 struct AtomicView<H: ?Sized> {
   history: Arc<H>,
   index: usize,
 }
 
+/// The history of an atomic variable (a vector of the vales it has held).
 type AtomicHistory<T> = Mutex<Vec<T>>;
 
+/// Currently, only `Ordering::Relaxed` is supported; other orderings could
+/// theoretically be supported, but this has not been implemented, as HVM
+/// currently only uses `Relaxed` operations.
 pub enum Ordering {
   Relaxed,
 }
@@ -143,7 +219,7 @@ impl ThreadContext {
     });
   }
   fn with<T>(f: impl FnOnce(&mut ThreadContext) -> T) -> T {
-    CONTEXT.with(|ctx| f(&mut ctx.get().expect("cannot use fuzz atomics outside of fuzz::fuzz").borrow_mut()))
+    CONTEXT.with(|ctx| f(&mut ctx.get().expect("cannot use fuzz atomics outside of Fuzzer::fuzz").borrow_mut()))
   }
 }
 
@@ -158,23 +234,18 @@ struct DecisionPath {
 }
 
 impl DecisionPath {
-  fn decide(&mut self, choices: usize) -> usize {
-    // println!("decide {}", choices);
-    // if choices == 1 {
-    //   println!("{:?}", &self.path);
-    // }
-    if choices == 1 {
+  fn decide(&mut self, options: usize) -> usize {
+    if options == 1 {
       return 0;
     }
     if self.index == self.path.len() {
-      self.path.push(choices - 1);
+      self.path.push(options - 1);
     }
     let choice = self.path[self.index];
     self.index += 1;
     choice
   }
   fn next_path(&mut self) -> bool {
-    // println!("---");
     self.index = 0;
     while self.path.last() == Some(&0) || self.path.len() > 100 {
       self.path.pop();
@@ -201,6 +272,7 @@ impl Fuzzer {
   pub fn with_path(path: Vec<usize>) -> Self {
     Fuzzer { path: Mutex::new(DecisionPath { path, index: 0 }), ..Default::default() }
   }
+
   pub fn fuzz(self, mut f: impl FnMut(&Arc<Fuzzer>) + Send) {
     thread::scope(move |s| {
       s.spawn(move || {
@@ -221,17 +293,20 @@ impl Fuzzer {
     });
   }
 
+  /// Makes a non-deterministic decision, returning an integer within `0..options`.
   pub fn decide(&self, options: usize) -> usize {
     self.path.lock().unwrap().decide(options)
-  }
-  pub fn yield_point(&self) {
-    if self.switch_thread() {
-      self.block_thread();
-    }
   }
 
   pub fn maybe_swap<T>(&self, a: T, b: T) -> (T, T) {
     if self.decide(2) == 1 { (b, a) } else { (a, b) }
+  }
+
+  /// Yields to the "scheduler", potentially switching to another thread.
+  pub fn yield_point(&self) {
+    if self.switch_thread() {
+      self.block_thread();
+    }
   }
 
   fn switch_thread(&self) -> bool {
@@ -305,7 +380,7 @@ impl<'s, 'p: 's, 'e: 's> FuzzScope<'s, 'p, 'e> {
   }
 }
 
-pub trait HasAtomic: 'static + Copy + Eq + Send + Add<Output = Self> + TraceArg {
+pub trait HasAtomic: 'static + Copy + Eq + Send + Add<Output = Self> {
   type Atomic;
   fn new_atomic(value: Self) -> Self::Atomic;
   fn load(atomic: &Self::Atomic) -> Self;
