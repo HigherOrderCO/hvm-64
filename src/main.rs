@@ -15,15 +15,7 @@ use hvmc::{
 use std::{collections::HashSet, env, fs, os::unix::thread, time::Instant};
 
 fn main() {
-  // let s = Instant::now();
-  // // for i in 0 .. 100000 {
-  // //   // unsafe { _reset_traces() };
-  // //   println!("{} {:?}", i, s.elapsed());
-  // //   cli_main();
-  // //   // _read_traces(100);
-  // //   // return;
-  // // }
-  // if cfg!(feature = "hvm_cli_options") { cli_main() } else { bare_main() }
+  if cfg!(feature = "hvm_cli_options") { cli_main() } else { bare_main() }
 }
 
 fn bare_main() {
