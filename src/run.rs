@@ -545,6 +545,7 @@ impl<'a> Net<'a> {
     };
   }
 
+  #[inline(never)]
   pub fn link_wire_port(&mut self, a_wire: Wire, b_port: Port) {
     trace!(self.tracer, a_wire, b_port);
     let a_port = a_wire.swap_target(b_port.clone());
