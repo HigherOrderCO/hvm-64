@@ -1,7 +1,5 @@
 #![cfg(feature = "_fuzz")]
 
-use std::collections::HashSet;
-
 use hvmc::{
   fuzz::*,
   run::{Loc, Net, Port, Tag},
@@ -11,30 +9,9 @@ use hvmc::{
 use serial_test::serial;
 
 #[test]
-fn fuzz_xy() {
-  let mut results = HashSet::new();
-  Fuzzer::default().fuzz(|f| {
-    let x = AtomicU64::new(0);
-    let y = AtomicU64::new(1);
-    f.scope(|s| {
-      s.spawn(|| {
-        y.store(3, Ordering::Relaxed);
-        x.store(1, Ordering::Relaxed);
-      });
-      s.spawn(|| {
-        if x.load(Ordering::Relaxed) == 1 {
-          y.store(y.load(Ordering::Relaxed) * 2, Ordering::Relaxed);
-        }
-      });
-    });
-    results.insert(y.read());
-  });
-  assert_eq!(results, [6, 3, 2].into_iter().collect());
-}
-
-#[test]
 #[serial]
 fn fuzz_var_link_link_var() {
+  assert!(cfg!(not(feature = "_fuzz_no_free")));
   trace::set_hook();
   Fuzzer::default().fuzz(|fuzz| {
     unsafe { trace::_reset_traces() };
@@ -54,13 +31,13 @@ fn fuzz_var_link_link_var() {
     net.link_port_port(e.clone(), f.clone());
     let mut n0 = net.fork(0, 2);
     let mut n1 = net.fork(1, 2);
-    fuzz.scope(move |s| {
-      s.spawn(move || {
-        let (x, y) = fuzz.maybe_swap(b, c);
+    fuzz.scope(|s| {
+      s.spawn(|| {
+        let (x, y) = fuzz.maybe_swap(b.clone(), c.clone());
         n0.link_wire_wire(x.wire(), y.wire());
       });
-      s.spawn(move || {
-        let (x, y) = fuzz.maybe_swap(d, e);
+      s.spawn(|| {
+        let (x, y) = fuzz.maybe_swap(d.clone(), e.clone());
         n1.link_wire_wire(x.wire(), y.wire());
       });
     });
@@ -70,12 +47,16 @@ fn fuzz_var_link_link_var() {
       dbg!(&a, &f, &at, &ft);
       panic!("invalid link")
     }
+    for x in [b, c, d, e] {
+      assert_eq!(x.loc().val().read(), Port::FREE.0);
+    }
   })
 }
 
 #[test]
 #[serial]
 fn fuzz_pri_link_link_pri() {
+  assert!(cfg!(not(feature = "_fuzz_no_free")));
   trace::set_hook();
   Fuzzer::default().fuzz(|fuzz| {
     unsafe { trace::_reset_traces() };
@@ -98,12 +79,16 @@ fn fuzz_pri_link_link_pri() {
       });
     });
     assert!(n0.rdex.len() == 1 || n1.rdex.len() == 1);
+    for x in [a, b] {
+      assert_eq!(x.loc().val().read(), Port::FREE.0);
+    }
   })
 }
 
 #[test]
 #[serial]
 fn fuzz_var_link_link_pri() {
+  assert!(cfg!(not(feature = "_fuzz_no_free")));
   trace::set_hook();
   Fuzzer::default().fuzz(|fuzz| {
     unsafe { trace::_reset_traces() };
@@ -119,17 +104,20 @@ fn fuzz_var_link_link_pri() {
     net.link_port_port(c.clone(), d.clone());
     let mut n0 = net.fork(0, 2);
     let mut n1 = net.fork(1, 2);
-    fuzz.scope(move |s| {
-      s.spawn(move || {
-        let (x, y) = fuzz.maybe_swap(b, c);
+    fuzz.scope(|s| {
+      s.spawn(|| {
+        let (x, y) = fuzz.maybe_swap(b.clone(), c.clone());
         n0.link_wire_wire(x.wire(), y.wire());
       });
-      s.spawn(move || {
+      s.spawn(|| {
         n1.link_wire_port(d.wire(), Port::ERA);
       });
     });
     let at = Port(a.loc().val().read());
     assert_eq!(at, Port::ERA);
+    for x in [b, c, d] {
+      assert_eq!(Port(x.loc().val().read()), Port::FREE);
+    }
   })
 }
 
@@ -137,6 +125,7 @@ fn fuzz_var_link_link_pri() {
 #[serial]
 #[ignore = "very slow"] // takes ~50m on my M3 Max (or ~13.5h with tracing enabled)
 fn fuzz_var_link_link_link_var() {
+  assert!(cfg!(feature = "_fuzz_no_free"));
   trace::set_hook();
   let heap = Net::init_heap(256);
   Fuzzer::default().fuzz(|fuzz| {
@@ -161,16 +150,16 @@ fn fuzz_var_link_link_link_var() {
     let mut n0 = net.fork(0, 3);
     let mut n1 = net.fork(1, 3);
     let mut n2 = net.fork(2, 3);
-    fuzz.scope(move |s| {
-      s.spawn(move || {
-        let (x, y) = fuzz.maybe_swap(b, c);
+    fuzz.scope(|s| {
+      s.spawn(|| {
+        let (x, y) = fuzz.maybe_swap(b.clone(), c.clone());
         n0.link_wire_wire(x.wire(), y.wire());
       });
-      s.spawn(move || {
+      s.spawn(|| {
         let (x, y) = fuzz.maybe_swap(d, e);
         n1.link_wire_wire(x.wire(), y.wire());
       });
-      s.spawn(move || {
+      s.spawn(|| {
         let (x, y) = fuzz.maybe_swap(f, g);
         n2.link_wire_wire(x.wire(), y.wire());
       });

@@ -31,6 +31,7 @@ hvm_cli_options = []
 trace = []
 trace_crash = ["trace", "dep:crash-handler"]
 _fuzz = []
+_fuzz_no_free = ["_fuzz"]
 
 [dependencies]
 nohash-hasher = "0.2.0"

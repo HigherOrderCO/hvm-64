@@ -453,20 +453,26 @@ impl<'a> Net<'a> {
   #[inline(never)]
   pub fn half_free(&mut self, loc: Loc) {
     trace!(self.tracer, loc);
-    // const FREE: u64 = Port::FREE.0;
-    // loc.val().store(FREE, Relaxed);
-    // if loc.other_half().val().load(Relaxed) == FREE {
-    //   trace!(self.tracer, "other free");
-    //   let loc = loc.left_half();
-    //   if loc.val().compare_exchange(FREE, self.head.0 as u64, Relaxed, Relaxed).is_ok() {
-    //     let old_head = &self.head;
-    //     let new_head = loc;
-    //     trace!(self.tracer, "appended", old_head, new_head);
-    //     self.head = new_head;
-    //   } else {
-    //     trace!(self.tracer, "too slow");
-    //   };
-    // }
+    const FREE: u64 = Port::FREE.0;
+    if cfg!(feature = "_fuzz") {
+      if cfg!(feature = "_fuzz_no_free") {
+        assert_ne!(loc.val().swap(FREE, Relaxed), FREE, "double free");
+      }
+    } else {
+      loc.val().store(FREE, Relaxed);
+      if loc.other_half().val().load(Relaxed) == FREE {
+        trace!(self.tracer, "other free");
+        let loc = loc.left_half();
+        if loc.val().compare_exchange(FREE, self.head.0 as u64, Relaxed, Relaxed).is_ok() {
+          let old_head = &self.head;
+          let new_head = loc;
+          trace!(self.tracer, "appended", old_head, new_head);
+          self.head = new_head;
+        } else {
+          trace!(self.tracer, "too slow");
+        };
+      }
+    }
   }
 
   #[inline(never)]
@@ -547,6 +553,7 @@ impl<'a> Net<'a> {
       return;
     }
     if a_port.tag() != Var {
+      self.half_free(a_wire.loc());
       return self.link_port_port(a_port, b_port);
     }
     let x_wire = a_port.wire();
@@ -555,12 +562,16 @@ impl<'a> Net<'a> {
     if x_port == Port::LOCK {
       return;
     }
-    if x_port == Port::new_var(a_wire.loc()) || x_port.is_lock() {
-      self.link_port_port(a_port, b_port);
+    if x_port == Port::new_var(a_wire.loc()) {
+      self.half_free(a_wire.loc());
+      return self.link_port_port(a_port, b_port);
+    } else if x_port.is_lock() {
+      return self.link_port_port(a_port, b_port);
     } else {
+      self.half_free(x_wire.loc());
       if a_wire < x_wire {
         trace!(self.tracer, "half 1", a_wire, x_wire, b_port, x_port);
-        self.link_port_port(b_port, x_port);
+        return self.link_port_port(b_port, x_port);
       } else {
         trace!(self.tracer, "half 0", a_wire, x_wire, b_port, x_port);
       }
@@ -573,6 +584,7 @@ impl<'a> Net<'a> {
     let x_port = b_port.wire().swap_target(unique_lock.clone());
     trace!(self.tracer, "swap b", x_port);
     if !x_port.is_lock() {
+      self.half_free(b_port.loc());
       return self.link_port_port(a_port, x_port);
     }
     let x_port = a_port.wire().swap_target(b_port.clone());
@@ -580,16 +592,19 @@ impl<'a> Net<'a> {
     if x_port.is_lock() {
       if let Err(x_port) = b_port.wire().cas_target(unique_lock, a_port.clone()) {
         trace!(self.tracer, "cas b fail", x_port);
-        if a_port.wire().cas_target(b_port, Port::LOCK).is_ok() {
+        if a_port.wire().cas_target(b_port.clone(), Port::LOCK).is_ok() {
           trace!(self.tracer, "cas a ok");
+          self.half_free(b_port.loc());
           return self.link_port_port(a_port, x_port);
         } else {
+          self.half_free(a_port.loc());
           trace!(self.tracer, "cas a fail");
         }
       } else {
         trace!(self.tracer, "cas a ok");
       }
     } else {
+      self.half_free(a_port.loc());
       return self.link_port_port(x_port, b_port);
     }
   }
@@ -599,6 +614,7 @@ impl<'a> Net<'a> {
     let x_port = a_port.wire().swap_target(b_port.clone());
     trace!(self.tracer, x_port);
     if !x_port.is_lock() {
+      self.half_free(a_port.loc());
       return self.link_port_port(x_port, b_port);
     }
   }
