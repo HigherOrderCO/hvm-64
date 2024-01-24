@@ -135,11 +135,11 @@ fn fuzz_var_link_link_pri() {
 
 #[test]
 #[serial]
-#[ignore = "very slow"]
+#[ignore = "very slow"] // takes ~50m on my M3 Max (or ~13.5h with tracing enabled)
 fn fuzz_var_link_link_link_var() {
   trace::set_hook();
   let heap = Net::init_heap(256);
-  Fuzzer::with_path(vec![]).fuzz(|fuzz| {
+  Fuzzer::default().fuzz(|fuzz| {
     unsafe { trace::_reset_traces() };
     let mut net = Net::new(&heap);
     let x = net.alloc();

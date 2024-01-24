@@ -527,23 +527,7 @@ impl<'a> Net<'a> {
     self.link_wire_port(a, Port::new(Red, 0, b.loc()));
   }
 
-  #[inline(always)]
-  pub fn redux(&mut self, a: Port, b: Port) {
-    trace!(self.tracer, a, b);
-    if a.is_skippable() && b.is_skippable() {
-      self.rwts.eras += 1;
-    } else {
-      self.force_redux(a, b);
-    }
-  }
-
-  #[inline(never)]
-  fn force_redux(&mut self, a: Port, b: Port) {
-    self.rdex.push((a, b));
-  }
-
   pub fn link_port_port(&mut self, a_port: Port, b_port: Port) {
-    trace!(self.tracer, a_port, b_port);
     match (a_port.tag(), b_port.tag()) {
       (Red, _) => self.link_wire_port(a_port.wire(), b_port),
       (_, Red) => self.link_wire_port(b_port.wire(), a_port),
@@ -558,11 +542,7 @@ impl<'a> Net<'a> {
   pub fn link_wire_port(&mut self, a_wire: Wire, b_port: Port) {
     trace!(self.tracer, a_wire, b_port);
     let a_port = a_wire.swap_target(b_port.clone());
-    self.link_foreign_port_port(a_wire, a_port, b_port);
-  }
-
-  fn link_foreign_port_port(&mut self, a_wire: Wire, a_port: Port, b_port: Port) {
-    trace!(self.tracer, a_wire, a_port, b_port);
+    trace!(self.tracer, a_port);
     if a_port.is_lock() {
       return;
     }
@@ -571,54 +551,46 @@ impl<'a> Net<'a> {
     }
     let x_wire = a_port.wire();
     let x_port = x_wire.swap_target(Port::LOCK);
-    if x_port != Port::new_var(a_wire.loc()) {
-      trace!(self.tracer, "cas fail", x_port);
-      if x_port == Port::LOCK {
-        return;
-      }
-      if !x_port.is_lock() {
-        if a_wire < x_wire {
-          trace!(self.tracer, "win", a_wire, x_wire, b_port, x_port);
-          return self.link_port_port(b_port, x_port);
-        } else {
-          trace!(self.tracer, "lose", a_wire, x_wire, a_port, x_port);
-          return;
-        }
-      }
-    } else {
-      trace!(self.tracer, "cas ok");
+    trace!(self.tracer, x_port);
+    if x_port == Port::LOCK {
+      return;
     }
-    return self.link_port_port(a_port, b_port);
+    if x_port == Port::new_var(a_wire.loc()) || x_port.is_lock() {
+      self.link_port_port(a_port, b_port);
+    } else {
+      if a_wire < x_wire {
+        trace!(self.tracer, "half 1", a_wire, x_wire, b_port, x_port);
+        self.link_port_port(b_port, x_port);
+      } else {
+        trace!(self.tracer, "half 0", a_wire, x_wire, b_port, x_port);
+      }
+    }
   }
 
   fn link_var_var(&mut self, a_port: Port, b_port: Port) {
-    debug_assert!(a_port < b_port);
     trace!(self.tracer, a_port, b_port);
     let unique_lock = Port::new_lock(self.tid as u16);
     let x_port = b_port.wire().swap_target(unique_lock.clone());
+    trace!(self.tracer, "swap b", x_port);
     if !x_port.is_lock() {
-      trace!(self.tracer, "relock fail", x_port);
       return self.link_port_port(a_port, x_port);
     }
-    trace!(self.tracer, "relock ok");
     let x_port = a_port.wire().swap_target(b_port.clone());
-    trace!(self.tracer, x_port);
+    trace!(self.tracer, "swap a", x_port);
     if x_port.is_lock() {
-      trace!(self.tracer, b_port, a_port);
       if let Err(x_port) = b_port.wire().cas_target(unique_lock, a_port.clone()) {
-        trace!(self.tracer, "cas 1 fail", x_port);
+        trace!(self.tracer, "cas b fail", x_port);
         if a_port.wire().cas_target(b_port, Port::LOCK).is_ok() {
-          trace!(self.tracer, "cas 2 ok", x_port);
+          trace!(self.tracer, "cas a ok");
           return self.link_port_port(a_port, x_port);
         } else {
-          trace!(self.tracer, "cas 2 fail", x_port);
-          return;
+          trace!(self.tracer, "cas a fail");
         }
       } else {
-        trace!(self.tracer, "cas 1 ok");
+        trace!(self.tracer, "cas a ok");
       }
     } else {
-      self.link_port_port(x_port, b_port);
+      return self.link_port_port(x_port, b_port);
     }
   }
 
@@ -627,8 +599,23 @@ impl<'a> Net<'a> {
     let x_port = a_port.wire().swap_target(b_port.clone());
     trace!(self.tracer, x_port);
     if !x_port.is_lock() {
-      self.link_port_port(x_port, b_port);
+      return self.link_port_port(x_port, b_port);
     }
+  }
+
+  #[inline(always)]
+  pub fn redux(&mut self, a: Port, b: Port) {
+    trace!(self.tracer, a, b);
+    if a.is_skippable() && b.is_skippable() {
+      self.rwts.eras += 1;
+    } else {
+      self.force_redux(a, b);
+    }
+  }
+
+  #[inline(never)]
+  fn force_redux(&mut self, a: Port, b: Port) {
+    self.rdex.push((a, b));
   }
 }
 
