@@ -8,6 +8,7 @@
 // space evaluation of recursive functions on Scott encoded datatypes.
 
 use crate::{
+  fuzz::Ordering,
   jit::{Instruction, Trg},
   ops::Op,
   trace,
@@ -455,7 +456,7 @@ impl<'a> Net<'a> {
     trace!(self.tracer, loc);
     const FREE: u64 = Port::FREE.0;
     if cfg!(feature = "_fuzz") {
-      if cfg!(feature = "_fuzz_no_free") {
+      if cfg!(not(feature = "_fuzz_no_free")) {
         assert_ne!(loc.val().swap(FREE, Relaxed), FREE, "double free");
       }
     } else {
@@ -533,6 +534,7 @@ impl<'a> Net<'a> {
     self.link_wire_port(a, Port::new(Red, 0, b.loc()));
   }
 
+  #[inline(always)]
   pub fn link_port_port(&mut self, a_port: Port, b_port: Port) {
     match (a_port.tag(), b_port.tag()) {
       (Red, _) => self.link_wire_port(a_port.wire(), b_port),
@@ -545,8 +547,41 @@ impl<'a> Net<'a> {
     };
   }
 
-  #[inline(never)]
+  #[inline(always)]
   pub fn link_wire_port(&mut self, a_wire: Wire, b_port: Port) {
+    match b_port.tag() {
+      Var => self._link_wire_port_var(a_wire, b_port),
+      Red => self._link_wire_port_red(a_wire, b_port),
+      _ => self._link_wire_port_pri(a_wire, b_port),
+    }
+  }
+
+  #[inline(never)]
+  fn _link_wire_port_var(&mut self, a_wire: Wire, b_port: Port) {
+    if b_port.tag() != Var {
+      unsafe { unreachable_unchecked() }
+    }
+    self._link_wire_port(a_wire, b_port)
+  }
+
+  #[inline(never)]
+  fn _link_wire_port_red(&mut self, a_wire: Wire, b_port: Port) {
+    if b_port.tag() != Red {
+      unsafe { unreachable_unchecked() }
+    }
+    self._link_wire_port(a_wire, b_port)
+  }
+
+  #[inline(never)]
+  fn _link_wire_port_pri(&mut self, a_wire: Wire, b_port: Port) {
+    if b_port.tag() == Var || b_port.tag() == Red {
+      unsafe { unreachable_unchecked() }
+    }
+    self._link_wire_port(a_wire, b_port)
+  }
+
+  #[inline(always)]
+  pub fn _link_wire_port(&mut self, a_wire: Wire, b_port: Port) {
     trace!(self.tracer, a_wire, b_port);
     let a_port = a_wire.swap_target(b_port.clone());
     trace!(self.tracer, a_port);
@@ -555,19 +590,16 @@ impl<'a> Net<'a> {
     }
     if a_port.tag() != Var {
       self.half_free(a_wire.loc());
-      return self.link_port_port(a_port, b_port);
+      return self.link_port_port(b_port, a_port);
     }
     let x_wire = a_port.wire();
     let x_port = x_wire.swap_target(Port::LOCK);
     trace!(self.tracer, x_port);
-    if x_port == Port::LOCK {
-      return;
-    }
     if x_port == Port::new_var(a_wire.loc()) {
       self.half_free(a_wire.loc());
-      return self.link_port_port(a_port, b_port);
+      return self.link_port_port(b_port, a_port);
     } else if x_port.is_lock() {
-      return self.link_port_port(a_port, b_port);
+      return self.link_port_port(b_port, a_port);
     } else {
       self.half_free(x_wire.loc());
       if a_wire < x_wire {
@@ -579,7 +611,11 @@ impl<'a> Net<'a> {
     }
   }
 
+  #[inline(never)]
   fn link_var_var(&mut self, a_port: Port, b_port: Port) {
+    if a_port.tag() != Var || b_port.tag() != Var {
+      unsafe { unreachable_unchecked() }
+    }
     trace!(self.tracer, a_port, b_port);
     let unique_lock = Port::new_lock(self.tid as u16);
     let x_port = b_port.wire().swap_target(unique_lock.clone());
@@ -606,11 +642,15 @@ impl<'a> Net<'a> {
       }
     } else {
       self.half_free(a_port.loc());
-      return self.link_port_port(x_port, b_port);
+      return self.link_port_port(b_port, x_port);
     }
   }
 
+  #[inline(never)]
   fn link_var_pri(&mut self, a_port: Port, b_port: Port) {
+    if a_port.tag() != Var || b_port.tag() == Var || b_port.tag() == Red {
+      unsafe { unreachable_unchecked() }
+    }
     trace!(self.tracer, a_port, b_port);
     let x_port = a_port.wire().swap_target(b_port.clone());
     trace!(self.tracer, x_port);
@@ -620,7 +660,7 @@ impl<'a> Net<'a> {
     }
   }
 
-  #[inline(always)]
+  #[inline(never)]
   pub fn redux(&mut self, a: Port, b: Port) {
     trace!(self.tracer, a, b);
     if a.is_skippable() && b.is_skippable() {
