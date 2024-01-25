@@ -102,9 +102,9 @@ impl<T: HasAtomic> Atomic<T> {
   }
   fn with<R>(&self, f: impl FnOnce(&Fuzzer, &mut Vec<T>, &mut usize) -> (bool, R)) -> R {
     ThreadContext::with(|ctx| {
-      // if !ctx.just_started {
-      ctx.fuzzer.yield_point();
-      // }
+      if !ctx.just_started {
+        ctx.fuzzer.yield_point();
+      }
       ctx.just_started = false;
       let key = &self.value as *const _ as usize;
       let view = ctx.views.entry(key).or_insert_with(|| AtomicView {
@@ -118,7 +118,7 @@ impl<T: HasAtomic> Atomic<T> {
           .clone(),
         index: 0,
       });
-      let history: &AtomicHistory<T> = view.history.downcast_ref().unwrap();
+      let history: &AtomicHistory<T> = view.history.to_any().downcast_ref().unwrap();
       let mut history = history.lock().unwrap();
       let (changed, r) = f(&ctx.fuzzer, &mut history, &mut view.index);
       if changed {
@@ -129,8 +129,8 @@ impl<T: HasAtomic> Atomic<T> {
   }
   pub fn load(&self, _: Ordering) -> T {
     self.with(|fuzzer, history, index| {
-      dbg!(history.len());
-      *index += fuzzer.decide(history.len() - *index);
+      let delta = fuzzer.decide(history.len() - *index);
+      *index += delta;
       let value = history[*index];
       (false, value)
     })
@@ -194,9 +194,26 @@ impl<T: HasAtomic> Atomic<T> {
 
 pub fn spin_loop() {
   ThreadContext::with(|ctx| {
-    ctx.fuzzer.block_thread();
-    ctx.fuzzer.yield_point();
-    ctx.just_started = true;
+    let mut unsynced = ctx
+      .views
+      .values_mut()
+      .map(|x| {
+        let l = x.history.len();
+        (x, l)
+      })
+      .filter(|x| x.0.index + 1 < x.1)
+      .collect::<Vec<_>>();
+    if !unsynced.is_empty() {
+      ctx.fuzzer.yield_point();
+      let idx = ctx.fuzzer.decide(unsynced.len());
+      let unsynced = &mut unsynced[idx];
+      let amount = 1 + ctx.fuzzer.decide(unsynced.1 - unsynced.0.index - 1);
+      unsynced.0.index += amount;
+    } else {
+      ctx.fuzzer.block_thread();
+      ctx.fuzzer.yield_point();
+      ctx.just_started = true;
+    }
   })
 }
 
@@ -219,7 +236,7 @@ pub enum Ordering {
 
 struct ThreadContext {
   fuzzer: Arc<Fuzzer>,
-  views: IntMap<usize, AtomicView<dyn Any>>,
+  views: IntMap<usize, AtomicView<dyn AnyAtomicHistory>>,
   just_started: bool,
 }
 
@@ -232,6 +249,20 @@ impl ThreadContext {
   }
   fn with<T>(f: impl FnOnce(&mut ThreadContext) -> T) -> T {
     CONTEXT.with(|ctx| f(&mut ctx.get().expect("cannot use fuzz atomics outside of Fuzzer::fuzz").borrow_mut()))
+  }
+}
+
+trait AnyAtomicHistory: Any {
+  fn len(&self) -> usize;
+  fn to_any(&self) -> &dyn Any;
+}
+
+impl<T: 'static> AnyAtomicHistory for AtomicHistory<T> {
+  fn len(&self) -> usize {
+    self.lock().unwrap().len()
+  }
+  fn to_any(&self) -> &dyn Any {
+    self
   }
 }
 
@@ -249,6 +280,9 @@ impl DecisionPath {
   fn decide(&mut self, options: usize) -> usize {
     if options == 1 {
       return 0;
+    }
+    if options == 0 {
+      panic!("you left me no choice");
     }
     if self.index == self.path.len() {
       self.path.push(options - 1);
@@ -274,7 +308,7 @@ impl DecisionPath {
 #[derive(Default)]
 pub struct Fuzzer {
   path: Mutex<DecisionPath>,
-  atomics: Mutex<IntMap<usize, Arc<dyn Any + Send + Sync>>>,
+  atomics: Mutex<IntMap<usize, Arc<dyn AnyAtomicHistory + Send + Sync>>>,
   current_thread: Mutex<Option<ThreadId>>,
   active_threads: Mutex<Vec<ThreadId>>,
   blocked_threads: Mutex<Vec<ThreadId>>,

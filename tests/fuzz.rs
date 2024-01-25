@@ -1,4 +1,5 @@
 #![cfg(feature = "_fuzz")]
+#![feature(const_type_name)]
 
 use hvmc::{
   fuzz::*,
@@ -37,10 +38,12 @@ fn fuzz_var_link_link_var() {
       s.spawn(|| {
         let (x, y) = fuzz.maybe_swap(b.clone(), c.clone());
         n0.link_wire_wire(x.wire(), y.wire());
+        trace!(n0.tracer, "done");
       });
       s.spawn(|| {
         let (x, y) = fuzz.maybe_swap(d.clone(), e.clone());
         n1.link_wire_wire(x.wire(), y.wire());
+        trace!(n1.tracer, "done");
       });
     });
     let mut used = vec![];

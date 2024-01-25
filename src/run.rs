@@ -695,9 +695,11 @@ impl<'a> Net<'a> {
           return;
         // Second to arrive clears up the memory.
         } else {
-          trace!(self.tracer, "snd", x_wire, y_wire);
+          trace!(self.tracer, "snd !!!", x_wire, y_wire);
           self.half_free(x_wire.loc());
-          while y_wire.cas_target(Port::GONE, Port::LOCK).is_err() {}
+          while y_wire.cas_target(Port::GONE, Port::LOCK).is_err() {
+            spin_loop();
+          }
           self.half_free(y_wire.loc());
           return;
         }
