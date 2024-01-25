@@ -26,6 +26,11 @@ use crate::fuzz as atomic;
 #[cfg(not(feature = "_fuzz"))]
 use std::sync::atomic;
 
+#[cfg(feature = "_fuzz")]
+use crate::fuzz::spin_loop;
+#[cfg(not(feature = "_fuzz"))]
+fn spin_loop() {}
+
 use atomic::{AtomicU64, AtomicUsize, Ordering::Relaxed};
 
 // -------------------
@@ -283,6 +288,8 @@ impl Wire {
 
   #[inline(always)]
   fn target<'a>(&self) -> &'a AtomicU64 {
+    assert_ne!(self.0 as usize, 0xfffffffffff0);
+    assert_ne!(self.0 as usize, 0);
     unsafe { &*self.0 }
   }
 
@@ -314,6 +321,7 @@ impl Wire {
       if got != Port::LOCK {
         return got;
       }
+      spin_loop();
     }
   }
 }
@@ -640,6 +648,7 @@ impl<'a> Net<'a> {
       trace!(self.tracer, t_port);
       // If it is taken, we wait.
       if t_port == Port::LOCK {
+        spin_loop();
         continue;
       }
       // If target is a rewireection, we own it. Clear and move forward.
@@ -657,7 +666,7 @@ impl<'a> Net<'a> {
           // Collect the orphaned backward path.
           t_wire = t_port.wire();
           t_port = t_wire.load_target();
-          while t_port.tag() == Red {
+          while t_port != Port::LOCK && t_port.tag() == Red {
             trace!(self.tracer, t_wire, t_port);
             self.half_free(t_wire.loc());
             t_wire = t_port.wire();

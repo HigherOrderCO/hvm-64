@@ -70,6 +70,7 @@
 
 use std::{
   any::Any,
+  backtrace::Backtrace,
   cell::{OnceCell, RefCell},
   marker::PhantomData,
   ops::Add,
@@ -99,14 +100,12 @@ impl<T: HasAtomic> Atomic<T> {
   pub fn read(&self) -> T {
     T::load(&self.value)
   }
-  fn with<R>(&self, yield_point: bool, f: impl FnOnce(&Fuzzer, &mut Vec<T>, &mut usize) -> R) -> R {
+  fn with<R>(&self, f: impl FnOnce(&Fuzzer, &mut Vec<T>, &mut usize) -> (bool, R)) -> R {
     ThreadContext::with(|ctx| {
-      if yield_point {
-        if !ctx.just_started {
-          ctx.fuzzer.yield_point();
-        }
-        ctx.just_started = false;
-      }
+      // if !ctx.just_started {
+      ctx.fuzzer.yield_point();
+      // }
+      ctx.just_started = false;
       let key = &self.value as *const _ as usize;
       let view = ctx.views.entry(key).or_insert_with(|| AtomicView {
         history: ctx
@@ -121,71 +120,84 @@ impl<T: HasAtomic> Atomic<T> {
       });
       let history: &AtomicHistory<T> = view.history.downcast_ref().unwrap();
       let mut history = history.lock().unwrap();
-      let r = f(&ctx.fuzzer, &mut history, &mut view.index);
+      let (changed, r) = f(&ctx.fuzzer, &mut history, &mut view.index);
+      if changed {
+        ctx.fuzzer.unblock_threads();
+      }
       r
     })
   }
   pub fn load(&self, _: Ordering) -> T {
-    self.with(true, |fuzzer, history, index| {
+    self.with(|fuzzer, history, index| {
+      dbg!(history.len());
       *index += fuzzer.decide(history.len() - *index);
       let value = history[*index];
-      value
+      (false, value)
     })
   }
   pub fn store(&self, value: T, _: Ordering) {
-    self.with(true, |_, history, index| {
+    self.with(|_, history, index| {
       *index = history.len();
       history.push(value);
       T::store(&self.value, value);
+      (true, ())
     })
   }
   pub fn swap(&self, new: T, _: Ordering) -> T {
-    self.with(true, |_, history, index| {
+    self.with(|_, history, index| {
       *index = history.len();
       let old = *history.last().unwrap();
       history.push(new);
       T::store(&self.value, new);
-      old
+      (true, old)
     })
   }
   pub fn compare_exchange(&self, expected: T, new: T, _: Ordering, _: Ordering) -> Result<T, T> {
-    self.with(true, |_, history, index| {
+    self.with(|_, history, index| {
       let old = *history.last().unwrap();
       if old == expected {
         *index = history.len();
         history.push(new);
         T::store(&self.value, new);
-        Ok(old)
+        (true, Ok(old))
       } else {
         *index = history.len() - 1;
-        Err(old)
+        (false, Err(old))
       }
     })
   }
   pub fn compare_exchange_weak(&self, expected: T, new: T, _: Ordering, _: Ordering) -> Result<T, T> {
-    self.with(true, |fuzzer, history, index| {
+    self.with(|fuzzer, history, index| {
       let old = *history.last().unwrap();
       if old == expected && fuzzer.decide(2) == 1 {
         *index = history.len();
         history.push(new);
         T::store(&self.value, new);
-        Ok(old)
+        (true, Ok(old))
       } else {
         *index = history.len() - 1;
-        Err(old)
+        (false, Err(old))
       }
     })
   }
   pub fn fetch_add(&self, delta: T, _: Ordering) -> T {
-    self.with(true, |_, history, index| {
+    self.with(|_, history, index| {
       *index = history.len();
       let old = *history.last().unwrap();
       let new = old + delta;
       history.push(new);
       T::store(&self.value, new);
-      old
+      (true, old)
     })
   }
+}
+
+pub fn spin_loop() {
+  ThreadContext::with(|ctx| {
+    ctx.fuzzer.block_thread();
+    ctx.fuzzer.yield_point();
+    ctx.just_started = true;
+  })
 }
 
 /// One thread's view of an atomic variable -- a reference to the history, and
@@ -265,7 +277,9 @@ pub struct Fuzzer {
   atomics: Mutex<IntMap<usize, Arc<dyn Any + Send + Sync>>>,
   current_thread: Mutex<Option<ThreadId>>,
   active_threads: Mutex<Vec<ThreadId>>,
+  blocked_threads: Mutex<Vec<ThreadId>>,
   condvar: Condvar,
+  main: Option<ThreadId>,
 }
 
 impl Fuzzer {
@@ -273,15 +287,17 @@ impl Fuzzer {
     Fuzzer { path: Mutex::new(DecisionPath { path, index: 0 }), ..Default::default() }
   }
 
-  pub fn fuzz(self, mut f: impl FnMut(&Arc<Fuzzer>) + Send) {
+  pub fn fuzz(mut self, mut f: impl FnMut(&Arc<Fuzzer>) + Send) {
     thread::scope(move |s| {
       s.spawn(move || {
+        self.main = Some(thread::current().id());
         let fuzzer = Arc::new(self);
         ThreadContext::init(fuzzer.clone());
         let mut i = 0;
         loop {
           println!("{:6} {:?}", i, &fuzzer.path.lock().unwrap().path);
           fuzzer.atomics.lock().unwrap().clear();
+          ThreadContext::with(|ctx| ctx.views.clear());
           f(&fuzzer);
           i += 1;
           if !fuzzer.path.lock().unwrap().next_path() {
@@ -305,14 +321,32 @@ impl Fuzzer {
   /// Yields to the "scheduler", potentially switching to another thread.
   pub fn yield_point(&self) {
     if self.switch_thread() {
-      self.block_thread();
+      self.pause_thread();
     }
+  }
+
+  fn unblock_threads(&self) {
+    let mut active_threads = self.active_threads.lock().unwrap();
+    let mut blocked_threads = self.blocked_threads.lock().unwrap();
+    active_threads.extend(blocked_threads.drain(..));
+  }
+
+  fn block_thread(&self) {
+    let thread_id = thread::current().id();
+    let mut active_threads = self.active_threads.lock().unwrap();
+    let mut blocked_threads = self.blocked_threads.lock().unwrap();
+    let idx = active_threads.iter().position(|x| x == &thread_id).unwrap();
+    active_threads.swap_remove(idx);
+    blocked_threads.push(thread_id);
   }
 
   fn switch_thread(&self) -> bool {
     let thread_id = thread::current().id();
     let active_threads = self.active_threads.lock().unwrap();
     if active_threads.is_empty() {
+      if self.main != Some(thread_id) {
+        panic!("deadlock");
+      }
       return false;
     }
     let new_idx = self.decide(active_threads.len());
@@ -326,7 +360,7 @@ impl Fuzzer {
     true
   }
 
-  fn block_thread(&self) {
+  fn pause_thread(&self) {
     let thread_id = thread::current().id();
     let mut current_thread = self.current_thread.lock().unwrap();
     while *current_thread != Some(thread_id) {
@@ -361,7 +395,7 @@ impl<'s, 'p: 's, 'e: 's> FuzzScope<'s, 'p, 'e> {
         let thread_id = thread::current().id();
         fuzzer.active_threads.lock().unwrap().push(thread_id);
         ready.store(true, atomic::Ordering::Relaxed);
-        fuzzer.block_thread();
+        fuzzer.pause_thread();
         f();
         let mut active_threads = fuzzer.active_threads.lock().unwrap();
         let i = active_threads.iter().position(|&t| t == thread_id).unwrap();
@@ -397,10 +431,10 @@ macro_rules! decl_atomic {
         atomic::$A::new(value)
       }
       fn load(atomic: &Self::Atomic) -> Self {
-        atomic.load(atomic::Ordering::Relaxed)
+        atomic.load(atomic::Ordering::SeqCst)
       }
       fn store(atomic: &Self::Atomic, value: Self) {
-        atomic.store(value, atomic::Ordering::Relaxed)
+        atomic.store(value, atomic::Ordering::SeqCst)
       }
     }
   )*};
