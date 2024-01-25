@@ -17,12 +17,16 @@ use std::{
   alloc::{self, Layout},
   fmt,
   hint::unreachable_unchecked,
-  sync::{
-    atomic::{AtomicU64, AtomicUsize, Ordering::Relaxed},
-    Arc, Barrier,
-  },
+  sync::{Arc, Barrier},
   thread,
 };
+
+#[cfg(feature = "_fuzz")]
+use crate::fuzz as atomic;
+#[cfg(not(feature = "_fuzz"))]
+use std::sync::atomic;
+
+use atomic::{AtomicU64, AtomicUsize, Ordering::Relaxed};
 
 // -------------------
 //   Primitive Types
@@ -294,7 +298,7 @@ impl Wire {
 
   #[inline(always)]
   pub fn cas_target(&self, expected: Port, value: Port) -> Result<Port, Port> {
-    self.target().compare_exchange_weak(expected.0, value.0, Relaxed, Relaxed).map(Port).map_err(Port)
+    self.target().compare_exchange(expected.0, value.0, Relaxed, Relaxed).map(Port).map_err(Port)
   }
 
   #[inline(always)]
@@ -456,20 +460,26 @@ impl<'a> Net<'a> {
 
   #[inline(never)]
   pub fn half_free(&mut self, loc: Loc) {
-    const FREE: u64 = Port::FREE.0;
     trace!(self.tracer, loc);
-    loc.val().store(FREE, Relaxed);
-    if loc.other_half().val().load(Relaxed) == FREE {
-      trace!(self.tracer, "other free");
-      let loc = loc.left_half();
-      if loc.val().compare_exchange(FREE, self.head.0 as u64, Relaxed, Relaxed).is_ok() {
-        let old_head = &self.head;
-        let new_head = loc;
-        trace!(self.tracer, "appended", old_head, new_head);
-        self.head = new_head;
-      } else {
-        trace!(self.tracer, "too slow");
-      };
+    const FREE: u64 = Port::FREE.0;
+    if cfg!(feature = "_fuzz") {
+      if cfg!(not(feature = "_fuzz_no_free")) {
+        assert_ne!(loc.val().swap(FREE, Relaxed), FREE, "double free");
+      }
+    } else {
+      loc.val().store(FREE, Relaxed);
+      if loc.other_half().val().load(Relaxed) == FREE {
+        trace!(self.tracer, "other free");
+        let loc = loc.left_half();
+        if loc.val().compare_exchange(FREE, self.head.0 as u64, Relaxed, Relaxed).is_ok() {
+          let old_head = &self.head;
+          let new_head = loc;
+          trace!(self.tracer, "appended", old_head, new_head);
+          self.head = new_head;
+        } else {
+          trace!(self.tracer, "too slow");
+        };
+      }
     }
   }
 
@@ -1254,7 +1264,7 @@ impl<'a> Net<'a> {
   }
 
   // Forks into child threads, returning a Net for the (tid/tids)'th thread.
-  fn fork(&self, tid: usize, tids: usize) -> Self {
+  pub fn fork(&self, tid: usize, tids: usize) -> Self {
     let heap_size = self.area.len() / tids;
     let heap_start = heap_size * tid;
     let area = &self.area[heap_start .. heap_start + heap_size];
