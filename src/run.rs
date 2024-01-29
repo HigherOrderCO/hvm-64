@@ -367,12 +367,20 @@ impl Trg {
     Trg(Port(wire.0 as u64))
   }
   #[inline(always)]
-  pub fn is_wire(&self) -> bool {
+  fn is_wire(&self) -> bool {
     self.0.tag() == Red
   }
   #[inline(always)]
+  fn as_wire(self) -> Wire {
+    Wire(self.0.0 as _)
+  }
+  #[inline(always)]
+  fn as_port(self) -> Port {
+    self.0
+  }
+  #[inline(always)]
   pub fn target(&self) -> Port {
-    if self.is_wire() { self.0.wire().load_target() } else { self.0.clone() }
+    if self.is_wire() { self.clone().as_wire().load_target() } else { self.0.clone() }
   }
 }
 
@@ -822,8 +830,8 @@ impl<'a> Net<'a> {
   #[inline(always)]
   pub fn link_trg_port(&mut self, a: Trg, b: Port) {
     match a.is_wire() {
-      true => self.link_wire_port(a.0.wire(), b),
-      false => self.link_port_port(a.0, b),
+      true => self.link_wire_port(a.as_wire(), b),
+      false => self.link_port_port(a.as_port(), b),
     }
   }
 
@@ -831,10 +839,10 @@ impl<'a> Net<'a> {
   #[inline(always)]
   pub fn link_trg(&mut self, a: Trg, b: Trg) {
     match (a.is_wire(), b.is_wire()) {
-      (true, true) => self.link_wire_wire(a.0.wire(), b.0.wire()),
-      (true, false) => self.link_wire_port(a.0.wire(), b.0),
-      (false, true) => self.link_wire_port(b.0.wire(), a.0),
-      (false, false) => self.link_port_port(a.0, b.0),
+      (true, true) => self.link_wire_wire(a.as_wire(), b.as_wire()),
+      (true, false) => self.link_wire_port(a.as_wire(), b.as_port()),
+      (false, true) => self.link_wire_port(b.as_wire(), a.as_port()),
+      (false, false) => self.link_port_port(a.as_port(), b.as_port()),
     }
   }
 }
