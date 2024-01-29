@@ -17,7 +17,6 @@ use std::{
   alloc::{self, Layout},
   fmt,
   hint::unreachable_unchecked,
-  mem::ManuallyDrop,
   sync::{Arc, Barrier},
   thread,
 };
@@ -1211,13 +1210,13 @@ impl<'a> Net<'a> {
             self.set_trg(a, at);
             self.set_trg(b, bt);
           }
-          Instruction::Pair(a, b) => {
-            let x = self.alloc();
-            let av = Port::new_var(x.other_half());
-            let bv = Port::new_var(x);
-            self.link_port_port(av.clone(), bv.clone());
-            self.set_trg(a, Trg::Wire(av.wire()));
-            self.set_trg(b, Trg::Wire(bv.wire()));
+          Instruction::Wires(av, aw, bv, bw) => {
+            let a = self.alloc();
+            let b = a.other_half();
+            self.set_trg(av, Trg::Port(Port::new_var(a.clone())));
+            self.set_trg(bv, Trg::Port(Port::new_var(b.clone())));
+            self.set_trg(aw, Trg::Wire(Wire::new(a)));
+            self.set_trg(bw, Trg::Wire(Wire::new(b)));
           }
         }
       }

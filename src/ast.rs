@@ -414,13 +414,16 @@ impl Host {
 }
 
 fn net_to_runtime_def(defs: &HashMap<String, DefRef>, net: &Net) -> DefNet {
-  let mut state = State { defs, scope: Default::default(), instr: Default::default(), next_index: 1 };
+  let mut state =
+    State { defs, scope: Default::default(), instr: Default::default(), end: Default::default(), next_index: 1 };
 
   state.visit_tree(&net.root, 0);
 
   net.rdex.iter().for_each(|(a, b)| state.visit_redex(a, b));
 
   assert!(state.scope.is_empty());
+
+  state.instr.extend(state.end.drain(..));
 
   return DefNet { instr: state.instr };
 
@@ -429,6 +432,7 @@ fn net_to_runtime_def(defs: &HashMap<String, DefRef>, net: &Net) -> DefNet {
     defs: &'a HashMap<String, DefRef>,
     scope: HashMap<&'a str, usize>,
     instr: Vec<Instruction>,
+    end: Vec<Instruction>,
     next_index: usize,
   }
 
@@ -439,12 +443,15 @@ fn net_to_runtime_def(defs: &HashMap<String, DefRef>, net: &Net) -> DefNet {
         (Tree::Ref { nam }, t) | (t, Tree::Ref { nam }) => (Port::new_ref(&self.defs[nam]), t),
         (Tree::Num { val }, t) | (t, Tree::Num { val }) => (Port::new_num(*val), t),
         (t, u) => {
-          let a = self.next_index;
-          let b = self.next_index + 1;
-          self.next_index += 2;
-          self.instr.push(Instruction::Pair(a, b));
-          self.visit_tree(t, a);
-          self.visit_tree(u, b);
+          let av = self.next_index;
+          let aw = self.next_index + 1;
+          let bv = self.next_index + 2;
+          let bw = self.next_index + 3;
+          self.next_index += 4;
+          self.instr.push(Instruction::Wires(av, aw, bv, bw));
+          self.end.push(Instruction::Link(aw, bw));
+          self.visit_tree(t, av);
+          self.visit_tree(u, bv);
           return;
         }
       };

@@ -12,15 +12,11 @@ use hvmc::{
   *,
 };
 
-use std::{collections::HashSet, env, fs, time::Instant};
+use std::{collections::HashSet, env, fs, sync::atomic, time::Instant};
 
 fn main() {
   if cfg!(feature = "trace") {
-    let hook = std::panic::take_hook();
-    std::panic::set_hook(Box::new(move |info| {
-      hook(info);
-      hvmc::trace::_read_traces(usize::MAX);
-    }))
+    trace::set_hook();
   }
   let s = Instant::now();
   // for i in 0 .. 100000 {
@@ -30,7 +26,14 @@ fn main() {
   //   // _read_traces(100);
   //   // return;
   // }
-  if cfg!(feature = "hvm_cli_options") { cli_main() } else { bare_main() }
+  if cfg!(feature = "hvm_cli_options") {
+    cli_main()
+  } else {
+    bare_main()
+  }
+  if cfg!(feature = "trace") {
+    hvmc::trace::_read_traces(usize::MAX);
+  }
 }
 
 fn bare_main() {
