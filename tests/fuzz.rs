@@ -14,8 +14,6 @@ use serial_test::serial;
 fn fuzz_var_link_link_var() {
   assert!(cfg!(not(feature = "_fuzz_no_free")));
   trace::set_hook();
-  let mut bad_link = 0;
-  let mut bad_free = 0;
   Fuzzer::default().fuzz(|fuzz| {
     unsafe { trace::_reset_traces() };
     let heap = Net::init_heap(256);
@@ -135,7 +133,7 @@ fn fuzz_var_link_link_pri() {
     let at = Port(a.loc().val().read());
     assert_eq!(at, Port::ERA);
     // for x in [b, c, d] {
-    //   assert_eq!(Port(x.loc().val().read()), Port::FREE);
+    //   assert_eq!(Port(x.loc().val().read()), Port::FREE, "failed to free {:?}", x.wire());
     // }
   })
 }
@@ -183,11 +181,23 @@ fn fuzz_var_link_link_link_var() {
         n2.link_wire_wire(x.wire(), y.wire());
       });
     });
-    let at = Port(a.loc().val().read());
-    let ht = Port(h.loc().val().read());
-    if at != h || ht != a {
-      dbg!(&a, &h, &at, &ht);
-      panic!("invalid link")
+    let mut used = vec![];
+    for (x, y) in [(a.clone(), h.clone()), (h, a)] {
+      let mut p = Port(x.wire().loc().val().read());
+      if p != y {
+        loop {
+          used.push(p.loc());
+          let q = Port(p.loc().val().read());
+          if p == y.redirect() {
+            break;
+          }
+          if q.tag() == Tag::Red {
+            p = q;
+            continue;
+          }
+          panic!("bad link");
+        }
+      }
     }
   })
 }

@@ -70,8 +70,8 @@
 
 use std::{
   any::Any,
-  backtrace::Backtrace,
   cell::{OnceCell, RefCell},
+  fmt::Debug,
   marker::PhantomData,
   ops::Add,
   sync::{atomic, Arc, Condvar, Mutex},
@@ -252,12 +252,18 @@ impl ThreadContext {
   }
 }
 
-trait AnyAtomicHistory: Any {
+impl<T: ?Sized> Clone for AtomicView<T> {
+  fn clone(&self) -> Self {
+    AtomicView { history: self.history.clone(), index: self.index }
+  }
+}
+
+trait AnyAtomicHistory: Any + Send + Sync {
   fn len(&self) -> usize;
   fn to_any(&self) -> &dyn Any;
 }
 
-impl<T: 'static> AnyAtomicHistory for AtomicHistory<T> {
+impl<T: 'static + Send> AnyAtomicHistory for AtomicHistory<T> {
   fn len(&self) -> usize {
     self.lock().unwrap().len()
   }
@@ -422,10 +428,12 @@ impl<'s, 'p: 's, 'e: 's> FuzzScope<'s, 'p, 'e> {
   pub fn spawn<F: FnOnce() + Send + 's>(&self, f: F) {
     let fuzzer = self.fuzzer.clone();
     let ready = Arc::new(atomic::AtomicBool::new(false));
+    let views = ThreadContext::with(|ctx| ctx.views.clone());
     self.scope.spawn({
       let ready = ready.clone();
       move || {
         ThreadContext::init(fuzzer.clone());
+        ThreadContext::with(|ctx| ctx.views = views);
         let thread_id = thread::current().id();
         fuzzer.active_threads.lock().unwrap().push(thread_id);
         ready.store(true, atomic::Ordering::Relaxed);
@@ -448,7 +456,7 @@ impl<'s, 'p: 's, 'e: 's> FuzzScope<'s, 'p, 'e> {
   }
 }
 
-pub trait HasAtomic: 'static + Copy + Eq + Send + Add<Output = Self> {
+pub trait HasAtomic: 'static + Copy + Eq + Send + Add<Output = Self> + Debug {
   type Atomic;
   fn new_atomic(value: Self) -> Self::Atomic;
   fn load(atomic: &Self::Atomic) -> Self;

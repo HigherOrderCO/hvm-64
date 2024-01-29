@@ -17,6 +17,7 @@ use std::{
   alloc::{self, Layout},
   fmt,
   hint::unreachable_unchecked,
+  mem::ManuallyDrop,
   sync::{Arc, Barrier},
   thread,
 };
@@ -288,14 +289,20 @@ impl Wire {
 
   #[inline(always)]
   fn target<'a>(&self) -> &'a AtomicU64 {
-    assert_ne!(self.0 as usize, 0xfffffffffff0);
-    assert_ne!(self.0 as usize, 0);
+    if cfg!(feature = "_fuzz") {
+      assert_ne!(self.0 as usize, 0xfffffffffff0);
+      assert_ne!(self.0 as usize, 0);
+    }
     unsafe { &*self.0 }
   }
 
   #[inline(always)]
   pub fn load_target(&self) -> Port {
-    Port(self.target().load(Relaxed))
+    let port = Port(self.target().load(Relaxed));
+    if cfg!(feature = "_fuzz") {
+      assert_ne!(port, Port::FREE);
+    }
+    port
   }
 
   #[inline(always)]
@@ -310,7 +317,11 @@ impl Wire {
 
   #[inline(always)]
   pub fn swap_target(&self, value: Port) -> Port {
-    Port(self.target().swap(value.0, Relaxed))
+    let port = Port(self.target().swap(value.0, Relaxed));
+    if cfg!(feature = "_fuzz") {
+      assert_ne!(port, Port::FREE);
+    }
+    port
   }
 
   // Takes a pointer's target.
@@ -318,6 +329,9 @@ impl Wire {
   pub fn lock_target(&self) -> Port {
     loop {
       let got = self.swap_target(Port::LOCK);
+      if cfg!(feature = "_fuzz") {
+        assert_ne!(got, Port::FREE);
+      }
       if got != Port::LOCK {
         return got;
       }
@@ -620,7 +634,8 @@ impl<'a> Net<'a> {
         self.half_free(a_wire.loc());
       // If the CAS failed, resolve by using redirections.
       } else {
-        trace!(self.tracer, "cas fail", got.clone().unwrap_err());
+        let got = got.unwrap_err();
+        trace!(self.tracer, "cas fail", got);
         if b_port.tag() == Var {
           let port = b_port.redirect();
           a_wire.set_target(port);
@@ -651,7 +666,7 @@ impl<'a> Net<'a> {
         spin_loop();
         continue;
       }
-      // If target is a rewireection, we own it. Clear and move forward.
+      // If target is a redirection, we own it. Clear and move forward.
       if t_port.tag() == Red {
         self.half_free(t_wire.loc());
         a_port = t_port;
@@ -662,7 +677,7 @@ impl<'a> Net<'a> {
         if t_wire.cas_target(t_port.clone(), b_port.clone()).is_ok() {
           trace!(self.tracer, "var cas ok");
           // Clear source location.
-          self.half_free(a_wire.loc());
+          // self.half_free(a_wire.loc());
           // Collect the orphaned backward path.
           t_wire = t_port.wire();
           t_port = t_wire.load_target();
@@ -670,6 +685,9 @@ impl<'a> Net<'a> {
             trace!(self.tracer, t_wire, t_port);
             self.half_free(t_wire.loc());
             t_wire = t_port.wire();
+            // if t_wire == a_wire {
+            //   break;
+            // }
             t_port = t_wire.load_target();
           }
           return;
