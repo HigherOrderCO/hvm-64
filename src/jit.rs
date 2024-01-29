@@ -54,17 +54,17 @@ fn compile_def(code: &mut Code, host: &ast::Host, raw_name: &str, instr: &[Instr
     for instr in instr {
       match instr {
         Instruction::Const { trg, port } => {
-          writeln!(code, "let t{trg} = Trg::Port({});", print_port(host, port))
+          writeln!(code, "let {trg} = Trg::Port({});", print_port(host, port))
         }
-        Instruction::Link { a, b } => writeln!(code, "net.link_trg(t{a}, t{b});"),
+        Instruction::Link { a, b } => writeln!(code, "net.link_trg({a}, {b});"),
         Instruction::Set { trg, port } => {
-          writeln!(code, "net.link_trg(t{trg}, Trg::Port({}));", print_port(host, port))
+          writeln!(code, "net.link_trg({trg}, Trg::Port({}));", print_port(host, port))
         }
-        Instruction::Ctr { lab, trg, lft, rgt } => writeln!(code, "let (t{lft}, t{rgt}) = net.do_ctr({lab}, t{trg});"),
-        Instruction::Op2 { op, trg, lft, rgt } => writeln!(code, "let (t{lft}, t{rgt}) = net.do_op2({op:?}, t{trg});"),
-        Instruction::Op1 { op, num, trg, rgt } => writeln!(code, "let t{rgt} = net.do_op1({op:?}, {num}, t{trg});"),
-        Instruction::Mat { trg, lft, rgt } => writeln!(code, "let (t{lft}, t{rgt}) = net.do_mat(t{trg});"),
-        Instruction::Wires { av, aw, bv, bw } => writeln!(code, "let (t{av}, t{aw}, t{bv}, t{bw}) = net.do_wires();"),
+        Instruction::Ctr { lab, trg, lft, rgt } => writeln!(code, "let ({lft}, {rgt}) = net.do_ctr({lab}, {trg});"),
+        Instruction::Op2 { op, trg, lft, rgt } => writeln!(code, "let ({lft}, {rgt}) = net.do_op2({op:?}, {trg});"),
+        Instruction::Op1 { op, num, trg, rgt } => writeln!(code, "let {rgt} = net.do_op1({op:?}, {num}, {trg});"),
+        Instruction::Mat { trg, lft, rgt } => writeln!(code, "let ({lft}, {rgt}) = net.do_mat({trg});"),
+        Instruction::Wires { av, aw, bv, bw } => writeln!(code, "let ({av}, {aw}, {bv}, {bw}) = net.do_wires();"),
       }?;
     }
     Ok(())

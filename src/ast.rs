@@ -7,7 +7,7 @@
 
 use crate::{
   ops::Op,
-  run::{self, Def, DefNet, DefType, Instruction, Lab, Loc, Port, Tag, Wire},
+  run::{self, Def, DefNet, DefType, Instruction, Lab, Loc, Port, Tag, TrgId, Wire},
 };
 use std::collections::{hash_map::Entry, BTreeMap, HashMap};
 
@@ -416,7 +416,7 @@ fn net_to_runtime_def(defs: &HashMap<String, DefRef>, net: &Net) -> DefNet {
   let mut state =
     State { defs, scope: Default::default(), instr: Default::default(), end: Default::default(), next_index: 1 };
 
-  state.visit_tree(&net.root, 0);
+  state.visit_tree(&net.root, TrgId::new(0));
 
   net.rdex.iter().for_each(|(a, b)| state.visit_redex(a, b));
 
@@ -429,23 +429,28 @@ fn net_to_runtime_def(defs: &HashMap<String, DefRef>, net: &Net) -> DefNet {
   #[derive(Debug)]
   struct State<'a> {
     defs: &'a HashMap<String, DefRef>,
-    scope: HashMap<&'a str, usize>,
+    scope: HashMap<&'a str, TrgId>,
     instr: Vec<Instruction>,
     end: Vec<Instruction>,
     next_index: usize,
   }
 
   impl<'a> State<'a> {
+    fn id(&mut self) -> TrgId {
+      let i = self.next_index;
+      self.next_index += 1;
+      TrgId::new(i)
+    }
     fn visit_redex(&mut self, a: &'a Tree, b: &'a Tree) {
       let (port, tree) = match (a, b) {
         (Tree::Era, t) | (t, Tree::Era) => (Port::ERA, t),
         (Tree::Ref { nam }, t) | (t, Tree::Ref { nam }) => (Port::new_ref(&self.defs[nam]), t),
         (Tree::Num { val }, t) | (t, Tree::Num { val }) => (Port::new_num(*val), t),
         (t, u) => {
-          let av = self.next_index;
-          let aw = self.next_index + 1;
-          let bv = self.next_index + 2;
-          let bw = self.next_index + 3;
+          let av = self.id();
+          let aw = self.id();
+          let bv = self.id();
+          let bw = self.id();
           self.next_index += 4;
           self.instr.push(Instruction::Wires { av, aw, bv, bw });
           self.end.push(Instruction::Link { a: aw, b: bw });
@@ -454,17 +459,11 @@ fn net_to_runtime_def(defs: &HashMap<String, DefRef>, net: &Net) -> DefNet {
           return;
         }
       };
-      let index = self.next_index;
-      self.next_index += 1;
-      self.instr.push(Instruction::Const { port, trg: index });
-      self.visit_tree(tree, index);
+      let trg = self.id();
+      self.instr.push(Instruction::Const { port, trg });
+      self.visit_tree(tree, trg);
     }
-    fn visit_tree(&mut self, tree: &'a Tree, trg: usize) {
-      let mut index = || {
-        let i = self.next_index;
-        self.next_index += 1;
-        i
-      };
+    fn visit_tree(&mut self, tree: &'a Tree, trg: TrgId) {
       match tree {
         Tree::Era => {
           self.instr.push(Instruction::Set { trg, port: Port::ERA });
@@ -485,27 +484,27 @@ fn net_to_runtime_def(defs: &HashMap<String, DefRef>, net: &Net) -> DefNet {
           }
         },
         Tree::Ctr { lab, lft, rgt } => {
-          let l = index();
-          let r = index();
+          let l = self.id();
+          let r = self.id();
           self.instr.push(Instruction::Ctr { lab: *lab, trg, lft: l, rgt: r });
           self.visit_tree(lft, l);
           self.visit_tree(rgt, r);
         }
         Tree::Op2 { opr, lft, rgt } => {
-          let l = index();
-          let r = index();
+          let l = self.id();
+          let r = self.id();
           self.instr.push(Instruction::Op2 { op: *opr, trg, lft: l, rgt: r });
           self.visit_tree(lft, l);
           self.visit_tree(rgt, r);
         }
         Tree::Op1 { opr, lft, rgt } => {
-          let r = index();
+          let r = self.id();
           self.instr.push(Instruction::Op1 { op: *opr, num: *lft, trg, rgt: r });
           self.visit_tree(rgt, r);
         }
         Tree::Mat { sel, ret } => {
-          let l = index();
-          let r = index();
+          let l = self.id();
+          let r = self.id();
           self.instr.push(Instruction::Mat { trg, lft: l, rgt: r });
           self.visit_tree(sel, l);
           self.visit_tree(ret, r);

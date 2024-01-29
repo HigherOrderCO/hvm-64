@@ -370,24 +370,50 @@ impl Trg {
   }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct TrgId {
+  byte_offset: usize,
+}
+
+impl TrgId {
+  pub fn new(index: usize) -> Self {
+    TrgId { byte_offset: index * std::mem::size_of::<Trg>() }
+  }
+  pub fn index(&self) -> usize {
+    self.byte_offset / std::mem::size_of::<Trg>()
+  }
+}
+
+impl fmt::Display for TrgId {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    write!(f, "t{}", self.index())
+  }
+}
+
+impl fmt::Debug for TrgId {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    write!(f, "TrgId({})", self.index())
+  }
+}
+
 #[derive(Debug, Clone)]
 pub enum Instruction {
   /// `let t = Trg::Port(p);`
-  Const { trg: usize, port: Port },
+  Const { trg: TrgId, port: Port },
   /// `net.link_trg(a, b);`
-  Link { a: usize, b: usize },
+  Link { a: TrgId, b: TrgId },
   /// `net.link(t, Trg::Port(p));`
-  Set { trg: usize, port: Port },
+  Set { trg: TrgId, port: Port },
   /// `let (lft, rgt) = net.do_ctr(lab, trg);`
-  Ctr { lab: Lab, trg: usize, lft: usize, rgt: usize },
+  Ctr { lab: Lab, trg: TrgId, lft: TrgId, rgt: TrgId },
   /// `let (lft, rgt) = net.do_op2(lab, trg);`
-  Op2 { op: Op, trg: usize, lft: usize, rgt: usize },
+  Op2 { op: Op, trg: TrgId, lft: TrgId, rgt: TrgId },
   /// `let rgt = net.do_op2(lab, num, trg);`
-  Op1 { op: Op, num: u64, trg: usize, rgt: usize },
+  Op1 { op: Op, num: u64, trg: TrgId, rgt: TrgId },
   /// `let rgt = net.do_op2(lab, num, trg);`
-  Mat { trg: usize, lft: usize, rgt: usize },
+  Mat { trg: TrgId, lft: TrgId, rgt: TrgId },
   /// `let (av, aw, bv, bw) = net.do_wires();`
-  Wires { av: usize, aw: usize, bv: usize, bw: usize },
+  Wires { av: TrgId, aw: TrgId, bv: TrgId, bw: TrgId },
 }
 
 // -----------
@@ -1422,57 +1448,63 @@ impl<'a> Net<'a> {
       DefType::Net(net) => net,
     };
 
-    self.set_trg(0, Trg::Port(trg));
+    let mut trgs = unsafe { std::mem::transmute::<_, Trgs>(Trgs(&mut self.trgs[..])) };
+
+    struct Trgs<'a>(&'a mut [Trg]);
+
+    impl<'a> Trgs<'a> {
+      #[inline(always)]
+      fn get_trg(&self, i: TrgId) -> Trg {
+        unsafe { (*self.0.as_ptr().byte_offset(i.byte_offset as _)).clone() }
+      }
+
+      #[inline(always)]
+      fn set_trg(&mut self, i: TrgId, trg: Trg) {
+        unsafe { *self.0.as_mut_ptr().byte_offset(i.byte_offset as _) = trg }
+      }
+    }
+
+    trgs.set_trg(TrgId::new(0), Trg::Port(trg));
     for i in &net.instr {
       unsafe {
         match *i {
-          Instruction::Const { ref port, trg } => self.set_trg(trg, Trg::Port(port.clone())),
-          Instruction::Link { a, b } => self.link_trg(self.get_trg(a), self.get_trg(b)),
-          Instruction::Set { trg: t, port: ref p } => {
-            if !p.is_principal() {
+          Instruction::Const { ref port, trg } => trgs.set_trg(trg, Trg::Port(port.clone())),
+          Instruction::Link { a, b } => self.link_trg(trgs.get_trg(a), trgs.get_trg(b)),
+          Instruction::Set { trg, ref port } => {
+            if !port.is_principal() {
               unreachable_unchecked()
             }
-            self.link_trg_port(self.get_trg(t), p.clone())
+            self.link_trg_port(trgs.get_trg(trg), port.clone())
           }
           Instruction::Ctr { lab, trg, lft, rgt } => {
-            let (l, r) = self.do_ctr(lab, self.get_trg(trg));
-            self.set_trg(lft, l);
-            self.set_trg(rgt, r);
+            let (l, r) = self.do_ctr(lab, trgs.get_trg(trg));
+            trgs.set_trg(lft, l);
+            trgs.set_trg(rgt, r);
           }
           Instruction::Op2 { op, trg, lft, rgt } => {
-            let (l, r) = self.do_op2(op, self.trgs[trg].clone());
-            self.set_trg(lft, l);
-            self.set_trg(rgt, r);
+            let (l, r) = self.do_op2(op, trgs.get_trg(trg));
+            trgs.set_trg(lft, l);
+            trgs.set_trg(rgt, r);
           }
           Instruction::Op1 { op, num, trg, rgt } => {
-            let r = self.do_op1(op, num, self.trgs[trg].clone());
-            self.set_trg(rgt, r);
+            let r = self.do_op1(op, num, trgs.get_trg(trg));
+            trgs.set_trg(rgt, r);
           }
           Instruction::Mat { trg, lft, rgt } => {
-            let (l, r) = self.do_mat(self.trgs[trg].clone());
-            self.set_trg(lft, l);
-            self.set_trg(rgt, r);
+            let (l, r) = self.do_mat(trgs.get_trg(trg));
+            trgs.set_trg(lft, l);
+            trgs.set_trg(rgt, r);
           }
           Instruction::Wires { av, aw, bv, bw } => {
             let (avt, awt, bvt, bwt) = self.do_wires();
-            self.set_trg(av, avt);
-            self.set_trg(bv, awt);
-            self.set_trg(aw, bvt);
-            self.set_trg(bw, bwt);
+            trgs.set_trg(av, avt);
+            trgs.set_trg(bv, awt);
+            trgs.set_trg(aw, bvt);
+            trgs.set_trg(bw, bwt);
           }
         }
       }
     }
-  }
-
-  #[inline(always)]
-  fn get_trg(&self, i: usize) -> Trg {
-    unsafe { self.trgs.get_unchecked(i).clone() }
-  }
-
-  #[inline(always)]
-  fn set_trg(&mut self, i: usize, trg: Trg) {
-    unsafe { *self.trgs.get_unchecked_mut(i) = trg }
   }
 }
 
