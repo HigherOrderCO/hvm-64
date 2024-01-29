@@ -50,15 +50,15 @@ fn compile_def(code: &mut Code, host: &ast::Host, raw_name: &str, instr: &[Instr
   let name = sanitize_name(raw_name);
   writeln!(code, "pub fn call_{name}(net: &mut Net, to: Port) {{")?;
   code.indent(|code| {
-    code.write_str("let t0 = Trg::Port(to);\n")?;
+    code.write_str("let t0 = Trg::port(to);\n")?;
     for instr in instr {
       match instr {
         Instruction::Const { trg, port } => {
-          writeln!(code, "let {trg} = Trg::Port({});", print_port(host, port))
+          writeln!(code, "let {trg} = Trg::port({});", print_port(host, port))
         }
         Instruction::Link { a, b } => writeln!(code, "net.link_trg({a}, {b});"),
         Instruction::Set { trg, port } => {
-          writeln!(code, "net.link_trg({trg}, Trg::Port({}));", print_port(host, port))
+          writeln!(code, "net.link_trg({trg}, Trg::port({}));", print_port(host, port))
         }
         Instruction::Ctr { lab, trg, lft, rgt } => writeln!(code, "let ({lft}, {rgt}) = net.do_ctr({lab}, {trg});"),
         Instruction::Op2 { op, trg, lft, rgt } => writeln!(code, "let ({lft}, {rgt}) = net.do_op2({op:?}, {trg});"),
