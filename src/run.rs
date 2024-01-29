@@ -7,12 +7,7 @@
 // they interact with nodes, and are cleared when they interact with Ptr::ERAs, allowing for constant
 // space evaluation of recursive functions on Scott encoded datatypes.
 
-use crate::{
-  jit::{Instruction, Trg},
-  ops::Op,
-  trace,
-  trace::Tracer,
-};
+use crate::{ops::Op, trace, trace::Tracer};
 use std::{
   alloc::{self, Layout},
   fmt,
@@ -358,6 +353,43 @@ pub struct DefNet {
   pub instr: Vec<Instruction>,
 }
 
+// A target pointer, with implied ownership.
+#[derive(Clone)]
+pub enum Trg {
+  Wire(Wire), // we don't own the pointer, so we point to its location
+  Port(Port), // we own the pointer, so we store it directly
+}
+
+impl Trg {
+  #[inline(always)]
+  pub fn target(&self) -> Port {
+    match self {
+      Trg::Wire(dir) => dir.load_target(),
+      Trg::Port(port) => port.clone(),
+    }
+  }
+}
+
+#[derive(Debug, Clone)]
+pub enum Instruction {
+  /// `let t = Trg::Port(p);`
+  Const { trg: usize, port: Port },
+  /// `net.link_trg(a, b);`
+  Link { a: usize, b: usize },
+  /// `net.link(t, Trg::Port(p));`
+  Set { trg: usize, port: Port },
+  /// `let (lft, rgt) = net.do_ctr(lab, trg);`
+  Ctr { lab: Lab, trg: usize, lft: usize, rgt: usize },
+  /// `let (lft, rgt) = net.do_op2(lab, trg);`
+  Op2 { op: Op, trg: usize, lft: usize, rgt: usize },
+  /// `let rgt = net.do_op2(lab, num, trg);`
+  Op1 { op: Op, num: u64, trg: usize, rgt: usize },
+  /// `let rgt = net.do_op2(lab, num, trg);`
+  Mat { trg: usize, lft: usize, rgt: usize },
+  /// `let (av, aw, bv, bw) = net.do_wires();`
+  Wires { av: usize, aw: usize, bv: usize, bw: usize },
+}
+
 // -----------
 //   The Net
 // -----------
@@ -479,7 +511,7 @@ impl<'a> Net<'a> {
     }
   }
 
-  #[inline(never)]
+  #[inline(always)]
   pub fn half_free(&mut self, loc: Loc) {
     trace!(self.tracer, loc);
     const FREE: u64 = Port::FREE.0;
@@ -522,6 +554,14 @@ impl<'a> Net<'a> {
     loc.val().store(Port::LOCK.0, Relaxed);
     loc.other_half().val().store(Port::LOCK.0, Relaxed);
     loc
+  }
+
+  #[inline(always)]
+  pub fn free_trg(&mut self, trg: Trg) {
+    match trg {
+      Trg::Wire(wire) => self.half_free(wire.loc()),
+      Trg::Port(_) => {}
+    }
   }
 }
 
@@ -746,6 +786,26 @@ impl<'a> Net<'a> {
       break;
     }
   }
+
+  // Links two targets, using atomics when necessary, based on implied ownership.
+  #[inline]
+  pub fn link_trg_port(&mut self, a: Trg, b: Port) {
+    match a {
+      Trg::Wire(a) => self.link_wire_port(a, b),
+      Trg::Port(a) => self.link_port_port(a, b),
+    }
+  }
+
+  // Links two targets, using atomics when necessary, based on implied ownership.
+  #[inline(always)]
+  pub fn link_trg(&mut self, a: Trg, b: Trg) {
+    match (a, b) {
+      (Trg::Wire(a), Trg::Wire(b)) => self.link_wire_wire(a, b),
+      (Trg::Wire(a), Trg::Port(b)) => self.link_wire_port(a, b),
+      (Trg::Port(a), Trg::Wire(b)) => self.link_wire_port(b, a),
+      (Trg::Port(a), Trg::Port(b)) => self.link_port_port(a, b),
+    }
+  }
 }
 
 // ---------------------
@@ -782,8 +842,8 @@ impl<'a> Net<'a> {
       (Ref, _) if a == Port::ERA => self.comm02(a, b),
       (_, Ref) if b == Port::ERA => self.comm02(b, a),
       // deref
-      (Ref, _) => self.call(a, b),
-      (_, Ref) => self.call(b, a),
+      (Ref, _) => self.call(a.loc().def(), b),
+      (_, Ref) => self.call(b.loc().def(), a),
       // native ops
       (Op2, Num) => self.op2_num(a, b),
       (Num, Op2) => self.op2_num(b, a),
@@ -1166,14 +1226,197 @@ impl<'a> Net<'a> {
     let out = a.op.op(n, m);
     self.link_wire_port(a.p2, Port::new_num(out));
   }
+}
 
+// ----------------
+//   Instructions
+// ----------------
+
+impl<'a> Net<'a> {
+  /// {#lab x y}
+  #[inline(always)]
+  pub(crate) fn do_ctr(&mut self, lab: Lab, trg: Trg) -> (Trg, Trg) {
+    let port = trg.target();
+    if port.is_ctr(lab) {
+      self.free_trg(trg);
+      let node = port.consume_node();
+      self.quik.anni += 1;
+      (Trg::Wire(node.p1), Trg::Wire(node.p2))
+    // TODO: fast copy?
+    // } else if port.tag() == Num || port.tag() == Ref && lab >= port.lab() {
+    //   self.quik.comm += 1;
+    //   (Trg::Port(port.clone()), Trg::Port(port))
+    } else {
+      let n = self.create_node(Ctr, lab);
+      self.link_trg_port(trg, n.p0);
+      (Trg::Port(n.p1), Trg::Port(n.p2))
+    }
+  }
+
+  /// <op x y>
+  #[inline(always)]
+  pub(crate) fn do_op2(&mut self, op: Op, trg: Trg) -> (Trg, Trg) {
+    let port = trg.target();
+    if port.tag() == Num {
+      self.quik.oper += 1;
+      self.free_trg(trg);
+      let n = self.create_node(Op1, op as Lab);
+      n.p1.wire().set_target(Port::new_num(port.num()));
+      (Trg::Port(n.p0), Trg::Port(n.p2))
+    } else if port == Port::ERA {
+      (Trg::Port(Port::ERA), Trg::Port(Port::ERA))
+    } else {
+      let n = self.create_node(Op2, op as Lab);
+      self.link_trg_port(trg, n.p0);
+      (Trg::Port(n.p1), Trg::Port(n.p2))
+    }
+  }
+
+  /// <a op x>
+  #[inline(always)]
+  pub(crate) fn do_op1(&mut self, op: Op, a: u64, trg: Trg) -> Trg {
+    let port = trg.target();
+    if trg.target().tag() == Num {
+      self.quik.oper += 1;
+      self.free_trg(trg);
+      Trg::Port(Port::new_num(op.op(a, port.num())))
+    } else if port == Port::ERA {
+      Trg::Port(Port::ERA)
+    } else {
+      let n = self.create_node(Op1, op as Lab);
+      self.link_trg_port(trg, n.p0);
+      n.p1.wire().set_target(Port::new_num(a));
+      Trg::Port(n.p2)
+    }
+  }
+
+  /// ?<x y>
+  #[inline(always)]
+  pub(crate) fn do_mat<'t, 'l>(&mut self, trg: Trg) -> (Trg, Trg) {
+    let port = trg.target();
+    if port.tag() == Num {
+      self.quik.oper += 1;
+      self.free_trg(trg);
+      let num = port.num();
+      let c1 = self.create_node(Ctr, 0);
+      if num == 0 {
+        self.link_port_port(c1.p2, Port::ERA);
+        (Trg::Port(c1.p0), Trg::Wire(self.create_wire(c1.p1)))
+      } else {
+        let c2 = self.create_node(Ctr, 0);
+        self.link_port_port(c1.p1, Port::ERA);
+        self.link_port_port(c1.p2, c2.p0);
+        self.link_port_port(c2.p1, Port::new_num(num - 1));
+        (Trg::Port(c1.p0), Trg::Wire(self.create_wire(c2.p2)))
+      }
+    } else if port == Port::ERA {
+      self.quik.eras += 1;
+      self.free_trg(trg);
+      (Trg::Port(Port::ERA), Trg::Port(Port::ERA))
+    } else {
+      let m = self.create_node(Mat, 0);
+      self.link_trg_port(trg, m.p0);
+      (Trg::Port(m.p1), Trg::Port(m.p2))
+    }
+  }
+
+  #[inline(always)]
+  pub(crate) fn do_wires(&mut self) -> (Trg, Trg, Trg, Trg) {
+    let a = self.alloc();
+    let b = a.other_half();
+    (
+      Trg::Port(Port::new_var(a.clone())),
+      Trg::Port(Port::new_var(b.clone())),
+      Trg::Wire(Wire::new(a)),
+      Trg::Wire(Wire::new(b)),
+    )
+  }
+
+  /// <op #b x>
+  #[inline(always)]
+  #[allow(unused)] // TODO: emit this instruction
+  pub(crate) fn do_op2_num(&mut self, op: Op, b: u64, trg: Trg) -> Trg {
+    let port = trg.target();
+    if port.tag() == Num {
+      self.quik.oper += 2;
+      self.free_trg(trg);
+      Trg::Port(Port::new_num(op.op(port.num(), b)))
+    } else if port == Port::ERA {
+      Trg::Port(Port::ERA)
+    } else {
+      let n = self.create_node(Op2, op as Lab);
+      self.link_trg_port(trg, n.p0);
+      n.p1.wire().set_target(Port::new_num(b));
+      Trg::Port(n.p2)
+    }
+  }
+
+  /// ?<(x (y z)) out>
+  #[inline(always)]
+  #[allow(unused)] // TODO: emit this instruction
+  pub(crate) fn do_mat_con_con(&mut self, trg: Trg, out: Trg) -> (Trg, Trg, Trg) {
+    let port = trg.target();
+    if trg.target().tag() == Num {
+      self.quik.oper += 1;
+      self.free_trg(trg);
+      let num = port.num();
+      if num == 0 {
+        (out, Trg::Port(Port::ERA), Trg::Port(Port::ERA))
+      } else {
+        (Trg::Port(Port::ERA), Trg::Port(Port::new_num(num - 1)), out)
+      }
+    } else if port == Port::ERA {
+      self.link_trg_port(out, Port::ERA);
+      (Trg::Port(Port::ERA), Trg::Port(Port::ERA), Trg::Port(Port::ERA))
+    } else {
+      let m = self.create_node(Mat, 0);
+      let c1 = self.create_node(Ctr, 0);
+      let c2 = self.create_node(Ctr, 0);
+      self.link_port_port(m.p1, c1.p0);
+      self.link_port_port(c1.p2, c2.p0);
+      self.link_trg_port(out, m.p2);
+      (Trg::Port(c1.p1), Trg::Port(c2.p1), Trg::Port(c2.p2))
+    }
+  }
+
+  /// ?<(x y) out>
+  #[inline(always)]
+  #[allow(unused)] // TODO: emit this instruction
+  pub(crate) fn do_mat_con<'t, 'l>(&mut self, trg: Trg, out: Trg) -> (Trg, Trg) {
+    let port = trg.target();
+    if trg.target().tag() == Num {
+      self.quik.oper += 1;
+      self.free_trg(trg);
+      let num = port.num();
+      if num == 0 {
+        (out, Trg::Port(Port::ERA))
+      } else {
+        let c2 = self.create_node(Ctr, 0);
+        c2.p1.wire().set_target(Port::new_num(num - 1));
+        self.link_trg_port(out, c2.p2);
+        (Trg::Port(Port::ERA), Trg::Port(c2.p0))
+      }
+    } else if port == Port::ERA {
+      self.link_trg_port(out, Port::ERA);
+      (Trg::Port(Port::ERA), Trg::Port(Port::ERA))
+    } else {
+      let m = self.create_node(Mat, 0);
+      let c1 = self.create_node(Ctr, 0);
+      self.link_port_port(m.p1, c1.p0);
+      self.link_trg_port(out, m.p2);
+      self.link_trg_port(trg, m.p0);
+      (Trg::Port(c1.p1), Trg::Port(c1.p2))
+    }
+  }
+}
+
+impl<'a> Net<'a> {
   // Expands a closed net.
   #[inline(never)]
-  pub fn call(&mut self, port: Port, trg: Port) {
-    trace!(self.tracer, port, trg);
+  pub fn call(&mut self, def: &Def, trg: Port) {
+    trace!(self.tracer, Port::new_ref(def), trg);
     self.rwts.dref += 1;
     // Intercepts with a native function, if available.
-    let def = port.loc().def();
     let net = match &def.inner {
       DefType::Native(native) => return native(self, trg),
       DefType::Net(net) => net,
@@ -1183,40 +1426,39 @@ impl<'a> Net<'a> {
     for i in &net.instr {
       unsafe {
         match *i {
-          Instruction::Const(ref port, trg) => self.set_trg(trg, Trg::Port(port.clone())),
-          Instruction::Link(a, b) => self.link_trg(self.get_trg(a), self.get_trg(b)),
-          Instruction::Set(t, ref p) => {
+          Instruction::Const { ref port, trg } => self.set_trg(trg, Trg::Port(port.clone())),
+          Instruction::Link { a, b } => self.link_trg(self.get_trg(a), self.get_trg(b)),
+          Instruction::Set { trg: t, port: ref p } => {
             if !p.is_principal() {
               unreachable_unchecked()
             }
             self.link_trg_port(self.get_trg(t), p.clone())
           }
-          Instruction::Ctr(lab, t, a, b) => {
-            let (at, bt) = self.do_ctr(self.get_trg(t), lab);
-            self.set_trg(a, at);
-            self.set_trg(b, bt);
+          Instruction::Ctr { lab, trg, lft, rgt } => {
+            let (l, r) = self.do_ctr(lab, self.get_trg(trg));
+            self.set_trg(lft, l);
+            self.set_trg(rgt, r);
           }
-          Instruction::Op2(op, t, a, b) => {
-            let (at, bt) = self.do_op2(self.trgs[t].clone(), op);
-            self.set_trg(a, at);
-            self.set_trg(b, bt);
+          Instruction::Op2 { op, trg, lft, rgt } => {
+            let (l, r) = self.do_op2(op, self.trgs[trg].clone());
+            self.set_trg(lft, l);
+            self.set_trg(rgt, r);
           }
-          Instruction::Op1(op, n, t, b) => {
-            let bt = self.do_op1(self.trgs[t].clone(), op, n);
-            self.set_trg(b, bt);
+          Instruction::Op1 { op, num, trg, rgt } => {
+            let r = self.do_op1(op, num, self.trgs[trg].clone());
+            self.set_trg(rgt, r);
           }
-          Instruction::Mat(t, a, b) => {
-            let (at, bt) = self.do_mat(self.trgs[t].clone());
-            self.set_trg(a, at);
-            self.set_trg(b, bt);
+          Instruction::Mat { trg, lft, rgt } => {
+            let (l, r) = self.do_mat(self.trgs[trg].clone());
+            self.set_trg(lft, l);
+            self.set_trg(rgt, r);
           }
-          Instruction::Wires(av, aw, bv, bw) => {
-            let a = self.alloc();
-            let b = a.other_half();
-            self.set_trg(av, Trg::Port(Port::new_var(a.clone())));
-            self.set_trg(bv, Trg::Port(Port::new_var(b.clone())));
-            self.set_trg(aw, Trg::Wire(Wire::new(a)));
-            self.set_trg(bw, Trg::Wire(Wire::new(b)));
+          Instruction::Wires { av, aw, bv, bw } => {
+            let (avt, awt, bvt, bwt) = self.do_wires();
+            self.set_trg(av, avt);
+            self.set_trg(bv, awt);
+            self.set_trg(aw, bvt);
+            self.set_trg(bw, bwt);
           }
         }
       }
@@ -1275,7 +1517,7 @@ impl<'a> Net<'a> {
         let got = wire.swap_target(Port::LOCK);
         if got != Port::LOCK {
           trace!(net.tracer, port, wire);
-          net.call(port, Port::new_var(wire.loc()));
+          net.call(port.loc().def(), Port::new_var(wire.loc()));
         }
       }
     }

@@ -6,9 +6,8 @@
 // syntax reflects this representation. The grammar is specified on this repo's README.
 
 use crate::{
-  jit::Instruction,
   ops::Op,
-  run::{self, Def, DefNet, DefType, Lab, Loc, Port, Tag, Wire},
+  run::{self, Def, DefNet, DefType, Instruction, Lab, Loc, Port, Tag, Wire},
 };
 use std::collections::{hash_map::Entry, BTreeMap, HashMap};
 
@@ -448,8 +447,8 @@ fn net_to_runtime_def(defs: &HashMap<String, DefRef>, net: &Net) -> DefNet {
           let bv = self.next_index + 2;
           let bw = self.next_index + 3;
           self.next_index += 4;
-          self.instr.push(Instruction::Wires(av, aw, bv, bw));
-          self.end.push(Instruction::Link(aw, bw));
+          self.instr.push(Instruction::Wires { av, aw, bv, bw });
+          self.end.push(Instruction::Link { a: aw, b: bw });
           self.visit_tree(t, av);
           self.visit_tree(u, bv);
           return;
@@ -457,7 +456,7 @@ fn net_to_runtime_def(defs: &HashMap<String, DefRef>, net: &Net) -> DefNet {
       };
       let index = self.next_index;
       self.next_index += 1;
-      self.instr.push(Instruction::Const(port, index));
+      self.instr.push(Instruction::Const { port, trg: index });
       self.visit_tree(tree, index);
     }
     fn visit_tree(&mut self, tree: &'a Tree, trg: usize) {
@@ -468,18 +467,18 @@ fn net_to_runtime_def(defs: &HashMap<String, DefRef>, net: &Net) -> DefNet {
       };
       match tree {
         Tree::Era => {
-          self.instr.push(Instruction::Set(trg, Port::ERA));
+          self.instr.push(Instruction::Set { trg, port: Port::ERA });
         }
         Tree::Ref { nam } => {
-          self.instr.push(Instruction::Set(trg, Port::new_ref(&self.defs[nam])));
+          self.instr.push(Instruction::Set { trg, port: Port::new_ref(&self.defs[nam]) });
         }
         Tree::Num { val } => {
-          self.instr.push(Instruction::Set(trg, Port::new_num(*val)));
+          self.instr.push(Instruction::Set { trg, port: Port::new_num(*val) });
         }
         Tree::Var { nam } => match self.scope.entry(nam) {
           Entry::Occupied(e) => {
             let other = e.remove();
-            self.instr.push(Instruction::Link(other, trg));
+            self.instr.push(Instruction::Link { a: other, b: trg });
           }
           Entry::Vacant(e) => {
             e.insert(trg);
@@ -488,26 +487,26 @@ fn net_to_runtime_def(defs: &HashMap<String, DefRef>, net: &Net) -> DefNet {
         Tree::Ctr { lab, lft, rgt } => {
           let l = index();
           let r = index();
-          self.instr.push(Instruction::Ctr(*lab, trg, l, r));
+          self.instr.push(Instruction::Ctr { lab: *lab, trg, lft: l, rgt: r });
           self.visit_tree(lft, l);
           self.visit_tree(rgt, r);
         }
         Tree::Op2 { opr, lft, rgt } => {
           let l = index();
           let r = index();
-          self.instr.push(Instruction::Op2(*opr, trg, l, r));
+          self.instr.push(Instruction::Op2 { op: *opr, trg, lft: l, rgt: r });
           self.visit_tree(lft, l);
           self.visit_tree(rgt, r);
         }
         Tree::Op1 { opr, lft, rgt } => {
           let r = index();
-          self.instr.push(Instruction::Op1(*opr, *lft, trg, r));
+          self.instr.push(Instruction::Op1 { op: *opr, num: *lft, trg, rgt: r });
           self.visit_tree(rgt, r);
         }
         Tree::Mat { sel, ret } => {
           let l = index();
           let r = index();
-          self.instr.push(Instruction::Mat(trg, l, r));
+          self.instr.push(Instruction::Mat { trg, lft: l, rgt: r });
           self.visit_tree(sel, l);
           self.visit_tree(ret, r);
         }
