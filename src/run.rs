@@ -891,14 +891,14 @@ impl<'a> Net<'a> {
       (Mat, Num) => self.mat_num(a, b),
       (Num, Mat) => self.mat_num(b, a),
       // todo: what should the semantics of these be?
-      (Mat, Ctr) // b.tag() == 0
-      | (Ctr, Mat) // a.tag() == 0
+      (Mat, Ctr) // b.lab() == 0
+      | (Ctr, Mat) // a.lab() == 0
       | (Op2, Op1)
       | (Op1, Op2)
       | (Op2, Mat)
       | (Mat, Op2)
       | (Op1, Mat)
-      | (Mat, Op1) => todo!(),
+      | (Mat, Op1) => unimplemented!("{:?}-{:?}", a.tag(), b.tag()),
     }
   }
 
