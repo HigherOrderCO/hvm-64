@@ -36,7 +36,7 @@ fn full_main(args: &[String]) {
         process::exit(1);
       };
       let host = load(file_name);
-      run(&opts, host);
+      run(opts, host);
     }
     "compile" => {
       let Some(file_name) = file_name else {
@@ -106,11 +106,11 @@ fn compile_executable(file_name: &str, host: &ast::Host) -> Result<(), io::Error
   let gen = jit::compile_book(host);
   let outdir = ".hvm";
   if Path::new(&outdir).exists() {
-    fs::remove_dir_all(&outdir)?;
+    fs::remove_dir_all(outdir)?;
   }
   let cargo_toml = include_str!("../Cargo.toml");
   let cargo_toml = cargo_toml.split("##--COMPILER-CUTOFF--##").next().unwrap();
-  fs::create_dir_all(&format!("{}/src", outdir))?;
+  fs::create_dir_all(format!("{}/src", outdir))?;
   fs::write(".hvm/Cargo.toml", cargo_toml)?;
   fs::write(".hvm/src/ast.rs", include_str!("../src/ast.rs"))?;
   fs::write(".hvm/src/fuzz.rs", include_str!("../src/fuzz.rs"))?;

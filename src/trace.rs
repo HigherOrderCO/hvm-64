@@ -76,7 +76,7 @@ use crate::run::{Loc, Port, Wire};
 
 #[cfg(not(feature = "trace"))]
 #[derive(Default)]
-pub struct Tracer;
+pub struct Tracer(());
 
 #[cfg(not(feature = "trace"))]
 impl Tracer {

@@ -126,7 +126,7 @@ impl<'i> Parser<'i> {
   }
   fn parse_name(&mut self) -> Result<String, String> {
     let name = self.take_while(|c| c.is_alphanumeric() || c == '_' || c == '.');
-    if name.len() == 0 {
+    if name.is_empty() {
       return Err(format!("Expected a name character, found {:?}", self.peek_char()));
     }
     Ok(name.to_owned())
@@ -399,7 +399,7 @@ fn net_to_runtime_def(defs: &HashMap<String, DefRef>, net: &Net) -> DefNet {
 
   assert!(state.scope.is_empty(), "unbound variables: {:?}", state.scope.keys());
 
-  state.instr.extend(state.end.drain(..));
+  state.instr.append(&mut state.end);
 
   return DefNet { instr: state.instr };
 

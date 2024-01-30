@@ -75,7 +75,7 @@ fn compile_def(code: &mut Code, host: &ast::Host, raw_name: &str, instr: &[Instr
   writeln!(code, "}}")?;
   code.write_char('\n')?;
 
-  return Ok(());
+  Ok(())
 }
 
 fn print_port(host: &ast::Host, port: &Port) -> String {

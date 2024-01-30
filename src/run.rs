@@ -1331,7 +1331,7 @@ impl<'a> Net<'a> {
 
   /// ?<x y>
   #[inline(always)]
-  pub(crate) fn do_mat<'t, 'l>(&mut self, trg: Trg) -> (Trg, Trg) {
+  pub(crate) fn do_mat(&mut self, trg: Trg) -> (Trg, Trg) {
     let port = trg.target();
     if port.tag() == Num {
       self.quik.oper += 1;
@@ -1421,7 +1421,7 @@ impl<'a> Net<'a> {
   /// ?<(x y) out>
   #[inline(always)]
   #[allow(unused)] // TODO: emit this instruction
-  pub(crate) fn do_mat_con<'t, 'l>(&mut self, trg: Trg, out: Trg) -> (Trg, Trg) {
+  pub(crate) fn do_mat_con(&mut self, trg: Trg, out: Trg) -> (Trg, Trg) {
     let port = trg.target();
     if trg.target().tag() == Num {
       self.quik.oper += 1;
