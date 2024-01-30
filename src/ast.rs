@@ -329,6 +329,10 @@ impl Host {
 
     Host { defs, back }
   }
+  pub fn insert(&mut self, name: &str, def: DefRef) {
+    self.back.insert(Port::new_ref(&def).loc(), name.to_owned());
+    self.defs.insert(name.to_owned(), def);
+  }
   pub fn readback(&self, rt_net: &run::Net) -> Net {
     let mut state = State { runtime: self, vars: Default::default(), next_var: 0 };
     let mut net = Net::default();

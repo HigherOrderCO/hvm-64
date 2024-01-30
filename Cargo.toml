@@ -22,17 +22,17 @@ opt-level = 3
 panic = "abort"
 debug = "full"
 
-[features]
-default = ["hvm_cli_options"]
-hvm_cli_options = []
-trace = []
-_fuzz = []
-_fuzz_no_free = ["_fuzz"]
-
 [dependencies]
-nohash-hasher = "0.2.0"
+nohash-hasher = { version = "0.2.0", optional = true }
 
 ##--COMPILER-CUTOFF--##
+
+[features]
+default = ["_full_cli"]
+trace = []
+_full_cli = []
+_fuzz = ["dep:nohash-hasher"]
+_fuzz_no_free = ["_fuzz"]
 
 [dev-dependencies]
 criterion = "0.5.1"

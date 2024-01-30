@@ -81,7 +81,11 @@ use std::{
   thread::{self, Scope, ThreadId},
 };
 
+#[cfg(feature = "dep:nohash-hasher")]
 use nohash_hasher::IntMap;
+
+#[cfg(not(feature = "dep:nohash-hasher"))]
+use std::collections::HashMap as IntMap;
 
 #[repr(transparent)]
 pub struct Atomic<T: HasAtomic> {

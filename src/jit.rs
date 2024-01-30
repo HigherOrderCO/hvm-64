@@ -9,20 +9,23 @@ use std::{
   hash::{DefaultHasher, Hasher},
 };
 
-pub fn compile_book(host: &ast::Host) -> Result<String, fmt::Error> {
+pub fn compile_book(host: &ast::Host) -> String {
+  _compile_book(host).unwrap()
+}
+
+fn _compile_book(host: &ast::Host) -> Result<String, fmt::Error> {
   let mut code = Code::default();
 
   writeln!(code, "#![allow(non_upper_case_globals)]")?;
   writeln!(code, "#[allow(unused_imports)]")?;
-  writeln!(code, "use crate::{{ast::{{Host, DefRef}}, run::{{*, Tag::*}}, ops::Op::*, jit::*}};\n")?;
+  writeln!(code, "use crate::{{ast::{{Host, DefRef}}, run::*, ops::Op::*}};\n")?;
 
   writeln!(code, "pub fn host() -> Host {{")?;
   code.indent(|code| {
     writeln!(code, "let mut host = Host::default();")?;
     for raw_name in host.defs.keys() {
       let name = sanitize_name(raw_name);
-      writeln!(code, r##"host.defs.insert(r#"{raw_name}"#.to_owned(), DefRef::Static(&DEF_{name}));"##)?;
-      writeln!(code, r##"host.back.insert(Port::new_ref(&DEF_{name}).loc(), r#"{raw_name}"#.to_owned());"##)?;
+      writeln!(code, r##"host.insert(r#"{raw_name}"#, DefRef::Static(&DEF_{name}));"##)?;
     }
     writeln!(code, "host")
   })?;
