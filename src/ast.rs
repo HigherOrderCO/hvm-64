@@ -138,11 +138,19 @@ impl<'i> Parser<'i> {
       }
       Some('<') => {
         self.advance_char();
-        let opr = self.parse_op()?;
-        let lft = Box::new(self.parse_tree()?);
-        let rgt = Box::new(self.parse_tree()?);
-        self.consume(">")?;
-        Ok(Tree::Op2 { opr, lft, rgt })
+        if self.peek_char().is_some_and(|c| c.is_digit(10)) {
+          let lft = self.parse_number()?;
+          let opr = self.parse_op()?;
+          let rgt = Box::new(self.parse_tree()?);
+          self.consume(">")?;
+          Ok(Tree::Op1 { opr, lft, rgt })
+        } else {
+          let opr = self.parse_op()?;
+          let lft = Box::new(self.parse_tree()?);
+          let rgt = Box::new(self.parse_tree()?);
+          self.consume(">")?;
+          Ok(Tree::Op2 { opr, lft, rgt })
+        }
       }
       Some('?') => {
         self.advance_char();
