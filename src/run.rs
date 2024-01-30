@@ -1553,10 +1553,10 @@ impl<'a> Net<'a> {
       if port.tag() == Ctr {
         let node = port.traverse_node();
         if len >= net.tids || key % 2 == 0 {
-          go(net, node.p1, len.saturating_sub(2), key / 2);
+          go(net, node.p1, len.saturating_mul(2), key / 2);
         }
         if len >= net.tids || key % 2 == 1 {
-          go(net, node.p2, len.saturating_sub(2), key / 2);
+          go(net, node.p2, len.saturating_mul(2), key / 2);
         }
       } else if port.tag() == Ref && port != Port::ERA {
         let got = wire.swap_target(Port::LOCK);
