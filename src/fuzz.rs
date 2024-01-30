@@ -15,7 +15,9 @@
 //!     https://doc.rust-lang.org/nomicon/atomics.html#hardware-reordering
 //!
 //! ```
-//! use crate::fuzz::{Fuzzer, AtomicU64, Ordering};
+//! # use std::collections::HashSet;
+//! use hvmc::fuzz::{Fuzzer, AtomicU64, Ordering};
+//!
 //! let mut results = HashSet::new();
 //! Fuzzer::default().fuzz(|f| {
 //!   let x = AtomicU64::new(0);
@@ -33,6 +35,7 @@
 //!   });
 //!   results.insert(y.read());
 //! });
+//!
 //! assert_eq!(results, [6, 3, 2].into_iter().collect());
 //! ```
 //!

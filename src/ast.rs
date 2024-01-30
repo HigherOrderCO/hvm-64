@@ -420,7 +420,7 @@ fn net_to_runtime_def(defs: &HashMap<String, DefRef>, net: &Net) -> DefNet {
 
   net.rdex.iter().for_each(|(a, b)| state.visit_redex(a, b));
 
-  assert!(state.scope.is_empty());
+  assert!(state.scope.is_empty(), "unbound variables: {:?}", state.scope.keys());
 
   state.instr.extend(state.end.drain(..));
 
