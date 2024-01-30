@@ -1,6 +1,6 @@
 use crate::{
   ast::{Book, Net, Tree},
-  run::{self, Def, DefNet, DefType, Instruction, Lab, Loc, Port, Tag, TrgId, Wire},
+  run::{self, Def, DefNet, DefType, Instruction, LabSet, Loc, Port, Tag, TrgId, Wire},
   util::num_to_str,
 };
 use std::collections::{hash_map::Entry, HashMap};
@@ -29,8 +29,10 @@ pub struct Host {
 
 impl Host {
   pub fn new(book: &Book) -> Host {
-    let mut defs = calculate_min_safe_labels(book)
-      .map(|(nam, lab)| (nam.to_owned(), DefRef::Owned(Box::new(Def { lab, inner: DefType::Net(DefNet::default()) }))))
+    let mut defs = calculate_label_sets(book)
+      .map(|(nam, labs)| {
+        (nam.to_owned(), DefRef::Owned(Box::new(Def { labs, inner: DefType::Net(DefNet::default()) })))
+      })
       .collect::<HashMap<_, _>>();
 
     for (nam, net) in book.iter() {
@@ -207,11 +209,11 @@ fn net_to_runtime_def(defs: &HashMap<String, DefRef>, net: &Net) -> DefNet {
   }
 }
 
-pub fn calculate_min_safe_labels(book: &Book) -> impl Iterator<Item = (&str, Lab)> {
+pub fn calculate_label_sets(book: &Book) -> impl Iterator<Item = (&str, LabSet)> {
   let mut state = State { book, labels: HashMap::with_capacity(book.len()) };
 
   for name in book.keys() {
-    state.visit_def(name);
+    state.visit_def(name, None);
   }
 
   return state.labels.into_iter().map(|(nam, lab)| match lab {
@@ -219,11 +221,11 @@ pub fn calculate_min_safe_labels(book: &Book) -> impl Iterator<Item = (&str, Lab
     _ => unreachable!(),
   });
 
-  #[derive(Debug, Clone, Copy)]
+  #[derive(Debug, Clone)]
   enum LabelState {
     Cycle1,
     Cycle2,
-    Done(Lab),
+    Done(LabSet),
   }
 
   struct State<'a> {
@@ -232,43 +234,51 @@ pub fn calculate_min_safe_labels(book: &Book) -> impl Iterator<Item = (&str, Lab
   }
 
   impl<'a> State<'a> {
-    fn visit_def(&mut self, key: &'a str) -> Lab {
-      let normative = match self.labels.entry(key) {
+    fn visit_def(&mut self, key: &'a str, out: Option<&mut LabSet>) {
+      match self.labels.entry(key) {
         Entry::Vacant(e) => {
           e.insert(LabelState::Cycle1);
-          true
+          self._visit_def(key, out, true);
         }
-        Entry::Occupied(mut e) => match *e.get() {
+        Entry::Occupied(mut e) => match e.get_mut() {
           LabelState::Cycle1 => {
             e.insert(LabelState::Cycle2);
-            false
+            self._visit_def(key, out, false);
           }
-          LabelState::Cycle2 => return 0,
-          LabelState::Done(lab) => return lab,
+          LabelState::Cycle2 => {}
+          LabelState::Done(labs) => {
+            if let Some(out) = out {
+              out.union(labs)
+            }
+          }
         },
-      };
-      let mut lab = 0;
+      }
+    }
+    fn _visit_def(&mut self, key: &'a str, out: Option<&mut LabSet>, normative: bool) {
+      let mut labs = LabSet::default();
       let def = &self.book[key];
-      self.visit_tree(&def.root, &mut lab);
+      self.visit_tree(&def.root, &mut labs);
       for (a, b) in &def.rdex {
-        self.visit_tree(a, &mut lab);
-        self.visit_tree(b, &mut lab);
+        self.visit_tree(a, &mut labs);
+        self.visit_tree(b, &mut labs);
+      }
+      if let Some(out) = out {
+        out.union(&labs);
       }
       if normative {
-        self.labels.insert(key, LabelState::Done(lab));
+        self.labels.insert(key, LabelState::Done(labs));
       }
-      lab
     }
-    fn visit_tree(&mut self, tree: &'a Tree, out: &mut Lab) {
+    fn visit_tree(&mut self, tree: &'a Tree, out: &mut LabSet) {
       match tree {
         Tree::Era | Tree::Var { .. } | Tree::Num { .. } => {}
         Tree::Ctr { lab, lft, rgt } => {
-          *out = (*out).max(lab + 1);
+          out.add(*lab);
           self.visit_tree(lft, out);
           self.visit_tree(rgt, out);
         }
         Tree::Ref { nam } => {
-          *out = (*out).max(self.visit_def(nam));
+          self.visit_def(nam, Some(out));
         }
         Tree::Op2 { lft, rgt, .. } => {
           self.visit_tree(lft, out);

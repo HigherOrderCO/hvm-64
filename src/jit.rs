@@ -16,9 +16,10 @@ pub fn compile_book(host: &Host) -> String {
 fn _compile_book(host: &Host) -> Result<String, fmt::Error> {
   let mut code = Code::default();
 
-  writeln!(code, "#![allow(non_upper_case_globals)]")?;
-  writeln!(code, "#[allow(unused_imports)]")?;
-  writeln!(code, "use crate::{{host::{{Host, DefRef}}, run::*, ops::Op::*}};\n")?;
+  writeln!(code, "#![allow(non_upper_case_globals, unused_imports)]")?;
+  writeln!(code, "use crate::{{host::{{Host, DefRef}}, run::*, ops::Op::*}};")?;
+  writeln!(code, "use std::borrow::Cow;")?;
+  writeln!(code, "")?;
 
   writeln!(code, "pub fn host() -> Host {{")?;
   code.indent(|code| {
@@ -33,8 +34,18 @@ fn _compile_book(host: &Host) -> Result<String, fmt::Error> {
 
   for (raw_name, def) in &host.defs {
     let name = sanitize_name(raw_name);
-    let lab = def.lab;
-    writeln!(code, "pub static DEF_{name}: Def = Def {{ lab: {lab}, inner: DefType::Native(call_{name}) }};")?;
+    write!(
+      code,
+      "pub static DEF_{name}: Def = Def {{ labs: LabSet {{ min_safe: {}, bits: Cow::Borrowed(&[",
+      def.labs.min_safe()
+    )?;
+    for (i, word) in def.labs.bits.iter().enumerate() {
+      if i != 0 {
+        write!(code, ", ")?;
+      }
+      write!(code, "0x{:x}", word)?;
+    }
+    writeln!(code, "]) }}, inner: DefType::Native(call_{name}) }};")?;
   }
 
   writeln!(code)?;

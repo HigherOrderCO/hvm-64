@@ -10,6 +10,7 @@
 use crate::{ops::Op, trace, trace::Tracer};
 use std::{
   alloc::{self, Layout},
+  borrow::Cow,
   fmt,
   hint::unreachable_unchecked,
   sync::{Arc, Barrier},
@@ -114,7 +115,7 @@ impl Port {
 
   #[inline(always)]
   pub fn new_ref(def: &Def) -> Port {
-    Port::new(Ref, def.lab, Loc(def as *const _ as _))
+    Port::new(Ref, def.labs.min_safe(), Loc(def as *const _ as _))
   }
 
   #[inline(always)]
@@ -337,7 +338,7 @@ impl Wire {
 #[derive(Clone, Debug)]
 #[repr(align(16))]
 pub struct Def {
-  pub lab: Lab,
+  pub labs: LabSet,
   pub inner: DefType,
 }
 
@@ -351,6 +352,46 @@ pub enum DefType {
 #[derive(Clone, Debug, Default)]
 pub struct DefNet {
   pub instr: Vec<Instruction>,
+}
+
+#[derive(Default, Debug, Clone)]
+pub struct LabSet {
+  pub(crate) min_safe: Lab,
+  pub(crate) bits: Cow<'static, [u64]>,
+}
+
+impl LabSet {
+  pub fn add(&mut self, lab: Lab) {
+    self.min_safe = self.min_safe.max(lab + 1);
+    let index = (lab >> 6) as usize;
+    let bit = lab & 63;
+    let bits = self.bits.to_mut();
+    if index >= bits.len() {
+      bits.resize(index + 1, 0);
+    }
+    bits[index] |= 1 << bit;
+  }
+  pub fn min_safe(&self) -> Lab {
+    self.min_safe
+  }
+  pub fn has(&self, lab: Lab) -> bool {
+    if lab >= self.min_safe {
+      return false;
+    }
+    let index = (lab >> 6) as usize;
+    let bit = lab & 63;
+    unsafe { self.bits.get_unchecked(index) & 1 << bit != 0 }
+  }
+  pub fn union(&mut self, other: &LabSet) {
+    self.min_safe = self.min_safe.max(other.min_safe);
+    let bits = self.bits.to_mut();
+    for (a, b) in bits.iter_mut().zip(other.bits.iter()) {
+      *a |= b;
+    }
+    if other.bits.len() > bits.len() {
+      bits.extend_from_slice(&other.bits[bits.len() ..])
+    }
+  }
 }
 
 // A target pointer, with implied ownership.
@@ -881,8 +922,8 @@ impl<'a> Net<'a> {
       (Ref, _) if a == Port::ERA => self.comm02(a, b),
       (_, Ref) if b == Port::ERA => self.comm02(b, a),
       // deref
-      (Ref, _) => self.call(a.loc().def(), b),
-      (_, Ref) => self.call(b.loc().def(), a),
+      (Ref, _) => self.call(a, b),
+      (_, Ref) => self.call(b, a),
       // native ops
       (Op2, Num) => self.op2_num(a, b),
       (Num, Op2) => self.op2_num(b, a),
@@ -1452,10 +1493,16 @@ impl<'a> Net<'a> {
 impl<'a> Net<'a> {
   // Expands a closed net.
   #[inline(never)]
-  pub fn call(&mut self, def: &Def, trg: Port) {
-    trace!(self.tracer, Port::new_ref(def), trg);
+  pub fn call(&mut self, port: Port, trg: Port) {
+    trace!(self.tracer, port, trg);
+
+    let def = port.loc().def();
+
+    if trg.tag() == Ctr && !def.labs.has(trg.lab()) {
+      return self.comm02(port, trg);
+    }
+
     self.rwts.dref += 1;
-    // Intercepts with a native function, if available.
     let net = match &def.inner {
       DefType::Native(native) => return native(self, trg),
       DefType::Net(net) => net,
@@ -1562,7 +1609,7 @@ impl<'a> Net<'a> {
         let got = wire.swap_target(Port::LOCK);
         if got != Port::LOCK {
           trace!(net.tracer, port, wire);
-          net.call(port.loc().def(), Port::new_var(wire.loc()));
+          net.call(port, Port::new_var(wire.loc()));
         }
       }
     }
