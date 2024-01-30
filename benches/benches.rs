@@ -123,7 +123,7 @@ fn interact_benchmark(c: &mut Criterion) {
   ];
 
   for (name, redex) in cases {
-    let mut book = Book::new();
+    let mut book = Book::default();
     book.insert(DefNames::ENTRY_POINT.to_string(), Net { root: Era, rdex: vec![redex] });
     let area = RtNet::init_heap(1 << 24);
     let host = Host::new(&book);

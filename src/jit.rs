@@ -1,7 +1,7 @@
 // Despite the file name, this is not actually a JIT (yet).
 
 use crate::{
-  ast,
+  host::Host,
   run::{DefType, Instruction, Port, Tag},
 };
 use std::{
@@ -9,16 +9,16 @@ use std::{
   hash::{DefaultHasher, Hasher},
 };
 
-pub fn compile_book(host: &ast::Host) -> String {
+pub fn compile_book(host: &Host) -> String {
   _compile_book(host).unwrap()
 }
 
-fn _compile_book(host: &ast::Host) -> Result<String, fmt::Error> {
+fn _compile_book(host: &Host) -> Result<String, fmt::Error> {
   let mut code = Code::default();
 
   writeln!(code, "#![allow(non_upper_case_globals)]")?;
   writeln!(code, "#[allow(unused_imports)]")?;
-  writeln!(code, "use crate::{{ast::{{Host, DefRef}}, run::*, ops::Op::*}};\n")?;
+  writeln!(code, "use crate::{{host::{{Host, DefRef}}, run::*, ops::Op::*}};\n")?;
 
   writeln!(code, "pub fn host() -> Host {{")?;
   code.indent(|code| {
@@ -49,7 +49,7 @@ fn _compile_book(host: &ast::Host) -> Result<String, fmt::Error> {
   Ok(code.code)
 }
 
-fn compile_def(code: &mut Code, host: &ast::Host, raw_name: &str, instr: &[Instruction]) -> fmt::Result {
+fn compile_def(code: &mut Code, host: &Host, raw_name: &str, instr: &[Instruction]) -> fmt::Result {
   let name = sanitize_name(raw_name);
   writeln!(code, "pub fn call_{name}(net: &mut Net, to: Port) {{")?;
   code.indent(|code| {
@@ -78,7 +78,7 @@ fn compile_def(code: &mut Code, host: &ast::Host, raw_name: &str, instr: &[Instr
   Ok(())
 }
 
-fn print_port(host: &ast::Host, port: &Port) -> String {
+fn print_port(host: &Host, port: &Port) -> String {
   if port == &Port::ERA {
     "Port::ERA".to_owned()
   } else if port.tag() == Tag::Ref {

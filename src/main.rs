@@ -58,7 +58,7 @@ fn full_main(args: &[String]) {
   }
 }
 
-fn run(opts: &[String], host: ast::Host) {
+fn run(opts: &[String], host: host::Host) {
   let opts = opts.iter().map(|x| &**x).collect::<HashSet<_>>();
   let data = run::Net::init_heap(1 << 32);
   let mut net = run::Net::new(&data);
@@ -70,7 +70,7 @@ fn run(opts: &[String], host: ast::Host) {
     net.parallel_normal();
   }
   let elapsed = start_time.elapsed();
-  println!("{}", ast::show_net(&host.readback(&net)));
+  println!("{}", &host.readback(&net));
   if opts.contains("-s") {
     print_stats(&net, elapsed);
   }
@@ -93,16 +93,15 @@ fn print_stats(net: &run::Net, elapsed: Duration) {
   println!("RPS    : {:.3} m", ((net.rwts.total() + net.quik.total()) as f64) / (elapsed.as_millis() as f64) / 1000.0);
 }
 
-fn load(file: &str) -> ast::Host {
+fn load(file: &str) -> host::Host {
   let Ok(file) = fs::read_to_string(file) else {
     eprintln!("Input file not found");
     process::exit(1);
   };
-  let book = ast::parse_book(&file);
-  ast::Host::new(&book)
+  host::Host::new(&file.parse().expect("parse error"))
 }
 
-fn compile_executable(file_name: &str, host: &ast::Host) -> Result<(), io::Error> {
+fn compile_executable(file_name: &str, host: &host::Host) -> Result<(), io::Error> {
   let gen = jit::compile_book(host);
   let outdir = ".hvm";
   if Path::new(&outdir).exists() {
@@ -114,12 +113,14 @@ fn compile_executable(file_name: &str, host: &ast::Host) -> Result<(), io::Error
   fs::write(".hvm/Cargo.toml", cargo_toml)?;
   fs::write(".hvm/src/ast.rs", include_str!("../src/ast.rs"))?;
   fs::write(".hvm/src/fuzz.rs", include_str!("../src/fuzz.rs"))?;
+  fs::write(".hvm/src/host.rs", include_str!("../src/host.rs"))?;
   fs::write(".hvm/src/jit.rs", include_str!("../src/jit.rs"))?;
   fs::write(".hvm/src/lib.rs", include_str!("../src/lib.rs"))?;
   fs::write(".hvm/src/main.rs", include_str!("../src/main.rs"))?;
   fs::write(".hvm/src/ops.rs", include_str!("../src/ops.rs"))?;
   fs::write(".hvm/src/run.rs", include_str!("../src/run.rs"))?;
   fs::write(".hvm/src/trace.rs", include_str!("../src/trace.rs"))?;
+  fs::write(".hvm/src/util.rs", include_str!("../src/util.rs"))?;
   fs::write(".hvm/src/gen.rs", gen)?;
 
   let output = process::Command::new("cargo")
