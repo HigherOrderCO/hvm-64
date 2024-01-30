@@ -1,5 +1,9 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use hvmc::{ast::*, *};
+use hvmc::{
+  ast::{parse_book, Book, Host, Net},
+  run::Net as RtNet,
+};
+use hvml::term::DefNames;
 use std::{
   ffi::OsStr,
   fs,
@@ -8,30 +12,21 @@ use std::{
 };
 
 // Loads file and generate net from hvm-core syntax
-fn load_from_core<P: AsRef<Path>>(file: P) -> (run::Book, run::Net) {
+fn load_from_core<P: AsRef<Path>>(file: P) -> Book {
   let code = fs::read_to_string(file).unwrap();
-  let (size, code) = extract_size(&code);
+  let (_, code) = extract_size(&code);
 
-  let book = ast::do_parse_book(code);
-  let rbook = ast::book_to_runtime(&book);
-
-  let mut net = run::Net::new(size);
-  net.boot(name_to_val("main"));
-  (rbook, net)
+  parse_book(code)
 }
 
 // Loads file and generate net from hvm-lang syntax
-fn load_from_lang<P: AsRef<Path>>(file: P) -> (run::Book, run::Net) {
+fn load_from_lang<P: AsRef<Path>>(file: P) -> Book {
   let code = fs::read_to_string(file).unwrap();
-  let (size, code) = extract_size(&code);
+  let (_, code) = extract_size(&code);
 
-  let mut book = hvm_lang::term::parser::parse_definition_book(&code).unwrap();
-  let (book, _) = hvm_lang::compile_book(&mut book).unwrap();
-  let book = ast::book_to_runtime(&book);
-
-  let mut net = run::Net::new(size);
-  net.boot(name_to_val("main"));
-  (book, net)
+  let mut book = hvml::term::parser::parse_definition_book(&code).unwrap();
+  let book = hvml::compile_book(&mut book, hvml::Opts::light()).unwrap().core_book;
+  book
 }
 
 fn extract_size(code: &str) -> (usize, &str) {
@@ -75,8 +70,8 @@ fn run_dir(path: &PathBuf, group: Option<String>, c: &mut Criterion) {
   }
 }
 
-fn run_file(path: &PathBuf, mut group: Option<String>, c: &mut Criterion) {
-  let (book, net) = match path.extension().and_then(OsStr::to_str) {
+fn run_file(path: &PathBuf, group: Option<String>, c: &mut Criterion) {
+  let book = match path.extension().and_then(OsStr::to_str) {
     Some("hvmc") => load_from_core(path),
     Some("hvm") => load_from_lang(path),
     _ => panic!("invalid file found: {}", path.to_string_lossy()),
@@ -84,69 +79,39 @@ fn run_file(path: &PathBuf, mut group: Option<String>, c: &mut Criterion) {
 
   let file_name = path.file_stem().unwrap().to_string_lossy();
 
-  if cfg!(feature = "cuda") {
-    group = Some(match group {
-      Some(group) => format!("cuda/{group}"),
-      None => "cuda".to_string(),
-    });
-  };
-
   match group {
-    Some(group) => benchmark_group(&file_name, group, book, net, c),
-    None => benchmark(&file_name, book, net, c),
+    Some(group) => benchmark_group(&file_name, group, book, c),
+    None => benchmark(&file_name, book, c),
   }
 }
 
-fn benchmark(file_name: &str, book: run::Book, net: run::Net, c: &mut Criterion) {
+fn benchmark(file_name: &str, book: Book, c: &mut Criterion) {
+  let area = RtNet::init_heap(1 << 24);
+  let host = Host::new(&book);
   c.bench_function(file_name, |b| {
-    b.iter_batched(
-      || net.clone(),
-      |net| black_box(black_box(net).normal(black_box(&book))),
-      criterion::BatchSize::SmallInput,
-    );
+    b.iter(|| {
+      let mut net = RtNet::new(&area);
+      net.boot(host.defs.get(DefNames::ENTRY_POINT).unwrap());
+      black_box(black_box(net).normal())
+    });
   });
 }
 
-#[allow(unused_variables)]
-fn benchmark_group(file_name: &str, group: String, book: run::Book, net: run::Net, c: &mut Criterion) {
-  #[cfg(not(feature = "cuda"))]
-  c.benchmark_group(group).bench_function(file_name, |b| {
-    b.iter_batched(
-      || net.clone(),
-      |net| black_box(black_box(net).normal(black_box(&book))),
-      criterion::BatchSize::SmallInput,
-    );
-  });
+fn benchmark_group(file_name: &str, group: String, book: Book, c: &mut Criterion) {
+  let area = RtNet::init_heap(1 << 24);
+  let host = Host::new(&book);
 
-  #[cfg(feature = "cuda")]
   c.benchmark_group(group).bench_function(file_name, |b| {
-    b.iter_batched(
-      || cuda::host::setup_gpu(&book, "main").unwrap(),
-      |(dev, global_expand_prepare, global_expand, global_rewrite, gpu_net, gpu_book)| {
-        black_box(
-          cuda::host::cuda_normalize_net(
-            black_box(global_expand_prepare),
-            black_box(global_expand),
-            black_box(global_rewrite),
-            black_box(&gpu_net.device_net),
-            black_box(&gpu_book),
-          )
-          .unwrap(),
-        );
-
-        black_box(dev.synchronize().unwrap());
-      },
-      criterion::BatchSize::PerIteration,
-    )
+    b.iter(|| {
+      let mut net = RtNet::new(&area);
+      net.boot(host.defs.get(DefNames::ENTRY_POINT).unwrap());
+      black_box(black_box(net).normal())
+    });
   });
 }
 
 fn interact_benchmark(c: &mut Criterion) {
-  if cfg!(feature = "cuda") {
-    return;
-  }
-
-  use ast::Tree::*;
+  use hvmc::ast::Tree::*;
   let mut group = c.benchmark_group("interact");
   group.sample_size(1000);
 
@@ -158,16 +123,16 @@ fn interact_benchmark(c: &mut Criterion) {
   ];
 
   for (name, redex) in cases {
-    let mut net = run::Net::new(10);
-    let book = run::Book::new();
-    ast::net_to_runtime(&mut net, &ast::Net { root: Era, rdex: vec![redex] });
-    let (rdx_a, rdx_b) = net.rdex[0];
+    let mut book = Book::new();
+    book.insert(DefNames::ENTRY_POINT.to_string(), Net { root: Era, rdex: vec![redex] });
+    let area = RtNet::init_heap(1 << 24);
+    let host = Host::new(&book);
     group.bench_function(name, |b| {
-      b.iter_batched(
-        || net.clone(),
-        |net| black_box(black_box(net).interact(black_box(&book), black_box(rdx_a), black_box(rdx_b))),
-        criterion::BatchSize::SmallInput,
-      );
+      b.iter(|| {
+        let mut net = RtNet::new(&area);
+        net.boot(host.defs.get(DefNames::ENTRY_POINT).unwrap());
+        black_box(black_box(net).normal())
+      });
     });
   }
 }
