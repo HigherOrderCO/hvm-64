@@ -10,8 +10,9 @@ mod numeric_tests {
   use insta::{assert_debug_snapshot, assert_snapshot};
 
   fn op_net(lnum: u32, op: Op, rnum: u32) -> Book {
-    println!("Code: {:?}", &format!("@main = root & #{lnum} ~ <{op} #{rnum} root>"));
-    parse_core(&format!("@main = root & #{lnum} ~ <{op} #{rnum} root>"))
+    let code = format!("@main = root & #{lnum} ~ <{op} #{rnum} root>");
+    println!("Code: {code:?}");
+    parse_core(&code)
   }
 
   #[test]
@@ -103,7 +104,7 @@ mod numeric_tests {
   fn test_not() {
     let net = op_net(0, Op::Not, 256);
     let (rwts, net) = normal(net, 16);
-    assert_snapshot!(show_net(&net), @"#16776959");
+    assert_snapshot!(show_net(&net), @"#1152921504606846975");
     assert_debug_snapshot!(rwts.total(), @"2");
   }
 
@@ -122,13 +123,11 @@ mod numeric_tests {
   }
 
   #[test]
-  /// Division by zero always return the value of 0xFFFFFF,
-  /// that is read as the unsigned integer `16777215`
   fn test_div_by_0() {
     let net = op_net(9, Op::Div, 0);
     let (rwts, net) = normal(net, 16);
-    assert_snapshot!(show_net(&net), @"#16777215");
-    assert_debug_snapshot!(rwts.total(), @"5");
+    assert_snapshot!(show_net(&net), @"#0");
+    assert_debug_snapshot!(rwts.total(), @"2");
   }
 
   #[test]
@@ -137,7 +136,7 @@ mod numeric_tests {
     let mut net = load_lang("chained_ops.hvm");
     let (rwts, net) = hvm_lang_normal(&mut net, 256);
 
-    assert_snapshot!(show_net(&net), @"#2138224");
-    assert_debug_snapshot!(rwts.total(), @"36");
+    assert_snapshot!(show_net(&net), @"#7184190578800");
+    assert_debug_snapshot!(rwts.total(), @"1");
   }
 }

@@ -68,7 +68,7 @@ fn test_tree_alloc() {
   assert!(valid_readback);
   assert_snapshot!(show_net(&net), @"(a (* a))");
   assert_snapshot!(readback, @"λa λ* a");
-  assert_debug_snapshot!(rwts.total(), @"53");
+  assert_debug_snapshot!(rwts.total(), @"57");
 }
 
 #[test]
@@ -80,5 +80,5 @@ fn test_queue() {
   assert!(valid_readback);
   assert_snapshot!(show_net(&net), @"(((* (a a)) (((((b c) (b c)) (((({3 (d e) (e f)} (d f)) ((* (g g)) h)) (* h)) i)) (* i)) j)) (* j))");
   assert_snapshot!(readback, @"λa λ* (a λ* λb b λc λ* (c λd λe (d e) λf λ* (f λg λh dup#0 j i = g; (i (j h)) λ* λk k)))");
-  assert_debug_snapshot!(rwts.total(), @"29");
+  assert_debug_snapshot!(rwts.total(), @"34");
 }

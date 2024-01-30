@@ -38,7 +38,7 @@ pub fn replace_template(mut code: String, map: &[(&str, &str)]) -> String {
 
 pub fn hvm_lang_readback(net: &Net, book: &DefinitionBook) -> (String, bool) {
   let net = hvml::net::hvmc_to_net::hvmc_to_net(net);
-  let (res_term, readback_errors) = hvml::term::net_to_term::net_to_term(&net, book, &Labels::default(), true);
+  let (res_term, readback_errors) = hvml::term::net_to_term::net_to_term(&net, book, &Labels::default(), false);
   (format!("{}", res_term.display(&book.def_names)), readback_errors.0.is_empty())
 }
 
