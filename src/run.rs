@@ -7,7 +7,7 @@
 // they interact with nodes, and are cleared when they interact with Ptr::ERAs, allowing for constant
 // space evaluation of recursive functions on Scott encoded datatypes.
 
-use crate::{ops::Op, trace, trace::Tracer};
+use crate::{bi_enum, ops::Op, trace, trace::Tracer};
 use std::{
   alloc::{self, Layout},
   borrow::Cow,
@@ -35,39 +35,22 @@ use atomic::{AtomicU64, AtomicUsize, Ordering::Relaxed};
 
 pub type Lab = u16;
 
-#[repr(u8)]
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum Tag {
-  Red = 0,
-  Var = 1,
-  Ref = 2,
-  Num = 3,
-  Op2 = 4,
-  Op1 = 5,
-  Mat = 6,
-  Ctr = 7,
+bi_enum! {
+  #[repr(u8)]
+  #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+  pub enum Tag {
+    Red = 0,
+    Var = 1,
+    Ref = 2,
+    Num = 3,
+    Op2 = 4,
+    Op1 = 5,
+    Mat = 6,
+    Ctr = 7,
+  }
 }
 
 use Tag::*;
-
-impl TryFrom<u8> for Tag {
-  type Error = ();
-
-  #[inline(always)]
-  fn try_from(value: u8) -> Result<Self, Self::Error> {
-    Ok(match value {
-      0 => Tag::Red,
-      1 => Tag::Var,
-      2 => Tag::Ref,
-      3 => Tag::Num,
-      4 => Tag::Op2,
-      5 => Tag::Op1,
-      6 => Tag::Mat,
-      7 => Tag::Ctr,
-      _ => Err(())?,
-    })
-  }
-}
 
 /// A tagged pointer.
 #[derive(Clone, Eq, PartialEq, PartialOrd, Hash, Default)]
