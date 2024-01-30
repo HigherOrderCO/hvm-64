@@ -61,6 +61,8 @@
 //! `_reset_traces()` before each iteration, to discard the traces of the
 //! previous iteration.
 
+#![cfg_attr(not(feature = "trace"), allow(unused))]
+
 use std::{
   cell::UnsafeCell,
   fmt::{self, Debug, Formatter, Write},
@@ -84,7 +86,7 @@ impl Tracer {
   #[doc(hidden)]
   pub fn trace<S: TraceSourceBearer, A: TraceArgs>(&mut self, _: A) {}
   #[inline(always)]
-  pub fn set_tid(&self, tid: usize) {}
+  pub fn set_tid(&self, _: usize) {}
 }
 
 #[macro_export]
