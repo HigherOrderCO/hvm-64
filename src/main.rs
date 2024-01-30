@@ -108,21 +108,11 @@ fn cli_main() {
         std::process::exit(1);
       }
     }
-    // "gen-cuda-book" => {
-    //   if let Some(file_name) = f_name {
-    //     let book = load(&data, file_name).0;
-    //     println!("{}", gen_cuda_book(&book));
-    //   } else {
-    //     println!("Usage: hvmc gen-cuda-book <file.hvmc>");
-    //     std::process::exit(1);
-    //   }
-    // }
     _ => {
       println!("Usage: hvmc <cmd> <file.hvmc> [-s]");
       println!("Commands:");
       println!("  run           - Run the given file");
       println!("  compile       - Compile the given file to an executable");
-      println!("  gen-cuda-book - Generate a CUDA book from the given file");
       println!("Options:");
       println!("  [-s] Show stats, including rewrite count");
       println!("  [-1] Single-core mode (no parallelism)");
@@ -190,91 +180,3 @@ pub fn compile_rust_crate_to_executable(f_name: &str) -> Result<(), std::io::Err
   fs::copy("./.hvm/target/release/hvmc", target)?;
   Ok(())
 }
-
-// // TODO: move to hvm-cuda repo
-// pub fn gen_cuda_book(book: &run::Book) -> String {
-//   use std::collections::BTreeMap;
-
-//   // Sort the book.defs by key
-//   let mut defs = BTreeMap::new();
-//   for (fid, def) in book.defs.iter() {
-//     if def.node.len() > 0 {
-//       defs.insert(fid, def.clone());
-//     }
-//   }
-
-//   // Initializes code
-//   let mut code = String::new();
-
-//   // Generate function ids
-//   for (i, id) in defs.keys().enumerate() {
-//     code.push_str(&format!(
-//       "const u32 F_{} = 0x{:x};\n",
-//       crate::ast::val_to_name(**id),
-//       id
-//     ));
-//   }
-//   code.push_str("\n");
-
-//   // Create book
-//   code.push_str("u32 BOOK_DATA[] = {\n");
-
-//   // Generate book data
-//   for (i, (id, net)) in defs.iter().enumerate() {
-//     let node_len = net.node.len();
-//     let rdex_len = net.rdex.len();
-
-//     code.push_str(&format!("  // @{}\n", crate::ast::val_to_name(**id)));
-
-//     // Collect all pointers from root, nodes and rdex into a single buffer
-//     code.push_str(&format!("  // .nlen\n"));
-//     code.push_str(&format!("  0x{:08X},\n", node_len));
-//     code.push_str(&format!("  // .rlen\n"));
-//     code.push_str(&format!("  0x{:08X},\n", rdex_len));
-
-//     // .node
-//     code.push_str("  // .node\n");
-//     for (i, node) in net.node.iter().enumerate() {
-//       code.push_str(&format!("  0x{:08X},", node.0 .0));
-//       code.push_str(&format!(" 0x{:08X},", node.1 .0));
-//       if (i + 1) % 4 == 0 {
-//         code.push_str("\n");
-//       }
-//     }
-//     if node_len % 4 != 0 {
-//       code.push_str("\n");
-//     }
-
-//     // .rdex
-//     code.push_str("  // .rdex\n");
-//     for (i, (a, b)) in net.rdex.iter().enumerate() {
-//       code.push_str(&format!("  0x{:08X},", a.0));
-//       code.push_str(&format!(" 0x{:08X},", b.0));
-//       if (i + 1) % 4 == 0 {
-//         code.push_str("\n");
-//       }
-//     }
-//     if rdex_len % 4 != 0 {
-//       code.push_str("\n");
-//     }
-//   }
-
-//   code.push_str("};\n\n");
-
-//   code.push_str("u32 JUMP_DATA[] = {\n");
-
-//   let mut index = 0;
-//   for (i, fid) in defs.keys().enumerate() {
-//     code.push_str(&format!(
-//       "  0x{:08X}, 0x{:08X}, // @{}\n",
-//       fid,
-//       index,
-//       crate::ast::val_to_name(**fid)
-//     ));
-//     index += 2 + 2 * defs[fid].node.len() as u32 + 2 * defs[fid].rdex.len() as u32;
-//   }
-
-//   code.push_str("};");
-
-//   return code;
-// }
