@@ -1,5 +1,5 @@
 use crate::loaders::*;
-use hvm_lang::term::Book;
+use hvml::term::Book;
 use insta::assert_debug_snapshot;
 
 mod loaders;
@@ -12,7 +12,7 @@ fn list_got(index: u32) -> Book {
 
 #[test]
 fn test_list_got() {
-  let mut rwts = Vec::new();
+  let mut rwts_list = Vec::new();
 
   for index in [
     0,
@@ -27,27 +27,27 @@ fn test_list_got() {
     31,
   ] {
     let mut book = list_got(index);
-    let (rnet, _, _) = hvm_lang_normal(&mut book, 2048);
-    rwts.push(rnet.rewrites())
+    let (rwts, _) = hvm_lang_normal(&mut book, 2048);
+    rwts_list.push(rwts.total())
   }
 
-  assert_debug_snapshot!(rwts[0], @"583");
-  assert_debug_snapshot!(rwts[1], @"615");
-  assert_debug_snapshot!(rwts[2], @"679");
-  assert_debug_snapshot!(rwts[3], @"807");
+  assert_debug_snapshot!(rwts_list[0], @"468");
+  assert_debug_snapshot!(rwts_list[1], @"478");
+  assert_debug_snapshot!(rwts_list[2], @"498");
+  assert_debug_snapshot!(rwts_list[3], @"538");
   #[cfg(not(feature = "cuda"))]
-  assert_debug_snapshot!(rwts[4], @"1063");
+  assert_debug_snapshot!(rwts_list[4], @"618");
   #[cfg(not(feature = "cuda"))]
-  assert_debug_snapshot!(rwts[5], @"1575");
+  assert_debug_snapshot!(rwts_list[5], @"778");
 
   // Tests the linearity of the function
-  let delta = rwts[1] - rwts[0];
-  assert_eq!(rwts[1] + delta * 2, rwts[2]);
-  assert_eq!(rwts[2] + delta * 4, rwts[3]);
+  let delta = rwts_list[1] - rwts_list[0];
+  assert_eq!(rwts_list[1] + delta * 2, rwts_list[2]);
+  assert_eq!(rwts_list[2] + delta * 4, rwts_list[3]);
   #[cfg(not(feature = "cuda"))]
-  assert_eq!(rwts[3] + delta * 8, rwts[4]);
+  assert_eq!(rwts_list[3] + delta * 8, rwts_list[4]);
   #[cfg(not(feature = "cuda"))]
-  assert_eq!(rwts[4] + delta * 16, rwts[5]);
+  assert_eq!(rwts_list[4] + delta * 16, rwts_list[5]);
 }
 
 fn list_put(index: u32, value: u32) -> Book {
@@ -58,25 +58,25 @@ fn list_put(index: u32, value: u32) -> Book {
 
 #[test]
 fn test_list_put() {
-  let mut rwts = Vec::new();
+  let mut rwts_list = Vec::new();
 
   for (index, value) in [(0, 2), (1, 4), (3, 8), (7, 16), (15, 32), (31, 0)] {
     let mut book = list_put(index, value);
-    let (rnet, _, _) = hvm_lang_normal(&mut book, 2048);
-    rwts.push(rnet.rewrites())
+    let (rwts, _) = hvm_lang_normal(&mut book, 2048);
+    rwts_list.push(rwts.total())
   }
 
-  assert_debug_snapshot!(rwts[0], @"566");
-  assert_debug_snapshot!(rwts[1], @"588");
-  assert_debug_snapshot!(rwts[2], @"632");
-  assert_debug_snapshot!(rwts[3], @"720");
-  assert_debug_snapshot!(rwts[4], @"896");
-  assert_debug_snapshot!(rwts[5], @"1248");
+  assert_debug_snapshot!(rwts_list[0], @"457");
+  assert_debug_snapshot!(rwts_list[1], @"467");
+  assert_debug_snapshot!(rwts_list[2], @"487");
+  assert_debug_snapshot!(rwts_list[3], @"527");
+  assert_debug_snapshot!(rwts_list[4], @"607");
+  assert_debug_snapshot!(rwts_list[5], @"767");
 
   //Tests the linearity of the function
-  let delta = rwts[1] - rwts[0];
-  assert_eq!(rwts[1] + delta * 2, rwts[2]);
-  assert_eq!(rwts[2] + delta * 4, rwts[3]);
-  assert_eq!(rwts[3] + delta * 8, rwts[4]);
-  assert_eq!(rwts[4] + delta * 16, rwts[5]);
+  let delta = rwts_list[1] - rwts_list[0];
+  assert_eq!(rwts_list[1] + delta * 2, rwts_list[2]);
+  assert_eq!(rwts_list[2] + delta * 4, rwts_list[3]);
+  assert_eq!(rwts_list[3] + delta * 8, rwts_list[4]);
+  assert_eq!(rwts_list[4] + delta * 16, rwts_list[5]);
 }
