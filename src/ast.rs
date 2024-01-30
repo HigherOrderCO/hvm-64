@@ -11,8 +11,6 @@ use crate::{
 };
 use std::collections::{hash_map::Entry, BTreeMap, HashMap};
 
-use std::{iter::Peekable, str::Chars};
-
 // AST
 // ---
 
@@ -63,187 +61,162 @@ pub type Book = BTreeMap<String, Net>;
 // Parser
 // ------
 
-fn skip(chars: &mut Peekable<Chars>) {
-  while let Some(c) = chars.peek() {
-    if *c == '/' {
-      chars.next();
-      while let Some(c) = chars.peek() {
-        if *c == '\n' {
-          break;
-        }
-        chars.next();
+struct Parser<'b> {
+  input: &'b str,
+}
+
+impl<'i> Parser<'i> {
+  fn peek_char(&self) -> Option<char> {
+    self.input.chars().next()
+  }
+  fn advance_char(&mut self) -> Option<char> {
+    let char = self.input.chars().next()?;
+    self.input = &self.input[char.len_utf8() ..];
+    Some(char)
+  }
+  fn skip_trivia(&mut self) {
+    while let Some(c) = self.peek_char() {
+      if c.is_ascii_whitespace() {
+        self.advance_char();
+        continue;
       }
-    } else if !c.is_ascii_whitespace() {
+      if c == '/' && self.input.starts_with("//") {
+        while self.peek_char() != Some('\n') {
+          self.advance_char();
+        }
+        continue;
+      }
       break;
+    }
+  }
+  fn consume(&mut self, text: &str) -> Result<(), String> {
+    self.skip_trivia();
+    let Some(rest) = self.input.strip_prefix(text) else {
+      return Err(format!("Expected {:?}, found {:?}", text, self.input.split_ascii_whitespace().next().unwrap_or("")));
+    };
+    self.input = rest;
+    Ok(())
+  }
+  fn parse_number(&mut self) -> Result<u64, String> {
+    self.skip_trivia();
+    let radix = if let Some(rest) = self.input.strip_prefix("0x") {
+      self.input = rest;
+      16
+    } else if let Some(rest) = self.input.strip_prefix("0b") {
+      self.input = rest;
+      2
     } else {
-      chars.next();
+      10
+    };
+    let mut num: u64 = 0;
+    if !self.peek_char().map_or(false, |c| c.is_digit(radix)) {
+      return Err(format!("Expected a digit, found {:?}", self.peek_char()));
+    }
+    while let Some(digit) = self.peek_char().and_then(|c| c.to_digit(radix)) {
+      self.advance_char();
+      num = num * (radix as u64) + (digit as u64);
+    }
+    Ok(num)
+  }
+  fn take_while(&mut self, mut f: impl FnMut(char) -> bool) -> &'i str {
+    let len = self.input.chars().take_while(|&c| f(c)).map(char::len_utf8).sum();
+    let (name, rest) = self.input.split_at(len);
+    self.input = rest;
+    name
+  }
+  fn parse_name(&mut self) -> Result<String, String> {
+    let name = self.take_while(|c| c.is_alphanumeric() || c == '_' || c == '.');
+    if name.len() == 0 {
+      return Err(format!("Expected a name character, found {:?}", self.peek_char()));
+    }
+    Ok(name.to_owned())
+  }
+  fn parse_op(&mut self) -> Result<Op, String> {
+    let op = self.take_while(|c| "+-=*/%<>|&^!?".contains(c));
+    op.parse().map_err(|_| panic!("Unknown operator: {op:?}"))
+  }
+  fn parse_tree(&mut self) -> Result<Tree, String> {
+    self.skip_trivia();
+    match self.peek_char() {
+      Some('*') => {
+        self.advance_char();
+        Ok(Tree::Era)
+      }
+      Some(char @ ('(' | '[' | '{')) => {
+        self.advance_char();
+        let lab = match char {
+          '(' => 0,
+          '[' => 1,
+          '{' => self.parse_number()? as Lab,
+          _ => unreachable!(),
+        };
+        let lft = Box::new(self.parse_tree()?);
+        let rgt = Box::new(self.parse_tree()?);
+        self.consume(match char {
+          '(' => ")",
+          '[' => "]",
+          '{' => "}",
+          _ => unreachable!(),
+        })?;
+        Ok(Tree::Ctr { lab, lft, rgt })
+      }
+      Some('@') => {
+        self.advance_char();
+        self.skip_trivia();
+        let nam = self.parse_name()?;
+        Ok(Tree::Ref { nam })
+      }
+      Some('#') => {
+        self.advance_char();
+        Ok(Tree::Num { val: self.parse_number()? })
+      }
+      Some('<') => {
+        self.advance_char();
+        let opr = self.parse_op()?;
+        let lft = Box::new(self.parse_tree()?);
+        let rgt = Box::new(self.parse_tree()?);
+        self.consume(">")?;
+        Ok(Tree::Op2 { opr, lft, rgt })
+      }
+      Some('?') => {
+        self.advance_char();
+        self.consume("<")?;
+        let sel = Box::new(self.parse_tree()?);
+        let ret = Box::new(self.parse_tree()?);
+        self.consume(">")?;
+        Ok(Tree::Mat { sel, ret })
+      }
+      _ => Ok(Tree::Var { nam: self.parse_name()? }),
     }
   }
-}
-
-pub fn consume(chars: &mut Peekable<Chars>, text: &str) -> Result<(), String> {
-  skip(chars);
-  for c in text.chars() {
-    if chars.next() != Some(c) {
-      return Err(format!("Expected '{}', found {:?}", text, chars.peek()));
-    }
-  }
-  Ok(())
-}
-
-pub fn parse_decimal(chars: &mut Peekable<Chars>) -> Result<u64, String> {
-  let mut num: u64 = 0;
-  skip(chars);
-  if !chars.peek().map_or(false, |c| c.is_ascii_digit()) {
-    return Err(format!("Expected a decimal number, found {:?}", chars.peek()));
-  }
-  while let Some(c) = chars.peek() {
-    if !c.is_ascii_digit() {
-      break;
-    }
-    num = num * 10 + c.to_digit(10).unwrap() as u64;
-    chars.next();
-  }
-  Ok(num)
-}
-
-pub fn parse_name(chars: &mut Peekable<Chars>) -> Result<String, String> {
-  let mut txt = String::new();
-  skip(chars);
-  if !chars.peek().map_or(false, |c| c.is_alphanumeric() || *c == '_' || *c == '.') {
-    return Err(format!("Expected a name character, found {:?}", chars.peek()));
-  }
-  while let Some(c) = chars.peek() {
-    if !c.is_alphanumeric() && *c != '_' && *c != '.' {
-      break;
-    }
-    txt.push(*c);
-    chars.next();
-  }
-  Ok(txt)
-}
-
-pub fn parse_opx_lit(chars: &mut Peekable<Chars>) -> Result<String, String> {
-  let mut opx = String::new();
-  skip(chars);
-  while let Some(c) = chars.peek() {
-    if !"+-=*/%<>|&^!?".contains(*c) {
-      break;
-    }
-    opx.push(*c);
-    chars.next();
-  }
-  Ok(opx)
-}
-
-fn parse_opr(chars: &mut Peekable<Chars>) -> Result<Op, String> {
-  let opx = parse_opx_lit(chars)?;
-  opx.parse().map_err(|_| format!("Unknown operator: {opx}"))
-}
-
-pub fn parse_tree(chars: &mut Peekable<Chars>) -> Result<Tree, String> {
-  skip(chars);
-  match chars.peek() {
-    Some('*') => {
-      chars.next();
-      Ok(Tree::Era)
-    }
-    Some('(') => {
-      chars.next();
-      let lft = Box::new(parse_tree(chars)?);
-      let rgt = Box::new(parse_tree(chars)?);
-      consume(chars, ")")?;
-      Ok(Tree::Ctr { lab: 0, lft, rgt })
-    }
-    Some('[') => {
-      chars.next();
-      let lft = Box::new(parse_tree(chars)?);
-      let rgt = Box::new(parse_tree(chars)?);
-      consume(chars, "]")?;
-      Ok(Tree::Ctr { lab: 1, lft, rgt })
-    }
-    Some('{') => {
-      chars.next();
-      let lab = parse_decimal(chars)? as Lab;
-      let lft = Box::new(parse_tree(chars)?);
-      let rgt = Box::new(parse_tree(chars)?);
-      consume(chars, "}")?;
-      Ok(Tree::Ctr { lab, lft, rgt })
-    }
-    Some('@') => {
-      chars.next();
-      skip(chars);
-      let nam = parse_name(chars)?;
-      Ok(Tree::Ref { nam })
-    }
-    Some('#') => {
-      chars.next();
-      Ok(Tree::Num { val: parse_decimal(chars)? })
-    }
-    Some('<') => {
-      chars.next();
-      let opr = parse_opr(chars)?;
-      let lft = Box::new(parse_tree(chars)?);
-      let rgt = Box::new(parse_tree(chars)?);
-      consume(chars, ">")?;
-      Ok(Tree::Op2 { opr, lft, rgt })
-    }
-    Some('?') => {
-      chars.next();
-      consume(chars, "<")?;
-      let sel = Box::new(parse_tree(chars)?);
-      let ret = Box::new(parse_tree(chars)?);
-      consume(chars, ">")?;
-      Ok(Tree::Mat { sel, ret })
-    }
-    _ => Ok(Tree::Var { nam: parse_name(chars)? }),
-  }
-}
-
-pub fn parse_net(chars: &mut Peekable<Chars>) -> Result<Net, String> {
-  let mut rdex = Vec::new();
-  let root = parse_tree(chars)?;
-  while let Some(c) = {
-    skip(chars);
-    chars.peek()
-  } {
-    if *c == '&' {
-      chars.next();
-      let tree1 = parse_tree(chars)?;
-      consume(chars, "~")?;
-      let tree2 = parse_tree(chars)?;
+  fn parse_net(&mut self) -> Result<Net, String> {
+    let mut rdex = Vec::new();
+    let root = self.parse_tree()?;
+    while self.consume("&").is_ok() {
+      let tree1 = self.parse_tree()?;
+      self.consume("~")?;
+      let tree2 = self.parse_tree()?;
       rdex.push((tree1, tree2));
-    } else {
-      break;
     }
+    Ok(Net { root, rdex })
   }
-  Ok(Net { root, rdex })
-}
-
-pub fn parse_book(chars: &mut Peekable<Chars>) -> Result<Book, String> {
-  let mut book = BTreeMap::new();
-  while let Some(c) = {
-    skip(chars);
-    chars.peek()
-  } {
-    if *c == '@' {
-      chars.next();
-      let name = parse_name(chars)?;
-      consume(chars, "=")?;
-      let net = parse_net(chars)?;
+  fn parse_book(&mut self) -> Result<Book, String> {
+    let mut book = BTreeMap::new();
+    while self.consume("@").is_ok() {
+      let name = self.parse_name()?;
+      self.consume("=")?;
+      let net = self.parse_net()?;
       book.insert(name, net);
-    } else {
-      break;
     }
+    Ok(book)
   }
-  Ok(book)
 }
 
-fn do_parse<T>(code: &str, parse_fn: impl Fn(&mut Peekable<Chars>) -> Result<T, String>) -> T {
-  let chars = &mut code.chars().peekable();
-  match parse_fn(chars) {
+fn parse<'i, T>(input: &'i str, parse_fn: impl Fn(&mut Parser<'i>) -> Result<T, String>) -> T {
+  let mut parser = Parser { input };
+  match parse_fn(&mut parser) {
     Ok(result) => {
-      if chars.next().is_none() {
+      if parser.peek_char().is_none() {
         result
       } else {
         eprintln!("Unable to parse the whole input. Is this not an hvmc file?");
@@ -257,16 +230,16 @@ fn do_parse<T>(code: &str, parse_fn: impl Fn(&mut Peekable<Chars>) -> Result<T, 
   }
 }
 
-pub fn do_parse_tree(code: &str) -> Tree {
-  do_parse(code, parse_tree)
+pub fn parse_tree(code: &str) -> Tree {
+  parse(code, Parser::parse_tree)
 }
 
-pub fn do_parse_net(code: &str) -> Net {
-  do_parse(code, parse_net)
+pub fn parse_net(code: &str) -> Net {
+  parse(code, Parser::parse_net)
 }
 
-pub fn do_parse_book(code: &str) -> Book {
-  do_parse(code, parse_book)
+pub fn parse_book(code: &str) -> Book {
+  parse(code, Parser::parse_book)
 }
 
 // Stringifier

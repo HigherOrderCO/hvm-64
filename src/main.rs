@@ -143,7 +143,7 @@ fn load<'a>(data: &'a run::Area, file: &str) -> (ast::Book, ast::Host, run::Net<
     eprintln!("Input file not found");
     std::process::exit(1);
   };
-  let book = ast::do_parse_book(&file);
+  let book = ast::parse_book(&file);
   let host = ast::Host::new(&book);
   let mut net = run::Net::new(data);
   net.boot(&host.defs["main"]);

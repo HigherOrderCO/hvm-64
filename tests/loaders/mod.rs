@@ -14,7 +14,7 @@ pub fn load_file(file: &str) -> String {
 
 // Parses code and generate Book from hvm-core syntax
 pub fn parse_core(code: &str) -> Book {
-  do_parse_book(code)
+  parse_book(code)
 }
 
 // Parses code and generate DefinitionBook from hvm-lang syntax
