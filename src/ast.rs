@@ -1,9 +1,10 @@
-// An interaction combinator language
-// ----------------------------------
-// This file implements a textual syntax to interact with the runtime. It includes a pure AST for
-// nets, as well as functions for parsing, stringifying, and converting pure ASTs to runtime nets.
-// On the runtime, a net is represented by a list of active trees, plus a root tree. The textual
-// syntax reflects this representation. The grammar is specified on this repo's README.
+//! The textual language of HVMC.
+//!
+//! This file defines an AST for interaction nets, and functions to convert this
+//! AST from/to the textual syntax.
+//!
+//! The grammar is documented in the repo README, as well was within the parser
+//! methods, for convenience.
 
 use crate::{ops::Op, run::Lab};
 use std::{
@@ -13,6 +14,13 @@ use std::{
   str::FromStr,
 };
 
+/// An AST node representing a interaction net tree.
+///
+/// Trees in interaction nets are inductively defined as either wires, or an
+/// agent with its auxiliary ports connected to trees.
+///
+/// Here, the wires at the base of the tree are represented with `Tree::Var`,
+/// where the variable name is shared between both sides of the wire.
 #[derive(Clone, Hash, PartialEq, Eq, Debug, Default)]
 pub enum Tree {
   #[default]
@@ -47,14 +55,23 @@ pub enum Tree {
   },
 }
 
-type Redex = Vec<(Tree, Tree)>;
-
+/// An AST node representing an interaction net with one free port.
+///
+/// The tree connected to the free port is represented by `root`, and the active
+/// pairs of the net by `rdex`.
+///
+/// The wiring connecting the bases of all the trees is represented via pairs of
+/// `Tree::Var` nodes with the same name.
 #[derive(Clone, Hash, PartialEq, Eq, Debug, Default)]
 pub struct Net {
   pub root: Tree,
-  pub rdex: Redex,
+  pub rdex: Vec<(Tree, Tree)>,
 }
 
+/// The top level AST node, representing a collection of named nets.
+///
+/// This is a newtype wrapper around a `BtreeMap<String, Net>`, and is
+/// dereferencable to such.
 #[derive(Clone, Hash, PartialEq, Eq, Debug, Default)]
 pub struct Book {
   pub nets: BTreeMap<String, Net>,
@@ -73,11 +90,14 @@ impl DerefMut for Book {
   }
 }
 
+/// The state of the HVMC parser.
 struct Parser<'b> {
+  /// The remaining characters in the input. `""` represents EOF.
   input: &'b str,
 }
 
 impl<'i> Parser<'i> {
+  /// Book = ("@" Name "=" Net)*
   fn parse_book(&mut self) -> Result<Book, String> {
     let mut book = BTreeMap::new();
     while self.consume("@").is_ok() {
@@ -89,6 +109,7 @@ impl<'i> Parser<'i> {
     Ok(Book { nets: book })
   }
 
+  /// Net = Tree ("&" Tree "~" Tree)*
   fn parse_net(&mut self) -> Result<Net, String> {
     let mut rdex = Vec::new();
     let root = self.parse_tree()?;
@@ -104,16 +125,18 @@ impl<'i> Parser<'i> {
   fn parse_tree(&mut self) -> Result<Tree, String> {
     self.skip_trivia();
     match self.peek_char() {
+      // Era = *
       Some('*') => {
         self.advance_char();
         Ok(Tree::Era)
       }
+      // Ctr = "(" Tree Tree ")" | "[" Tree Tree "]" | "{" Int Tree Tree "}"
       Some(char @ ('(' | '[' | '{')) => {
         self.advance_char();
         let lab = match char {
           '(' => 0,
           '[' => 1,
-          '{' => self.parse_number()? as Lab,
+          '{' => self.parse_int()? as Lab,
           _ => unreachable!(),
         };
         let lft = Box::new(self.parse_tree()?);
@@ -126,20 +149,23 @@ impl<'i> Parser<'i> {
         })?;
         Ok(Tree::Ctr { lab, lft, rgt })
       }
+      // Ref = "@" Name
       Some('@') => {
         self.advance_char();
         self.skip_trivia();
         let nam = self.parse_name()?;
         Ok(Tree::Ref { nam })
       }
+      // Num = "#" Int
       Some('#') => {
         self.advance_char();
-        Ok(Tree::Num { val: self.parse_number()? })
+        Ok(Tree::Num { val: self.parse_int()? })
       }
+      // Op = "<" Op Tree Tree ">" | "<" Int Op Tree ">"
       Some('<') => {
         self.advance_char();
         if self.peek_char().is_some_and(|c| c.is_digit(10)) {
-          let lft = self.parse_number()?;
+          let lft = self.parse_int()?;
           let opr = self.parse_op()?;
           let rgt = Box::new(self.parse_tree()?);
           self.consume(">")?;
@@ -152,6 +178,7 @@ impl<'i> Parser<'i> {
           Ok(Tree::Op2 { opr, lft, rgt })
         }
       }
+      // Mat = "?<" Tree Tree ">"
       Some('?') => {
         self.advance_char();
         self.consume("<")?;
@@ -160,10 +187,12 @@ impl<'i> Parser<'i> {
         self.consume(">")?;
         Ok(Tree::Mat { sel, ret })
       }
+      // Var = Name
       _ => Ok(Tree::Var { nam: self.parse_name()? }),
     }
   }
 
+  // Name = /[a-z_.]+/
   fn parse_name(&mut self) -> Result<String, String> {
     let name = self.take_while(|c| c.is_alphanumeric() || c == '_' || c == '.');
     if name.is_empty() {
@@ -172,7 +201,8 @@ impl<'i> Parser<'i> {
     Ok(name.to_owned())
   }
 
-  fn parse_number(&mut self) -> Result<u64, String> {
+  // Int = /[0-9]+/ | /0x[0-9a-fA-F]+/ | /0b[01]+/
+  fn parse_int(&mut self) -> Result<u64, String> {
     self.skip_trivia();
     let radix = if let Some(rest) = self.input.strip_prefix("0x") {
       self.input = rest;
@@ -199,16 +229,19 @@ impl<'i> Parser<'i> {
     op.parse().map_err(|_| panic!("Unknown operator: {op:?}"))
   }
 
+  /// Inspects the next character in the input without consuming it.
   fn peek_char(&self) -> Option<char> {
     self.input.chars().next()
   }
 
+  /// Consumes the next character in the input.
   fn advance_char(&mut self) -> Option<char> {
     let char = self.input.chars().next()?;
     self.input = &self.input[char.len_utf8() ..];
     Some(char)
   }
 
+  /// Skips whitespace & comments in the input.
   fn skip_trivia(&mut self) {
     while let Some(c) = self.peek_char() {
       if c.is_ascii_whitespace() {
@@ -225,6 +258,7 @@ impl<'i> Parser<'i> {
     }
   }
 
+  /// Consumes an instance of the given string, erroring if it is not found.
   fn consume(&mut self, text: &str) -> Result<(), String> {
     self.skip_trivia();
     let Some(rest) = self.input.strip_prefix(text) else {
@@ -234,6 +268,7 @@ impl<'i> Parser<'i> {
     Ok(())
   }
 
+  /// Consumes all of the contiguous next characters in the input matching a given predicate.
   fn take_while(&mut self, mut f: impl FnMut(char) -> bool) -> &'i str {
     let len = self.input.chars().take_while(|&c| f(c)).map(char::len_utf8).sum();
     let (name, rest) = self.input.split_at(len);
@@ -242,7 +277,8 @@ impl<'i> Parser<'i> {
   }
 }
 
-fn parse<'i, T>(input: &'i str, parse_fn: impl Fn(&mut Parser<'i>) -> Result<T, String>) -> Result<T, String> {
+/// Parses the input with the callback, ensuring that the whole input is consumed.
+fn parse_eof<'i, T>(input: &'i str, parse_fn: impl Fn(&mut Parser<'i>) -> Result<T, String>) -> Result<T, String> {
   let mut parser = Parser { input };
   let out = parse_fn(&mut parser)?;
   if !parser.input.is_empty() {
@@ -254,21 +290,21 @@ fn parse<'i, T>(input: &'i str, parse_fn: impl Fn(&mut Parser<'i>) -> Result<T, 
 impl FromStr for Tree {
   type Err = String;
   fn from_str(str: &str) -> Result<Self, Self::Err> {
-    parse(str, Parser::parse_tree)
+    parse_eof(str, Parser::parse_tree)
   }
 }
 
 impl FromStr for Net {
   type Err = String;
   fn from_str(str: &str) -> Result<Self, Self::Err> {
-    parse(str, Parser::parse_net)
+    parse_eof(str, Parser::parse_net)
   }
 }
 
 impl FromStr for Book {
   type Err = String;
   fn from_str(str: &str) -> Result<Self, Self::Err> {
-    parse(str, Parser::parse_book)
+    parse_eof(str, Parser::parse_book)
   }
 }
 
