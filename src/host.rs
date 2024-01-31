@@ -1,7 +1,7 @@
 use crate::{
   ast::{Book, Net, Tree},
   run::{self, Def, DefNet, DefType, Instruction, LabSet, Loc, Port, Tag, TrgId, Wire},
-  util::num_to_str,
+  util::create_var,
 };
 use std::collections::{hash_map::Entry, HashMap};
 
@@ -81,7 +81,7 @@ impl Host {
       fn read_ptr(&mut self, ptr: Port, dir: Option<Wire>) -> Tree {
         match ptr.tag() {
           Tag::Var => Tree::Var {
-            nam: num_to_str(self.vars.remove(&dir.unwrap().loc()).unwrap_or_else(|| {
+            nam: create_var(self.vars.remove(&dir.unwrap().loc()).unwrap_or_else(|| {
               let nam = self.next_var;
               self.next_var += 1;
               self.vars.insert(ptr.loc(), nam);

@@ -7,7 +7,7 @@
 // they interact with nodes, and are cleared when they interact with Ptr::ERAs, allowing for constant
 // space evaluation of recursive functions on Scott encoded datatypes.
 
-use crate::{bi_enum, ops::Op, trace, trace::Tracer};
+use crate::{ops::Op, trace, trace::Tracer, util::bi_enum};
 use std::{
   alloc::{self, Layout},
   borrow::Cow,
@@ -25,7 +25,7 @@ use std::sync::atomic;
 #[cfg(feature = "_fuzz")]
 use crate::fuzz::spin_loop;
 #[cfg(not(feature = "_fuzz"))]
-fn spin_loop() {}
+fn spin_loop() {} // this could use `std::hint::spin_loop`, but in practice it hurts performance
 
 use atomic::{AtomicU64, AtomicUsize, Ordering::Relaxed};
 

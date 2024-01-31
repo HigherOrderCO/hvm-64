@@ -1,4 +1,4 @@
-use crate::bi_enum;
+use crate::util::bi_enum;
 
 bi_enum! {
   #[repr(u16)]
