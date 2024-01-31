@@ -2,6 +2,7 @@
 
 use hvmc::{
   ast::*,
+  host::Host,
   run::{self, Area},
 };
 use hvml::term::{parser, term_to_net::Labels, Book as DefinitionBook, DefNames};
@@ -14,7 +15,7 @@ pub fn load_file(file: &str) -> String {
 
 // Parses code and generate Book from hvm-core syntax
 pub fn parse_core(code: &str) -> Book {
-  parse_book(code)
+  code.parse().unwrap()
 }
 
 // Parses code and generate DefinitionBook from hvm-lang syntax

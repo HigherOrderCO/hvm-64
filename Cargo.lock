@@ -463,7 +463,7 @@ dependencies = [
 [[package]]
 name = "hvm-lang"
 version = "0.1.0"
-source = "git+https://github.com/HigherOrderCO/hvm-lang.git?branch=core-ptr-refactor/sc-362/basic-compatibility#e540aff14336017e5844ec83a6c65a28584128ed"
+source = "git+https://github.com/HigherOrderCO/hvm-lang.git?branch=core-ptr-refactor/sc-362/basic-compatibility#cd39bd6c1b2de0d0e10804cd7dfbddccd373f6f6"
 dependencies = [
  "chumsky",
  "clap",
