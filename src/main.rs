@@ -102,7 +102,7 @@ fn load(file: &str) -> host::Host {
 }
 
 fn compile_executable(file_name: &str, host: &host::Host) -> Result<(), io::Error> {
-  let gen = jit::compile_host(host);
+  let gen = compile::compile_host(host);
   let outdir = ".hvm";
   if Path::new(&outdir).exists() {
     fs::remove_dir_all(outdir)?;
@@ -114,7 +114,7 @@ fn compile_executable(file_name: &str, host: &host::Host) -> Result<(), io::Erro
   fs::write(".hvm/src/ast.rs", include_str!("../src/ast.rs"))?;
   fs::write(".hvm/src/fuzz.rs", include_str!("../src/fuzz.rs"))?;
   fs::write(".hvm/src/host.rs", include_str!("../src/host.rs"))?;
-  fs::write(".hvm/src/jit.rs", include_str!("../src/jit.rs"))?;
+  fs::write(".hvm/src/compile.rs", include_str!("../src/compile.rs"))?;
   fs::write(".hvm/src/lib.rs", include_str!("../src/lib.rs"))?;
   fs::write(".hvm/src/main.rs", include_str!("../src/main.rs"))?;
   fs::write(".hvm/src/ops.rs", include_str!("../src/ops.rs"))?;

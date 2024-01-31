@@ -1,4 +1,4 @@
-//! Replaced by `jit.rs` with compiled terms.
+//! Replaced by `compile.rs` with compiled defs.
 
 use crate::host::Host;
 

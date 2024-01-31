@@ -2,8 +2,8 @@
 #![allow(non_snake_case)]
 
 pub mod ast;
+pub mod compile;
 pub mod host;
-pub mod jit;
 pub mod ops;
 pub mod run;
 
