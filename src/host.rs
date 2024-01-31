@@ -1,10 +1,28 @@
+//! The runtime's host, which acts as a translation layer between the AST and
+//! the runtime.
+
 use crate::{
   ast::{Book, Net, Tree},
   run::{self, Def, DefNet, DefType, Instruction, LabSet, Loc, Port, Tag, TrgId, Wire},
   util::create_var,
 };
-use std::collections::{hash_map::Entry, HashMap};
+use std::{
+  collections::{hash_map::Entry, HashMap},
+  ops::RangeFrom,
+};
 
+/// Stores a bidirectional mapping between names and runtime defs.
+#[derive(Debug, Clone, Default)]
+pub struct Host {
+  /// the forward mapping, from a name to the runtime def
+  pub defs: HashMap<String, DefRef>,
+  /// the backward mapping, from the address of a runtime def to the name
+  pub back: HashMap<Loc, String>,
+}
+
+/// A potentially-owned reference to a `Def`. Vitally, the address of the `Def`
+/// is stable, even if the `DefRef` moves –- this is why a `Cow` cannot be used
+/// here.
 #[derive(Debug, Clone)]
 pub enum DefRef {
   Owned(Box<Def>),
@@ -21,28 +39,32 @@ impl std::ops::Deref for DefRef {
   }
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct Host {
-  pub defs: HashMap<String, DefRef>,
-  pub back: HashMap<Loc, String>,
-}
-
 impl Host {
   pub fn new(book: &Book) -> Host {
     let mut host = Host::default();
     host.insert_book(book);
     host
   }
+
+  /// Converts all of the nets from the book into runtime defs, and inserts them
+  /// into the net.
   pub fn insert_book(&mut self, book: &Book) {
     self.defs.reserve(book.len());
     self.back.reserve(book.len());
 
+    // Because there may be circular dependencies, inserting the definitions
+    // must be done in two phases:
+
+    // First, we insert empty defs into the host. Even though their instructions
+    // are not yet set, the address of the def will not change, meaning that
+    // `net_to_runtime_def` can safely use `Port::new_def` on them.
     for (nam, labs) in calculate_label_sets(book) {
       let def = DefRef::Owned(Box::new(Def { labs, inner: DefType::Net(DefNet::default()) }));
-      self.back.insert(Port::new_ref(&def).loc(), nam.to_owned());
-      self.defs.insert(nam.to_owned(), def);
+      self.insert_def(nam, def);
     }
 
+    // Now that `defs` is fully populated, we can fill in the instructions of
+    // each of the new defs.
     for (nam, net) in book.iter() {
       let net = net_to_runtime_def(&self.defs, net);
       match self.defs.get_mut(nam).unwrap() {
@@ -51,59 +73,79 @@ impl Host {
       }
     }
   }
-  pub fn insert(&mut self, name: &str, def: DefRef) {
+
+  /// Inserts a singular def into the mapping.
+  pub fn insert_def(&mut self, name: &str, def: DefRef) {
     self.back.insert(Port::new_ref(&def).loc(), name.to_owned());
     self.defs.insert(name.to_owned(), def);
   }
+
+  /// Reads a runtime net into an ast net.
+  ///
+  /// Note that viscous circles and disconnected subnets will not be in the
+  /// resulting net, as it is impossible to read these back from the runtime net
+  /// representation. In the case of viscous circles, this may result in unbound
+  /// variables.
   pub fn readback(&self, rt_net: &run::Net) -> Net {
-    let mut state = State { runtime: self, vars: Default::default(), next_var: 0 };
+    let mut state = State { host: self, vars: Default::default(), var_id: 0 .. };
     let mut net = Net::default();
 
-    net.root = state.read_dir(rt_net.root.clone());
+    net.root = state.read_wire(rt_net.root.clone());
 
     for (a, b) in &rt_net.rdex {
-      net.rdex.push((state.read_ptr(a.clone(), None), state.read_ptr(b.clone(), None)))
+      net.rdex.push((state.read_port(a.clone(), None), state.read_port(b.clone(), None)))
     }
 
     return net;
 
+    #[derive(Debug)]
     struct State<'a> {
-      runtime: &'a Host,
+      host: &'a Host,
       vars: HashMap<Loc, usize>,
-      next_var: usize,
+      var_id: RangeFrom<usize>,
     }
 
     impl<'a> State<'a> {
-      fn read_dir(&mut self, dir: Wire) -> Tree {
-        let ptr = dir.load_target();
-        self.read_ptr(ptr, Some(dir))
+      /// Reads a tree out from a given `wire`.
+      fn read_wire(&mut self, wire: Wire) -> Tree {
+        let port = wire.load_target();
+        self.read_port(port, Some(wire))
       }
-      fn read_ptr(&mut self, ptr: Port, dir: Option<Wire>) -> Tree {
-        match ptr.tag() {
-          Tag::Var => Tree::Var {
-            nam: create_var(self.vars.remove(&dir.unwrap().loc()).unwrap_or_else(|| {
-              let nam = self.next_var;
-              self.next_var += 1;
-              self.vars.insert(ptr.loc(), nam);
-              nam
-            })),
-          },
-          Tag::Red => self.read_dir(ptr.wire()),
-          Tag::Ref if ptr == Port::ERA => Tree::Era,
-          Tag::Ref => Tree::Ref { nam: self.runtime.back[&ptr.loc()].clone() },
-          Tag::Num => Tree::Num { val: ptr.num() },
-          Tag::Op2 | Tag::Op1 => {
-            let opr = ptr.op();
-            let node = ptr.traverse_node();
-            Tree::Op2 { opr, lft: Box::new(self.read_dir(node.p1)), rgt: Box::new(self.read_dir(node.p2)) }
+      /// Reads a tree out from a given `port`. If this is a var port, the
+      /// `wire` this port was reached from must be supplied to key into the
+      /// `vars` map.
+      fn read_port(&mut self, port: Port, wire: Option<Wire>) -> Tree {
+        match port.tag() {
+          Tag::Var => {
+            let key = wire.unwrap().loc().min(port.loc());
+            Tree::Var {
+              nam: create_var(match self.vars.entry(key) {
+                Entry::Occupied(e) => e.remove(),
+                Entry::Vacant(e) => *e.insert(self.var_id.next().unwrap()),
+              }),
+            }
+          }
+          Tag::Red => self.read_wire(port.wire()),
+          Tag::Ref if port == Port::ERA => Tree::Era,
+          Tag::Ref => Tree::Ref { nam: self.host.back[&port.loc()].clone() },
+          Tag::Num => Tree::Num { val: port.num() },
+          Tag::Op2 => {
+            let opr = port.op();
+            let node = port.traverse_node();
+            Tree::Op2 { opr, lft: Box::new(self.read_wire(node.p1)), rgt: Box::new(self.read_wire(node.p2)) }
+          }
+          Tag::Op1 => {
+            let opr = port.op();
+            let node = port.traverse_op1();
+            Tree::Op1 { opr, lft: node.num.num(), rgt: Box::new(self.read_wire(node.p2)) }
           }
           Tag::Ctr => {
-            let node = ptr.traverse_node();
-            Tree::Ctr { lab: node.lab, lft: Box::new(self.read_dir(node.p1)), rgt: Box::new(self.read_dir(node.p2)) }
+            let node = port.traverse_node();
+            Tree::Ctr { lab: node.lab, lft: Box::new(self.read_wire(node.p1)), rgt: Box::new(self.read_wire(node.p2)) }
           }
           Tag::Mat => {
-            let node = ptr.traverse_node();
-            Tree::Mat { sel: Box::new(self.read_dir(node.p1)), ret: Box::new(self.read_dir(node.p2)) }
+            let node = port.traverse_node();
+            Tree::Mat { sel: Box::new(self.read_wire(node.p1)), ret: Box::new(self.read_wire(node.p2)) }
           }
         }
       }
@@ -111,6 +153,9 @@ impl Host {
   }
 }
 
+/// Converts an ast net to the runtime representation.
+///
+/// `defs` must be populated with every `Ref` node that may appear in the net.
 fn net_to_runtime_def(defs: &HashMap<String, DefRef>, net: &Net) -> DefNet {
   let mut state =
     State { defs, scope: Default::default(), instr: Default::default(), end: Default::default(), next_index: 1 };
