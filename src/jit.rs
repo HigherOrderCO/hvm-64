@@ -9,11 +9,11 @@ use std::{
   hash::{DefaultHasher, Hasher},
 };
 
-pub fn compile_book(host: &Host) -> String {
-  _compile_book(host).unwrap()
+pub fn compile_host(host: &Host) -> String {
+  _compile_host(host).unwrap()
 }
 
-fn _compile_book(host: &Host) -> Result<String, fmt::Error> {
+fn _compile_host(host: &Host) -> Result<String, fmt::Error> {
   let mut code = Code::default();
 
   writeln!(code, "#![allow(non_upper_case_globals, unused_imports)]")?;

@@ -102,7 +102,7 @@ fn load(file: &str) -> host::Host {
 }
 
 fn compile_executable(file_name: &str, host: &host::Host) -> Result<(), io::Error> {
-  let gen = jit::compile_book(host);
+  let gen = jit::compile_host(host);
   let outdir = ".hvm";
   if Path::new(&outdir).exists() {
     fs::remove_dir_all(outdir)?;
