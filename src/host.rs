@@ -29,23 +29,27 @@ pub struct Host {
 
 impl Host {
   pub fn new(book: &Book) -> Host {
-    let mut defs = calculate_label_sets(book)
-      .map(|(nam, labs)| {
-        (nam.to_owned(), DefRef::Owned(Box::new(Def { labs, inner: DefType::Net(DefNet::default()) })))
-      })
-      .collect::<HashMap<_, _>>();
+    let mut host = Host::default();
+    host.insert_book(book);
+    host
+  }
+  pub fn insert_book(&mut self, book: &Book) {
+    self.defs.reserve(book.len());
+    self.back.reserve(book.len());
+
+    for (nam, labs) in calculate_label_sets(book) {
+      let def = DefRef::Owned(Box::new(Def { labs, inner: DefType::Net(DefNet::default()) }));
+      self.back.insert(Port::new_ref(&def).loc(), nam.to_owned());
+      self.defs.insert(nam.to_owned(), def);
+    }
 
     for (nam, net) in book.iter() {
-      let net = net_to_runtime_def(&defs, net);
-      match defs.get_mut(nam).unwrap() {
+      let net = net_to_runtime_def(&self.defs, net);
+      match self.defs.get_mut(nam).unwrap() {
         DefRef::Owned(def) => def.inner = DefType::Net(net),
         DefRef::Static(_) => unreachable!(),
       }
     }
-
-    let back = defs.iter().map(|(nam, def)| (Port::new_ref(def).loc(), nam.clone())).collect();
-
-    Host { defs, back }
   }
   pub fn insert(&mut self, name: &str, def: DefRef) {
     self.back.insert(Port::new_ref(&def).loc(), name.to_owned());
