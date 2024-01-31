@@ -337,7 +337,7 @@ pub struct DefNet {
   pub instr: Vec<Instruction>,
 }
 
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub struct LabSet {
   pub(crate) min_safe: Lab,
   pub(crate) bits: Cow<'static, [u64]>,
@@ -374,6 +374,16 @@ impl LabSet {
     if other.bits.len() > bits.len() {
       bits.extend_from_slice(&other.bits[bits.len() ..])
     }
+  }
+}
+
+impl FromIterator<Lab> for LabSet {
+  fn from_iter<T: IntoIterator<Item = Lab>>(iter: T) -> Self {
+    let mut set = LabSet::default();
+    for lab in iter {
+      set.add(lab);
+    }
+    set
   }
 }
 
