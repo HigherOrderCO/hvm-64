@@ -301,21 +301,30 @@ fn net_to_runtime_def(defs: &HashMap<String, DefRef>, net: &Net) -> DefNet {
 /// The end result of this is `@foo: {1, 2}, @bar: {2}` -- `@bar` is missing
 /// `1`.
 ///
-/// Instead, a two-phase memoization approach is needed. When processing nodes
-/// involved in a cycle, we don't save the results (which are incomplete) into
-/// the memo as we go along. Once we have processed everything in the cycle this
-/// way, we save the union of all of the results to one of the nodes in the
-/// cycle, and then reprocess its children, this time saving into the memo.
+/// Instead, a two-phase memoization approach is needed. Each phase follows a
+/// similar procedure as the simple memoization algorithm, with a few
+/// modifications. (Henceforth, the *head node* of a cycle is the first node in
+/// a cycle reached in a traversal.)
+/// - in the first phase:
+///   - when we process a node involved in a cycle:
+///     - if it is not the head node of a cycle it is involved in, instead of
+///       saving the computed label set to the memo, we store a placeholder
+///       `Cycle` value into the memo
+///     - otherwise, after storing the label set in the memo, we enter the
+///       second phase, retraversing the node
+///   - when we encounter a `Cycle` value in the memo, we treat it akin to an
+///     empty label set
+/// - in the second phase, we treat `Cycle` values as though they were missing
+///   entries in the memo
 ///
-/// To know when we are processing nodes in a cycle, we keep track of the depth
-/// of the traversal, and every time we enter a ref, we store `Cycle(depth)`
-/// into the memo -- so if we encounter this in the traversal of the children,
-/// we know that that node participates in a cycle. Additionally, when we exit a
-/// node, we return the *head depth* of the result that was calculated -- the
-/// least depth of a node involved in a cycle with the node just processed.
-/// Comparing this with depth informs us as to whether this node participates in
-/// a cycle, and if so, if this is the top-most node in this traversal of the
-/// cycle (i.e., whether we are leaving a cycle).
+/// In the first phase, to know when we are processing nodes in a cycle, we keep
+/// track of the depth of the traversal, and every time we enter a ref, we store
+/// `Cycle(depth)` into the memo -- so if we encounter this in the traversal of
+/// the children, we know that that node is involved in a cycle. Additionally,
+/// when we exit a node, we return the *head depth* of the result that was
+/// calculated -- the least depth of a node involved in a cycle with the node
+/// just processed. Comparing this with the depth gives us the information
+/// needed for the special rules.
 ///
 /// This algorithm runs in linear time (as refs are traversed at most twice),
 /// and requires no more space than the naive algorithm.
@@ -348,7 +357,7 @@ fn calculate_label_sets(book: &Book) -> impl Iterator<Item = (&str, LabSet)> {
   /// All of these methods share a similar signature:
   /// - `depth` is optional; `None` indicates that this is the second processing
   ///   pass (where the depth is irrelevant, as all cycles have been detected)
-  /// - `out`, is supplied, will be unioned with the result of this traversal
+  /// - `out`, if supplied, will be unioned with the result of this traversal
   /// - the return value indicates the head depth, as defined above (or
   ///   an arbitrary value `>= depth` if no cycles are involved)
   impl<'a> State<'a> {
