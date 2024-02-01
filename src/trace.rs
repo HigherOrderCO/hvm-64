@@ -72,7 +72,7 @@ use std::{
   },
 };
 
-use crate::run::{Loc, Port, Wire};
+use crate::run::{Addr, Port, Wire};
 
 #[cfg(not(feature = "trace"))]
 #[derive(Default)]
@@ -352,12 +352,12 @@ impl TraceArg for Wire {
   }
 }
 
-impl TraceArg for Loc {
+impl TraceArg for Addr {
   fn to_word(&self) -> u64 {
     self.0 as u64
   }
   fn from_word(word: u64) -> impl Debug {
-    Loc(word as _)
+    Addr(word as _)
   }
 }
 

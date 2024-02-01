@@ -41,8 +41,8 @@ use atomic::{AtomicU64, AtomicUsize, Ordering::Relaxed};
 ///
 /// All tags other than `Num` divide the bits of the port as follows:
 /// - the top 16 bits are the *label*, accessible with `.lab()`
-/// - the middle 45 bits are the non-alignment bits of the *loc*, an
-///   8-byte-aligned pointer accessible with `.loc()`
+/// - the middle 45 bits are the non-alignment bits of the *address*, an
+///   8-byte-aligned pointer accessible with `.addr()`
 /// - the bottom 3 bits are the tag, as always
 ///
 /// See the documentation for each `Tag` as to the semantics of each
@@ -63,14 +63,14 @@ bi_enum! {
     Red = 0,
     /// A `Var` port represents an auxiliary port in the net.
     ///
-    /// The loc of this port represents the wire leaving this port, accessible
-    /// with `.wire()`.
+    /// The address of this port represents the wire leaving this port,
+    /// accessible with `.wire()`.
     ///
     /// The label of this port is currently unused and always 0.
     Var = 1,
     /// A `Ref` port represents the principal port of a nilary reference node.
     ///
-    /// The loc of this port is a pointer to the corresponding `Def`.
+    /// The address of this port is a pointer to the corresponding `Def`.
     ///
     /// The label of this port is always equivalent to `def.labs.min_safe`, and
     /// is used as an optimization for the ref commutation interaction.
@@ -90,25 +90,25 @@ bi_enum! {
     /// The label of this port is the corresponding operation, which can be
     /// accessed with `.op()`.
     ///
-    /// The loc of this port is the address of a two-word allocation, storing
-    /// the targets of the wires connected to the two auxiliary ports of this
-    /// node.
+    /// The address of this port is the address of a two-word allocation,
+    /// storing the targets of the wires connected to the two auxiliary ports of
+    /// this node.
     Op2 = 4,
     /// An `Op1` port represents the principal port of an Op1 node.
     ///
     /// The label of this port is the corresponding operation, which can be
     /// accessed with `.op()`.
     ///
-    /// The loc of this port is the address of a two-word allocation. The first
-    /// word in this allocation stores the first operand as a `Num` port, and
-    /// the second word stores the target of the wire connected to the auxiliary
-    /// port of this node.
+    /// The address of this port is the address of a two-word allocation. The
+    /// first word in this allocation stores the first operand as a `Num` port,
+    /// and the second word stores the target of the wire connected to the
+    /// auxiliary port of this node.
     Op1 = 5,
     /// A `Mat` port represents the principal port of a Mat node.
     ///
-    /// The loc of this port is the address of a two-word allocation, storing
-    /// the targets of the wires connected to the two auxiliary ports of the
-    /// node.
+    /// The address of this port is the address of a two-word allocation,
+    /// storing the targets of the wires connected to the two auxiliary ports of
+    /// the node.
     ///
     /// The label of this port is currently unused and always 0.
     Mat = 6,
@@ -118,9 +118,9 @@ bi_enum! {
     /// The label of this port is the label of the combinator; two combinators
     /// annihilate if they have the same label, or commute otherwise.
     ///
-    /// The loc of this port is the address of a two-word allocation, storing
-    /// the targets of the wires connected to the two auxiliary ports of the
-    /// node.
+    /// The address of this port is the address of a two-word allocation,
+    /// storing the targets of the wires connected to the two auxiliary ports of
+    /// the node.
     Ctr = 7,
   }
 }
@@ -139,8 +139,8 @@ impl fmt::Debug for Port {
       Port::LOCK => write!(f, "[LOCK]"),
       _ => match self.tag() {
         Num => write!(f, "[Num {}]", self.num()),
-        Var | Red | Mat => write!(f, "[{:?} {:?}]", self.tag(), self.loc()),
-        Op2 | Op1 | Ctr | Ref => write!(f, "[{:?} {:?} {:?}]", self.tag(), self.lab(), self.loc()),
+        Var | Red | Mat => write!(f, "[{:?} {:?}]", self.tag(), self.addr()),
+        Op2 | Op1 | Ctr | Ref => write!(f, "[{:?} {:?} {:?}]", self.tag(), self.lab(), self.addr()),
       },
     }
   }
@@ -159,16 +159,16 @@ impl Port {
   /// details.
   pub const GONE: Port = Port(0xFFFF_FFFF_FFFF_FFFF);
 
-  /// Creates a new port with a given tag, label, and loc.
+  /// Creates a new port with a given tag, label, and addr.
   #[inline(always)]
-  pub fn new(tag: Tag, lab: Lab, loc: Loc) -> Self {
-    Port(((lab as u64) << 48) | (loc.0 as u64) | (tag as u64))
+  pub fn new(tag: Tag, lab: Lab, addr: Addr) -> Self {
+    Port(((lab as u64) << 48) | (addr.0 as u64) | (tag as u64))
   }
 
-  /// Creates a new `Var` port with a given loc.
+  /// Creates a new `Var` port with a given addr.
   #[inline(always)]
-  pub fn new_var(loc: Loc) -> Self {
-    Port::new(Var, 0, loc)
+  pub fn new_var(addr: Addr) -> Self {
+    Port::new(Var, 0, addr)
   }
 
   /// Creates a new `Num` port with a given 60-bit numeric value.
@@ -180,7 +180,7 @@ impl Port {
   /// Creates a new `Ref` port corresponding to a given definition.
   #[inline(always)]
   pub fn new_ref(def: &Def) -> Port {
-    Port::new(Ref, def.labs.min_safe(), Loc(def as *const _ as _))
+    Port::new(Ref, def.labs.min_safe(), Addr(def as *const _ as _))
   }
 
   /// Accesses the tag of this port; this is valid for all ports.
@@ -195,10 +195,10 @@ impl Port {
     (self.0 >> 48) as Lab
   }
 
-  /// Accesses the loc of this port; this is valid for all non-`Num` ports.
+  /// Accesses the addr of this port; this is valid for all non-`Num` ports.
   #[inline(always)]
-  pub const fn loc(&self) -> Loc {
-    Loc((self.0 & 0x0000_FFFF_FFFF_FFF8) as usize as _)
+  pub const fn addr(&self) -> Addr {
+    Addr((self.0 & 0x0000_FFFF_FFFF_FFF8) as usize as _)
   }
 
   /// Accesses the operation of this port; this is valid for `Op1` and `Op2`
@@ -218,7 +218,7 @@ impl Port {
   /// non-sentinel `Red` ports.
   #[inline(always)]
   pub fn wire(&self) -> Wire {
-    Wire::new(self.loc())
+    Wire::new(self.addr())
   }
 
   #[inline(always)]
@@ -234,16 +234,16 @@ impl Port {
     matches!(self.tag(), Num | Ref)
   }
 
-  /// Converts a `Var` port into a `Red` port with the same loc.
+  /// Converts a `Var` port into a `Red` port with the same addr.
   #[inline(always)]
   fn redirect(&self) -> Port {
-    Port::new(Red, 0, self.loc())
+    Port::new(Red, 0, self.addr())
   }
 
-  /// Converts a `Red` port into a `Var` port with the same loc.
+  /// Converts a `Red` port into a `Var` port with the same addr.
   #[inline(always)]
   fn unredirect(&self) -> Port {
-    Port::new(Var, 0, self.loc())
+    Port::new(Var, 0, self.addr())
   }
 }
 
@@ -267,7 +267,7 @@ impl Port {
 
   #[inline(always)]
   pub fn traverse_node(self) -> TraverseNode {
-    TraverseNode { lab: self.lab(), p1: Wire::new(self.loc()), p2: Wire::new(self.loc().other_half()) }
+    TraverseNode { lab: self.lab(), p1: Wire::new(self.addr()), p2: Wire::new(self.addr().other_half()) }
   }
 
   #[inline(always)]
@@ -289,16 +289,16 @@ impl Port {
 
 #[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[must_use]
-pub struct Loc(pub usize);
+pub struct Addr(pub usize);
 
-impl fmt::Debug for Loc {
+impl fmt::Debug for Addr {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     write!(f, "{:012x?}", self.0)
   }
 }
 
-impl Loc {
-  pub const NULL: Loc = Loc(0);
+impl Addr {
+  pub const NULL: Addr = Addr(0);
 
   const HALF_MASK: usize = 0b1000;
 
@@ -309,12 +309,12 @@ impl Loc {
 
   #[inline(always)]
   pub fn left_half(&self) -> Self {
-    Loc(self.0 & !Loc::HALF_MASK)
+    Addr(self.0 & !Addr::HALF_MASK)
   }
 
   #[inline(always)]
   pub fn other_half(&self) -> Self {
-    Loc(self.0 ^ Loc::HALF_MASK)
+    Addr(self.0 ^ Addr::HALF_MASK)
   }
 
   #[inline(always)]
@@ -339,13 +339,13 @@ impl Wire {
   pub const NULL: Wire = Wire(std::ptr::null());
 
   #[inline(always)]
-  pub fn loc(&self) -> Loc {
-    Loc(self.0 as _)
+  pub fn addr(&self) -> Addr {
+    Addr(self.0 as _)
   }
 
   #[inline(always)]
-  pub fn new(loc: Loc) -> Wire {
-    Wire(loc.0 as _)
+  pub fn new(addr: Addr) -> Wire {
+    Wire(addr.0 as _)
   }
 
   #[inline(always)]
@@ -615,7 +615,7 @@ pub struct Net<'a> {
   pub root: Wire,
   // allocator
   pub area: &'a Area,
-  pub head: Loc,
+  pub head: Addr,
   pub next: usize,
   //
   pub tracer: Tracer,
@@ -640,7 +640,7 @@ impl<'a> Net<'a> {
       quik: Rewrites::default(),
       root,
       area,
-      head: Loc::NULL,
+      head: Addr::NULL,
       next: 0,
       tracer: Tracer::default(),
     }
@@ -669,21 +669,21 @@ impl<'a> Net<'a> {
   }
 
   #[inline(always)]
-  pub fn half_free(&mut self, loc: Loc) {
-    trace!(self.tracer, loc);
+  pub fn half_free(&mut self, addr: Addr) {
+    trace!(self.tracer, addr);
     const FREE: u64 = Port::FREE.0;
     if cfg!(feature = "_fuzz") {
       if cfg!(not(feature = "_fuzz_no_free")) {
-        assert_ne!(loc.val().swap(FREE, Relaxed), FREE, "double free");
+        assert_ne!(addr.val().swap(FREE, Relaxed), FREE, "double free");
       }
     } else {
-      loc.val().store(FREE, Relaxed);
-      if loc.other_half().val().load(Relaxed) == FREE {
+      addr.val().store(FREE, Relaxed);
+      if addr.other_half().val().load(Relaxed) == FREE {
         trace!(self.tracer, "other free");
-        let loc = loc.left_half();
-        if loc.val().compare_exchange(FREE, self.head.0 as u64, Relaxed, Relaxed).is_ok() {
+        let addr = addr.left_half();
+        if addr.val().compare_exchange(FREE, self.head.0 as u64, Relaxed, Relaxed).is_ok() {
           let old_head = &self.head;
-          let new_head = loc;
+          let new_head = addr;
           trace!(self.tracer, "appended", old_head, new_head);
           self.head = new_head;
         } else {
@@ -694,29 +694,29 @@ impl<'a> Net<'a> {
   }
 
   #[inline(never)]
-  pub fn alloc(&mut self) -> Loc {
+  pub fn alloc(&mut self) -> Addr {
     trace!(self.tracer, self.head);
-    let loc = if self.head != Loc::NULL {
-      let loc = self.head.clone();
-      let next = Loc(self.head.val().load(Relaxed) as usize);
+    let addr = if self.head != Addr::NULL {
+      let addr = self.head.clone();
+      let next = Addr(self.head.val().load(Relaxed) as usize);
       trace!(self.tracer, next);
       self.head = next;
-      loc
+      addr
     } else {
       let index = self.next;
       self.next += 1;
-      Loc(&self.area.get(index).expect("OOM").0 as *const _ as _)
+      Addr(&self.area.get(index).expect("OOM").0 as *const _ as _)
     };
-    trace!(self.tracer, loc, self.head);
-    loc.val().store(Port::LOCK.0, Relaxed);
-    loc.other_half().val().store(Port::LOCK.0, Relaxed);
-    loc
+    trace!(self.tracer, addr, self.head);
+    addr.val().store(Port::LOCK.0, Relaxed);
+    addr.other_half().val().store(Port::LOCK.0, Relaxed);
+    addr
   }
 
   #[inline(always)]
   pub fn free_trg(&mut self, trg: Trg) {
     if trg.is_wire() {
-      self.half_free(trg.0.loc());
+      self.half_free(trg.0.addr());
     }
   }
 }
@@ -730,20 +730,20 @@ pub struct CreatedNode {
 impl<'a> Net<'a> {
   #[inline(always)]
   pub fn create_node(&mut self, tag: Tag, lab: Lab) -> CreatedNode {
-    let loc = self.alloc();
+    let addr = self.alloc();
     CreatedNode {
-      p0: Port::new(tag, lab, loc.clone()),
-      p1: Port::new_var(loc.clone()),
-      p2: Port::new_var(loc.other_half()),
+      p0: Port::new(tag, lab, addr.clone()),
+      p1: Port::new_var(addr.clone()),
+      p2: Port::new_var(addr.other_half()),
     }
   }
 
   #[inline(always)]
   pub fn create_wire(&mut self, port: Port) -> Wire {
-    let loc = self.alloc();
-    self.half_free(loc.other_half());
-    let wire = Wire::new(loc);
-    self.link_port_port(port, Port::new_var(wire.loc()));
+    let addr = self.alloc();
+    self.half_free(addr.other_half());
+    let wire = Wire::new(addr);
+    self.link_port_port(port, Port::new_var(wire.addr()));
     wire
   }
 }
@@ -773,8 +773,8 @@ impl<'a> Net<'a> {
     let b_port = b_wire.lock_target();
     trace!(self.tracer, a_port, b_port);
     if a_port.is_principal() && b_port.is_principal() {
-      self.half_free(a_wire.loc());
-      self.half_free(b_wire.loc());
+      self.half_free(a_wire.addr());
+      self.half_free(b_wire.addr());
       self.redux(a_port, b_port);
     } else {
       self.half_link_wire_port(a_port.clone(), a_wire, b_port.clone());
@@ -789,7 +789,7 @@ impl<'a> Net<'a> {
     let a_port = a_wire.lock_target();
     trace!(self.tracer, a_port);
     if a_port.is_principal() && b_port.is_principal() {
-      self.half_free(a_wire.loc());
+      self.half_free(a_wire.addr());
       self.redux(a_port, b_port);
     } else {
       self.half_link_wire_port(a_port.clone(), a_wire, b_port.clone());
@@ -822,11 +822,11 @@ impl<'a> Net<'a> {
     trace!(self.tracer, a_port, a_wire, b_port);
     // If 'a_port' is a var...
     if a_port.tag() == Var {
-      let got = a_port.wire().cas_target(Port::new_var(a_wire.loc()), b_port.clone());
+      let got = a_port.wire().cas_target(Port::new_var(a_wire.addr()), b_port.clone());
       // Attempts to link using a compare-and-swap.
       if got.is_ok() {
         trace!(self.tracer, "cas ok");
-        self.half_free(a_wire.loc());
+        self.half_free(a_wire.addr());
       // If the CAS failed, resolve by using redirections.
       } else {
         let got = got.unwrap_err();
@@ -843,7 +843,7 @@ impl<'a> Net<'a> {
         }
       }
     } else {
-      self.half_free(a_wire.loc());
+      self.half_free(a_wire.addr());
     }
   }
 
@@ -863,7 +863,7 @@ impl<'a> Net<'a> {
       }
       // If target is a redirection, we own it. Clear and move forward.
       if t_port.tag() == Red {
-        self.half_free(t_wire.loc());
+        self.half_free(t_wire.addr());
         a_port = t_port;
         continue;
       }
@@ -872,13 +872,13 @@ impl<'a> Net<'a> {
         if t_wire.cas_target(t_port.clone(), b_port.clone()).is_ok() {
           trace!(self.tracer, "var cas ok");
           // Clear source location.
-          // self.half_free(a_wire.loc());
+          // self.half_free(a_wire.addr());
           // Collect the orphaned backward path.
           t_wire = t_port.wire();
           t_port = t_wire.load_target();
           while t_port != Port::LOCK && t_port.tag() == Red {
             trace!(self.tracer, t_wire, t_port);
-            self.half_free(t_wire.loc());
+            self.half_free(t_wire.addr());
             t_wire = t_port.wire();
             // if t_wire == a_wire {
             //   break;
@@ -909,11 +909,11 @@ impl<'a> Net<'a> {
         // Second to arrive clears up the memory.
         } else {
           trace!(self.tracer, "snd !!!", x_wire, y_wire);
-          self.half_free(x_wire.loc());
+          self.half_free(x_wire.addr());
           while y_wire.cas_target(Port::GONE, Port::LOCK).is_err() {
             spin_loop();
           }
-          self.half_free(y_wire.loc());
+          self.half_free(y_wire.addr());
           return;
         }
       }
@@ -934,7 +934,7 @@ impl<'a> Net<'a> {
         if trg_port.tag() == Red {
           let neo_port = trg_port.unredirect();
           if ste_wire.cas_target(ste_port, neo_port).is_ok() {
-            self.half_free(trg_wire.loc());
+            self.half_free(trg_wire.addr());
             continue;
           }
         }
@@ -1572,7 +1572,7 @@ impl<'a> Net<'a> {
   pub fn call(&mut self, port: Port, trg: Port) {
     trace!(self.tracer, port, trg);
 
-    let def = port.loc().def();
+    let def = port.addr().def();
 
     if trg.tag() == Ctr && !def.labs.has(trg.lab()) {
       return self.comm02(port, trg);
@@ -1685,7 +1685,7 @@ impl<'a> Net<'a> {
         let got = wire.swap_target(Port::LOCK);
         if got != Port::LOCK {
           trace!(net.tracer, port, wire);
-          net.call(port, Port::new_var(wire.loc()));
+          net.call(port, Port::new_var(wire.addr()));
         }
       }
     }
@@ -1708,7 +1708,7 @@ impl<'a> Net<'a> {
     let area = &self.area[heap_start .. heap_start + heap_size];
     let mut net = Net::new_with_root(area, self.root.clone());
     net.next = self.next.saturating_sub(heap_start);
-    net.head = if tid == 0 { self.head.clone() } else { Loc::NULL };
+    net.head = if tid == 0 { self.head.clone() } else { Addr::NULL };
     net.tid = tid;
     net.tids = tids;
     net.tracer.set_tid(tid);

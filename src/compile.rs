@@ -84,7 +84,7 @@ fn print_port(host: &Host, port: &Port) -> String {
   if port == &Port::ERA {
     "Port::ERA".to_owned()
   } else if port.tag() == Tag::Ref {
-    let name = sanitize_name(&host.back[&port.loc()]);
+    let name = sanitize_name(&host.back[&port.addr()]);
     format!("Port::new_ref(&DEF_{name})")
   } else if port.tag() == Tag::Num {
     format!("Port::new_num({})", port.num())

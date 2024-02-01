@@ -3,7 +3,7 @@
 
 use hvmc::{
   fuzz::*,
-  run::{Loc, Net, Port, Tag},
+  run::{Addr, Net, Port, Tag},
   trace,
 };
 

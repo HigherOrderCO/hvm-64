@@ -3,7 +3,7 @@
 
 use crate::{
   ast::{Book, Net, Tree},
-  run::{self, Def, DefNet, DefType, Instruction, LabSet, Loc, Port, Tag, TrgId, Wire},
+  run::{self, Addr, Def, DefNet, DefType, Instruction, LabSet, Port, Tag, TrgId, Wire},
   util::create_var,
 };
 use std::{
@@ -17,7 +17,7 @@ pub struct Host {
   /// the forward mapping, from a name to the runtime def
   pub defs: HashMap<String, DefRef>,
   /// the backward mapping, from the address of a runtime def to the name
-  pub back: HashMap<Loc, String>,
+  pub back: HashMap<Addr, String>,
 }
 
 /// A potentially-owned reference to a `Def`. Vitally, the address of the `Def`
@@ -76,7 +76,7 @@ impl Host {
 
   /// Inserts a singular def into the mapping.
   pub fn insert_def(&mut self, name: &str, def: DefRef) {
-    self.back.insert(Port::new_ref(&def).loc(), name.to_owned());
+    self.back.insert(Port::new_ref(&def).addr(), name.to_owned());
     self.defs.insert(name.to_owned(), def);
   }
 
@@ -101,7 +101,7 @@ impl Host {
     #[derive(Debug)]
     struct State<'a> {
       host: &'a Host,
-      vars: HashMap<Loc, usize>,
+      vars: HashMap<Addr, usize>,
       var_id: RangeFrom<usize>,
     }
 
@@ -117,7 +117,7 @@ impl Host {
       fn read_port(&mut self, port: Port, wire: Option<Wire>) -> Tree {
         match port.tag() {
           Tag::Var => {
-            let key = wire.unwrap().loc().min(port.loc());
+            let key = wire.unwrap().addr().min(port.addr());
             Tree::Var {
               nam: create_var(match self.vars.entry(key) {
                 Entry::Occupied(e) => e.remove(),
@@ -127,7 +127,7 @@ impl Host {
           }
           Tag::Red => self.read_wire(port.wire()),
           Tag::Ref if port == Port::ERA => Tree::Era,
-          Tag::Ref => Tree::Ref { nam: self.host.back[&port.loc()].clone() },
+          Tag::Ref => Tree::Ref { nam: self.host.back[&port.addr()].clone() },
           Tag::Num => Tree::Num { val: port.num() },
           Tag::Op2 => {
             let opr = port.op();
