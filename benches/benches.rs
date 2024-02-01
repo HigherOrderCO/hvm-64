@@ -1,6 +1,7 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use hvmc::{
-  ast::{parse_book, Book, Host, Net},
+  ast::{Book, Net},
+  host::Host,
   run::Net as RtNet,
 };
 use hvml::term::DefNames;
@@ -16,7 +17,7 @@ fn load_from_core<P: AsRef<Path>>(file: P) -> Book {
   let code = fs::read_to_string(file).unwrap();
   let (_, code) = extract_size(&code);
 
-  parse_book(code)
+  code.parse().unwrap()
 }
 
 // Loads file and generate net from hvm-lang syntax
