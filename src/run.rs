@@ -33,30 +33,101 @@ use atomic::{AtomicU64, AtomicUsize, Ordering::Relaxed};
 //   Primitive Types
 // -------------------
 
-pub type Lab = u16;
+/// A port in the interaction net.
+///
+/// The bottom three bits of this value are the *tag*, which determines both
+/// what kind of port it is (principal vs auxiliary, etc.), as well as the
+/// semantics of the remainder of the bits of the value.
+///
+/// All tags other than `Num` divide the bits of the port as follows:
+/// - the top 16 bits are the *label*, accessible with `.lab()`
+/// - the middle 45 bits are the non-alignment bits of the *loc*, an
+///   8-byte-aligned pointer accessible with `.loc()`
+/// - the bottom 3 bits are the tag, as always
+///
+/// See the documentation for each `Tag` as to the semantics of each
+/// corresponding type of port.
+#[derive(Clone, Eq, PartialEq, PartialOrd, Hash, Default)]
+#[repr(transparent)]
+#[must_use]
+pub struct Port(pub u64);
 
 bi_enum! {
   #[repr(u8)]
   #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
   pub enum Tag {
+    /// `Red` ports are an implementation detail of the atomic linking
+    /// algorithm, and don't have a precise analogue in interaction nets.
+    ///
+    /// See the documentation for the linking algorithm for more.
     Red = 0,
+    /// A `Var` port represents an auxiliary port in the net.
+    ///
+    /// The loc of this port represents the wire leaving this port, accessible
+    /// with `.wire()`.
+    ///
+    /// The label of this port is currently unused and always 0.
     Var = 1,
+    /// A `Ref` port represents the principal port of a nilary reference node.
+    ///
+    /// The loc of this port is a pointer to the corresponding `Def`.
+    ///
+    /// The label of this port is always equivalent to `def.labs.min_safe`, and
+    /// is used as an optimization for the ref commutation interaction.
+    ///
+    /// Eraser nodes are represented by a null-pointer `Ref`, available as the
+    /// constant `Port::ERA`.
     Ref = 2,
+    /// A `Num` port represents the principal port of a U60 node.
+    ///
+    /// The top 60 bits of the port are the value of this node, and are
+    /// accessible with `.num()`.
+    ///
+    /// The `0b1000` bit is currently unused in this port.
     Num = 3,
+    /// An `Op2` port represents the principal port of an Op2 node.
+    ///
+    /// The label of this port is the corresponding operation, which can be
+    /// accessed with `.op()`.
+    ///
+    /// The loc of this port is the address of a two-word allocation, storing
+    /// the targets of the wires connected to the two auxiliary ports of this
+    /// node.
     Op2 = 4,
+    /// An `Op1` port represents the principal port of an Op1 node.
+    ///
+    /// The label of this port is the corresponding operation, which can be
+    /// accessed with `.op()`.
+    ///
+    /// The loc of this port is the address of a two-word allocation. The first
+    /// word in this allocation stores the first operand as a `Num` port, and
+    /// the second word stores the target of the wire connected to the auxiliary
+    /// port of this node.
     Op1 = 5,
+    /// A `Mat` port represents the principal port of a Mat node.
+    ///
+    /// The loc of this port is the address of a two-word allocation, storing
+    /// the targets of the wires connected to the two auxiliary ports of the
+    /// node.
+    ///
+    /// The label of this port is currently unused and always 0.
     Mat = 6,
+    /// A `Ctr` port represents the principal port of an binary interaction
+    /// combinator node.
+    ///
+    /// The label of this port is the label of the combinator; two combinators
+    /// annihilate if they have the same label, or commute otherwise.
+    ///
+    /// The loc of this port is the address of a two-word allocation, storing
+    /// the targets of the wires connected to the two auxiliary ports of the
+    /// node.
     Ctr = 7,
   }
 }
 
 use Tag::*;
 
-/// A tagged pointer.
-#[derive(Clone, Eq, PartialEq, PartialOrd, Hash, Default)]
-#[repr(transparent)]
-#[must_use]
-pub struct Port(pub u64);
+pub type Lab = u16;
 
 impl fmt::Debug for Port {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -68,64 +139,83 @@ impl fmt::Debug for Port {
       Port::LOCK => write!(f, "[LOCK]"),
       _ => match self.tag() {
         Num => write!(f, "[Num {}]", self.num()),
-        Var | Red | Ref | Mat => write!(f, "[{:?} {:?}]", self.tag(), self.loc()),
-        Op2 | Op1 | Ctr => write!(f, "[{:?} {:?} {:?}]", self.tag(), self.lab(), self.loc()),
+        Var | Red | Mat => write!(f, "[{:?} {:?}]", self.tag(), self.loc()),
+        Op2 | Op1 | Ctr | Ref => write!(f, "[{:?} {:?} {:?}]", self.tag(), self.lab(), self.loc()),
       },
     }
   }
 }
 
 impl Port {
+  /// The principal port of an eraser node.
   pub const ERA: Port = Port(Ref as _);
+  /// A sentinel value used to indicate free memory; see the allocator for more
+  /// details.
   pub const FREE: Port = Port(0x8000_0000_0000_0000);
+  /// A sentinel value used to lock a wire; see the linking algorithm for more
+  /// details.
   pub const LOCK: Port = Port(0xFFFF_FFFF_FFFF_FFF0);
+  /// A sentinel value used in the atomic linking algorithm; see it for more
+  /// details.
   pub const GONE: Port = Port(0xFFFF_FFFF_FFFF_FFFF);
 
+  /// Creates a new port with a given tag, label, and loc.
   #[inline(always)]
   pub fn new(tag: Tag, lab: Lab, loc: Loc) -> Self {
     Port(((lab as u64) << 48) | (loc.0 as u64) | (tag as u64))
   }
 
+  /// Creates a new `Var` port with a given loc.
   #[inline(always)]
   pub fn new_var(loc: Loc) -> Self {
     Port::new(Var, 0, loc)
   }
 
+  /// Creates a new `Num` port with a given 60-bit numeric value.
   #[inline(always)]
   pub const fn new_num(val: u64) -> Self {
     Port((val << 4) | (Num as u64))
   }
 
+  /// Creates a new `Ref` port corresponding to a given definition.
   #[inline(always)]
   pub fn new_ref(def: &Def) -> Port {
     Port::new(Ref, def.labs.min_safe(), Loc(def as *const _ as _))
   }
 
+  /// Accesses the tag of this port; this is valid for all ports.
   #[inline(always)]
   pub fn tag(&self) -> Tag {
     unsafe { ((self.0 & 0x7) as u8).try_into().unwrap_unchecked() }
   }
 
+  /// Accesses the label of this port; this is valid for all non-`Num` ports.
   #[inline(always)]
   pub const fn lab(&self) -> Lab {
     (self.0 >> 48) as Lab
   }
 
-  #[inline(always)]
-  pub fn op(&self) -> Op {
-    unsafe { self.lab().try_into().unwrap_unchecked() }
-  }
-
+  /// Accesses the loc of this port; this is valid for all non-`Num` ports.
   #[inline(always)]
   pub const fn loc(&self) -> Loc {
     Loc((self.0 & 0x0000_FFFF_FFFF_FFF8) as usize as _)
   }
 
+  /// Accesses the operation of this port; this is valid for `Op1` and `Op2`
+  /// ports.
+  #[inline(always)]
+  pub fn op(&self) -> Op {
+    unsafe { self.lab().try_into().unwrap_unchecked() }
+  }
+
+  /// Accesses the numeric value of this port; this is valid for `Num` ports.
   #[inline(always)]
   pub const fn num(&self) -> u64 {
     self.0 >> 4
   }
 
+  /// Accesses the wire leaving this port; this is valid for `Var` ports and
+  /// non-sentinel `Red` ports.
   #[inline(always)]
   pub fn wire(&self) -> Wire {
     Wire::new(self.loc())
@@ -136,23 +226,23 @@ impl Port {
     self.tag() >= Ref
   }
 
+  /// Given a principal port, returns whether this principal port may be part of
+  /// a skippable active pair -- an active pair like `ERA-ERA` that does not
+  /// need to be added to the redex list.
   #[inline(always)]
   pub fn is_skippable(&self) -> bool {
     matches!(self.tag(), Num | Ref)
   }
 
+  /// Converts a `Var` port into a `Red` port with the same loc.
   #[inline(always)]
-  pub fn is_ctr(&self, lab: Lab) -> bool {
-    self.tag() == Ctr && self.lab() == lab
-  }
-
-  #[inline(always)]
-  pub fn redirect(&self) -> Port {
+  fn redirect(&self) -> Port {
     Port::new(Red, 0, self.loc())
   }
 
+  /// Converts a `Red` port into a `Var` port with the same loc.
   #[inline(always)]
-  pub fn unredirect(&self) -> Port {
+  fn unredirect(&self) -> Port {
     Port::new(Var, 0, self.loc())
   }
 }
@@ -195,13 +285,6 @@ impl Port {
     let num = s.p1.load_target();
     TraverseOp1 { op, num, p2: s.p2 }
   }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-#[repr(u8)]
-pub enum Half {
-  Left,
-  Right,
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -1310,7 +1393,7 @@ impl<'a> Net<'a> {
   #[inline(always)]
   pub(crate) fn do_ctr(&mut self, lab: Lab, trg: Trg) -> (Trg, Trg) {
     let port = trg.target();
-    if port.is_ctr(lab) {
+    if port.tag() == Ctr && port.lab() == lab {
       self.free_trg(trg);
       let node = port.consume_node();
       self.quik.anni += 1;

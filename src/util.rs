@@ -36,10 +36,10 @@ macro_rules! bi_enum {
     #[repr($uN:ident)]
     $(#$attr:tt)*
     $vis:vis enum $Ty:ident {
-      $($Variant:ident = $value:literal),* $(,)?
+      $($(#$var_addr:tt)* $Variant:ident = $value:literal),* $(,)?
     }
   ) => {
-    #[repr($uN)] $(#$attr)* $vis enum $Ty { $($Variant = $value,)* }
+    #[repr($uN)] $(#$attr)* $vis enum $Ty { $($(#$var_addr)* $Variant = $value,)* }
 
     impl TryFrom<$uN> for $Ty {
       type Error = ();
@@ -56,10 +56,10 @@ macro_rules! bi_enum {
     #[repr($uN:ident)]
     $(#$attr:tt)*
     $vis:vis enum $Ty:ident {
-      $($str:literal: $Variant:ident = $value:literal),* $(,)?
+      $($(#$var_addr:tt)* $str:literal: $Variant:ident = $value:literal),* $(,)?
     }
   ) => {
-    bi_enum! { #[repr($uN)] $(#$attr)* $vis enum $Ty { $($Variant = $value,)* } }
+    bi_enum! { #[repr($uN)] $(#$attr)* $vis enum $Ty { $($(#$var_addr)* $Variant = $value,)* } }
 
     impl std::fmt::Display for $Ty {
       fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
