@@ -42,6 +42,18 @@ pub type Book = BTreeMap<String, Net>;
 // Parser
 // ------
 
+// FIXME: remove after skip is fixed
+fn skip_spaces(chars: &mut Peekable<Chars>) {
+  while let Some(c) = chars.peek() {
+    if !c.is_ascii_whitespace() {
+      break;
+    } else {
+      chars.next();
+    }
+  }
+}
+
+// FIXME: detect two '/' for comments, allowing us to remove 'skip_spaces'
 fn skip(chars: &mut Peekable<Chars>) {
   while let Some(c) = chars.peek() {
     if *c == '/' {
@@ -104,7 +116,7 @@ pub fn parse_name(chars: &mut Peekable<Chars>) -> Result<String, String> {
 
 pub fn parse_opx_lit(chars: &mut Peekable<Chars>) -> Result<String, String> {
   let mut opx = String::new();
-  skip(chars);
+  skip_spaces(chars);
   while let Some(c) = chars.peek() {
     if !"+-=*/%<>|&^!?".contains(*c) {
       break;
