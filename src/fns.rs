@@ -6,5 +6,4 @@ impl<'a, const LAZY: bool> NetFields<'a, LAZY> where [(); LAZY as usize]: {
       _ => { return false; }
     }
   }
-
 }

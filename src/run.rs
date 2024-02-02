@@ -138,7 +138,7 @@ pub struct NetFields<'a, const LAZY: bool>
 where [(); LAZY as usize]: {
   pub tid : usize, // thread id
   pub tids: usize, // thread count
-  pub labs: Lab, // dup labels
+  //pub labs: Lab, // dup labels
   pub heap: Heap<'a, LAZY>, // nodes
   pub rdex: Vec<(Ptr,Ptr)>, // redexes
   pub locs: Vec<Loc>,
@@ -496,7 +496,7 @@ impl<'a, const LAZY: bool> NetFields<'a, LAZY> where [(); LAZY as usize]: {
     NetFields {
       tid : 0,
       tids: 1,
-      labs: 0x1,
+      //labs: 0x1,
       heap: Heap { nodes },
       rdex: vec![],
       locs: vec![0; 1 << 16],
@@ -574,22 +574,27 @@ impl<'a, const LAZY: bool> NetFields<'a, LAZY> where [(); LAZY as usize]: {
     self.heap.cas(ptr.loc(), ptr.0 & 1, expected, value)
   }
 
+  // Like get_target, but also for main ports
+  #[inline(always)]
+  pub fn get_target_full(&self, ptr: Ptr) -> Ptr {
+    if ptr.is_var() || ptr.is_red() {
+      return self.get_target(ptr);
+    }
+    if ptr.is_nod() {
+      return self.heap.get_pri(ptr.loc()).targ;
+    }
+    panic!("Can't get target of: {}", ptr.view());
+  }
+
   #[inline(always)]
   pub fn redux(&mut self, a: Ptr, b: Ptr) {
-    //println!("redux {} ~ {}", a.view(), b.view());
     if Ptr::can_skip(a, b) {
       self.rwts.eras += 1;
+    } else if !LAZY {
+      self.rdex.push((a, b));
     } else {
-      if LAZY {
-        if a.is_nod() {
-          self.heap.set_pri(a.loc(), a, b);
-        }
-        if b.is_nod() {
-          self.heap.set_pri(b.loc(), b, a);
-        }
-      } else {
-        self.rdex.push((a, b));
-      }
+      if a.is_nod() { self.heap.set_pri(a.loc(), a, b); }
+      if b.is_nod() { self.heap.set_pri(b.loc(), b, a); }
     }
   }
 
@@ -1028,13 +1033,13 @@ impl<'a, const LAZY: bool> NetFields<'a, LAZY> where [(); LAZY as usize]: {
     if ptr.has_loc() {
       let tag = ptr.tag();
       // FIXME
-      let lab = if LAZY && ptr.is_dup() && ptr.lab() == 0 { 
-        self.labs += 2;
-        self.labs
-      } else {
-        ptr.lab()
-      };
-      //let lab = ptr.lab();
+      //let lab = if LAZY && ptr.is_dup() && ptr.lab() == 0 { 
+        //self.labs += 2;
+        //self.labs
+      //} else {
+        //ptr.lab()
+      //};
+      let lab = ptr.lab();
       let loc = *unsafe { self.locs.get_unchecked(ptr.loc() as usize) };
       return Ptr::new(tag, lab, loc)
     } else {
@@ -1054,9 +1059,7 @@ impl<'a, const LAZY: bool> NetFields<'a, LAZY> where [(); LAZY as usize]: {
     }
     return txt;
   }
-}
 
-impl<'a> NetFields<'a, false> {
   // Reduces all redexes.
   #[inline(always)]
   pub fn reduce(&mut self, book: &Book, limit: usize) -> usize {
@@ -1076,8 +1079,7 @@ impl<'a> NetFields<'a, false> {
   // Expands heads.
   #[inline(always)]
   pub fn expand(&mut self, book: &Book) {
-    fn go<const LAZY: bool>(net: &mut NetFields<LAZY>, book: &Book, dir: Ptr, len: usize, key: usize) 
-    where [(); LAZY as usize]: {
+    fn go<const LAZY: bool>(net: &mut NetFields<LAZY>, book: &Book, dir: Ptr, len: usize, key: usize) where [(); LAZY as usize]: {
       //println!("[{:04x}] expand dir: {:016x}", net.tid, dir.0);
       let ptr = net.get_target(dir);
       if ptr.is_ctr() {
@@ -1096,15 +1098,6 @@ impl<'a> NetFields<'a, false> {
       }
     }
     return go(self, book, ROOT, 1, self.tid);
-  }
-
-  // Reduce a net to normal form.
-  pub fn normal(&mut self, book: &Book) {
-    self.expand(book);
-    while self.rdex.len() > 0 {
-      self.reduce(book, usize::MAX);
-      self.expand(book);
-    }
   }
 
   // Forks into child threads, returning a NetFields for the (tid/tids)'th thread.
@@ -1134,12 +1127,12 @@ impl<'a> NetFields<'a, false> {
     const LOCAL_LIMIT : usize = 1 << 18; // max local rewrites per epoch
 
     // Local thread context
-    struct ThreadContext<'a> {
+    struct ThreadContext<'a, const LAZY: bool> where [(); LAZY as usize]: {
       tid: usize, // thread id
       tids: usize, // thread count
       tlog2: usize, // log2 of thread count
       tick: usize, // current tick
-      net: NetFields<'a, false>, // thread's own net object
+      net: NetFields<'a, LAZY>, // thread's own net object
       book: &'a Book, // definition book
       delta: &'a AtomicRewrites, // global delta rewrites
       share: &'a Vec<(APtr, APtr)>, // global share buffer
@@ -1186,7 +1179,7 @@ impl<'a> NetFields<'a, false> {
 
     // Main reduction loop
     #[inline(always)]
-    fn main(ctx: &mut ThreadContext) {
+    fn main<const LAZY: bool>(ctx: &mut ThreadContext<LAZY>) where [(); LAZY as usize]: {
       loop {
         reduce(ctx);
         expand(ctx);
@@ -1197,10 +1190,9 @@ impl<'a> NetFields<'a, false> {
 
     // Reduce redexes locally, then share with target
     #[inline(always)]
-    fn reduce(ctx: &mut ThreadContext) {
+    fn reduce<const LAZY: bool>(ctx: &mut ThreadContext<LAZY>) where [(); LAZY as usize]: {
       loop {
         let reduced = ctx.net.reduce(ctx.book, LOCAL_LIMIT);
-        //println!("[{:04x}] reduced {}", ctx.tid, reduced);
         if count(ctx) == 0 {
           break;
         }
@@ -1212,13 +1204,13 @@ impl<'a> NetFields<'a, false> {
 
     // Expand head refs
     #[inline(always)]
-    fn expand(ctx: &mut ThreadContext) {
+    fn expand<const LAZY: bool>(ctx: &mut ThreadContext<LAZY>) where [(); LAZY as usize]: {
       ctx.net.expand(ctx.book);
     }
 
     // Count total redexes (and populate 'rlens')
     #[inline(always)]
-    fn count(ctx: &mut ThreadContext) -> usize {
+    fn count<const LAZY: bool>(ctx: &mut ThreadContext<LAZY>) -> usize where [(); LAZY as usize]: {
       ctx.barry.wait();
       ctx.total.store(0, Ordering::Relaxed);
       ctx.barry.wait();
@@ -1231,7 +1223,7 @@ impl<'a> NetFields<'a, false> {
 
     // Share redexes with target thread
     #[inline(always)]
-    fn split(ctx: &mut ThreadContext, plog2: usize) {
+    fn split<const LAZY: bool>(ctx: &mut ThreadContext<LAZY>, plog2: usize) where [(); LAZY as usize]: {
       unsafe {
         let side  = (ctx.tid >> (plog2 - 1 - (ctx.tick % plog2))) & 1;
         let shift = (1 << (plog2 - 1)) >> (ctx.tick % plog2);
@@ -1247,13 +1239,6 @@ impl<'a> NetFields<'a, false> {
           let init = a_len - send * 2;
           let rdx0 = *ctx.net.rdex.get_unchecked(init + i * 2 + 0);
           let rdx1 = *ctx.net.rdex.get_unchecked(init + i * 2 + 1);
-          //let init = 0;
-          //let ref0 = ctx.net.rdex.get_unchecked_mut(init + i * 2 + 0);
-          //let rdx0 = *ref0;
-          //*ref0    = (Ptr(0), Ptr(0));
-          //let ref1 = ctx.net.rdex.get_unchecked_mut(init + i * 2 + 1);
-          //let rdx1 = *ref1;
-          //*ref1    = (Ptr(0), Ptr(0));
           let targ = ctx.share.get_unchecked(b_tid * SHARE_LIMIT + i);
           *ctx.net.rdex.get_unchecked_mut(init + i) = rdx0;
           targ.0.store(rdx1.0);
@@ -1268,47 +1253,24 @@ impl<'a> NetFields<'a, false> {
       }
     }
   }
-}
 
-impl<'a> NetFields<'a, true> {
-  // Like get_target, but also for main ports
+  // Lazy mode weak head normalizer
   #[inline(always)]
-  pub fn get_target_full(&self, ptr: Ptr) -> Ptr {
-    if ptr.is_var() || ptr.is_red() {
-      return self.get_target(ptr);
-    }
-    if ptr.is_nod() {
-      return self.heap.get_pri(ptr.loc()).targ;
-    }
-    panic!("Can't get target of: {}", ptr.view());
-  }
-
-  #[inline(always)]
-  pub fn reduce(&mut self, book: &Book, mut prev: Ptr) -> Ptr {
-    //println!("reduce {}", prev.view());
+  pub fn weak_normal(&mut self, book: &Book, mut prev: Ptr) -> Ptr {
     let mut path : Vec<Ptr> = vec![];
 
     loop {
       // Load ptrs
-      //println!("move {}", prev.view());
-
       let next = self.get_target_full(prev);
-      //println!("---> {}", next.view());
-
-      //println!("ROOT={} {}", self.heap.get_root().view(), self.get_target(self.heap.get_root()).view());
 
       // If next is ref, dereferences
       if next.is_ref() {
-        //println!("CALL");
         self.call(book, next, prev);
-        //println!("{}", self.view());
-        //println!("{}", crate::ast::show_runtime_net(self));
         continue;
       }
 
       // If next is root, stop.
       if next == ROOT {
-        //println!("DONE!");
         break ;
       }
 
@@ -1316,54 +1278,44 @@ impl<'a> NetFields<'a, true> {
       if next.is_pri() {
         // If prev is a main port, reduce the active pair.
         if prev.is_pri() {
-          //println!("REDEX {} {}", prev.view(), next.view());
           self.interact(book, prev, next);
-          //println!("{}", self.view());
-          //println!("{}", crate::ast::show_runtime_net(self));
           prev = path.pop().unwrap();
           continue;
         // Otherwise, we're done.
         } else {
-          //println!("AXIOM!");
           break;
         }
       }
 
       // If next is an aux port, pass through.
       let main = self.heap.get_pri(next.loc());
-      //println!("CONT next: {} | main: {} ~ {}", next.view(), main.0.view(), main.1.view());
       path.push(prev);
       prev = main.this;
     }
 
-    //println!("done");
     return self.get_target_full(prev);
   }
 
-  #[inline(always)]
-  pub fn expand(&mut self, book: &Book) {
-    todo!()
-  }
-
+  // Reduce a net to normal form.
   pub fn normal(&mut self, book: &Book) {
-    let mut visit = vec![ROOT];
-    while let Some(prev) = visit.pop() {
-      //println!("normal {} | {}", prev.view(), self.rewrites());
-      let next = self.reduce(book, prev);
-      if next.is_nod() {
-        if next.is_op1() { todo!(); } // FIXME
-        visit.push(Ptr::new(VR1, 0, next.loc()));
-        visit.push(Ptr::new(VR2, 0, next.loc()));
+    if LAZY {
+      let mut visit = vec![ROOT];
+      while let Some(prev) = visit.pop() {
+        //println!("normal {} | {}", prev.view(), self.rewrites());
+        let next = self.weak_normal(book, prev);
+        if next.is_nod() {
+          if next.is_op1() { todo!(); } // FIXME
+          visit.push(Ptr::new(VR1, 0, next.loc()));
+          visit.push(Ptr::new(VR2, 0, next.loc()));
+        }
+      }
+    } else {
+      self.expand(book);
+      while self.rdex.len() > 0 {
+        self.reduce(book, usize::MAX);
+        self.expand(book);
       }
     }
-  }
-
-  pub fn fork(&self, tid: usize, tids: usize) -> Self {
-    todo!()
-  }
-
-  pub fn parallel_normal(&mut self, book: &Book) {
-    todo!()
   }
 
 }

@@ -601,11 +601,13 @@ pub fn runtime_def_get_all_labs(labs: &mut InsideLabs, insides: &HashMap<run::Va
     return;
   } else {
     seen.insert(fid);
-    for dup in &insides[&fid].labs {
-      labs.insert(*dup);
-    }
-    for child_fid in &insides[&fid].refs {
-      runtime_def_get_all_labs(labs, insides, *child_fid, seen);
+    if let Some(fid_insides) = insides.get(&fid) {
+      for dup in &fid_insides.labs {
+        labs.insert(*dup);
+      }
+      for child_fid in &fid_insides.refs {
+        runtime_def_get_all_labs(labs, insides, *child_fid, seen);
+      }
     }
   }
 }
@@ -614,7 +616,7 @@ pub fn runtime_def_get_all_labs(labs: &mut InsideLabs, insides: &HashMap<run::Va
 pub fn book_to_runtime(book: &Book) -> run::Book {
   let mut rt_book = run::Book::new();
 
-  // Convert each network in 'book' to a runtime network and add to 'rt_book'
+  // Convert each net in 'book' to a runtime net and add to 'rt_book'
   for (name, net) in book {
     let fid = name_to_val(name);
     let nodes = run::Heap::<false>::init(1 << 16);
