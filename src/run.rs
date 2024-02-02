@@ -1305,7 +1305,7 @@ impl<'a, const LAZY: bool> NetFields<'a, LAZY> where [(); LAZY as usize]: {
         let next = self.weak_normal(book, prev);
         if next.is_nod() {
           visit.push(Ptr::new(VR1, 0, next.loc()));
-          if !next.is_op1() visit.push(Ptr::new(VR2, 0, next.loc())); // TODO: improve
+          if !next.is_op1() { visit.push(Ptr::new(VR2, 0, next.loc())); } // TODO: improve
         }
       }
     } else {
