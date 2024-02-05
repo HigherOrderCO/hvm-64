@@ -1,12 +1,17 @@
 #![cfg_attr(feature = "trace", feature(const_type_name))]
 
-use hvmc::*;
+use hvmc::{
+  run::{Def, LabSet},
+  stdlib::LogDef,
+  *,
+};
 
 use std::{
   collections::HashSet,
   env, fs, io,
   path::Path,
   process::{self, Stdio},
+  sync::{Arc, Mutex},
   time::{Duration, Instant},
 };
 
@@ -18,7 +23,7 @@ fn main() {
   if cfg!(feature = "_full_cli") {
     full_main(&args)
   } else {
-    run(&args, hvmc::gen::host())
+    run(&args, Arc::new(Mutex::new(hvmc::gen::host())))
   }
   if cfg!(feature = "trace") {
     hvmc::trace::_read_traces(usize::MAX);
@@ -44,7 +49,7 @@ fn full_main(args: &[String]) {
         process::exit(1);
       };
       let host = load(file_name);
-      compile_executable(file_name, &host).unwrap();
+      compile_executable(file_name, &host.lock().unwrap()).unwrap();
     }
     _ => {
       println!("Usage: hvmc <cmd> <file.hvmc> [-s]");
@@ -58,11 +63,11 @@ fn full_main(args: &[String]) {
   }
 }
 
-fn run(opts: &[String], host: host::Host) {
+fn run(opts: &[String], host: Arc<Mutex<host::Host>>) {
   let opts = opts.iter().map(|x| &**x).collect::<HashSet<_>>();
   let data = run::Net::init_heap(1 << 32);
   let mut net = run::Net::new(&data);
-  net.boot(&host.defs["main"]);
+  net.boot(&host.lock().unwrap().defs["main"]);
   let start_time = Instant::now();
   if opts.contains("-1") {
     net.normal();
@@ -70,7 +75,7 @@ fn run(opts: &[String], host: host::Host) {
     net.parallel_normal();
   }
   let elapsed = start_time.elapsed();
-  println!("{}", &host.readback(&net));
+  println!("{}", &host.lock().unwrap().readback(&net));
   if opts.contains("-s") {
     print_stats(&net, elapsed);
   }
@@ -98,12 +103,26 @@ fn pretty_num(n: u64) -> String {
     .collect()
 }
 
-fn load(file: &str) -> host::Host {
+fn load(file: &str) -> Arc<Mutex<host::Host>> {
   let Ok(file) = fs::read_to_string(file) else {
     eprintln!("Input file not found");
     process::exit(1);
   };
-  host::Host::new(&file.parse().expect("parse error"))
+  let host = Arc::new(Mutex::new(host::Host::default()));
+  host.lock().unwrap().insert_def(
+    "HVM.Log",
+    host::DefRef::Owned(Box::new(Def::new(
+      LabSet::ALL,
+      LogDef({
+        let host = Arc::downgrade(&host);
+        move |wire| {
+          eprintln!("{}", host.upgrade().unwrap().lock().unwrap().readback_tree(&wire));
+        }
+      }),
+    ))),
+  );
+  host.lock().unwrap().insert_book(&file.parse().expect("parse error"));
+  host
 }
 
 fn compile_executable(file_name: &str, host: &host::Host) -> Result<(), io::Error> {

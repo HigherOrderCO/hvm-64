@@ -24,7 +24,7 @@ pub struct Host {
 /// is stable, even if the `DefRef` moves –- this is why a `Cow` cannot be used
 /// here.
 pub enum DefRef {
-  Owned(Box<dyn DerefMut<Target = Def>>),
+  Owned(Box<dyn DerefMut<Target = Def> + Send + Sync>),
   Static(&'static Def),
 }
 
@@ -57,7 +57,7 @@ impl Host {
     // First, we insert empty defs into the host. Even though their instructions
     // are not yet set, the address of the def will not change, meaning that
     // `net_to_runtime_def` can safely use `Port::new_def` on them.
-    for (name, labs) in calculate_label_sets(book) {
+    for (name, labs) in calculate_label_sets(book, self) {
       let def = DefRef::Owned(Box::new(Def::new(labs, InterpretedDef { name: name.to_owned(), instr: Vec::new() })));
       self.insert_def(name, def);
     }
@@ -329,8 +329,8 @@ fn net_to_runtime_def(defs: &HashMap<String, DefRef>, net: &Net) -> Vec<Instruct
 ///
 /// This algorithm runs in linear time (as refs are traversed at most twice),
 /// and requires no more space than the naive algorithm.
-fn calculate_label_sets(book: &Book) -> impl Iterator<Item = (&str, LabSet)> {
-  let mut state = State { book, labels: HashMap::with_capacity(book.len()) };
+fn calculate_label_sets<'a>(book: &'a Book, host: &Host) -> impl Iterator<Item = (&'a str, LabSet)> {
+  let mut state = State { book, host, labels: HashMap::with_capacity(book.len()) };
 
   for name in book.keys() {
     state.visit_def(name, Some(0), None);
@@ -341,9 +341,9 @@ fn calculate_label_sets(book: &Book) -> impl Iterator<Item = (&str, LabSet)> {
     _ => unreachable!(),
   });
 
-  #[derive(Debug)]
-  struct State<'a> {
+  struct State<'a, 'b> {
     book: &'a Book,
+    host: &'b Host,
     labels: HashMap<&'a str, LabelState>,
   }
 
@@ -361,7 +361,7 @@ fn calculate_label_sets(book: &Book) -> impl Iterator<Item = (&str, LabSet)> {
   /// - `out`, if supplied, will be unioned with the result of this traversal
   /// - the return value indicates the head depth, as defined above (or
   ///   an arbitrary value `>= depth` if no cycles are involved)
-  impl<'a> State<'a> {
+  impl<'a, 'b> State<'a, 'b> {
     fn visit_def(&mut self, key: &'a str, depth: Option<usize>, out: Option<&mut LabSet>) -> usize {
       match self.labels.entry(key) {
         Entry::Vacant(e) => {
@@ -420,7 +420,16 @@ fn calculate_label_sets(book: &Book) -> impl Iterator<Item = (&str, LabSet)> {
           }
           usize::min(self.visit_tree(lft, depth, out.as_deref_mut()), self.visit_tree(rgt, depth, out.as_deref_mut()))
         }
-        Tree::Ref { nam } => self.visit_def(nam, depth.map(|x| x + 1), out),
+        Tree::Ref { nam } => {
+          if let Some(def) = self.host.defs.get(nam) {
+            if let Some(out) = out {
+              out.union(&def.labs);
+            }
+            usize::MAX
+          } else {
+            self.visit_def(nam, depth.map(|x| x + 1), out)
+          }
+        }
         Tree::Op1 { rgt, .. } => self.visit_tree(rgt, depth, out),
         Tree::Op2 { lft, rgt, .. } | Tree::Mat { sel: lft, ret: rgt } => {
           usize::min(self.visit_tree(lft, depth, out.as_deref_mut()), self.visit_tree(rgt, depth, out.as_deref_mut()))
@@ -448,7 +457,8 @@ fn test_calculate_labels() {
         @u = {10 @u @s}
       "
       .parse()
-      .unwrap()
+      .unwrap(),
+      &Host::default(),
     )
     .collect::<BTreeMap<_, _>>(),
     [

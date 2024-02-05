@@ -233,7 +233,7 @@ impl Port {
   /// need to be added to the redex list.
   #[inline(always)]
   pub fn is_skippable(&self) -> bool {
-    matches!(self.tag(), Num | Ref)
+    self.tag() == Num || self.tag() == Ref && self.lab() != u16::MAX
   }
 
   /// Converts a `Var` port into a `Red` port with the same addr.
@@ -350,6 +350,7 @@ impl fmt::Debug for Wire {
 }
 
 unsafe impl Send for Wire {}
+unsafe impl Sync for Wire {}
 
 impl Wire {
   #[inline(always)]
@@ -486,7 +487,7 @@ impl FromIterator<Lab> for LabSet {
 
 #[repr(C)]
 #[repr(align(16))]
-pub struct Def<T: ?Sized = Unknown> {
+pub struct Def<T: ?Sized + Send + Sync = Unknown> {
   pub labs: LabSet,
   ty: TypeId,
   call: unsafe fn(*const Def<T>, &mut Net, port: Port),
@@ -498,11 +499,14 @@ extern "C" {
   pub type Unknown;
 }
 
-pub trait AsDef: 'static {
+unsafe impl Send for Unknown {}
+unsafe impl Sync for Unknown {}
+
+pub trait AsDef: 'static + Send + Sync {
   unsafe fn call(slf: *const Def<Self>, net: &mut Net, port: Port);
 }
 
-impl<T> Def<T> {
+impl<T: Send + Sync> Def<T> {
   pub const fn new(labs: LabSet, data: T) -> Self
   where
     T: AsDef,
@@ -523,19 +527,19 @@ impl<T> Def<T> {
 
 impl Def {
   #[inline(always)]
-  pub unsafe fn downcast_ptr<T: 'static>(slf: *const Def) -> Option<*const Def<T>> {
+  pub unsafe fn downcast_ptr<T: Send + Sync + 'static>(slf: *const Def) -> Option<*const Def<T>> {
     if (*slf).ty == TypeId::of::<T>() { Some(slf.cast()) } else { None }
   }
   #[inline(always)]
-  pub unsafe fn downcast_mut_ptr<T: 'static>(slf: *mut Def) -> Option<*mut Def<T>> {
+  pub unsafe fn downcast_mut_ptr<T: Send + Sync + 'static>(slf: *mut Def) -> Option<*mut Def<T>> {
     if (*slf).ty == TypeId::of::<T>() { Some(slf.cast()) } else { None }
   }
   #[inline(always)]
-  pub fn downcast_ref<T: 'static>(&self) -> Option<&Def<T>> {
+  pub fn downcast_ref<T: Send + Sync + 'static>(&self) -> Option<&Def<T>> {
     unsafe { Def::downcast_ptr(self).map(|x| &*x) }
   }
   #[inline(always)]
-  pub fn downcast_mut<T: 'static>(&mut self) -> Option<&mut Def<T>> {
+  pub fn downcast_mut<T: Send + Sync + 'static>(&mut self) -> Option<&mut Def<T>> {
     unsafe { Def::downcast_mut_ptr(self).map(|x| &mut *x) }
   }
   #[inline(always)]
@@ -544,7 +548,7 @@ impl Def {
   }
 }
 
-impl<T> Deref for Def<T> {
+impl<T: Send + Sync> Deref for Def<T> {
   type Target = Def;
   #[inline(always)]
   fn deref(&self) -> &Self::Target {
@@ -552,14 +556,14 @@ impl<T> Deref for Def<T> {
   }
 }
 
-impl<T> DerefMut for Def<T> {
+impl<T: Send + Sync> DerefMut for Def<T> {
   #[inline(always)]
   fn deref_mut(&mut self) -> &mut Self::Target {
     self.upcast_mut()
   }
 }
 
-impl<F: Fn(&mut Net, Port) + 'static> AsDef for F {
+impl<F: Fn(&mut Net, Port) + Send + Sync + 'static> AsDef for F {
   unsafe fn call(slf: *const Def<Self>, net: &mut Net, port: Port) {
     unsafe { ((*slf).data)(net, port) }
   }
@@ -862,7 +866,7 @@ impl<'a> Net<'a> {
 
   /// If `trg` is a wire, frees the backing memory.
   #[inline(always)]
-  fn free_trg(&mut self, trg: Trg) {
+  pub fn free_trg(&mut self, trg: Trg) {
     if trg.is_wire() {
       self.half_free(trg.as_wire().addr());
     }
@@ -886,10 +890,18 @@ impl<'a> Net<'a> {
     }
   }
 
+  /// Creates a wire an aux port pair.
+  #[inline(always)]
+  pub fn create_wire(&mut self) -> (Wire, Port) {
+    let addr = self.alloc();
+    self.half_free(addr.other_half());
+    (Wire::new(addr.clone()), Port::new_var(addr))
+  }
+
   /// Creates a wire pointing to a given port; sometimes necessary to avoid
   /// deadlock.
   #[inline(always)]
-  fn create_wire(&mut self, port: Port) -> Wire {
+  pub fn create_wire_to(&mut self, port: Port) -> Wire {
     let addr = self.alloc();
     self.half_free(addr.other_half());
     let wire = Wire::new(addr);
@@ -1140,6 +1152,8 @@ impl<'a> Net<'a> {
       // not actually an active pair
       (Var | Red, _) | (_, Var | Red) => unreachable!(),
       // nil-nil
+      (Ref, Ref | Num) if !a.is_skippable() => self.call(a, b),
+      (Ref | Num, Ref) if !b.is_skippable() => self.call(b, a),
       (Num | Ref, Num | Ref) => self.rwts.eras += 1,
       // comm 2/2
       (Ctr, Mat) if a.lab() != 0 => self.comm22(a, b),
@@ -1619,13 +1633,13 @@ impl<'a> Net<'a> {
       let c1 = self.create_node(Ctr, 0);
       if num == 0 {
         self.link_port_port(c1.p2, Port::ERA);
-        (Trg::port(c1.p0), Trg::wire(self.create_wire(c1.p1)))
+        (Trg::port(c1.p0), Trg::wire(self.create_wire_to(c1.p1)))
       } else {
         let c2 = self.create_node(Ctr, 0);
         self.link_port_port(c1.p1, Port::ERA);
         self.link_port_port(c1.p2, c2.p0);
         self.link_port_port(c2.p1, Port::new_num(num - 1));
-        (Trg::port(c1.p0), Trg::wire(self.create_wire(c2.p2)))
+        (Trg::port(c1.p0), Trg::wire(self.create_wire_to(c2.p2)))
       }
     } else if port == Port::ERA {
       self.rwts.eras += 1;
@@ -1644,8 +1658,8 @@ impl<'a> Net<'a> {
     let b = a.other_half();
     (
       Trg::port(Port::new_var(a.clone())),
-      Trg::port(Port::new_var(b.clone())),
       Trg::wire(Wire::new(a)),
+      Trg::port(Port::new_var(b.clone())),
       Trg::wire(Wire::new(b)),
     )
   }

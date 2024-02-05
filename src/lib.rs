@@ -17,3 +17,5 @@ pub mod trace;
 
 #[doc(hidden)]
 pub mod gen;
+
+pub mod stdlib;
