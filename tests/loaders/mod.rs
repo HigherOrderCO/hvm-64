@@ -3,7 +3,7 @@
 use hvmc::{
   ast::*,
   host::Host,
-  run::{self, Area},
+  run::{self, Node},
 };
 use hvml::term::{parser, term_to_net::Labels, Book as DefinitionBook, DefNames};
 use std::fs;
@@ -52,7 +52,7 @@ pub fn hvm_lang_normal(book: &mut DefinitionBook, size: usize) -> (hvmc::run::Re
 
 #[allow(unused_variables)]
 pub fn normal(book: Book, size: usize) -> (hvmc::run::Rewrites, Net) {
-  fn normal_cpu<'area>(host: &Host, area: &'area Area) -> run::Net<'area> {
+  fn normal_cpu<'area>(host: &Host, area: &'area [Node]) -> run::Net<'area> {
     let mut rnet = run::Net::new(area);
     rnet.boot(host.defs.get(DefNames::ENTRY_POINT).unwrap());
     rnet.normal();

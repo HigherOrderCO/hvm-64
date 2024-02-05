@@ -287,6 +287,14 @@ impl Port {
   }
 }
 
+/// A memory address to be used in a `Port` or a `Wire`.
+///
+/// The bottom three bits must be zero; i.e. this address must be at least
+/// 8-byte-aligned.
+///
+/// Additionally, all bits other than the lowest 48 must be zero. On a 32-bit
+/// system, this has no effect, but on a 64-bit system, this means that the top
+/// 16 bits much be zero.
 #[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[must_use]
 pub struct Addr(pub usize);
@@ -300,26 +308,32 @@ impl fmt::Debug for Addr {
 impl Addr {
   pub const NULL: Addr = Addr(0);
 
-  const HALF_MASK: usize = 0b1000;
-
+  /// Casts this address into an `&AtomicU64`, which may or may not be valid.
   #[inline(always)]
   pub fn val<'a>(&self) -> &'a AtomicU64 {
     unsafe { &*(self.0 as *const _) }
   }
 
-  #[inline(always)]
-  pub fn left_half(&self) -> Self {
-    Addr(self.0 & !Addr::HALF_MASK)
-  }
-
-  #[inline(always)]
-  pub fn other_half(&self) -> Self {
-    Addr(self.0 ^ Addr::HALF_MASK)
-  }
-
+  /// Casts this address into an `&Def`, which may or may not be valid.
   #[inline(always)]
   pub fn def<'a>(&self) -> &'a Def {
     unsafe { &*(self.0 as *const _) }
+  }
+
+  const HALF_MASK: usize = 0b1000;
+
+  /// Given an address to one word of a two-word allocation, returns the address
+  /// of the first word of that allocation.
+  #[inline(always)]
+  fn left_half(&self) -> Self {
+    Addr(self.0 & !Addr::HALF_MASK)
+  }
+
+  /// Given an address to one word of a two-word allocation, returns the address
+  /// of the other word of that allocation.
+  #[inline(always)]
+  pub fn other_half(&self) -> Self {
+    Addr(self.0 ^ Addr::HALF_MASK)
   }
 }
 
@@ -336,8 +350,6 @@ impl fmt::Debug for Wire {
 unsafe impl Send for Wire {}
 
 impl Wire {
-  pub const NULL: Wire = Wire(std::ptr::null());
-
   #[inline(always)]
   pub fn addr(&self) -> Addr {
     Addr(self.0 as _)
@@ -408,20 +420,12 @@ pub struct Def {
   pub inner: DefType,
 }
 
-#[derive(Clone, Debug)]
-pub enum DefType {
-  Native(fn(&mut Net, Port)),
-  Net(DefNet),
-}
-
-/// A compact closed net, used for dereferences.
-#[derive(Clone, Debug, Default)]
-pub struct DefNet {
-  pub instr: Vec<Instruction>,
-}
-
+/// A bitset representing the set of labels used in a def.
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub struct LabSet {
+  /// The least label greater than every label in the set.
+  ///
+  /// `lab >= set.min_safe` implies `!set.has(lab)`.
   pub(crate) min_safe: Lab,
   pub(crate) bits: Cow<'static, [u64]>,
 }
@@ -437,9 +441,11 @@ impl LabSet {
     }
     bits[index] |= 1 << bit;
   }
+
   pub fn min_safe(&self) -> Lab {
     self.min_safe
   }
+
   pub fn has(&self, lab: Lab) -> bool {
     if lab >= self.min_safe {
       return false;
@@ -448,6 +454,8 @@ impl LabSet {
     let bit = lab & 63;
     unsafe { self.bits.get_unchecked(index) & 1 << bit != 0 }
   }
+
+  /// Adds of of the labels in `other` to this set.
   pub fn union(&mut self, other: &LabSet) {
     self.min_safe = self.min_safe.max(other.min_safe);
     let bits = self.bits.to_mut();
@@ -470,39 +478,124 @@ impl FromIterator<Lab> for LabSet {
   }
 }
 
-// A target pointer, with implied ownership.
+/// The inner representation of a `Def`.
+#[derive(Clone, Debug)]
+pub enum DefType {
+  /// This definition is implemented with a native function.
+  Native(fn(&mut Net, Port)),
+  /// This definition needs to be interpreted.
+  Interpreted(Vec<Instruction>),
+}
+
+/// `Def`s, when not pre-compiled, are represented as lists of instructions.
+///
+/// Each instruction corresponds to a fragment of a net that has a native
+/// implementation.
+///
+/// These net fragments may have several free ports, which are each represented
+/// with `TrgId`s.
+///
+/// Each `TrgId` of an instruction has an associated polarity -- it can either
+/// be an input or an output. Because the underlying interaction net model we're
+/// using does not have polarity, we also need instructions for linking out-out
+/// or in-in.
+///
+/// Linking two outputs can be done with `Link`, which creates a "cup" wire.
+///
+/// Linking two inputs is more complicated, due to the way locking works. It can
+/// be done with `Wires`, which creates two "cap" wires. One half of each cap
+/// can be used for each input. Once those inputs have been fully unlocked, the
+/// other halves of each cap can be linked with `Link`. For example:
+/// ```ignore
+/// let (av, aw, bv, bw) = net.do_wires();
+/// some_subnet(net, av, bv);
+/// net.link(aw, bw);
+/// ```
+///
+/// Each instruction documents both the native implementation and the polarity
+/// of each `TrgId`.
+///
+/// Some instructions take a `Port`; these must always be statically-valid ports
+/// -- that is, `Ref` or `Num` ports.
+#[derive(Debug, Clone)]
+pub enum Instruction {
+  /// `let trg = Trg::port(port);`
+  Const { trg: TrgId, port: Port },
+  /// `net.link_trg(a, b);`
+  Link { a: TrgId, b: TrgId },
+  /// `net.link(trg, Trg::port(port));`
+  LinkConst { trg: TrgId, port: Port },
+  /// `let (lft, rgt) = net.do_ctr(lab, trg);`
+  Ctr { lab: Lab, trg: TrgId, lft: TrgId, rgt: TrgId },
+  /// `let (lft, rgt) = net.do_op2(lab, trg);`
+  Op2 { op: Op, trg: TrgId, lft: TrgId, rgt: TrgId },
+  /// `let rgt = net.do_op1(lab, num, trg);`
+  Op1 { op: Op, num: u64, trg: TrgId, rgt: TrgId },
+  /// `let (lft, rgt) = net.do_mat(trg);`
+  Mat { trg: TrgId, lft: TrgId, rgt: TrgId },
+  /// `let (av, aw, bv, bw) = net.do_wires();`
+  Wires { av: TrgId, aw: TrgId, bv: TrgId, bw: TrgId },
+}
+
+/// Part of the net to link to; either a wire or a port.
+///
+/// To store this compactly, we reuse the `Red` tag to indicate if this is a
+/// wire.
 #[derive(Clone)]
 pub struct Trg(Port);
 
 impl Trg {
+  /// Creates a `Trg` from a port.
   #[inline(always)]
   pub fn port(port: Port) -> Self {
     Trg(port)
   }
+
+  /// Creates a `Trg` from a wire.
   #[inline(always)]
   pub fn wire(wire: Wire) -> Self {
     Trg(Port(wire.0 as u64))
   }
+
   #[inline(always)]
   fn is_wire(&self) -> bool {
     self.0.tag() == Red
   }
+
   #[inline(always)]
   fn as_wire(self) -> Wire {
     Wire(self.0.0 as _)
   }
+
   #[inline(always)]
   fn as_port(self) -> Port {
     self.0
   }
+
+  /// Access the target port; if this trg is already a port, this does nothing,
+  /// but if it is a wire, it loads the target.
+  ///
+  /// The returned port is only normative if it is principal; if it is a var or
+  /// a redirect, it must not be used for linking, and the original `Trg` should
+  /// be used instead.
   #[inline(always)]
   pub fn target(&self) -> Port {
     if self.is_wire() { self.clone().as_wire().load_target() } else { self.0.clone() }
   }
 }
 
+/// An index to a `Trg` in a `DefNet`. These essentially serve the function of
+/// registers.
+///
+/// In the compiled mode, each `TrgId` will be compiled to a variable.
+///
+/// In the interpreted mode, the `TrgId` serves as an index into a vector.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TrgId {
+  /// instead of storing the index directly, we store the byte offset, to save a
+  /// shift instruction when indexing into the `Trg` vector in interpreted mode.
+  ///
+  /// This is always `index * size_of<Trg>`.
   byte_offset: usize,
 }
 
@@ -527,47 +620,47 @@ impl fmt::Debug for TrgId {
   }
 }
 
-#[derive(Debug, Clone)]
-pub enum Instruction {
-  /// `let t = Trg::port(p);`
-  Const { trg: TrgId, port: Port },
-  /// `net.link_trg(a, b);`
-  Link { a: TrgId, b: TrgId },
-  /// `net.link(t, Trg::port(p));`
-  Set { trg: TrgId, port: Port },
-  /// `let (lft, rgt) = net.do_ctr(lab, trg);`
-  Ctr { lab: Lab, trg: TrgId, lft: TrgId, rgt: TrgId },
-  /// `let (lft, rgt) = net.do_op2(lab, trg);`
-  Op2 { op: Op, trg: TrgId, lft: TrgId, rgt: TrgId },
-  /// `let rgt = net.do_op2(lab, num, trg);`
-  Op1 { op: Op, num: u64, trg: TrgId, rgt: TrgId },
-  /// `let rgt = net.do_op2(lab, num, trg);`
-  Mat { trg: TrgId, lft: TrgId, rgt: TrgId },
-  /// `let (av, aw, bv, bw) = net.do_wires();`
-  Wires { av: TrgId, aw: TrgId, bv: TrgId, bw: TrgId },
-}
-
-// -----------
-//   The Net
-// -----------
-
+/// The memory behind a two-word allocation.
+///
+/// This must be aligned to 16 bytes so that the left word's address always ends
+/// with `0b0000` and the right word's address always ends with `0b1000`.
 #[repr(C)]
 #[repr(align(16))]
 #[derive(Default)]
 pub struct Node(pub AtomicU64, pub AtomicU64);
 
-// The global node buffer.
-pub type Area = [Node];
+// -----------
+//   The Net
+// -----------
 
-/// Rewrite counter.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct Rewrites {
-  pub anni: usize, // anni rewrites
-  pub comm: usize, // comm rewrites
-  pub eras: usize, // eras rewrites
-  pub dref: usize, // dref rewrites
-  pub oper: usize, // oper rewrites
+// A interaction combinator net.
+pub struct Net<'a> {
+  pub tid: usize,              // thread id
+  pub tids: usize,             // thread count
+  pub rdex: Vec<(Port, Port)>, // redexes
+  pub trgs: Vec<Trg>,
+  pub rwts: Rewrites, // rewrite count
+  pub quik: Rewrites, // rewrite count
+  pub root: Wire,
+  // allocator
+  pub area: &'a [Node],
+  pub head: Addr,
+  pub next: usize,
+  //
+  tracer: Tracer,
 }
+
+/// Tracks the number of rewrites, categorized by type.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Rewrites<T = u64> {
+  pub anni: T,
+  pub comm: T,
+  pub eras: T,
+  pub dref: T,
+  pub oper: T,
+}
+
+type AtomicRewrites = Rewrites<AtomicU64>;
 
 impl Rewrites {
   pub fn add_to(&self, target: &AtomicRewrites) {
@@ -578,20 +671,9 @@ impl Rewrites {
     target.oper.fetch_add(self.oper, Relaxed);
   }
 
-  // Total rewrite count.
-  pub fn total(&self) -> usize {
+  pub fn total(&self) -> u64 {
     self.anni + self.comm + self.eras + self.dref + self.oper
   }
-}
-
-/// Rewrite counter, atomic.
-#[derive(Default)]
-pub struct AtomicRewrites {
-  pub anni: AtomicUsize, // anni rewrites
-  pub comm: AtomicUsize, // comm rewrites
-  pub eras: AtomicUsize, // eras rewrites
-  pub dref: AtomicUsize, // dref rewrites
-  pub oper: AtomicUsize, // oper rewrites
 }
 
 impl AtomicRewrites {
@@ -604,33 +686,15 @@ impl AtomicRewrites {
   }
 }
 
-// A interaction combinator net.
-pub struct Net<'a> {
-  pub tid: usize,              // thread id
-  pub tids: usize,             // thread count
-  pub rdex: Vec<(Port, Port)>, // redexes
-  pub trgs: Vec<Trg>,
-  pub rwts: Rewrites, // rewrite count
-  pub quik: Rewrites, // quick rewrite count
-  pub root: Wire,
-  // allocator
-  pub area: &'a Area,
-  pub head: Addr,
-  pub next: usize,
-  //
-  pub tracer: Tracer,
-}
-
 impl<'a> Net<'a> {
-  // Creates an empty net with a given heap.
-  pub fn new(area: &'a Area) -> Self {
-    let mut net = Net::new_with_root(area, Wire::NULL);
+  /// Creates an empty net with a given heap.
+  pub fn new(area: &'a [Node]) -> Self {
+    let mut net = Net::new_with_root(area, Wire(std::ptr::null()));
     net.root = Wire::new(net.alloc());
     net
   }
 
-  // Creates an empty net with a given heap.
-  pub fn new_with_root(area: &'a Area, root: Wire) -> Self {
+  fn new_with_root(area: &'a [Node], root: Wire) -> Self {
     Net {
       tid: 0,
       tids: 1,
@@ -668,6 +732,7 @@ impl<'a> Net<'a> {
     }
   }
 
+  /// Frees one word of a two-word allocation.
   #[inline(always)]
   pub fn half_free(&mut self, addr: Addr) {
     trace!(self.tracer, addr);
@@ -693,6 +758,7 @@ impl<'a> Net<'a> {
     }
   }
 
+  /// Allocates a two-word node.
   #[inline(never)]
   pub fn alloc(&mut self) -> Addr {
     trace!(self.tracer, self.head);
@@ -713,10 +779,11 @@ impl<'a> Net<'a> {
     addr
   }
 
+  /// If `trg` is a wire, frees the backing memory.
   #[inline(always)]
-  pub fn free_trg(&mut self, trg: Trg) {
+  fn free_trg(&mut self, trg: Trg) {
     if trg.is_wire() {
-      self.half_free(trg.0.addr());
+      self.half_free(trg.as_wire().addr());
     }
   }
 }
@@ -738,8 +805,10 @@ impl<'a> Net<'a> {
     }
   }
 
+  /// Creates a wire pointing to a given port; sometimes necessary to avoid
+  /// deadlock.
   #[inline(always)]
-  pub fn create_wire(&mut self, port: Port) -> Wire {
+  fn create_wire(&mut self, port: Port) -> Wire {
     let addr = self.alloc();
     self.half_free(addr.other_half());
     let wire = Wire::new(addr);
@@ -752,8 +821,13 @@ impl<'a> Net<'a> {
 //   Linker
 // ----------
 
+/// When threads interfere, this uses the atomic linking algorithm described in
+/// `paper/`.
+///
+/// Linking wires must be done atomically, but linking ports can be done
+/// non-atomically (because they must be locked).
 impl<'a> Net<'a> {
-  // Links two pointers, forming a new wire. Assumes ownership.
+  /// Links two ports.
   #[inline(always)]
   pub fn link_port_port(&mut self, a_port: Port, b_port: Port) {
     trace!(self.tracer, a_port, b_port);
@@ -765,7 +839,7 @@ impl<'a> Net<'a> {
     }
   }
 
-  // Given two locations, links both stored pointers, atomically.
+  /// Links two wires.
   #[inline(always)]
   pub fn link_wire_wire(&mut self, a_wire: Wire, b_wire: Wire) {
     trace!(self.tracer, a_wire, b_wire);
@@ -782,7 +856,7 @@ impl<'a> Net<'a> {
     }
   }
 
-  // Given a location, link the pointer stored to another pointer, atomically.
+  /// Links a wire to a port.
   #[inline(always)]
   pub fn link_wire_port(&mut self, a_wire: Wire, b_port: Port) {
     trace!(self.tracer, a_wire, b_port);
@@ -797,8 +871,10 @@ impl<'a> Net<'a> {
     }
   }
 
+  /// Pushes an active pair to the redex queue; `a` and `b` must both be
+  /// principal ports.
   #[inline(always)]
-  pub fn redux(&mut self, a: Port, b: Port) {
+  fn redux(&mut self, a: Port, b: Port) {
     trace!(self.tracer, a, b);
     if a.is_skippable() && b.is_skippable() {
       self.rwts.eras += 1;
@@ -807,18 +883,19 @@ impl<'a> Net<'a> {
     }
   }
 
-  // When two threads interfere, uses the lock-free link algorithm described on the 'paper/'.
+  /// Half-links `a_port` to `b_port`, without linking `b_port` back to `a_port`.
   #[inline(always)]
-  pub fn half_link_port_port(&mut self, a_port: Port, b_port: Port) {
+  fn half_link_port_port(&mut self, a_port: Port, b_port: Port) {
     trace!(self.tracer, a_port, b_port);
     if a_port.tag() == Var {
       a_port.wire().set_target(b_port);
     }
   }
 
-  // When two threads interfere, uses the lock-free link algorithm described on the 'paper/'.
+  /// Half-links a foreign `a_port` (taken from `a_wire`) to `b_port`, without
+  /// linking `b_port` back to `a_port`.
   #[inline(always)]
-  pub fn half_link_wire_port(&mut self, a_port: Port, a_wire: Wire, b_port: Port) {
+  fn half_link_wire_port(&mut self, a_port: Port, a_wire: Wire, b_port: Port) {
     trace!(self.tracer, a_port, a_wire, b_port);
     // If 'a_port' is a var...
     if a_port.tag() == Var {
@@ -834,10 +911,10 @@ impl<'a> Net<'a> {
         if b_port.tag() == Var {
           let port = b_port.redirect();
           a_wire.set_target(port);
-          //self.atomic_linker_var(a_port, a_wire, b_port);
+          //self.resolve_redirect_var(a_port, a_wire, b_port);
         } else if b_port.is_principal() {
           a_wire.set_target(b_port.clone());
-          self.atomic_linker_pri(a_port, a_wire, b_port);
+          self.resolve_redirect_pri(a_port, a_wire, b_port);
         } else {
           unreachable!();
         }
@@ -847,8 +924,8 @@ impl<'a> Net<'a> {
     }
   }
 
-  // Atomic linker for when 'b_port' is a principal port.
-  pub fn atomic_linker_pri(&mut self, mut a_port: Port, a_wire: Wire, b_port: Port) {
+  /// Resolves redirects when 'b_port' is a principal port.
+  fn resolve_redirect_pri(&mut self, mut a_port: Port, a_wire: Wire, b_port: Port) {
     trace!(self.tracer);
     loop {
       trace!(self.tracer, a_port, a_wire, b_port);
@@ -923,8 +1000,10 @@ impl<'a> Net<'a> {
     }
   }
 
-  // Atomic linker for when 'b_port' is an aux port.
-  pub fn atomic_linker_var(&mut self, _: Port, _: Wire, b_port: Port) {
+  /// Resolves redirects when 'b_port' is an aux port.
+  // TODO: this is currently broken
+  #[allow(unused)]
+  fn resolve_redirect_var(&mut self, _: Port, _: Wire, b_port: Port) {
     loop {
       let ste_wire = b_port.clone().wire();
       let ste_port = ste_wire.load_target();
@@ -943,7 +1022,8 @@ impl<'a> Net<'a> {
     }
   }
 
-  // Links two targets, using atomics when necessary, based on implied ownership.
+  /// Links a `Trg` to a port, delegating to the appropriate method based on the
+  /// type of `a`.
   #[inline(always)]
   pub fn link_trg_port(&mut self, a: Trg, b: Port) {
     match a.is_wire() {
@@ -952,7 +1032,8 @@ impl<'a> Net<'a> {
     }
   }
 
-  // Links two targets, using atomics when necessary, based on implied ownership.
+  /// Links two `Trg`s, delegating to the appropriate method based on the type
+  /// of `a` and `b`.
   #[inline(always)]
   pub fn link_trg(&mut self, a: Trg, b: Trg) {
     match (a.is_wire(), b.is_wire()) {
@@ -969,7 +1050,7 @@ impl<'a> Net<'a> {
 // ---------------------
 
 impl<'a> Net<'a> {
-  // Performs an interaction over a redex.
+  /// Performs an interaction between two connected principal ports.
   #[inline(always)]
   pub fn interact(&mut self, a: Port, b: Port) {
     self.tracer.sync();
@@ -1019,7 +1100,6 @@ impl<'a> Net<'a> {
     }
   }
 
-  #[inline(never)]
   /// ```text
   ///
   ///         a2 |   | a1
@@ -1045,6 +1125,7 @@ impl<'a> Net<'a> {
   ///         b1 |   | b2
   ///
   /// ```
+  #[inline(never)]
   pub fn anni2(&mut self, a: Port, b: Port) {
     trace!(self.tracer, a, b);
     self.rwts.anni += 1;
@@ -1054,7 +1135,6 @@ impl<'a> Net<'a> {
     self.link_wire_wire(a.p2, b.p2);
   }
 
-  #[inline(never)]
   /// ```text
   ///
   ///         a2 |   | a1
@@ -1090,6 +1170,7 @@ impl<'a> Net<'a> {
   ///     b1 |         | b2
   ///
   /// ```
+  #[inline(never)]
   pub fn comm22(&mut self, a: Port, b: Port) {
     trace!(self.tracer, a, b);
     self.rwts.comm += 1;
@@ -1115,7 +1196,6 @@ impl<'a> Net<'a> {
     self.link_wire_port(b.p2, A2.p0);
   }
 
-  #[inline(never)]
   /// ```text
   ///
   ///         a  (---)
@@ -1134,6 +1214,7 @@ impl<'a> Net<'a> {
   ///      b1 |       | b2
   ///
   /// ```
+  #[inline(never)]
   pub fn comm02(&mut self, a: Port, b: Port) {
     trace!(self.tracer, a, b);
     self.rwts.comm += 1;
@@ -1142,7 +1223,6 @@ impl<'a> Net<'a> {
     self.link_wire_port(b.p2, a);
   }
 
-  #[inline(never)]
   /// ```text
   ///
   ///         a2 |
@@ -1172,6 +1252,7 @@ impl<'a> Net<'a> {
   ///                | b2
   ///
   /// ```
+  #[inline(never)]
   pub fn anni1(&mut self, a: Port, b: Port) {
     trace!(self.tracer, a, b);
     self.rwts.anni += 1;
@@ -1266,7 +1347,6 @@ impl<'a> Net<'a> {
     self.link_wire_port(b.p2, a);
   }
 
-  #[inline(never)]
   /// ```text
   ///                             |
   ///         b   (0)             |         b  (n+1)
@@ -1278,7 +1358,7 @@ impl<'a> Net<'a> {
   ///            |   |            |            |   |
   ///         a1 |   | a2         |         a1 |   | a2
   ///                             |
-  /// --------------------------- | -----------X--------------- mat_num
+  /// --------------------------- | --------------------------- mat_num
   ///                             |          _ _ _ _ _
   ///                             |        /           \
   ///                             |    y2 |  (n) y1     |
@@ -1295,6 +1375,7 @@ impl<'a> Net<'a> {
   ///       a1 |       | a2       |        a1 |         | a2
   ///                             |
   /// ```
+  #[inline(never)]
   pub fn mat_num(&mut self, a: Port, b: Port) {
     trace!(self.tracer, a, b);
     self.rwts.oper += 1;
@@ -1318,7 +1399,6 @@ impl<'a> Net<'a> {
     }
   }
 
-  #[inline(never)]
   /// ```text
   ///                   
   ///         b   (n)    
@@ -1342,6 +1422,7 @@ impl<'a> Net<'a> {
   ///       a1 |       | a2  
   ///                       
   /// ```
+  #[inline(never)]
   pub fn op2_num(&mut self, a: Port, b: Port) {
     trace!(self.tracer, a, b);
     self.rwts.oper += 1;
@@ -1353,7 +1434,6 @@ impl<'a> Net<'a> {
     self.link_wire_port(a.p1, x.p0);
   }
 
-  #[inline(never)]
   /// ```text
   ///                   
   ///         b   (m)    
@@ -1373,6 +1453,7 @@ impl<'a> Net<'a> {
   ///              | a2
   ///                       
   /// ```
+  #[inline(never)]
   pub fn op1_num(&mut self, a: Port, b: Port) {
     trace!(self.tracer, a, b);
     self.rwts.oper += 1;
@@ -1389,7 +1470,7 @@ impl<'a> Net<'a> {
 // ----------------
 
 impl<'a> Net<'a> {
-  /// {#lab x y}
+  /// `trg ~ {#lab x y}`
   #[inline(always)]
   pub(crate) fn do_ctr(&mut self, lab: Lab, trg: Trg) -> (Trg, Trg) {
     let port = trg.target();
@@ -1409,7 +1490,7 @@ impl<'a> Net<'a> {
     }
   }
 
-  /// <op x y>
+  /// `trg ~ <op x y>`
   #[inline(always)]
   pub(crate) fn do_op2(&mut self, op: Op, trg: Trg) -> (Trg, Trg) {
     let port = trg.target();
@@ -1428,7 +1509,7 @@ impl<'a> Net<'a> {
     }
   }
 
-  /// <a op x>
+  /// `trg ~ <a op x>`
   #[inline(always)]
   pub(crate) fn do_op1(&mut self, op: Op, a: u64, trg: Trg) -> Trg {
     let port = trg.target();
@@ -1446,7 +1527,7 @@ impl<'a> Net<'a> {
     }
   }
 
-  /// ?<x y>
+  /// `trg ~ ?<x y>`
   #[inline(always)]
   pub(crate) fn do_mat(&mut self, trg: Trg) -> (Trg, Trg) {
     let port = trg.target();
@@ -1488,7 +1569,7 @@ impl<'a> Net<'a> {
     )
   }
 
-  /// <op #b x>
+  /// `trg ~ <op #b x>`
   #[inline(always)]
   #[allow(unused)] // TODO: emit this instruction
   pub(crate) fn do_op2_num(&mut self, op: Op, b: u64, trg: Trg) -> Trg {
@@ -1507,7 +1588,7 @@ impl<'a> Net<'a> {
     }
   }
 
-  /// ?<(x (y z)) out>
+  /// `trg ~ ?<(x (y z)) out>`
   #[inline(always)]
   #[allow(unused)] // TODO: emit this instruction
   pub(crate) fn do_mat_con_con(&mut self, trg: Trg, out: Trg) -> (Trg, Trg, Trg) {
@@ -1535,7 +1616,7 @@ impl<'a> Net<'a> {
     }
   }
 
-  /// ?<(x y) out>
+  /// `trg ~ ?<(x y) out>`
   #[inline(always)]
   #[allow(unused)] // TODO: emit this instruction
   pub(crate) fn do_mat_con(&mut self, trg: Trg, out: Trg) -> (Trg, Trg) {
@@ -1567,7 +1648,7 @@ impl<'a> Net<'a> {
 }
 
 impl<'a> Net<'a> {
-  // Expands a closed net.
+  /// Expands a `Ref` node connected to `trg`.
   #[inline(never)]
   pub fn call(&mut self, port: Port, trg: Port) {
     trace!(self.tracer, port, trg);
@@ -1579,9 +1660,9 @@ impl<'a> Net<'a> {
     }
 
     self.rwts.dref += 1;
-    let net = match &def.inner {
+    let instructions = match &def.inner {
       DefType::Native(native) => return native(self, trg),
-      DefType::Net(net) => net,
+      DefType::Interpreted(instructions) => instructions,
     };
 
     let mut trgs = unsafe { std::mem::transmute::<_, Trgs>(Trgs(&mut self.trgs[..])) };
@@ -1601,12 +1682,12 @@ impl<'a> Net<'a> {
     }
 
     trgs.set_trg(TrgId::new(0), Trg::port(trg));
-    for i in &net.instr {
+    for i in instructions {
       unsafe {
         match *i {
-          Instruction::Const { ref port, trg } => trgs.set_trg(trg, Trg::port(port.clone())),
+          Instruction::Const { trg, ref port } => trgs.set_trg(trg, Trg::port(port.clone())),
           Instruction::Link { a, b } => self.link_trg(trgs.get_trg(a), trgs.get_trg(b)),
-          Instruction::Set { trg, ref port } => {
+          Instruction::LinkConst { trg, ref port } => {
             if !port.is_principal() {
               unreachable_unchecked()
             }
@@ -1649,7 +1730,7 @@ impl<'a> Net<'a> {
 // -----------------
 
 impl<'a> Net<'a> {
-  // Reduces all redexes.
+  /// Reduces at most `limit` redexes.
   #[inline(always)]
   pub fn reduce(&mut self, limit: usize) -> usize {
     let mut count = 0;
@@ -1663,7 +1744,7 @@ impl<'a> Net<'a> {
     count
   }
 
-  // Expands heads.
+  /// Expands `Ref` nodes in the tree connected to `root`.
   #[inline(always)]
   pub fn expand(&mut self) {
     fn go(net: &mut Net, wire: Wire, len: usize, key: usize) {
@@ -1692,7 +1773,7 @@ impl<'a> Net<'a> {
     go(self, self.root.clone(), 1, self.tid);
   }
 
-  // Reduce a net to normal form.
+  /// Reduces a net to normal form.
   pub fn normal(&mut self) {
     self.expand();
     while !self.rdex.is_empty() {
@@ -1701,23 +1782,23 @@ impl<'a> Net<'a> {
     }
   }
 
-  // Forks into child threads, returning a Net for the (tid/tids)'th thread.
-  pub fn fork(&self, tid: usize, tids: usize) -> Self {
-    let heap_size = self.area.len() / tids;
-    let heap_start = heap_size * tid;
-    let area = &self.area[heap_start .. heap_start + heap_size];
-    let mut net = Net::new_with_root(area, self.root.clone());
-    net.next = self.next.saturating_sub(heap_start);
-    net.head = if tid == 0 { self.head.clone() } else { Addr::NULL };
-    net.tid = tid;
-    net.tids = tids;
-    net.tracer.set_tid(tid);
-    let from = self.rdex.len() * (tid + 0) / tids;
-    let upto = self.rdex.len() * (tid + 1) / tids;
-    for i in from .. upto {
-      net.rdex.push(self.rdex[i].clone());
-    }
-    net
+  /// Forks the net into `tids` child nets, for parallel operation.
+  pub fn fork(&mut self, tids: usize) -> impl Iterator<Item = Self> + '_ {
+    let mut redexes = std::mem::take(&mut self.rdex).into_iter();
+    (0 .. tids).map(move |tid| {
+      let heap_size = self.area.len() / tids;
+      let heap_start = heap_size * tid;
+      let area = &self.area[heap_start .. heap_start + heap_size];
+      let mut net = Net::new_with_root(area, self.root.clone());
+      net.next = self.next.saturating_sub(heap_start);
+      net.head = if tid == 0 { self.head.clone() } else { Addr::NULL };
+      net.tid = tid;
+      net.tids = tids;
+      net.tracer.set_tid(tid);
+      let count = redexes.len() / (tids - tid);
+      net.rdex.extend((&mut redexes).take(count));
+      net
+    })
   }
 
   // Evaluates a term to normal form in parallel
@@ -1752,11 +1833,11 @@ impl<'a> Net<'a> {
 
     // Perform parallel reductions
     std::thread::scope(|s| {
-      for tid in 0 .. tids {
+      for net in self.fork(tids) {
         let mut ctx = ThreadContext {
-          tid,
+          tid: net.tid,
           tick: 0,
-          net: self.fork(tid, tids),
+          net,
           tlog2,
           delta: &delta,
           quick: &quick,

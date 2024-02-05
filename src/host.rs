@@ -3,7 +3,7 @@
 
 use crate::{
   ast::{Book, Net, Tree},
-  run::{self, Addr, Def, DefNet, DefType, Instruction, LabSet, Port, Tag, TrgId, Wire},
+  run::{self, Addr, Def, DefType, Instruction, LabSet, Port, Tag, TrgId, Wire},
   util::create_var,
 };
 use std::{
@@ -59,16 +59,16 @@ impl Host {
     // are not yet set, the address of the def will not change, meaning that
     // `net_to_runtime_def` can safely use `Port::new_def` on them.
     for (nam, labs) in calculate_label_sets(book) {
-      let def = DefRef::Owned(Box::new(Def { labs, inner: DefType::Net(DefNet::default()) }));
+      let def = DefRef::Owned(Box::new(Def { labs, inner: DefType::Interpreted(Vec::new()) }));
       self.insert_def(nam, def);
     }
 
     // Now that `defs` is fully populated, we can fill in the instructions of
     // each of the new defs.
     for (nam, net) in book.iter() {
-      let net = net_to_runtime_def(&self.defs, net);
+      let inner = net_to_runtime_def(&self.defs, net);
       match self.defs.get_mut(nam).unwrap() {
-        DefRef::Owned(def) => def.inner = DefType::Net(net),
+        DefRef::Owned(def) => def.inner = inner,
         DefRef::Static(_) => unreachable!(),
       }
     }
@@ -156,7 +156,7 @@ impl Host {
 /// Converts an ast net to the runtime representation.
 ///
 /// `defs` must be populated with every `Ref` node that may appear in the net.
-fn net_to_runtime_def(defs: &HashMap<String, DefRef>, net: &Net) -> DefNet {
+fn net_to_runtime_def(defs: &HashMap<String, DefRef>, net: &Net) -> DefType {
   let mut state =
     State { defs, scope: Default::default(), instr: Default::default(), end: Default::default(), next_index: 1 };
 
@@ -168,7 +168,7 @@ fn net_to_runtime_def(defs: &HashMap<String, DefRef>, net: &Net) -> DefNet {
 
   state.instr.append(&mut state.end);
 
-  return DefNet { instr: state.instr };
+  return DefType::Interpreted(state.instr);
 
   #[derive(Debug)]
   struct State<'a> {
@@ -210,13 +210,13 @@ fn net_to_runtime_def(defs: &HashMap<String, DefRef>, net: &Net) -> DefNet {
     fn visit_tree(&mut self, tree: &'a Tree, trg: TrgId) {
       match tree {
         Tree::Era => {
-          self.instr.push(Instruction::Set { trg, port: Port::ERA });
+          self.instr.push(Instruction::LinkConst { trg, port: Port::ERA });
         }
         Tree::Ref { nam } => {
-          self.instr.push(Instruction::Set { trg, port: Port::new_ref(&self.defs[nam]) });
+          self.instr.push(Instruction::LinkConst { trg, port: Port::new_ref(&self.defs[nam]) });
         }
         Tree::Num { val } => {
-          self.instr.push(Instruction::Set { trg, port: Port::new_num(*val) });
+          self.instr.push(Instruction::LinkConst { trg, port: Port::new_num(*val) });
         }
         Tree::Var { nam } => match self.scope.entry(nam) {
           Entry::Occupied(e) => {

@@ -49,7 +49,7 @@ fn _compile_host(host: &Host) -> Result<String, fmt::Error> {
 
   for (raw_name, def) in &host.defs {
     compile_def(&mut code, host, raw_name, match &def.inner {
-      DefType::Net(n) => &n.instr,
+      DefType::Interpreted(n) => &n,
       DefType::Native(_) => unreachable!(),
     })?;
   }
@@ -66,7 +66,9 @@ fn compile_def(code: &mut String, host: &Host, raw_name: &str, instr: &[Instruct
     match instr {
       Instruction::Const { trg, port } => writeln!(code, "let {trg} = Trg::port({});", print_port(host, port)),
       Instruction::Link { a, b } => writeln!(code, "net.link_trg({a}, {b});"),
-      Instruction::Set { trg, port } => writeln!(code, "net.link_trg({trg}, Trg::port({}));", print_port(host, port)),
+      Instruction::LinkConst { trg, port } => {
+        writeln!(code, "net.link_trg({trg}, Trg::port({}));", print_port(host, port))
+      }
       Instruction::Ctr { lab, trg, lft, rgt } => writeln!(code, "let ({lft}, {rgt}) = net.do_ctr({lab}, {trg});"),
       Instruction::Op2 { op, trg, lft, rgt } => writeln!(code, "let ({lft}, {rgt}) = net.do_op2({op:?}, {trg});"),
       Instruction::Op1 { op, num, trg, rgt } => writeln!(code, "let {rgt} = net.do_op1({op:?}, {num}, {trg});"),
