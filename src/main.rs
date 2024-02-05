@@ -77,20 +77,25 @@ fn run(opts: &[String], host: host::Host) {
 }
 
 fn print_stats(net: &run::Net, elapsed: Duration) {
-  println!("RWTS   : {}", net.rwts.total());
-  println!("- ANNI : {}", net.rwts.anni);
-  println!("- COMM : {}", net.rwts.comm);
-  println!("- ERAS : {}", net.rwts.eras);
-  println!("- DREF : {}", net.rwts.dref);
-  println!("- OPER : {}", net.rwts.oper);
-  println!("QUIK   : {}", net.quik.total());
-  println!("- ANNI : {}", net.quik.anni);
-  println!("- COMM : {}", net.quik.comm);
-  println!("- ERAS : {}", net.quik.eras);
-  println!("- DREF : {}", net.quik.dref);
-  println!("- OPER : {}", net.quik.oper);
-  println!("TIME   : {:.3} s", (elapsed.as_millis() as f64) / 1000.0);
-  println!("RPS    : {:.3} m", ((net.rwts.total() + net.quik.total()) as f64) / (elapsed.as_millis() as f64) / 1000.0);
+  eprintln!("RWTS   : {:>15}", pretty_num(net.rwts.total()));
+  eprintln!("- ANNI : {:>15}", pretty_num(net.rwts.anni));
+  eprintln!("- COMM : {:>15}", pretty_num(net.rwts.comm));
+  eprintln!("- ERAS : {:>15}", pretty_num(net.rwts.eras));
+  eprintln!("- DREF : {:>15}", pretty_num(net.rwts.dref));
+  eprintln!("- OPER : {:>15}", pretty_num(net.rwts.oper));
+  eprintln!("TIME   : {:.3?}", elapsed);
+  eprintln!("RPS    : {:.3} M", (net.rwts.total() as f64) / (elapsed.as_millis() as f64) / 1000.0);
+}
+
+fn pretty_num(n: u64) -> String {
+  n.to_string()
+    .as_bytes()
+    .rchunks(3)
+    .rev()
+    .map(|x| std::str::from_utf8(x).unwrap())
+    .flat_map(|x| ["_", x])
+    .skip(1)
+    .collect()
 }
 
 fn load(file: &str) -> host::Host {

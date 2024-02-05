@@ -640,7 +640,6 @@ pub struct Net<'a> {
   pub rdex: Vec<(Port, Port)>, // redexes
   pub trgs: Vec<Trg>,
   pub rwts: Rewrites, // rewrite count
-  pub quik: Rewrites, // rewrite count
   pub root: Wire,
   // allocator
   pub area: &'a [Node],
@@ -701,7 +700,6 @@ impl<'a> Net<'a> {
       rdex: vec![],
       trgs: vec![Trg::port(Port::FREE); 1 << 16],
       rwts: Rewrites::default(),
-      quik: Rewrites::default(),
       root,
       area,
       head: Addr::NULL,
@@ -1477,11 +1475,11 @@ impl<'a> Net<'a> {
     if port.tag() == Ctr && port.lab() == lab {
       self.free_trg(trg);
       let node = port.consume_node();
-      self.quik.anni += 1;
+      self.rwts.anni += 1;
       (Trg::wire(node.p1), Trg::wire(node.p2))
     // TODO: fast copy?
     // } else if port.tag() == Num || port.tag() == Ref && lab >= port.lab() {
-    //   self.quik.comm += 1;
+    //   self.rwts.comm += 1;
     //   (Trg::port(port.clone()), Trg::port(port))
     } else {
       let n = self.create_node(Ctr, lab);
@@ -1495,7 +1493,7 @@ impl<'a> Net<'a> {
   pub(crate) fn do_op2(&mut self, op: Op, trg: Trg) -> (Trg, Trg) {
     let port = trg.target();
     if port.tag() == Num {
-      self.quik.oper += 1;
+      self.rwts.oper += 1;
       self.free_trg(trg);
       let n = self.create_node(Op1, op as Lab);
       n.p1.wire().set_target(Port::new_num(port.num()));
@@ -1514,7 +1512,7 @@ impl<'a> Net<'a> {
   pub(crate) fn do_op1(&mut self, op: Op, a: u64, trg: Trg) -> Trg {
     let port = trg.target();
     if trg.target().tag() == Num {
-      self.quik.oper += 1;
+      self.rwts.oper += 1;
       self.free_trg(trg);
       Trg::port(Port::new_num(op.op(a, port.num())))
     } else if port == Port::ERA {
@@ -1532,7 +1530,7 @@ impl<'a> Net<'a> {
   pub(crate) fn do_mat(&mut self, trg: Trg) -> (Trg, Trg) {
     let port = trg.target();
     if port.tag() == Num {
-      self.quik.oper += 1;
+      self.rwts.oper += 1;
       self.free_trg(trg);
       let num = port.num();
       let c1 = self.create_node(Ctr, 0);
@@ -1547,7 +1545,7 @@ impl<'a> Net<'a> {
         (Trg::port(c1.p0), Trg::wire(self.create_wire(c2.p2)))
       }
     } else if port == Port::ERA {
-      self.quik.eras += 1;
+      self.rwts.eras += 1;
       self.free_trg(trg);
       (Trg::port(Port::ERA), Trg::port(Port::ERA))
     } else {
@@ -1575,7 +1573,7 @@ impl<'a> Net<'a> {
   pub(crate) fn do_op2_num(&mut self, op: Op, b: u64, trg: Trg) -> Trg {
     let port = trg.target();
     if port.tag() == Num {
-      self.quik.oper += 2;
+      self.rwts.oper += 2;
       self.free_trg(trg);
       Trg::port(Port::new_num(op.op(port.num(), b)))
     } else if port == Port::ERA {
@@ -1594,7 +1592,7 @@ impl<'a> Net<'a> {
   pub(crate) fn do_mat_con_con(&mut self, trg: Trg, out: Trg) -> (Trg, Trg, Trg) {
     let port = trg.target();
     if trg.target().tag() == Num {
-      self.quik.oper += 1;
+      self.rwts.oper += 1;
       self.free_trg(trg);
       let num = port.num();
       if num == 0 {
@@ -1622,7 +1620,7 @@ impl<'a> Net<'a> {
   pub(crate) fn do_mat_con(&mut self, trg: Trg, out: Trg) -> (Trg, Trg) {
     let port = trg.target();
     if trg.target().tag() == Num {
-      self.quik.oper += 1;
+      self.rwts.oper += 1;
       self.free_trg(trg);
       let num = port.num();
       if num == 0 {
@@ -1813,7 +1811,6 @@ impl<'a> Net<'a> {
       tick: usize,                            // current tick
       net: Net<'a>,                           // thread's own net object
       delta: &'a AtomicRewrites,              // global delta rewrites
-      quick: &'a AtomicRewrites,              // global delta rewrites
       share: &'a Vec<(AtomicU64, AtomicU64)>, // global share buffer
       rlens: &'a Vec<AtomicUsize>,            // global redex lengths
       total: &'a AtomicUsize,                 // total redex length
@@ -1825,7 +1822,6 @@ impl<'a> Net<'a> {
     let tlog2 = cores.ilog2() as usize;
     let tids = 1 << tlog2;
     let delta = AtomicRewrites::default(); // delta rewrite counter
-    let quick = AtomicRewrites::default(); // quick rewrite counter
     let rlens = (0 .. tids).map(|_| AtomicUsize::new(0)).collect::<Vec<_>>();
     let share = (0 .. SHARE_LIMIT * tids).map(|_| Default::default()).collect::<Vec<_>>();
     let total = AtomicUsize::new(0); // sum of redex bag length
@@ -1840,7 +1836,6 @@ impl<'a> Net<'a> {
           net,
           tlog2,
           delta: &delta,
-          quick: &quick,
           share: &share,
           rlens: &rlens,
           total: &total,
@@ -1853,7 +1848,6 @@ impl<'a> Net<'a> {
     // Clear redexes and sum stats
     self.rdex.clear();
     delta.add_to(&mut self.rwts);
-    quick.add_to(&mut self.quik);
 
     // Main reduction loop
     #[inline(always)]
@@ -1866,7 +1860,6 @@ impl<'a> Net<'a> {
         }
       }
       ctx.net.rwts.add_to(ctx.delta);
-      ctx.net.quik.add_to(ctx.quick);
     }
 
     // Reduce redexes locally, then share with target
