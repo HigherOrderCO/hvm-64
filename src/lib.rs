@@ -1,3 +1,4 @@
+#![feature(const_type_id, extern_types, inline_const)]
 #![cfg_attr(feature = "trace", feature(const_type_name))]
 #![allow(non_snake_case)]
 

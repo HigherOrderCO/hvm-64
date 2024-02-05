@@ -1,6 +1,6 @@
 use crate::{
-  host::Host,
-  run::{DefType, Instruction, Port, Tag},
+  host::{DefRef, Host},
+  run::{Instruction, Port, Tag},
 };
 use std::{
   fmt::{self, Write},
@@ -33,7 +33,7 @@ fn _compile_host(host: &Host) -> Result<String, fmt::Error> {
     let name = sanitize_name(raw_name);
     write!(
       code,
-      "pub static DEF_{name}: Def = Def {{ labs: LabSet {{ min_safe: {}, bits: Cow::Borrowed(&[",
+      "pub const DEF_{name}: &Def = Def::upcast(const {{ &Def::new(LabSet {{ min_safe: {}, bits: Cow::Borrowed(&[",
       def.labs.min_safe()
     )?;
     for (i, word) in def.labs.bits.iter().enumerate() {
@@ -42,15 +42,15 @@ fn _compile_host(host: &Host) -> Result<String, fmt::Error> {
       }
       write!(code, "0x{:x}", word)?;
     }
-    writeln!(code, "]) }}, inner: DefType::Native(call_{name}) }};")?;
+    writeln!(code, "]) }}, call_{name}) }});")?;
   }
 
   writeln!(code)?;
 
   for (raw_name, def) in &host.defs {
-    compile_def(&mut code, host, raw_name, match &def.inner {
-      DefType::Interpreted(n) => &n,
-      DefType::Native(_) => unreachable!(),
+    compile_def(&mut code, host, raw_name, match &def {
+      DefRef::Owned(n) => &n.data.instr,
+      _ => unreachable!(),
     })?;
   }
 

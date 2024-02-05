@@ -10,9 +10,11 @@
 use crate::{ops::Op, trace, trace::Tracer, util::bi_enum};
 use std::{
   alloc::{self, Layout},
+  any::TypeId,
   borrow::Cow,
   fmt,
   hint::unreachable_unchecked,
+  ops::Deref,
   sync::{Arc, Barrier},
   thread,
 };
@@ -413,13 +415,6 @@ impl Wire {
   }
 }
 
-#[derive(Clone, Debug)]
-#[repr(align(16))]
-pub struct Def {
-  pub labs: LabSet,
-  pub inner: DefType,
-}
-
 /// A bitset representing the set of labels used in a def.
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub struct LabSet {
@@ -431,6 +426,7 @@ pub struct LabSet {
 }
 
 impl LabSet {
+  pub const ALL: LabSet = LabSet { min_safe: Lab::MAX, bits: Cow::Borrowed(&[u64::MAX; 1024]) };
   pub fn add(&mut self, lab: Lab) {
     self.min_safe = self.min_safe.max(lab + 1);
     let index = (lab >> 6) as usize;
@@ -478,13 +474,62 @@ impl FromIterator<Lab> for LabSet {
   }
 }
 
-/// The inner representation of a `Def`.
-#[derive(Clone, Debug)]
-pub enum DefType {
-  /// This definition is implemented with a native function.
-  Native(fn(&mut Net, Port)),
-  /// This definition needs to be interpreted.
-  Interpreted(Vec<Instruction>),
+#[repr(C)]
+#[repr(align(16))]
+pub struct Def<T: ?Sized = Unknown> {
+  pub labs: LabSet,
+  ty: TypeId,
+  call: unsafe fn(*const Def<T>, &mut Net, port: Port),
+  pub data: T,
+}
+
+extern "C" {
+  #[doc(hidden)]
+  pub type Unknown;
+}
+
+pub trait AsDef: 'static {
+  unsafe fn call(slf: *const Def<Self>, net: &mut Net, port: Port);
+}
+
+impl<T> Def<T> {
+  pub const fn new(labs: LabSet, data: T) -> Self
+  where
+    T: AsDef,
+  {
+    Def { labs, ty: TypeId::of::<T>(), call: T::call, data }
+  }
+
+  pub const fn upcast(&self) -> &Def {
+    unsafe { &*(self as *const _ as *const _) }
+  }
+}
+
+impl Def {
+  pub unsafe fn downcast<T: 'static>(slf: *const Def) -> Option<*const Def<T>> {
+    if (*slf).ty == TypeId::of::<T>() { Some(slf.cast()) } else { None }
+  }
+  pub unsafe fn call(slf: *const Def, net: &mut Net, port: Port) {
+    ((*slf).call)(slf as *const _, net, port)
+  }
+}
+
+impl<T> Deref for Def<T> {
+  type Target = Def;
+  fn deref(&self) -> &Self::Target {
+    self.upcast()
+  }
+}
+
+impl<F: Fn(&mut Net, Port) + 'static> AsDef for F {
+  unsafe fn call(slf: *const Def<Self>, net: &mut Net, port: Port) {
+    unsafe { ((*slf).data)(net, port) }
+  }
+}
+
+pub struct InterpretedDef {
+  pub name: String,
+  pub instr: Vec<Instruction>,
 }
 
 /// `Def`s, when not pre-compiled, are represented as lists of instructions.
@@ -1658,12 +1703,16 @@ impl<'a> Net<'a> {
     }
 
     self.rwts.dref += 1;
-    let instructions = match &def.inner {
-      DefType::Native(native) => return native(self, trg),
-      DefType::Interpreted(instructions) => instructions,
-    };
 
-    let mut trgs = unsafe { std::mem::transmute::<_, Trgs>(Trgs(&mut self.trgs[..])) };
+    unsafe { Def::call(port.addr().0 as *const _, self, trg) }
+  }
+}
+
+impl AsDef for InterpretedDef {
+  unsafe fn call(slf: *const Def<Self>, net: &mut Net, trg: Port) {
+    let instructions = unsafe { &(*slf).data.instr };
+
+    let mut trgs = unsafe { std::mem::transmute::<_, Trgs>(Trgs(&mut net.trgs[..])) };
 
     struct Trgs<'a>(&'a mut [Trg]);
 
@@ -1684,34 +1733,34 @@ impl<'a> Net<'a> {
       unsafe {
         match *i {
           Instruction::Const { trg, ref port } => trgs.set_trg(trg, Trg::port(port.clone())),
-          Instruction::Link { a, b } => self.link_trg(trgs.get_trg(a), trgs.get_trg(b)),
+          Instruction::Link { a, b } => net.link_trg(trgs.get_trg(a), trgs.get_trg(b)),
           Instruction::LinkConst { trg, ref port } => {
             if !port.is_principal() {
               unreachable_unchecked()
             }
-            self.link_trg_port(trgs.get_trg(trg), port.clone())
+            net.link_trg_port(trgs.get_trg(trg), port.clone())
           }
           Instruction::Ctr { lab, trg, lft, rgt } => {
-            let (l, r) = self.do_ctr(lab, trgs.get_trg(trg));
+            let (l, r) = net.do_ctr(lab, trgs.get_trg(trg));
             trgs.set_trg(lft, l);
             trgs.set_trg(rgt, r);
           }
           Instruction::Op2 { op, trg, lft, rgt } => {
-            let (l, r) = self.do_op2(op, trgs.get_trg(trg));
+            let (l, r) = net.do_op2(op, trgs.get_trg(trg));
             trgs.set_trg(lft, l);
             trgs.set_trg(rgt, r);
           }
           Instruction::Op1 { op, num, trg, rgt } => {
-            let r = self.do_op1(op, num, trgs.get_trg(trg));
+            let r = net.do_op1(op, num, trgs.get_trg(trg));
             trgs.set_trg(rgt, r);
           }
           Instruction::Mat { trg, lft, rgt } => {
-            let (l, r) = self.do_mat(trgs.get_trg(trg));
+            let (l, r) = net.do_mat(trgs.get_trg(trg));
             trgs.set_trg(lft, l);
             trgs.set_trg(rgt, r);
           }
           Instruction::Wires { av, aw, bv, bw } => {
-            let (avt, awt, bvt, bwt) = self.do_wires();
+            let (avt, awt, bvt, bwt) = net.do_wires();
             trgs.set_trg(av, avt);
             trgs.set_trg(bv, awt);
             trgs.set_trg(aw, bvt);
