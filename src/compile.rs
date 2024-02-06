@@ -17,7 +17,6 @@ fn _compile_host(host: &Host) -> Result<String, fmt::Error> {
 
   writeln!(code, "#![allow(non_upper_case_globals, unused_imports)]")?;
   writeln!(code, "use crate::{{host::{{Host, DefRef}}, run::*, ops::Op::*}};")?;
-  writeln!(code, "use std::borrow::Cow;")?;
   writeln!(code, "")?;
 
   writeln!(code, "pub fn host() -> Host {{")?;
@@ -31,18 +30,14 @@ fn _compile_host(host: &Host) -> Result<String, fmt::Error> {
 
   for (raw_name, def) in &host.defs {
     let name = sanitize_name(raw_name);
-    write!(
-      code,
-      "pub const DEF_{name}: &Def = Def::upcast(const {{ &Def::new(LabSet {{ min_safe: {}, bits: Cow::Borrowed(&[",
-      def.labs.min_safe()
-    )?;
+    write!(code, "pub const DEF_{name}: &Def = const {{ &Def::new(LabSet::from_bits(&[")?;
     for (i, word) in def.labs.bits.iter().enumerate() {
       if i != 0 {
         write!(code, ", ")?;
       }
       write!(code, "0x{:x}", word)?;
     }
-    writeln!(code, "]) }}, call_{name}) }});")?;
+    writeln!(code, "]), call_{name}) }}.upcast();")?;
   }
 
   writeln!(code)?;
@@ -64,16 +59,30 @@ fn compile_def(code: &mut String, host: &Host, raw_name: &str, instr: &[Instruct
   for instr in instr {
     write!(code, "  ")?;
     match instr {
-      Instruction::Const { trg, port } => writeln!(code, "let {trg} = Trg::port({});", print_port(host, port)),
-      Instruction::Link { a, b } => writeln!(code, "net.link_trg({a}, {b});"),
+      Instruction::Const { trg, port } => {
+        writeln!(code, "let {trg} = Trg::port({});", print_port(host, port))
+      }
+      Instruction::Link { a, b } => {
+        writeln!(code, "net.link_trg({a}, {b});")
+      }
       Instruction::LinkConst { trg, port } => {
         writeln!(code, "net.link_trg({trg}, Trg::port({}));", print_port(host, port))
       }
-      Instruction::Ctr { lab, trg, lft, rgt } => writeln!(code, "let ({lft}, {rgt}) = net.do_ctr({lab}, {trg});"),
-      Instruction::Op2 { op, trg, lft, rgt } => writeln!(code, "let ({lft}, {rgt}) = net.do_op2({op:?}, {trg});"),
-      Instruction::Op1 { op, num, trg, rgt } => writeln!(code, "let {rgt} = net.do_op1({op:?}, {num}, {trg});"),
-      Instruction::Mat { trg, lft, rgt } => writeln!(code, "let ({lft}, {rgt}) = net.do_mat({trg});"),
-      Instruction::Wires { av, aw, bv, bw } => writeln!(code, "let ({av}, {aw}, {bv}, {bw}) = net.do_wires();"),
+      Instruction::Ctr { lab, trg, lft, rgt } => {
+        writeln!(code, "let ({lft}, {rgt}) = net.do_ctr({lab}, {trg});")
+      }
+      Instruction::Op2 { op, trg, lft, rgt } => {
+        writeln!(code, "let ({lft}, {rgt}) = net.do_op2({op:?}, {trg});")
+      }
+      Instruction::Op1 { op, num, trg, rgt } => {
+        writeln!(code, "let {rgt} = net.do_op1({op:?}, {num}, {trg});")
+      }
+      Instruction::Mat { trg, lft, rgt } => {
+        writeln!(code, "let ({lft}, {rgt}) = net.do_mat({trg});")
+      }
+      Instruction::Wires { av, aw, bv, bw } => {
+        writeln!(code, "let ({av}, {aw}, {bv}, {bw}) = net.do_wires();")
+      }
     }?;
   }
   writeln!(code, "}}")?;

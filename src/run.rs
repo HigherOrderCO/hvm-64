@@ -426,7 +426,9 @@ pub struct LabSet {
 }
 
 impl LabSet {
+  pub const NONE: LabSet = LabSet { min_safe: 0, bits: Cow::Borrowed(&[]) };
   pub const ALL: LabSet = LabSet { min_safe: Lab::MAX, bits: Cow::Borrowed(&[u64::MAX; 1024]) };
+
   pub fn add(&mut self, lab: Lab) {
     self.min_safe = self.min_safe.max(lab + 1);
     let index = (lab >> 6) as usize;
@@ -461,6 +463,14 @@ impl LabSet {
     if other.bits.len() > bits.len() {
       bits.extend_from_slice(&other.bits[bits.len() ..])
     }
+  }
+
+  pub const fn from_bits(bits: &'static [u64]) -> Self {
+    if bits.is_empty() {
+      return LabSet::NONE;
+    }
+    let min_safe = (bits.len() << 6) as u16 - bits[bits.len() - 1].leading_zeros() as u16;
+    LabSet { min_safe, bits: Cow::Borrowed(bits) }
   }
 }
 
