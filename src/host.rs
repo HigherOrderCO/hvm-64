@@ -8,7 +8,7 @@ use crate::{
 };
 use std::{
   collections::{hash_map::Entry, HashMap},
-  ops::RangeFrom,
+  ops::{DerefMut, RangeFrom},
 };
 
 /// Stores a bidirectional mapping between names and runtime defs.
@@ -24,7 +24,7 @@ pub struct Host {
 /// is stable, even if the `DefRef` moves –- this is why a `Cow` cannot be used
 /// here.
 pub enum DefRef {
-  Owned(Box<Def<InterpretedDef>>),
+  Owned(Box<dyn DerefMut<Target = Def>>),
   Static(&'static Def),
 }
 
@@ -67,7 +67,7 @@ impl Host {
     for (nam, net) in book.iter() {
       let instr = net_to_runtime_def(&self.defs, net);
       match self.defs.get_mut(nam).unwrap() {
-        DefRef::Owned(def) => def.data.instr = instr,
+        DefRef::Owned(def) => def.downcast_mut::<InterpretedDef>().unwrap().data.instr = instr,
         DefRef::Static(_) => unreachable!(),
       }
     }

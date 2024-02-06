@@ -14,7 +14,7 @@ use std::{
   borrow::Cow,
   fmt,
   hint::unreachable_unchecked,
-  ops::Deref,
+  ops::{Deref, DerefMut},
   sync::{Arc, Barrier},
   thread,
 };
@@ -510,15 +510,35 @@ impl<T> Def<T> {
     Def { labs, ty: TypeId::of::<T>(), call: T::call, data }
   }
 
+  #[inline(always)]
   pub const fn upcast(&self) -> &Def {
     unsafe { &*(self as *const _ as *const _) }
+  }
+
+  #[inline(always)]
+  pub fn upcast_mut(&mut self) -> &mut Def {
+    unsafe { &mut *(self as *mut _ as *mut _) }
   }
 }
 
 impl Def {
-  pub unsafe fn downcast<T: 'static>(slf: *const Def) -> Option<*const Def<T>> {
+  #[inline(always)]
+  pub unsafe fn downcast_ptr<T: 'static>(slf: *const Def) -> Option<*const Def<T>> {
     if (*slf).ty == TypeId::of::<T>() { Some(slf.cast()) } else { None }
   }
+  #[inline(always)]
+  pub unsafe fn downcast_mut_ptr<T: 'static>(slf: *mut Def) -> Option<*mut Def<T>> {
+    if (*slf).ty == TypeId::of::<T>() { Some(slf.cast()) } else { None }
+  }
+  #[inline(always)]
+  pub fn downcast_ref<T: 'static>(&self) -> Option<&Def<T>> {
+    unsafe { Def::downcast_ptr(self).map(|x| &*x) }
+  }
+  #[inline(always)]
+  pub fn downcast_mut<T: 'static>(&mut self) -> Option<&mut Def<T>> {
+    unsafe { Def::downcast_mut_ptr(self).map(|x| &mut *x) }
+  }
+  #[inline(always)]
   pub unsafe fn call(slf: *const Def, net: &mut Net, port: Port) {
     ((*slf).call)(slf as *const _, net, port)
   }
@@ -526,8 +546,16 @@ impl Def {
 
 impl<T> Deref for Def<T> {
   type Target = Def;
+  #[inline(always)]
   fn deref(&self) -> &Self::Target {
     self.upcast()
+  }
+}
+
+impl<T> DerefMut for Def<T> {
+  #[inline(always)]
+  fn deref_mut(&mut self) -> &mut Self::Target {
+    self.upcast_mut()
   }
 }
 

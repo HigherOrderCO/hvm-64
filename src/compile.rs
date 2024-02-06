@@ -1,6 +1,6 @@
 use crate::{
-  host::{DefRef, Host},
-  run::{Instruction, Port, Tag},
+  host::Host,
+  run::{Instruction, InterpretedDef, Port, Tag},
 };
 use std::{
   fmt::{self, Write},
@@ -43,10 +43,7 @@ fn _compile_host(host: &Host) -> Result<String, fmt::Error> {
   writeln!(code)?;
 
   for (raw_name, def) in &host.defs {
-    compile_def(&mut code, host, raw_name, match &def {
-      DefRef::Owned(n) => &n.data.instr,
-      _ => unreachable!(),
-    })?;
+    compile_def(&mut code, host, raw_name, &def.downcast_ref::<InterpretedDef>().unwrap().data.instr)?;
   }
 
   Ok(code)
