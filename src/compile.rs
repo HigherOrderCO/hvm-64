@@ -1,6 +1,6 @@
 use crate::{
   host::Host,
-  run::{Instruction, InterpretedDef, Port, Tag},
+  run::{Instruction, InterpretedDef, LabSet, Port, Tag},
 };
 use std::{
   fmt::{self, Write},
@@ -15,55 +15,52 @@ pub fn compile_host(host: &Host) -> String {
 fn _compile_host(host: &Host) -> Result<String, fmt::Error> {
   let mut code = String::default();
 
+  let defs = host
+    .defs
+    .iter()
+    .filter_map(|(name, def)| Some((name, def.downcast_ref::<InterpretedDef>()?)))
+    .map(|(raw_name, def)| (raw_name, sanitize_name(raw_name), def));
+
   writeln!(code, "#![allow(non_upper_case_globals, unused_imports)]")?;
   writeln!(code, "use crate::{{host::{{Host, DefRef}}, run::*, ops::Op::*}};")?;
   writeln!(code, "")?;
 
   writeln!(code, "pub fn host() -> Host {{")?;
   writeln!(code, "  let mut host = Host::default();")?;
-  for raw_name in host.defs.keys() {
-    let name = sanitize_name(raw_name);
+  for (raw_name, name, _) in defs.clone() {
     writeln!(code, r##"  host.insert_def(r#"{raw_name}"#, DefRef::Static(&DEF_{name}));"##)?;
   }
   writeln!(code, "  host")?;
   writeln!(code, "}}\n")?;
 
-  for (raw_name, def) in &host.defs {
-    let name = sanitize_name(raw_name);
-    write!(code, "pub const DEF_{name}: &Def = const {{ &Def::new(LabSet::from_bits(&[")?;
-    for (i, word) in def.labs.bits.iter().enumerate() {
-      if i != 0 {
-        write!(code, ", ")?;
-      }
-      write!(code, "0x{:x}", word)?;
-    }
-    writeln!(code, "]), call_{name}) }}.upcast();")?;
+  for (_, name, def) in defs.clone() {
+    let labs = compile_lab_set(&def.labs)?;
+    write!(code, "pub const DEF_{name}: &Def = const {{ &Def::new({labs}, call_{name}) }}.upcast();")?;
   }
 
   writeln!(code)?;
 
-  for (raw_name, def) in &host.defs {
-    compile_def(&mut code, host, raw_name, &def.downcast_ref::<InterpretedDef>().unwrap().data.instr)?;
+  for (_, name, def) in defs {
+    compile_def(&mut code, host, &name, &def.data.instr)?;
   }
 
   Ok(code)
 }
 
-fn compile_def(code: &mut String, host: &Host, raw_name: &str, instr: &[Instruction]) -> fmt::Result {
-  let name = sanitize_name(raw_name);
+fn compile_def(code: &mut String, host: &Host, name: &str, instr: &[Instruction]) -> fmt::Result {
   writeln!(code, "pub fn call_{name}(net: &mut Net, to: Port) {{")?;
   writeln!(code, "  let t0 = Trg::port(to);")?;
   for instr in instr {
     write!(code, "  ")?;
     match instr {
       Instruction::Const { trg, port } => {
-        writeln!(code, "let {trg} = Trg::port({});", print_port(host, port))
+        writeln!(code, "let {trg} = Trg::port({});", compile_port(host, port))
       }
       Instruction::Link { a, b } => {
         writeln!(code, "net.link_trg({a}, {b});")
       }
       Instruction::LinkConst { trg, port } => {
-        writeln!(code, "net.link_trg({trg}, Trg::port({}));", print_port(host, port))
+        writeln!(code, "net.link_trg({trg}, Trg::port({}));", compile_port(host, port))
       }
       Instruction::Ctr { lab, trg, lft, rgt } => {
         writeln!(code, "let ({lft}, {rgt}) = net.do_ctr({lab}, {trg});")
@@ -88,7 +85,7 @@ fn compile_def(code: &mut String, host: &Host, raw_name: &str, instr: &[Instruct
   Ok(())
 }
 
-fn print_port(host: &Host, port: &Port) -> String {
+fn compile_port(host: &Host, port: &Port) -> String {
   if port == &Port::ERA {
     "Port::ERA".to_owned()
   } else if port.tag() == Tag::Ref {
@@ -114,4 +111,22 @@ fn sanitize_name(name: &str) -> String {
     write!(sanitized, "__{:016x}", hash).unwrap();
     sanitized
   }
+}
+
+fn compile_lab_set(labs: &LabSet) -> Result<String, fmt::Error> {
+  if labs == &LabSet::ALL {
+    return Ok("LabSet::ALL".to_owned());
+  }
+  if labs == &LabSet::NONE {
+    return Ok("LabSet::NONE".to_owned());
+  }
+  let mut str = "LabSet::from_bits(&[".to_owned();
+  for (i, word) in labs.bits.iter().enumerate() {
+    if i != 0 {
+      write!(str, ", ")?;
+    }
+    write!(str, "0x{:x}", word)?;
+  }
+  str.push_str("])");
+  Ok(str)
 }

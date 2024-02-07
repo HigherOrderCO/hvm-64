@@ -143,6 +143,7 @@ fn compile_executable(file_name: &str, host: &host::Host) -> Result<(), io::Erro
   fs::write(".hvm/src/main.rs", include_str!("../src/main.rs"))?;
   fs::write(".hvm/src/ops.rs", include_str!("../src/ops.rs"))?;
   fs::write(".hvm/src/run.rs", include_str!("../src/run.rs"))?;
+  fs::write(".hvm/src/stdlib.rs", include_str!("../src/stdlib.rs"))?;
   fs::write(".hvm/src/trace.rs", include_str!("../src/trace.rs"))?;
   fs::write(".hvm/src/util.rs", include_str!("../src/util.rs"))?;
   fs::write(".hvm/src/gen.rs", gen)?;
