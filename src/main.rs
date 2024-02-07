@@ -1,10 +1,6 @@
 #![cfg_attr(feature = "trace", feature(const_type_name))]
 
-use hvmc::{
-  run::{Def, LabSet},
-  stdlib::LogDef,
-  *,
-};
+use hvmc::*;
 
 use std::{
   collections::HashSet,
@@ -111,15 +107,12 @@ fn load(file: &str) -> Arc<Mutex<host::Host>> {
   let host = Arc::new(Mutex::new(host::Host::default()));
   host.lock().unwrap().insert_def(
     "HVM.Log",
-    host::DefRef::Owned(Box::new(Def::new(
-      LabSet::ALL,
-      LogDef({
-        let host = Arc::downgrade(&host);
-        move |wire| {
-          eprintln!("{}", host.upgrade().unwrap().lock().unwrap().readback_tree(&wire));
-        }
-      }),
-    ))),
+    host::DefRef::Owned(Box::new(stdlib::LogDef::new({
+      let host = Arc::downgrade(&host);
+      move |wire| {
+        println!("{}", host.upgrade().unwrap().lock().unwrap().readback_tree(&wire));
+      }
+    }))),
   );
   host.lock().unwrap().insert_book(&file.parse().expect("parse error"));
   host
