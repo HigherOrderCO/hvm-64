@@ -264,7 +264,7 @@ fn net_to_runtime_def(defs: &HashMap<String, DefRef>, net: &Net) -> Vec<Instruct
 /// # Algorithm
 ///
 /// The simplest algorithm to calculate labels would be to go to each def,
-/// recursively traverse the tree (going into references), and collecting all of
+/// recursively traverse the tree (going into references), and collect all of
 /// the labels.
 ///
 /// Now, this algorithm will not terminate for recursive definitions, but fixing

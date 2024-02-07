@@ -454,7 +454,7 @@ impl LabSet {
     unsafe { self.bits.get_unchecked(index) & 1 << bit != 0 }
   }
 
-  /// Adds of of the labels in `other` to this set.
+  /// Adds all of the labels in `other` to this set.
   pub fn union(&mut self, other: &LabSet) {
     self.min_safe = self.min_safe.max(other.min_safe);
     let bits = self.bits.to_mut();
