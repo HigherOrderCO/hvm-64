@@ -23,7 +23,7 @@ panic = "abort"
 debug = "full"
 
 [dependencies]
-nohash-hasher = { version = "0.2.0", optional = true }
+nohash-hasher = { version = "0.2.0" }
 
 ##--COMPILER-CUTOFF--##
 
@@ -31,7 +31,7 @@ nohash-hasher = { version = "0.2.0", optional = true }
 default = ["_full_cli"]
 trace = []
 _full_cli = []
-_fuzz = ["dep:nohash-hasher"]
+_fuzz = []
 _fuzz_no_free = ["_fuzz"]
 
 [dev-dependencies]

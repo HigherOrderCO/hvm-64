@@ -1,13 +1,13 @@
 use std::sync::Arc;
 
-use crate::run::{AsDef, Def, LabSet, Net, Port, Tag, Trg, Wire};
+use crate::run::{AsDef, Def, LabSet, Mode, Net, Port, Tag, Trg, Wire};
 
-fn call_identity(net: &mut Net, port: Port) {
+fn call_identity<M: Mode>(net: &mut Net<M>, port: Port) {
   let (a, b) = net.do_ctr(0, Trg::port(port));
   net.link_trg(a, b);
 }
 
-pub const IDENTITY: &Def = const { &Def::new(LabSet::from_bits(&[1]), call_identity) }.upcast();
+pub const IDENTITY: &Def = const { &Def::new(LabSet::from_bits(&[1]), (call_identity, call_identity)) }.upcast();
 
 pub struct LogDef<F>(F);
 
@@ -18,7 +18,7 @@ impl<F: Fn(Wire) + Clone + Send + Sync + 'static> LogDef<F> {
 }
 
 impl<F: Fn(Wire) + Clone + Send + Sync + 'static> AsDef for LogDef<F> {
-  unsafe fn call(def: *const Def<Self>, net: &mut Net, port: Port) {
+  unsafe fn call<M: Mode>(def: *const Def<Self>, net: &mut Net<M>, port: Port) {
     let def = unsafe { &*def };
     let (arg, seq) = net.do_ctr(0, Trg::port(port));
     let (wire, port) = net.create_wire();
@@ -34,7 +34,7 @@ struct Logger<F> {
 }
 
 impl<F: Fn(Wire)> Logger<F> {
-  fn maybe_log(self: Arc<Self>, net: &mut Net) {
+  fn maybe_log<M: Mode>(self: Arc<Self>, net: &mut Net<M>) {
     let Some(slf) = Arc::into_inner(self) else { return };
     (slf.f)(slf.root.clone());
     net.link_wire_port(slf.root, Port::ERA);
@@ -54,7 +54,7 @@ impl<F: Fn(Wire) + Send + Sync + 'static> ActiveLogDef<F> {
 }
 
 impl<F: Fn(Wire) + Send + Sync + 'static> AsDef for ActiveLogDef<F> {
-  unsafe fn call(def: *const Def<Self>, net: &mut Net, port: Port) {
+  unsafe fn call<M: Mode>(def: *const Def<Self>, net: &mut Net<M>, port: Port) {
     let def = *Box::from_raw(def as *mut Def<Self>);
     match port.tag() {
       Tag::Red | Tag::Var => unreachable!(),

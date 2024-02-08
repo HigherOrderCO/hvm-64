@@ -35,7 +35,7 @@ fn _compile_host(host: &Host) -> Result<String, fmt::Error> {
 
   for (_, name, def) in defs.clone() {
     let labs = compile_lab_set(&def.labs)?;
-    write!(code, "pub const DEF_{name}: &Def = const {{ &Def::new({labs}, call_{name}) }}.upcast();")?;
+    write!(code, "pub const DEF_{name}: &Def = const {{ &Def::new({labs}, (call_{name}, call_{name})) }}.upcast();")?;
   }
 
   writeln!(code)?;
@@ -48,7 +48,7 @@ fn _compile_host(host: &Host) -> Result<String, fmt::Error> {
 }
 
 fn compile_def(code: &mut String, host: &Host, name: &str, instr: &[Instruction]) -> fmt::Result {
-  writeln!(code, "pub fn call_{name}(net: &mut Net, to: Port) {{")?;
+  writeln!(code, "pub fn call_{name}<M: Mode>(net: &mut Net<M>, to: Port) {{")?;
   writeln!(code, "  let t0 = Trg::port(to);")?;
   for instr in instr {
     write!(code, "  ")?;

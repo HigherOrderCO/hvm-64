@@ -3,7 +3,7 @@
 
 use crate::{
   ast::{Book, Net, Tree},
-  run::{self, Addr, Def, Instruction, InterpretedDef, LabSet, Port, Tag, TrgId, Wire},
+  run::{self, Addr, Def, Instruction, InterpretedDef, LabSet, Mode, Port, Tag, TrgId, Wire},
   util::create_var,
 };
 use std::{
@@ -89,7 +89,7 @@ impl Host {
   /// resulting net, as it is impossible to read these back from the runtime net
   /// representation. In the case of viscous circles, this may result in unbound
   /// variables.
-  pub fn readback(&self, rt_net: &run::Net) -> Net {
+  pub fn readback<M: Mode>(&self, rt_net: &run::Net<M>) -> Net {
     let mut state = Readback { host: self, vars: Default::default(), var_id: 0 .. };
     let mut net = Net::default();
 

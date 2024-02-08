@@ -14,6 +14,7 @@ use std::{
   borrow::Cow,
   fmt,
   hint::unreachable_unchecked,
+  marker::PhantomData,
   ops::{Deref, DerefMut},
   sync::{Arc, Barrier},
   thread,
@@ -127,6 +128,7 @@ bi_enum! {
   }
 }
 
+use nohash_hasher::IntMap;
 use Tag::*;
 
 pub type Lab = u16;
@@ -490,7 +492,8 @@ impl FromIterator<Lab> for LabSet {
 pub struct Def<T: ?Sized + Send + Sync = Unknown> {
   pub labs: LabSet,
   ty: TypeId,
-  call: unsafe fn(*const Def<T>, &mut Net, port: Port),
+  call_strict: unsafe fn(*const Def<T>, &mut Net<Strict>, port: Port),
+  call_lazy: unsafe fn(*const Def<T>, &mut Net<Lazy>, port: Port),
   pub data: T,
 }
 
@@ -503,7 +506,7 @@ unsafe impl Send for Unknown {}
 unsafe impl Sync for Unknown {}
 
 pub trait AsDef: 'static + Send + Sync {
-  unsafe fn call(slf: *const Def<Self>, net: &mut Net, port: Port);
+  unsafe fn call<M: Mode>(slf: *const Def<Self>, net: &mut Net<M>, port: Port);
 }
 
 impl<T: Send + Sync> Def<T> {
@@ -511,7 +514,7 @@ impl<T: Send + Sync> Def<T> {
   where
     T: AsDef,
   {
-    Def { labs, ty: TypeId::of::<T>(), call: T::call, data }
+    Def { labs, ty: TypeId::of::<T>(), call_lazy: T::call::<Lazy>, call_strict: T::call::<Strict>, data }
   }
 
   #[inline(always)]
@@ -543,8 +546,12 @@ impl Def {
     unsafe { Def::downcast_mut_ptr(self).map(|x| &mut *x) }
   }
   #[inline(always)]
-  pub unsafe fn call(slf: *const Def, net: &mut Net, port: Port) {
-    ((*slf).call)(slf as *const _, net, port)
+  pub unsafe fn call<M: Mode>(slf: *const Def, net: &mut Net<M>, port: Port) {
+    if M::LAZY {
+      ((*slf).call_lazy)(slf as *const _, std::mem::transmute(net), port)
+    } else {
+      ((*slf).call_strict)(slf as *const _, std::mem::transmute(net), port)
+    }
   }
 }
 
@@ -563,9 +570,15 @@ impl<T: Send + Sync> DerefMut for Def<T> {
   }
 }
 
-impl<F: Fn(&mut Net, Port) + Send + Sync + 'static> AsDef for F {
-  unsafe fn call(slf: *const Def<Self>, net: &mut Net, port: Port) {
-    unsafe { ((*slf).data)(net, port) }
+impl<F: Fn(&mut Net<Strict>, Port) + Send + Sync + 'static, G: Fn(&mut Net<Lazy>, Port) + Send + Sync + 'static> AsDef
+  for (F, G)
+{
+  unsafe fn call<M: Mode>(slf: *const Def<Self>, net: &mut Net<M>, port: Port) {
+    if M::LAZY {
+      ((*slf).data.1)(std::mem::transmute::<_, &mut Net<Lazy>>(net), port)
+    } else {
+      ((*slf).data.0)(std::mem::transmute::<_, &mut Net<Strict>>(net), port)
+    }
   }
 }
 
@@ -716,12 +729,24 @@ impl fmt::Debug for TrgId {
 #[derive(Default)]
 pub struct Node(pub AtomicU64, pub AtomicU64);
 
+pub struct Lazy;
+pub struct Strict;
+pub unsafe trait Mode: Send + Sync + 'static {
+  const LAZY: bool;
+}
+unsafe impl Mode for Lazy {
+  const LAZY: bool = true;
+}
+unsafe impl Mode for Strict {
+  const LAZY: bool = false;
+}
+
 // -----------
 //   The Net
 // -----------
 
 // A interaction combinator net.
-pub struct Net<'a> {
+pub struct Net<'a, M: Mode> {
   pub tid: usize,              // thread id
   pub tids: usize,             // thread count
   pub rdex: Vec<(Port, Port)>, // redexes
@@ -732,8 +757,10 @@ pub struct Net<'a> {
   pub area: &'a [Node],
   pub head: Addr,
   pub next: usize,
+  pub uplinks: IntMap<Addr, (Port, Port)>,
   //
   tracer: Tracer,
+  _mode: PhantomData<M>,
 }
 
 /// Tracks the number of rewrites, categorized by type.
@@ -772,7 +799,7 @@ impl AtomicRewrites {
   }
 }
 
-impl<'a> Net<'a> {
+impl<'a, M: Mode> Net<'a, M> {
   /// Creates an empty net with a given heap.
   pub fn new(area: &'a [Node]) -> Self {
     let mut net = Net::new_with_root(area, Wire(std::ptr::null()));
@@ -791,7 +818,9 @@ impl<'a> Net<'a> {
       area,
       head: Addr::NULL,
       next: 0,
+      uplinks: Default::default(),
       tracer: Tracer::default(),
+      _mode: PhantomData,
     }
   }
 
@@ -807,7 +836,7 @@ impl<'a> Net<'a> {
 //   Allocator
 // -------------
 
-impl<'a> Net<'a> {
+impl<'a, M: Mode> Net<'a, M> {
   pub fn init_heap(size: usize) -> Box<[Node]> {
     unsafe {
       Box::from_raw(core::ptr::slice_from_raw_parts_mut(
@@ -879,7 +908,7 @@ pub struct CreatedNode {
   pub p2: Port,
 }
 
-impl<'a> Net<'a> {
+impl<'a, M: Mode> Net<'a, M> {
   #[inline(always)]
   pub fn create_node(&mut self, tag: Tag, lab: Lab) -> CreatedNode {
     let addr = self.alloc();
@@ -919,7 +948,7 @@ impl<'a> Net<'a> {
 ///
 /// Linking wires must be done atomically, but linking ports can be done
 /// non-atomically (because they must be locked).
-impl<'a> Net<'a> {
+impl<'a, M: Mode> Net<'a, M> {
   /// Links two ports.
   #[inline(always)]
   pub fn link_port_port(&mut self, a_port: Port, b_port: Port) {
@@ -1142,7 +1171,7 @@ impl<'a> Net<'a> {
 //   Interaction Rules
 // ---------------------
 
-impl<'a> Net<'a> {
+impl<'a, M: Mode> Net<'a, M> {
   /// Performs an interaction between two connected principal ports.
   #[inline(always)]
   pub fn interact(&mut self, a: Port, b: Port) {
@@ -1564,7 +1593,7 @@ impl<'a> Net<'a> {
 //   Instructions
 // ----------------
 
-impl<'a> Net<'a> {
+impl<'a, M: Mode> Net<'a, M> {
   /// `trg ~ {#lab x y}`
   #[inline(always)]
   pub(crate) fn do_ctr(&mut self, lab: Lab, trg: Trg) -> (Trg, Trg) {
@@ -1742,7 +1771,7 @@ impl<'a> Net<'a> {
   }
 }
 
-impl<'a> Net<'a> {
+impl<'a, M: Mode> Net<'a, M> {
   /// Expands a `Ref` node connected to `trg`.
   #[inline(never)]
   pub fn call(&mut self, port: Port, trg: Port) {
@@ -1761,7 +1790,7 @@ impl<'a> Net<'a> {
 }
 
 impl AsDef for InterpretedDef {
-  unsafe fn call(slf: *const Def<Self>, net: &mut Net, trg: Port) {
+  unsafe fn call<M: Mode>(slf: *const Def<Self>, net: &mut Net<M>, trg: Port) {
     let instructions = unsafe { &(*slf).data.instr };
 
     let mut trgs = unsafe { std::mem::transmute::<_, Trgs>(Trgs(&mut net.trgs[..])) };
@@ -1828,7 +1857,7 @@ impl AsDef for InterpretedDef {
 //   Normalization
 // -----------------
 
-impl<'a> Net<'a> {
+impl<'a, M: Mode> Net<'a, M> {
   /// Reduces at most `limit` redexes.
   #[inline(always)]
   pub fn reduce(&mut self, limit: usize) -> usize {
@@ -1846,7 +1875,7 @@ impl<'a> Net<'a> {
   /// Expands `Ref` nodes in the tree connected to `root`.
   #[inline(always)]
   pub fn expand(&mut self) {
-    fn go(net: &mut Net, wire: Wire, len: usize, key: usize) {
+    fn go<M: Mode>(net: &mut Net<M>, wire: Wire, len: usize, key: usize) {
       trace!(net.tracer, wire);
       let port = wire.load_target();
       trace!(net.tracer, port);
@@ -1906,11 +1935,11 @@ impl<'a> Net<'a> {
     const LOCAL_LIMIT: usize = 1 << 18; // max local rewrites per epoch
 
     // Local thread context
-    struct ThreadContext<'a> {
+    struct ThreadContext<'a, M: Mode> {
       tid: usize,                             // thread id
       tlog2: usize,                           // log2 of thread count
       tick: usize,                            // current tick
-      net: Net<'a>,                           // thread's own net object
+      net: Net<'a, M>,                        // thread's own net object
       delta: &'a AtomicRewrites,              // global delta rewrites
       share: &'a Vec<(AtomicU64, AtomicU64)>, // global share buffer
       rlens: &'a Vec<AtomicUsize>,            // global redex lengths
@@ -1952,7 +1981,7 @@ impl<'a> Net<'a> {
 
     // Main reduction loop
     #[inline(always)]
-    fn main(ctx: &mut ThreadContext) {
+    fn main<M: Mode>(ctx: &mut ThreadContext<M>) {
       loop {
         reduce(ctx);
         ctx.net.expand();
@@ -1965,7 +1994,7 @@ impl<'a> Net<'a> {
 
     // Reduce redexes locally, then share with target
     #[inline(always)]
-    fn reduce(ctx: &mut ThreadContext) {
+    fn reduce<M: Mode>(ctx: &mut ThreadContext<M>) {
       loop {
         ctx.net.reduce(LOCAL_LIMIT);
         if count(ctx) == 0 {
@@ -1979,7 +2008,7 @@ impl<'a> Net<'a> {
 
     // Count total redexes (and populate 'rlens')
     #[inline(always)]
-    fn count(ctx: &mut ThreadContext) -> usize {
+    fn count<M: Mode>(ctx: &mut ThreadContext<M>) -> usize {
       ctx.barry.wait();
       ctx.total.store(0, Relaxed);
       ctx.barry.wait();
@@ -1991,7 +2020,7 @@ impl<'a> Net<'a> {
 
     // Share redexes with target thread
     #[inline(always)]
-    fn split(ctx: &mut ThreadContext, plog2: usize) {
+    fn split<M: Mode>(ctx: &mut ThreadContext<M>, plog2: usize) {
       unsafe {
         let side = (ctx.tid >> (plog2 - 1 - (ctx.tick % plog2))) & 1;
         let shift = (1 << (plog2 - 1)) >> (ctx.tick % plog2);

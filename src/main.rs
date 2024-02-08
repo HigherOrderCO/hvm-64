@@ -1,6 +1,6 @@
 #![cfg_attr(feature = "trace", feature(const_type_name))]
 
-use hvmc::*;
+use hvmc::{run::Mode, *};
 
 use std::{
   collections::HashSet,
@@ -61,8 +61,8 @@ fn full_main(args: &[String]) {
 
 fn run(opts: &[String], host: Arc<Mutex<host::Host>>) {
   let opts = opts.iter().map(|x| &**x).collect::<HashSet<_>>();
-  let data = run::Net::init_heap(1 << 32);
-  let mut net = run::Net::new(&data);
+  let data = run::Net::<run::Strict>::init_heap(1 << 32);
+  let mut net = run::Net::<run::Strict>::new(&data);
   net.boot(&host.lock().unwrap().defs["main"]);
   let start_time = Instant::now();
   if opts.contains("-1") {
@@ -77,7 +77,7 @@ fn run(opts: &[String], host: Arc<Mutex<host::Host>>) {
   }
 }
 
-fn print_stats(net: &run::Net, elapsed: Duration) {
+fn print_stats<M: Mode>(net: &run::Net<M>, elapsed: Duration) {
   eprintln!("RWTS   : {:>15}", pretty_num(net.rwts.total()));
   eprintln!("- ANNI : {:>15}", pretty_num(net.rwts.anni));
   eprintln!("- COMM : {:>15}", pretty_num(net.rwts.comm));
