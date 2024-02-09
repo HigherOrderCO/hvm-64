@@ -128,7 +128,7 @@ bi_enum! {
   }
 }
 
-use nohash_hasher::IntMap;
+use nohash_hasher::{IntMap, IsEnabled};
 use Tag::*;
 
 pub type Lab = u16;
@@ -248,6 +248,10 @@ impl Port {
   #[inline(always)]
   fn unredirect(&self) -> Port {
     Port::new(Var, 0, self.addr())
+  }
+
+  fn has_head(&self) -> bool {
+    self.tag() > Num
   }
 }
 
@@ -642,7 +646,13 @@ pub enum Instruction {
 /// To store this compactly, we reuse the `Red` tag to indicate if this is a
 /// wire.
 #[derive(Clone)]
-pub struct Trg(Port);
+pub struct Trg(pub(crate) Port);
+
+impl fmt::Debug for Trg {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    if self.is_wire() { self.clone().as_wire().fmt(f) } else { self.0.fmt(f) }
+  }
+}
 
 impl Trg {
   /// Creates a `Trg` from a port.
@@ -741,6 +751,13 @@ unsafe impl Mode for Strict {
   const LAZY: bool = false;
 }
 
+impl IsEnabled for Addr {}
+
+struct Head {
+  this: Port,
+  targ: Port,
+}
+
 // -----------
 //   The Net
 // -----------
@@ -757,7 +774,7 @@ pub struct Net<'a, M: Mode> {
   pub area: &'a [Node],
   pub head: Addr,
   pub next: usize,
-  pub uplinks: IntMap<Addr, (Port, Port)>,
+  pub heads: IntMap<Addr, Head>,
   //
   tracer: Tracer,
   _mode: PhantomData<M>,
@@ -818,7 +835,7 @@ impl<'a, M: Mode> Net<'a, M> {
       area,
       head: Addr::NULL,
       next: 0,
-      uplinks: Default::default(),
+      heads: Default::default(),
       tracer: Tracer::default(),
       _mode: PhantomData,
     }
@@ -1000,8 +1017,11 @@ impl<'a, M: Mode> Net<'a, M> {
     trace!(self.tracer, a, b);
     if a.is_skippable() && b.is_skippable() {
       self.rwts.eras += 1;
-    } else {
+    } else if !M::LAZY {
       self.rdex.push((a, b));
+    } else {
+      self.set_pri(a.clone(), b.clone());
+      self.set_pri(b.clone(), a.clone());
     }
   }
 
@@ -1011,6 +1031,10 @@ impl<'a, M: Mode> Net<'a, M> {
     trace!(self.tracer, a_port, b_port);
     if a_port.tag() == Var {
       a_port.wire().set_target(b_port);
+    } else {
+      if M::LAZY {
+        self.set_pri(a_port, b_port);
+      }
     }
   }
 
@@ -1043,6 +1067,9 @@ impl<'a, M: Mode> Net<'a, M> {
       }
     } else {
       self.half_free(a_wire.addr());
+      if M::LAZY {
+        self.set_pri(a_port, b_port);
+      }
     }
   }
 
@@ -1164,6 +1191,27 @@ impl<'a, M: Mode> Net<'a, M> {
       (false, true) => self.link_wire_port(b.as_wire(), a.as_port()),
       (false, false) => self.link_port_port(a.as_port(), b.as_port()),
     }
+  }
+
+  fn get_pri(&self, addr: Addr) -> &Head {
+    assert!(M::LAZY);
+    &self.heads[&addr]
+  }
+
+  fn set_pri(&mut self, ptr: Port, trg: Port) {
+    assert!(M::LAZY);
+    trace!(self.tracer, ptr, trg);
+    if ptr.has_head() {
+      self.heads.insert(ptr.addr(), Head { this: ptr, targ: trg });
+    }
+  }
+
+  fn get_target_full(&self, port: Port) -> Port {
+    assert!(M::LAZY);
+    if !port.is_principal() {
+      return port.wire().load_target();
+    }
+    self.heads[&port.addr()].targ.clone()
   }
 }
 
@@ -1598,13 +1646,14 @@ impl<'a, M: Mode> Net<'a, M> {
   #[inline(always)]
   pub(crate) fn do_ctr(&mut self, lab: Lab, trg: Trg) -> (Trg, Trg) {
     let port = trg.target();
-    if port.tag() == Ctr && port.lab() == lab {
+    if !M::LAZY && port.tag() == Ctr && port.lab() == lab {
+      trace!(self.tracer, "fast");
       self.free_trg(trg);
       let node = port.consume_node();
       self.rwts.anni += 1;
       (Trg::wire(node.p1), Trg::wire(node.p2))
     // TODO: fast copy?
-    // } else if port.tag() == Num || port.tag() == Ref && lab >= port.lab() {
+    // } else if !M::LAZY && port.tag() == Num || port.tag() == Ref && lab >= port.lab() {
     //   self.rwts.comm += 1;
     //   (Trg::port(port.clone()), Trg::port(port))
     } else {
@@ -1617,14 +1666,15 @@ impl<'a, M: Mode> Net<'a, M> {
   /// `trg ~ <op x y>`
   #[inline(always)]
   pub(crate) fn do_op2(&mut self, op: Op, trg: Trg) -> (Trg, Trg) {
+    trace!(self.tracer, op, trg);
     let port = trg.target();
-    if port.tag() == Num {
+    if !M::LAZY && port.tag() == Num {
       self.rwts.oper += 1;
       self.free_trg(trg);
       let n = self.create_node(Op1, op as Lab);
       n.p1.wire().set_target(Port::new_num(port.num()));
       (Trg::port(n.p0), Trg::port(n.p2))
-    } else if port == Port::ERA {
+    } else if !M::LAZY && port == Port::ERA {
       (Trg::port(Port::ERA), Trg::port(Port::ERA))
     } else {
       let n = self.create_node(Op2, op as Lab);
@@ -1637,11 +1687,11 @@ impl<'a, M: Mode> Net<'a, M> {
   #[inline(always)]
   pub(crate) fn do_op1(&mut self, op: Op, a: u64, trg: Trg) -> Trg {
     let port = trg.target();
-    if trg.target().tag() == Num {
+    if !M::LAZY && trg.target().tag() == Num {
       self.rwts.oper += 1;
       self.free_trg(trg);
       Trg::port(Port::new_num(op.op(a, port.num())))
-    } else if port == Port::ERA {
+    } else if !M::LAZY && port == Port::ERA {
       Trg::port(Port::ERA)
     } else {
       let n = self.create_node(Op1, op as Lab);
@@ -1655,7 +1705,7 @@ impl<'a, M: Mode> Net<'a, M> {
   #[inline(always)]
   pub(crate) fn do_mat(&mut self, trg: Trg) -> (Trg, Trg) {
     let port = trg.target();
-    if port.tag() == Num {
+    if !M::LAZY && port.tag() == Num {
       self.rwts.oper += 1;
       self.free_trg(trg);
       let num = port.num();
@@ -1670,7 +1720,7 @@ impl<'a, M: Mode> Net<'a, M> {
         self.link_port_port(c2.p1, Port::new_num(num - 1));
         (Trg::port(c1.p0), Trg::wire(self.create_wire_to(c2.p2)))
       }
-    } else if port == Port::ERA {
+    } else if !M::LAZY && port == Port::ERA {
       self.rwts.eras += 1;
       self.free_trg(trg);
       (Trg::port(Port::ERA), Trg::port(Port::ERA))
@@ -1698,11 +1748,11 @@ impl<'a, M: Mode> Net<'a, M> {
   #[allow(unused)] // TODO: emit this instruction
   pub(crate) fn do_op2_num(&mut self, op: Op, b: u64, trg: Trg) -> Trg {
     let port = trg.target();
-    if port.tag() == Num {
+    if !M::LAZY && port.tag() == Num {
       self.rwts.oper += 2;
       self.free_trg(trg);
       Trg::port(Port::new_num(op.op(port.num(), b)))
-    } else if port == Port::ERA {
+    } else if !M::LAZY && port == Port::ERA {
       Trg::port(Port::ERA)
     } else {
       let n = self.create_node(Op2, op as Lab);
@@ -1717,7 +1767,7 @@ impl<'a, M: Mode> Net<'a, M> {
   #[allow(unused)] // TODO: emit this instruction
   pub(crate) fn do_mat_con_con(&mut self, trg: Trg, out: Trg) -> (Trg, Trg, Trg) {
     let port = trg.target();
-    if trg.target().tag() == Num {
+    if !M::LAZY && trg.target().tag() == Num {
       self.rwts.oper += 1;
       self.free_trg(trg);
       let num = port.num();
@@ -1726,7 +1776,7 @@ impl<'a, M: Mode> Net<'a, M> {
       } else {
         (Trg::port(Port::ERA), Trg::port(Port::new_num(num - 1)), out)
       }
-    } else if port == Port::ERA {
+    } else if !M::LAZY && port == Port::ERA {
       self.link_trg_port(out, Port::ERA);
       (Trg::port(Port::ERA), Trg::port(Port::ERA), Trg::port(Port::ERA))
     } else {
@@ -1843,8 +1893,8 @@ impl AsDef for InterpretedDef {
           Instruction::Wires { av, aw, bv, bw } => {
             let (avt, awt, bvt, bwt) = net.do_wires();
             trgs.set_trg(av, avt);
-            trgs.set_trg(bv, awt);
-            trgs.set_trg(aw, bvt);
+            trgs.set_trg(aw, awt);
+            trgs.set_trg(bv, bvt);
             trgs.set_trg(bw, bwt);
           }
         }
@@ -1875,6 +1925,7 @@ impl<'a, M: Mode> Net<'a, M> {
   /// Expands `Ref` nodes in the tree connected to `root`.
   #[inline(always)]
   pub fn expand(&mut self) {
+    assert!(!M::LAZY);
     fn go<M: Mode>(net: &mut Net<M>, wire: Wire, len: usize, key: usize) {
       trace!(net.tracer, wire);
       let port = wire.load_target();
@@ -1901,15 +1952,6 @@ impl<'a, M: Mode> Net<'a, M> {
     go(self, self.root.clone(), 1, self.tid);
   }
 
-  /// Reduces a net to normal form.
-  pub fn normal(&mut self) {
-    self.expand();
-    while !self.rdex.is_empty() {
-      self.reduce(usize::MAX);
-      self.expand();
-    }
-  }
-
   /// Forks the net into `tids` child nets, for parallel operation.
   pub fn fork(&mut self, tids: usize) -> impl Iterator<Item = Self> + '_ {
     let mut redexes = std::mem::take(&mut self.rdex).into_iter();
@@ -1931,6 +1973,7 @@ impl<'a, M: Mode> Net<'a, M> {
 
   // Evaluates a term to normal form in parallel
   pub fn parallel_normal(&mut self) {
+    assert!(!M::LAZY);
     const SHARE_LIMIT: usize = 1 << 12; // max share redexes per split
     const LOCAL_LIMIT: usize = 1 << 18; // max local rewrites per epoch
 
@@ -2054,6 +2097,75 @@ impl<'a, M: Mode> Net<'a, M> {
           let got = ctx.share.get_unchecked(a_tid * SHARE_LIMIT + i);
           ctx.net.rdex.push((Port(got.0.load(Relaxed)), Port(got.1.load(Relaxed))));
         }
+      }
+    }
+  }
+
+  // Lazy mode weak head normalizer
+  #[inline(always)]
+  pub fn weak_normal(&mut self, mut prev: Port) -> Port {
+    let mut path: Vec<Port> = vec![];
+
+    loop {
+      trace!(self.tracer, prev);
+      // Load ptrs
+      let next = self.get_target_full(prev.clone());
+      trace!(self.tracer, next);
+
+      // If next is ref, dereferences
+      if next.tag() == Ref {
+        self.call(next, prev.clone());
+        continue;
+      }
+
+      // If next is root, stop.
+      if next == Port::new_var(self.root.addr()) {
+        break;
+      }
+
+      // If next is a main port...
+      if next.is_principal() {
+        // If prev is a main port, reduce the active pair.
+        if prev.is_principal() {
+          self.interact(next.clone(), prev.clone());
+          prev = path.pop().unwrap();
+          continue;
+        // Otherwise, we're done.
+        } else {
+          break;
+        }
+      }
+
+      // If next is an aux port, pass through.
+      let main = self.get_pri(next.addr().left_half());
+      path.push(prev);
+      prev = main.this.clone();
+    }
+
+    return self.get_target_full(prev);
+  }
+
+  /// Reduces a net to normal form.
+  pub fn normal(&mut self) {
+    if M::LAZY {
+      let mut visit = vec![Port::new_var(self.root.addr())];
+      while let Some(prev) = visit.pop() {
+        trace!(self.tracer, "visit", prev);
+        //println!("normal {} | {}", prev.view(), self.rewrites());
+        let next = self.weak_normal(prev);
+        trace!(self.tracer, "got", next);
+        if next.has_head() {
+          if next.tag() != Op1 {
+            visit.push(Port::new_var(next.addr()));
+          }
+          visit.push(Port::new_var(next.addr().other_half()));
+        }
+      }
+    } else {
+      self.expand();
+      while !self.rdex.is_empty() {
+        self.reduce(usize::MAX);
+        self.expand();
       }
     }
   }

@@ -72,7 +72,10 @@ use std::{
   },
 };
 
-use crate::run::{Addr, Port, Wire};
+use crate::{
+  ops::Op,
+  run::{Addr, Port, Trg, Wire},
+};
 
 #[cfg(not(feature = "trace"))]
 #[derive(Default)]
@@ -349,6 +352,24 @@ impl TraceArg for Wire {
   }
   fn from_word(word: u64) -> impl Debug {
     Wire(word as _)
+  }
+}
+
+impl TraceArg for Trg {
+  fn to_word(&self) -> u64 {
+    self.0.0 as u64
+  }
+  fn from_word(word: u64) -> impl Debug {
+    Trg(Port(word))
+  }
+}
+
+impl TraceArg for Op {
+  fn to_word(&self) -> u64 {
+    *self as u64
+  }
+  fn from_word(word: u64) -> impl Debug {
+    unsafe { Op::try_from(word as u16).unwrap_unchecked() }
   }
 }
 

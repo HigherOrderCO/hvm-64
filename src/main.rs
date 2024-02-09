@@ -61,8 +61,8 @@ fn full_main(args: &[String]) {
 
 fn run(opts: &[String], host: Arc<Mutex<host::Host>>) {
   let opts = opts.iter().map(|x| &**x).collect::<HashSet<_>>();
-  let data = run::Net::<run::Strict>::init_heap(1 << 32);
-  let mut net = run::Net::<run::Strict>::new(&data);
+  let data = run::Net::<run::Lazy>::init_heap(1 << 32);
+  let mut net = run::Net::<run::Lazy>::new(&data);
   net.boot(&host.lock().unwrap().defs["main"]);
   let start_time = Instant::now();
   if opts.contains("-1") {
