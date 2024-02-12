@@ -61,20 +61,24 @@ fn full_main(args: &[String]) {
 
 fn run(opts: &[String], host: Arc<Mutex<host::Host>>) {
   let opts = opts.iter().map(|x| &**x).collect::<HashSet<_>>();
-  let data = run::Net::<run::Lazy>::init_heap(1 << 32);
-  let mut net = run::Net::<run::Lazy>::new(&data);
-  net.boot(&host.lock().unwrap().defs["main"]);
-  let start_time = Instant::now();
-  if opts.contains("-1") {
-    net.normal();
-  } else {
-    net.parallel_normal();
-  }
-  let elapsed = start_time.elapsed();
-  println!("{}", &host.lock().unwrap().readback(&net));
-  if opts.contains("-s") {
-    print_stats(&net, elapsed);
-  }
+  let data = run::Net::<run::Strict>::init_heap(1 << 32);
+  let lazy = opts.contains("-L");
+  let net = run::DynNet::new(&data, lazy);
+  dispatch_dyn_net! { net => {
+    let mut net = net;
+    net.boot(&host.lock().unwrap().defs["main"]);
+    let start_time = Instant::now();
+    if lazy || opts.contains("-1") {
+      net.normal();
+    } else {
+      net.parallel_normal();
+    }
+    let elapsed = start_time.elapsed();
+    println!("{}", &host.lock().unwrap().readback(&net));
+    if opts.contains("-s") {
+      print_stats(&net, elapsed);
+    }
+  } }
 }
 
 fn print_stats<M: Mode>(net: &run::Net<M>, elapsed: Duration) {
