@@ -2113,7 +2113,7 @@ impl<'a, M: Mode> Net<'a, M> {
       trace!(self.tracer, next);
 
       // If next is ref, dereferences
-      if next.tag() == Ref {
+      if next.tag() == Ref && next != Port::ERA {
         self.call(next, prev.clone());
         continue;
       }
