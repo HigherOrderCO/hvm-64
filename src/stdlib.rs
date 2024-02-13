@@ -22,8 +22,16 @@ impl<F: Fn(Wire) + Clone + Send + Sync + 'static> AsDef for LogDef<F> {
     let def = unsafe { &*def };
     let (arg, seq) = net.do_ctr(0, Trg::port(port));
     let (wire, port) = net.create_wire();
-    let logger = Arc::new(Logger { f: def.data.0.clone(), root: wire, seq });
-    net.link_trg_port(arg, ActiveLogDef::new(logger, port));
+    if M::LAZY {
+      net.link_trg_port(arg, port);
+      net.link_trg_port(seq, Port::new_ref(unsafe { &*IDENTITY }));
+      net.normal_from(wire.clone());
+      def.data.0(wire.clone());
+      net.link_wire_port(wire, Port::ERA);
+    } else {
+      let logger = Arc::new(Logger { f: def.data.0.clone(), root: wire, seq });
+      net.link_trg_port(arg, ActiveLogDef::new(logger, port));
+    }
   }
 }
 

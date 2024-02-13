@@ -2103,7 +2103,7 @@ impl<'a, M: Mode> Net<'a, M> {
 
   // Lazy mode weak head normalizer
   #[inline(always)]
-  pub fn weak_normal(&mut self, mut prev: Port) -> Port {
+  pub fn weak_normal(&mut self, mut prev: Port, root: Wire) -> Port {
     let mut path: Vec<Port> = vec![];
 
     loop {
@@ -2113,7 +2113,7 @@ impl<'a, M: Mode> Net<'a, M> {
       trace!(self.tracer, next);
 
       // If next is root, stop.
-      if next == Port::new_var(self.root.addr()) {
+      if next == Port::new_var(root.addr()) {
         break;
       }
 
@@ -2143,22 +2143,27 @@ impl<'a, M: Mode> Net<'a, M> {
     return self.get_target_full(prev);
   }
 
+  pub fn normal_from(&mut self, root: Wire) {
+    assert!(M::LAZY);
+    let mut visit = vec![Port::new_var(root.addr())];
+    while let Some(prev) = visit.pop() {
+      trace!(self.tracer, "visit", prev);
+      //println!("normal {} | {}", prev.view(), self.rewrites());
+      let next = self.weak_normal(prev, root.clone());
+      trace!(self.tracer, "got", next);
+      if next.has_head() {
+        if next.tag() != Op1 {
+          visit.push(Port::new_var(next.addr()));
+        }
+        visit.push(Port::new_var(next.addr().other_half()));
+      }
+    }
+  }
+
   /// Reduces a net to normal form.
   pub fn normal(&mut self) {
     if M::LAZY {
-      let mut visit = vec![Port::new_var(self.root.addr())];
-      while let Some(prev) = visit.pop() {
-        trace!(self.tracer, "visit", prev);
-        //println!("normal {} | {}", prev.view(), self.rewrites());
-        let next = self.weak_normal(prev);
-        trace!(self.tracer, "got", next);
-        if next.has_head() {
-          if next.tag() != Op1 {
-            visit.push(Port::new_var(next.addr()));
-          }
-          visit.push(Port::new_var(next.addr().other_half()));
-        }
-      }
+      self.normal_from(self.root.clone());
     } else {
       self.expand();
       while !self.rdex.is_empty() {
