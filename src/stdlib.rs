@@ -7,7 +7,7 @@ fn call_identity<M: Mode>(net: &mut Net<M>, port: Port) {
   net.link_trg(a, b);
 }
 
-pub const IDENTITY: &Def = const { &Def::new(LabSet::from_bits(&[1]), (call_identity, call_identity)) }.upcast();
+pub const IDENTITY: *const Def = const { &Def::new(LabSet::from_bits(&[1]), (call_identity, call_identity)) }.upcast();
 
 pub struct LogDef<F>(F);
 
@@ -38,7 +38,7 @@ impl<F: Fn(Wire)> Logger<F> {
     let Some(slf) = Arc::into_inner(self) else { return };
     (slf.f)(slf.root.clone());
     net.link_wire_port(slf.root, Port::ERA);
-    net.link_trg_port(slf.seq, Port::new_ref(IDENTITY));
+    net.link_trg_port(slf.seq, Port::new_ref(unsafe { &*IDENTITY }));
   }
 }
 

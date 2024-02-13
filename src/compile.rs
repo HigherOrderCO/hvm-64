@@ -28,14 +28,17 @@ fn _compile_host(host: &Host) -> Result<String, fmt::Error> {
   writeln!(code, "pub fn host() -> Host {{")?;
   writeln!(code, "  let mut host = Host::default();")?;
   for (raw_name, name, _) in defs.clone() {
-    writeln!(code, r##"  host.insert_def(r#"{raw_name}"#, DefRef::Static(&DEF_{name}));"##)?;
+    writeln!(code, r##"  host.insert_def(r#"{raw_name}"#, DefRef::Static(unsafe {{ &*DEF_{name} }}));"##)?;
   }
   writeln!(code, "  host")?;
   writeln!(code, "}}\n")?;
 
   for (_, name, def) in defs.clone() {
     let labs = compile_lab_set(&def.labs)?;
-    write!(code, "pub const DEF_{name}: &Def = const {{ &Def::new({labs}, (call_{name}, call_{name})) }}.upcast();")?;
+    write!(
+      code,
+      "pub const DEF_{name}: *const Def = const {{ &Def::new({labs}, (call_{name}, call_{name})) }}.upcast();"
+    )?;
   }
 
   writeln!(code)?;
@@ -90,7 +93,7 @@ fn compile_port(host: &Host, port: &Port) -> String {
     "Port::ERA".to_owned()
   } else if port.tag() == Tag::Ref {
     let name = sanitize_name(&host.back[&port.addr()]);
-    format!("Port::new_ref(&DEF_{name})")
+    format!("Port::new_ref(unsafe {{ &*DEF_{name} }})")
   } else if port.tag() == Tag::Num {
     format!("Port::new_num({})", port.num())
   } else {
