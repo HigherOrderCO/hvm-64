@@ -2112,12 +2112,6 @@ impl<'a, M: Mode> Net<'a, M> {
       let next = self.get_target_full(prev.clone());
       trace!(self.tracer, next);
 
-      // If next is ref, dereferences
-      if next.tag() == Ref && next != Port::ERA {
-        self.call(next, prev.clone());
-        continue;
-      }
-
       // If next is root, stop.
       if next == Port::new_var(self.root.addr()) {
         break;
@@ -2127,8 +2121,12 @@ impl<'a, M: Mode> Net<'a, M> {
       if next.is_principal() {
         // If prev is a main port, reduce the active pair.
         if prev.is_principal() {
-          self.interact(next.clone(), prev.clone());
+          self.interact(next, prev.clone());
           prev = path.pop().unwrap();
+          continue;
+        // Otherwise, if it is a ref, expand it.
+        } else if next.tag() == Ref && next != Port::ERA {
+          self.call(next, prev.clone());
           continue;
         // Otherwise, we're done.
         } else {
