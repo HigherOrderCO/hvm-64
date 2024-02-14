@@ -7,6 +7,7 @@ pub mod compile;
 pub mod host;
 pub mod ops;
 pub mod run;
+pub mod stdlib;
 
 mod util;
 
@@ -15,7 +16,5 @@ pub mod fuzz;
 #[doc(hidden)] // not public api
 pub mod trace;
 
-#[doc(hidden)]
+#[doc(hidden)] // shim for compilation
 pub mod gen;
-
-pub mod stdlib;

@@ -1,99 +1,112 @@
 //! The textual language of HVMC.
 //!
 //! This file defines an AST for interaction nets, and functions to convert this
-//! AST from/to the textual syntax.
+//! AST to/from the textual syntax.
 //!
-//! The grammar is documented in the repo README, as well was within the parser
+//! The grammar is documented in the repo README, as well as within the parser
 //! methods, for convenience.
+//!
+//! The AST is based on the [interaction calculus].
+//!
+//! [interaction calculus]: https://en.wikipedia.org/wiki/Interaction_nets#Interaction_calculus
 
-use crate::{ops::Op, run::Lab};
-use std::{
-  collections::BTreeMap,
-  fmt,
-  ops::{Deref, DerefMut},
-  str::FromStr,
-};
-
-/// An AST node representing a interaction net tree.
-///
-/// Trees in interaction nets are inductively defined as either wires, or an
-/// agent with its auxiliary ports connected to trees.
-///
-/// Here, the wires at the base of the tree are represented with `Tree::Var`,
-/// where the variable name is shared between both sides of the wire.
-#[derive(Clone, Hash, PartialEq, Eq, Debug, Default)]
-pub enum Tree {
-  #[default]
-  Era,
-  Ctr {
-    lab: Lab,
-    lft: Box<Tree>,
-    rgt: Box<Tree>,
-  },
-  Var {
-    nam: String,
-  },
-  Ref {
-    nam: String,
-  },
-  Num {
-    val: u64,
-  },
-  Op2 {
-    opr: Op,
-    lft: Box<Tree>,
-    rgt: Box<Tree>,
-  },
-  Op1 {
-    opr: Op,
-    lft: u64,
-    rgt: Box<Tree>,
-  },
-  Mat {
-    sel: Box<Tree>,
-    ret: Box<Tree>,
-  },
-}
-
-/// An AST node representing an interaction net with one free port.
-///
-/// The tree connected to the free port is represented by `root`, and the active
-/// pairs of the net by `rdex`.
-///
-/// The wiring connecting the bases of all the trees is represented via pairs of
-/// `Tree::Var` nodes with the same name.
-#[derive(Clone, Hash, PartialEq, Eq, Debug, Default)]
-pub struct Net {
-  pub root: Tree,
-  pub rdex: Vec<(Tree, Tree)>,
-}
+use crate::{ops::Op, run::Lab, util::deref};
+use std::{collections::BTreeMap, fmt, str::FromStr};
 
 /// The top level AST node, representing a collection of named nets.
 ///
-/// This is a newtype wrapper around a `BtreeMap<String, Net>`, and is
+/// This is a newtype wrapper around a `BTreeMap<String, Net>`, and is
 /// dereferencable to such.
 #[derive(Clone, Hash, PartialEq, Eq, Debug, Default)]
 pub struct Book {
   pub nets: BTreeMap<String, Net>,
 }
 
-impl Deref for Book {
-  type Target = BTreeMap<String, Net>;
-  fn deref(&self) -> &Self::Target {
-    &self.nets
-  }
+deref!(Book => self.nets: BTreeMap<String, Net>);
+
+/// An AST node representing an interaction net with one free port.
+///
+/// The tree connected to the free port is stored in `root`. The active pairs in
+/// the net -- trees connected by their roots -- are stored in `rdex`.
+///
+/// (The wiring connecting the leaves of all the trees is represented within the
+/// trees via pairs of `Tree::Var` nodes with the same name.)
+#[derive(Clone, Hash, PartialEq, Eq, Debug, Default)]
+pub struct Net {
+  pub root: Tree,
+  pub rdex: Vec<(Tree, Tree)>,
 }
 
-impl DerefMut for Book {
-  fn deref_mut(&mut self) -> &mut Self::Target {
-    &mut self.nets
-  }
+/// An AST node representing an interaction net tree.
+///
+/// Trees in interaction nets are inductively defined as either wires, or an
+/// agent with all of its auxiliary ports (if any) connected to trees.
+///
+/// Here, the wires at the leaves of the tree are represented with `Tree::Var`,
+/// where the variable name is shared between both sides of the wire.
+#[derive(Clone, Hash, PartialEq, Eq, Debug, Default)]
+pub enum Tree {
+  #[default]
+  /// A nilary eraser node.
+  Era,
+  /// A native 60-bit integer.
+  Num { val: u64 },
+  /// A nilary node, referencing a top-level definition.
+  Ref { nam: String },
+  /// A binary interaction combinator.
+  Ctr {
+    /// The label of the combinator; combinators with the same label annihilate,
+    /// and combinators with different labels commute.
+    lab: Lab,
+    lft: Box<Tree>,
+    rgt: Box<Tree>,
+  },
+  /// A binary node representing an operation on native integers.
+  ///
+  /// The principal port connects to the left operand.
+  Op2 {
+    /// The operation associated with this node.
+    opr: Op,
+    /// An auxiliary port; connects to the right operand.
+    lft: Box<Tree>,
+    /// An auxiliary port; connects to the output.
+    rgt: Box<Tree>,
+  },
+  /// A unary node representing a partially-applied operation on native
+  /// integers.
+  ///
+  /// The left operand is already appllied. The principal port of connects to
+  /// the right operand.
+  Op1 {
+    /// The operation associated with this node.
+    opr: Op,
+    /// The left operand.
+    lft: u64,
+    /// An auxiliary port; connects to the output.
+    rgt: Box<Tree>,
+  },
+  /// A binary node representing a match on native integers.
+  ///
+  /// The principal port of this agent connects to the integer to be matched on.
+  Mat {
+    /// An auxiliary port; connects to the branches of this match.
+    ///
+    /// This should be connected to something of the form:
+    /// ```
+    /// (+value_if_zero (-predecessor_of_number +value_if_non_zero))
+    /// ```
+    sel: Box<Tree>,
+    /// An auxiliary port; connects to the output.
+    ret: Box<Tree>,
+  },
+  /// One side of a wire; the other side will have the same name.
+  Var { nam: String },
 }
 
 /// The state of the HVMC parser.
-struct Parser<'b> {
-  /// The remaining characters in the input. `""` represents EOF.
-  input: &'b str,
+struct Parser<'i> {
+  /// The remaining characters in the input. An empty string indicates EOF.
+  input: &'i str,
 }
 
 impl<'i> Parser<'i> {
@@ -125,7 +138,7 @@ impl<'i> Parser<'i> {
   fn parse_tree(&mut self) -> Result<Tree, String> {
     self.skip_trivia();
     match self.peek_char() {
-      // Era = *
+      // Era = "*"
       Some('*') => {
         self.advance_char();
         Ok(Tree::Era)
@@ -192,7 +205,7 @@ impl<'i> Parser<'i> {
     }
   }
 
-  // Name = /[a-z_.]+/
+  // Name = /[a-zA-Z0-9_.]+/
   fn parse_name(&mut self) -> Result<String, String> {
     let name = self.take_while(|c| c.is_alphanumeric() || c == '_' || c == '.');
     if name.is_empty() {
@@ -224,6 +237,7 @@ impl<'i> Parser<'i> {
     Ok(num)
   }
 
+  /// See `ops.rs` for the available operators.
   fn parse_op(&mut self) -> Result<Op, String> {
     let op = self.take_while(|c| "+-=*/%<>|&^!?".contains(c));
     op.parse().map_err(|_| panic!("Unknown operator: {op:?}"))
@@ -287,10 +301,10 @@ fn parse_eof<'i, T>(input: &'i str, parse_fn: impl Fn(&mut Parser<'i>) -> Result
   Ok(out)
 }
 
-impl FromStr for Tree {
+impl FromStr for Book {
   type Err = String;
   fn from_str(str: &str) -> Result<Self, Self::Err> {
-    parse_eof(str, Parser::parse_tree)
+    parse_eof(str, Parser::parse_book)
   }
 }
 
@@ -301,10 +315,29 @@ impl FromStr for Net {
   }
 }
 
-impl FromStr for Book {
+impl FromStr for Tree {
   type Err = String;
   fn from_str(str: &str) -> Result<Self, Self::Err> {
-    parse_eof(str, Parser::parse_book)
+    parse_eof(str, Parser::parse_tree)
+  }
+}
+
+impl fmt::Display for Book {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    for (name, net) in self.iter() {
+      writeln!(f, "@{name} = {net}")?;
+    }
+    Ok(())
+  }
+}
+
+impl fmt::Display for Net {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    write!(f, "{}", &self.root)?;
+    for (a, b) in &self.rdex {
+      write!(f, "\n& {a} ~ {b}")?;
+    }
+    Ok(())
   }
 }
 
@@ -324,24 +357,5 @@ impl fmt::Display for Tree {
       Tree::Op1 { opr, lft, rgt } => write!(f, "<{lft}{opr} {rgt}>"),
       Tree::Mat { sel, ret } => write!(f, "?<{sel} {ret}>"),
     }
-  }
-}
-
-impl fmt::Display for Net {
-  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    write!(f, "{}", &self.root)?;
-    for (a, b) in &self.rdex {
-      write!(f, "\n& {a} ~ {b}")?;
-    }
-    Ok(())
-  }
-}
-
-impl fmt::Display for Book {
-  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    for (name, net) in self.iter() {
-      writeln!(f, "@{name} = {net}")?;
-    }
-    Ok(())
   }
 }

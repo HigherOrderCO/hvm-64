@@ -2,6 +2,7 @@ use crate::util::bi_enum;
 
 bi_enum! {
   #[repr(u16)]
+  /// A native operation on 60-bit integers.
   #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
   pub enum Op {
     "+":  Add = 0,

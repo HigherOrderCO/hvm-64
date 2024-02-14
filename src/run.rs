@@ -8,6 +8,7 @@
 // space evaluation of recursive functions on Scott encoded datatypes.
 
 use crate::{ops::Op, trace, trace::Tracer, util::bi_enum};
+use nohash_hasher::{IntMap, IsEnabled};
 use std::{
   alloc::{self, Layout},
   any::TypeId,
@@ -15,6 +16,7 @@ use std::{
   fmt,
   hint::unreachable_unchecked,
   marker::PhantomData,
+  mem::size_of,
   ops::{Deref, DerefMut},
   sync::{Arc, Barrier},
   thread,
@@ -128,7 +130,6 @@ bi_enum! {
   }
 }
 
-use nohash_hasher::{IntMap, IsEnabled};
 use Tag::*;
 
 pub type Lab = u16;
@@ -238,23 +239,24 @@ impl Port {
     self.tag() == Num || self.tag() == Ref && self.lab() != u16::MAX
   }
 
-  /// Converts a `Var` port into a `Red` port with the same addr.
+  /// Converts a `Var` port into a `Red` port with the same address.
   #[inline(always)]
   fn redirect(&self) -> Port {
     Port::new(Red, 0, self.addr())
   }
 
-  /// Converts a `Red` port into a `Var` port with the same addr.
+  /// Converts a `Red` port into a `Var` port with the same address.
   #[inline(always)]
   fn unredirect(&self) -> Port {
     Port::new(Var, 0, self.addr())
   }
 
-  fn has_head(&self) -> bool {
+  fn is_full_node(&self) -> bool {
     self.tag() > Num
   }
 }
 
+/// See `Port::traverse_node`
 pub struct TraverseNode {
   pub tag: Tag,
   pub lab: Lab,
@@ -262,6 +264,7 @@ pub struct TraverseNode {
   pub p2: Wire,
 }
 
+/// See `Port::traverse_op1`
 pub struct TraverseOp1 {
   pub op: Op,
   pub num: Port,
@@ -312,6 +315,8 @@ impl Port {
 #[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[must_use]
 pub struct Addr(pub usize);
+
+impl IsEnabled for Addr {}
 
 impl fmt::Debug for Addr {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -497,6 +502,7 @@ impl FromIterator<Lab> for LabSet {
   }
 }
 
+// ensure that the fields will have a consistent alignment, regardless of `T`
 #[repr(C)]
 #[repr(align(16))]
 pub struct Def<T: ?Sized + Send + Sync = Unknown> {
@@ -592,13 +598,12 @@ impl<F: Fn(&mut Net<Strict>, Port) + Send + Sync + 'static, G: Fn(&mut Net<Lazy>
   }
 }
 
+/// `Def`s, when not pre-compiled, are represented as lists of instructions.
+#[derive(Debug, Default, Clone)]
 pub struct InterpretedDef {
-  pub name: String,
   pub instr: Vec<Instruction>,
 }
 
-/// `Def`s, when not pre-compiled, are represented as lists of instructions.
-///
 /// Each instruction corresponds to a fragment of a net that has a native
 /// implementation.
 ///
@@ -700,27 +705,27 @@ impl Trg {
   }
 }
 
-/// An index to a `Trg` in a `DefNet`. These essentially serve the function of
-/// registers.
+/// An index to a `Trg` in an `Instruction`. These essentially serve the
+/// function of registers.
 ///
-/// In the compiled mode, each `TrgId` will be compiled to a variable.
+/// When compiled, each `TrgId` will be compiled to a variable.
 ///
-/// In the interpreted mode, the `TrgId` serves as an index into a vector.
+/// When interpreted, the `TrgId` serves as an index into a vector.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TrgId {
   /// instead of storing the index directly, we store the byte offset, to save a
   /// shift instruction when indexing into the `Trg` vector in interpreted mode.
   ///
-  /// This is always `index * size_of<Trg>`.
+  /// This is always `index * size_of::<Trg>()`.
   byte_offset: usize,
 }
 
 impl TrgId {
   pub fn new(index: usize) -> Self {
-    TrgId { byte_offset: index * std::mem::size_of::<Trg>() }
+    TrgId { byte_offset: index * size_of::<Trg>() }
   }
   pub fn index(&self) -> usize {
-    self.byte_offset / std::mem::size_of::<Trg>()
+    self.byte_offset / size_of::<Trg>()
   }
 }
 
@@ -745,19 +750,19 @@ impl fmt::Debug for TrgId {
 #[derive(Default)]
 pub struct Node(pub AtomicU64, pub AtomicU64);
 
-pub struct Lazy;
-pub struct Strict;
 pub unsafe trait Mode: Send + Sync + 'static {
   const LAZY: bool;
 }
-unsafe impl Mode for Lazy {
-  const LAZY: bool = true;
-}
+
+pub struct Strict;
 unsafe impl Mode for Strict {
   const LAZY: bool = false;
 }
 
-impl IsEnabled for Addr {}
+pub struct Lazy;
+unsafe impl Mode for Lazy {
+  const LAZY: bool = true;
+}
 
 struct Head {
   this: Port,
@@ -768,7 +773,7 @@ struct Head {
 //   The Net
 // -----------
 
-// A interaction combinator net.
+/// An interaction combinator net.
 pub struct Net<'a, M: Mode> {
   pub tid: usize,              // thread id
   pub tids: usize,             // thread count
@@ -1026,8 +1031,8 @@ impl<'a, M: Mode> Net<'a, M> {
     } else if !M::LAZY {
       self.rdex.push((a, b));
     } else {
-      self.set_pri(a.clone(), b.clone());
-      self.set_pri(b.clone(), a.clone());
+      self.set_head(a.clone(), b.clone());
+      self.set_head(b.clone(), a.clone());
     }
   }
 
@@ -1039,7 +1044,7 @@ impl<'a, M: Mode> Net<'a, M> {
       a_port.wire().set_target(b_port);
     } else {
       if M::LAZY {
-        self.set_pri(a_port, b_port);
+        self.set_head(a_port, b_port);
       }
     }
   }
@@ -1074,7 +1079,7 @@ impl<'a, M: Mode> Net<'a, M> {
     } else {
       self.half_free(a_wire.addr());
       if M::LAZY {
-        self.set_pri(a_port, b_port);
+        self.set_head(a_port, b_port);
       }
     }
   }
@@ -1199,15 +1204,15 @@ impl<'a, M: Mode> Net<'a, M> {
     }
   }
 
-  fn get_pri(&self, addr: Addr) -> &Head {
+  fn get_head(&self, addr: Addr) -> &Head {
     assert!(M::LAZY);
     &self.heads[&addr]
   }
 
-  fn set_pri(&mut self, ptr: Port, trg: Port) {
+  fn set_head(&mut self, ptr: Port, trg: Port) {
     assert!(M::LAZY);
     trace!(self.tracer, ptr, trg);
-    if ptr.has_head() {
+    if ptr.is_full_node() {
       self.heads.insert(ptr.addr(), Head { this: ptr, targ: trg });
     }
   }
@@ -1278,6 +1283,8 @@ impl<'a, M: Mode> Net<'a, M> {
     }
   }
 
+  /// Annihilates two binary agents.
+  ///
   /// ```text
   ///
   ///         a2 |   | a1
@@ -1313,6 +1320,8 @@ impl<'a, M: Mode> Net<'a, M> {
     self.link_wire_wire(a.p2, b.p2);
   }
 
+  /// Commutes two binary agents.
+  ///
   /// ```text
   ///
   ///         a2 |   | a1
@@ -1374,6 +1383,8 @@ impl<'a, M: Mode> Net<'a, M> {
     self.link_wire_port(b.p2, A2.p0);
   }
 
+  /// Commutes a nilary agent and a binary agent.
+  ///
   /// ```text
   ///
   ///         a  (---)
@@ -1401,6 +1412,8 @@ impl<'a, M: Mode> Net<'a, M> {
     self.link_wire_port(b.p2, a);
   }
 
+  /// Annihilates two unary agents.
+  ///
   /// ```text
   ///
   ///         a2 |
@@ -1439,6 +1452,8 @@ impl<'a, M: Mode> Net<'a, M> {
     self.link_wire_wire(a.p2, b.p2);
   }
 
+  /// Commutes a unary agent and a unary agent.
+  ///
   /// ```text
   ///
   ///         a2 |   n
@@ -1498,7 +1513,8 @@ impl<'a, M: Mode> Net<'a, M> {
     self.link_wire_port(b.p2, A2.p0);
   }
 
-  #[inline(never)]
+  /// Commutes a nilary agent and a unary agent.
+  ///
   /// ```text
   ///
   ///         a  (---)
@@ -1518,6 +1534,7 @@ impl<'a, M: Mode> Net<'a, M> {
   ///                | b2
   ///
   /// ```
+  #[inline(never)]
   pub fn comm01(&mut self, a: Port, b: Port) {
     trace!(self.tracer, a, b);
     self.rwts.comm += 1;
@@ -1525,6 +1542,8 @@ impl<'a, M: Mode> Net<'a, M> {
     self.link_wire_port(b.p2, a);
   }
 
+  /// Interacts a number and a numeric match node.
+  ///
   /// ```text
   ///                             |
   ///         b   (0)             |         b  (n+1)
@@ -1577,6 +1596,8 @@ impl<'a, M: Mode> Net<'a, M> {
     }
   }
 
+  /// Interacts a number and a binary numeric operation node.
+  ///
   /// ```text
   ///                   
   ///         b   (n)    
@@ -1612,6 +1633,8 @@ impl<'a, M: Mode> Net<'a, M> {
     self.link_wire_port(a.p1, x.p0);
   }
 
+  /// Interacts a number and a unary numeric operation node.
+  ///
   /// ```text
   ///                   
   ///         b   (m)    
@@ -1624,7 +1647,7 @@ impl<'a, M: Mode> Net<'a, M> {
   ///            n   |         
   ///                | a2       
   ///                            
-  /// --------------------------- op2_num
+  /// --------------------------- op1_num
   ///                       
   ///          (n opr m)
   ///              |         
@@ -1917,6 +1940,7 @@ impl<'a, M: Mode> Net<'a, M> {
   /// Reduces at most `limit` redexes.
   #[inline(always)]
   pub fn reduce(&mut self, limit: usize) -> usize {
+    assert!(!M::LAZY);
     let mut count = 0;
     while let Some((a, b)) = self.rdex.pop() {
       self.interact(a, b);
@@ -1980,6 +2004,7 @@ impl<'a, M: Mode> Net<'a, M> {
   // Evaluates a term to normal form in parallel
   pub fn parallel_normal(&mut self) {
     assert!(!M::LAZY);
+
     const SHARE_LIMIT: usize = 1 << 12; // max share redexes per split
     const LOCAL_LIMIT: usize = 1 << 18; // max local rewrites per epoch
 
@@ -2109,7 +2134,9 @@ impl<'a, M: Mode> Net<'a, M> {
 
   // Lazy mode weak head normalizer
   #[inline(always)]
-  pub fn weak_normal(&mut self, mut prev: Port, root: Wire) -> Port {
+  fn weak_normal(&mut self, mut prev: Port, root: Wire) -> Port {
+    assert!(M::LAZY);
+
     let mut path: Vec<Port> = vec![];
 
     loop {
@@ -2141,7 +2168,7 @@ impl<'a, M: Mode> Net<'a, M> {
       }
 
       // If next is an aux port, pass through.
-      let main = self.get_pri(next.addr().left_half());
+      let main = self.get_head(next.addr().left_half());
       path.push(prev);
       prev = main.this.clone();
     }
@@ -2157,7 +2184,7 @@ impl<'a, M: Mode> Net<'a, M> {
       //println!("normal {} | {}", prev.view(), self.rewrites());
       let next = self.weak_normal(prev, root.clone());
       trace!(self.tracer, "got", next);
-      if next.has_head() {
+      if next.is_full_node() {
         if next.tag() != Op1 {
           visit.push(Port::new_var(next.addr()));
         }
@@ -2180,6 +2207,9 @@ impl<'a, M: Mode> Net<'a, M> {
   }
 }
 
+/// A `Net` whose mode is determined dynamically, at runtime.
+///
+/// Use `dispatch_dyn_net!` to wrap operations on the inner net.
 pub enum DynNet<'a> {
   Lazy(Net<'a, Lazy>),
   Strict(Net<'a, Strict>),

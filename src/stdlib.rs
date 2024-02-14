@@ -2,13 +2,21 @@ use std::sync::Arc;
 
 use crate::run::{AsDef, Def, LabSet, Mode, Net, Port, Tag, Trg, Wire};
 
+/// `@IDENTITY = (x x)`
+pub const IDENTITY: *const Def = const { &Def::new(LabSet::from_bits(&[1]), (call_identity, call_identity)) }.upcast();
+
 fn call_identity<M: Mode>(net: &mut Net<M>, port: Port) {
   let (a, b) = net.do_ctr(0, Trg::port(port));
   net.link_trg(a, b);
 }
 
-pub const IDENTITY: *const Def = const { &Def::new(LabSet::from_bits(&[1]), (call_identity, call_identity)) }.upcast();
-
+/// The definition of `HVM.Log`, parameterized by the readback function.
+///
+/// `@HVM.Log ~ (arg out)` waits for `arg` to be normalized, prints it using the
+/// supplied readback function, and then reduces to `arg ~ * & out ~ @IDENTITY`.
+///
+/// The output can therefore either be erased, or used to sequence other
+/// operations after the log.
 pub struct LogDef<F>(F);
 
 impl<F: Fn(Wire) + Clone + Send + Sync + 'static> LogDef<F> {

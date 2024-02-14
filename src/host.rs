@@ -8,7 +8,7 @@ use crate::{
 };
 use std::{
   collections::{hash_map::Entry, HashMap},
-  ops::{DerefMut, RangeFrom},
+  ops::{Deref, DerefMut, RangeFrom},
 };
 
 /// Stores a bidirectional mapping between names and runtime defs.
@@ -28,7 +28,7 @@ pub enum DefRef {
   Static(&'static Def),
 }
 
-impl std::ops::Deref for DefRef {
+impl Deref for DefRef {
   type Target = Def;
   fn deref(&self) -> &Def {
     match self {
@@ -58,7 +58,7 @@ impl Host {
     // are not yet set, the address of the def will not change, meaning that
     // `net_to_runtime_def` can safely use `Port::new_def` on them.
     for (name, labs) in calculate_label_sets(book, self) {
-      let def = DefRef::Owned(Box::new(Def::new(labs, InterpretedDef { name: name.to_owned(), instr: Vec::new() })));
+      let def = DefRef::Owned(Box::new(Def::new(labs, InterpretedDef::default())));
       self.insert_def(name, def);
     }
 
