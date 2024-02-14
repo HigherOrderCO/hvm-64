@@ -57,7 +57,7 @@ pub struct Port(pub u64);
 
 bi_enum! {
   #[repr(u8)]
-  #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+  #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
   pub enum Tag {
     /// `Red` ports are an implementation detail of the atomic linking
     /// algorithm, and don't have a precise analogue in interaction nets.
@@ -256,6 +256,7 @@ impl Port {
 }
 
 pub struct TraverseNode {
+  pub tag: Tag,
   pub lab: Lab,
   pub p1: Wire,
   pub p2: Wire,
@@ -275,7 +276,12 @@ impl Port {
 
   #[inline(always)]
   pub fn traverse_node(self) -> TraverseNode {
-    TraverseNode { lab: self.lab(), p1: Wire::new(self.addr()), p2: Wire::new(self.addr().other_half()) }
+    TraverseNode {
+      tag: self.tag(),
+      lab: self.lab(),
+      p1: Wire::new(self.addr()),
+      p2: Wire::new(self.addr().other_half()),
+    }
   }
 
   #[inline(always)]
@@ -1350,10 +1356,10 @@ impl<'a, M: Mode> Net<'a, M> {
     let a = a.consume_node();
     let b = b.consume_node();
 
-    let A1 = self.create_node(Ctr, a.lab);
-    let A2 = self.create_node(Ctr, a.lab);
-    let B1 = self.create_node(Ctr, b.lab);
-    let B2 = self.create_node(Ctr, b.lab);
+    let A1 = self.create_node(a.tag, a.lab);
+    let A2 = self.create_node(a.tag, a.lab);
+    let B1 = self.create_node(b.tag, b.lab);
+    let B2 = self.create_node(b.tag, b.lab);
 
     trace!(self.tracer, A1.p0, A2.p0, B1.p0, B2.p0);
     self.link_port_port(A1.p1, B1.p1);
@@ -1476,9 +1482,9 @@ impl<'a, M: Mode> Net<'a, M> {
     let a = a.consume_op1();
     let b = b.consume_node();
 
-    let A1 = self.create_node(Ctr, a.op as Lab);
-    let A2 = self.create_node(Ctr, a.op as Lab);
-    let B2 = self.create_node(Ctr, b.lab);
+    let A1 = self.create_node(Op1, a.op as Lab);
+    let A2 = self.create_node(Op1, a.op as Lab);
+    let B2 = self.create_node(b.tag, b.lab);
 
     trace!(self.tracer, B2.p0, A1.p0, A2.p0);
     self.link_port_port(A1.p1, a.num.clone());
