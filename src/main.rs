@@ -64,8 +64,7 @@ fn run(opts: &[String], host: Arc<Mutex<host::Host>>) {
   let data = run::Net::<run::Strict>::init_heap(1 << 32);
   let lazy = opts.contains("-L");
   let net = run::DynNet::new(&data, lazy);
-  dispatch_dyn_net! { net => {
-    let mut net = net;
+  dispatch_dyn_net! { mut net => {
     net.boot(&host.lock().unwrap().defs["main"]);
     let start_time = Instant::now();
     if lazy || opts.contains("-1") {

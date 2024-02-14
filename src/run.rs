@@ -2185,18 +2185,30 @@ pub enum DynNet<'a> {
   Strict(Net<'a, Strict>),
 }
 
-#[macro_export]
-macro_rules! dispatch_dyn_net {
-  ($net:ident => $body:expr) => {
-    match $net {
-      $crate::run::DynNet::Lazy($net) => $body,
-      $crate::run::DynNet::Strict($net) => $body,
-    }
-  };
-}
-
 impl<'a> DynNet<'a> {
   pub fn new(area: &'a [Node], lazy: bool) -> Self {
     if lazy { DynNet::Lazy(Net::new(area)) } else { DynNet::Strict(Net::new(area)) }
   }
+}
+
+#[macro_export]
+macro_rules! dispatch_dyn_net {
+  ($pat:pat = $expr:expr => $body:expr) => {
+    match $expr {
+      $crate::run::DynNet::Lazy($pat) => $body,
+      $crate::run::DynNet::Strict($pat) => $body,
+    }
+  };
+  ($net:ident => $body:expr) => {
+    dispatch_dyn_net! { $net = $net => $body }
+  };
+  (mut $net:ident => $body:expr) => {
+    dispatch_dyn_net! { mut $net = $net => $body }
+  };
+  (&$net:ident => $body:expr) => {
+    dispatch_dyn_net! { $net = &$net => $body }
+  };
+  (&mut $net:ident => $body:expr) => {
+    dispatch_dyn_net! { $net = &mut $net => $body }
+  };
 }
