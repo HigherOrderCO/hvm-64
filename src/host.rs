@@ -46,7 +46,7 @@ impl Host {
   }
 
   /// Converts all of the nets from the book into runtime defs, and inserts them
-  /// into the net.
+  /// into the host.
   pub fn insert_book(&mut self, book: &Book) {
     self.defs.reserve(book.len());
     self.back.reserve(book.len());
@@ -65,7 +65,7 @@ impl Host {
     // Now that `defs` is fully populated, we can fill in the instructions of
     // each of the new defs.
     for (nam, net) in book.iter() {
-      let instr = net_to_runtime_def(&self.defs, net);
+      let instr = ast_net_to_instructions(&self.defs, net);
       match self.defs.get_mut(nam).unwrap() {
         DefRef::Owned(def) => def.downcast_mut::<InterpretedDef>().unwrap().data.instr = instr,
         DefRef::Static(_) => unreachable!(),
@@ -79,18 +79,19 @@ impl Host {
     self.defs.insert(name.to_owned(), def);
   }
 
+  /// Creates an ast tree from a wire in a runtime net.
   pub fn readback_tree(&self, wire: &run::Wire) -> Tree {
-    Readback { host: self, vars: Default::default(), var_id: 0 .. }.read_wire(wire.clone())
+    ReadbackState { host: self, vars: Default::default(), var_id: 0 .. }.read_wire(wire.clone())
   }
 
-  /// Reads a runtime net into an ast net.
+  /// Creates an ast net from a runtime net.
   ///
-  /// Note that viscous circles and disconnected subnets will not be in the
-  /// resulting net, as it is impossible to read these back from the runtime net
-  /// representation. In the case of viscous circles, this may result in unbound
-  /// variables.
+  /// Note that vicious circles and disconnected subnets will not be in the
+  /// resulting ast net, as it is impossible to read these back from the runtime
+  /// net representation. In the case of vicious circles, this may result in
+  /// unbound variables.
   pub fn readback<M: Mode>(&self, rt_net: &run::Net<M>) -> Net {
-    let mut state = Readback { host: self, vars: Default::default(), var_id: 0 .. };
+    let mut state = ReadbackState { host: self, vars: Default::default(), var_id: 0 .. };
     let mut net = Net::default();
 
     net.root = state.read_wire(rt_net.root.clone());
@@ -99,17 +100,18 @@ impl Host {
       net.rdex.push((state.read_port(a.clone(), None), state.read_port(b.clone(), None)))
     }
 
-    return net;
+    net
   }
 }
 
-struct Readback<'a> {
+/// See `Host::readback`.
+struct ReadbackState<'a> {
   host: &'a Host,
   vars: HashMap<Addr, usize>,
   var_id: RangeFrom<usize>,
 }
 
-impl<'a> Readback<'a> {
+impl<'a> ReadbackState<'a> {
   /// Reads a tree out from a given `wire`.
   fn read_wire(&mut self, wire: Wire) -> Tree {
     let port = wire.load_target();
@@ -155,10 +157,10 @@ impl<'a> Readback<'a> {
   }
 }
 
-/// Converts an ast net to the runtime representation.
+/// Converts an ast net to a list of instructions to create the net.
 ///
 /// `defs` must be populated with every `Ref` node that may appear in the net.
-fn net_to_runtime_def(defs: &HashMap<String, DefRef>, net: &Net) -> Vec<Instruction> {
+fn ast_net_to_instructions(defs: &HashMap<String, DefRef>, net: &Net) -> Vec<Instruction> {
   let mut state =
     State { defs, scope: Default::default(), instr: Default::default(), end: Default::default(), next_index: 1 };
 
@@ -261,7 +263,7 @@ fn net_to_runtime_def(defs: &HashMap<String, DefRef>, net: &Net) -> Vec<Instruct
 
 /// Calculates the labels used in each definition of a book.
 ///
-/// # Algorithm
+/// # Background: Naive Algorithms
 ///
 /// The simplest algorithm to calculate labels would be to go to each def,
 /// recursively traverse the tree (going into references), and collect all of
@@ -302,10 +304,13 @@ fn net_to_runtime_def(defs: &HashMap<String, DefRef>, net: &Net) -> Vec<Instruct
 /// The end result of this is `@foo: {1, 2}, @bar: {2}` -- `@bar` is missing
 /// `1`.
 ///
-/// Instead, a two-phase memoization approach is needed. Each phase follows a
-/// similar procedure as the simple memoization algorithm, with a few
-/// modifications. (Henceforth, the *head node* of a cycle is the first node in
-/// a cycle reached in a traversal.)
+/// Instead, a two-phase memoization approach is needed.
+///
+/// # Implemented Here: Two-Phase Algorithm
+///
+/// Each phase follows a similar procedure as the simple memoization algorithm,
+/// with a few modifications. (Henceforth, the *head node* of a cycle is the
+/// first node in a cycle reached in a traversal.)
 /// - in the first phase:
 ///   - when we process a node involved in a cycle:
 ///     - if it is not the head node of a cycle it is involved in, instead of

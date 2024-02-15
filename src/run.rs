@@ -40,9 +40,8 @@ use atomic::{AtomicU64, AtomicUsize, Ordering::Relaxed};
 
 /// A port in the interaction net.
 ///
-/// The bottom three bits of this value are the *tag*, which determines both
-/// what kind of port it is (principal vs auxiliary, etc.), as well as the
-/// semantics of the remainder of the bits of the value.
+/// The type of a port is determined by its *tag*, which is stored in the bottom
+/// three bits.
 ///
 /// All tags other than `Num` divide the bits of the port as follows:
 /// - the top 16 bits are the *label*, accessible with `.lab()`
@@ -50,8 +49,8 @@ use atomic::{AtomicU64, AtomicUsize, Ordering::Relaxed};
 ///   8-byte-aligned pointer accessible with `.addr()`
 /// - the bottom 3 bits are the tag, as always
 ///
-/// See the documentation for each `Tag` as to the semantics of each
-/// corresponding type of port.
+/// The semantics of these fields depend upon the tag; see the documentation for
+/// each `Tag` variant.
 #[derive(Clone, Eq, PartialEq, PartialOrd, Hash, Default)]
 #[repr(transparent)]
 #[must_use]
@@ -88,7 +87,7 @@ bi_enum! {
     /// The top 60 bits of the port are the value of this node, and are
     /// accessible with `.num()`.
     ///
-    /// The `0b1000` bit is currently unused in this port.
+    /// The 4th bit from the bottom is currently unused in this port.
     Num = 3,
     /// An `Op2` port represents the principal port of an Op2 node.
     ///

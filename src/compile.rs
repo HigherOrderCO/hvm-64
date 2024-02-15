@@ -23,7 +23,7 @@ fn _compile_host(host: &Host) -> Result<String, fmt::Error> {
 
   writeln!(code, "#![allow(non_upper_case_globals, unused_imports)]")?;
   writeln!(code, "use crate::{{host::{{Host, DefRef}}, run::*, ops::Op::*}};")?;
-  writeln!(code, "")?;
+  writeln!(code)?;
 
   writeln!(code, "pub fn host() -> Host {{")?;
   writeln!(code, "  let mut host = Host::default();")?;
@@ -106,6 +106,7 @@ fn sanitize_name(name: &str) -> String {
   if !name.contains('.') {
     name.to_owned()
   } else {
+    // Append a hash to the name to avoid clashes between `foo.bar` and `foo_bar`.
     let mut hasher = DefaultHasher::new();
     hasher.write(name.as_bytes());
     let hash = hasher.finish();

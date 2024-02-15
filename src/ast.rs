@@ -51,12 +51,12 @@ pub enum Tree {
   Era,
   /// A native 60-bit integer.
   Num { val: u64 },
-  /// A nilary node, referencing a top-level definition.
+  /// A nilary node, referencing a named net.
   Ref { nam: String },
   /// A binary interaction combinator.
   Ctr {
-    /// The label of the combinator; combinators with the same label annihilate,
-    /// and combinators with different labels commute.
+    /// The label of the combinator. (Combinators with the same label annihilate,
+    /// and combinators with different labels commute.)
     lab: Lab,
     lft: Box<Tree>,
     rgt: Box<Tree>,
@@ -75,8 +75,8 @@ pub enum Tree {
   /// A unary node representing a partially-applied operation on native
   /// integers.
   ///
-  /// The left operand is already appllied. The principal port of connects to
-  /// the right operand.
+  /// The left operand is already applied. The principal port connects to the
+  /// right operand.
   Op1 {
     /// The operation associated with this node.
     opr: Op,
@@ -87,7 +87,7 @@ pub enum Tree {
   },
   /// A binary node representing a match on native integers.
   ///
-  /// The principal port of this agent connects to the integer to be matched on.
+  /// The principal port connects to the integer to be matched on.
   Mat {
     /// An auxiliary port; connects to the branches of this match.
     ///
@@ -205,7 +205,7 @@ impl<'i> Parser<'i> {
     }
   }
 
-  // Name = /[a-zA-Z0-9_.]+/
+  /// Name = /[a-zA-Z0-9_.]+/
   fn parse_name(&mut self) -> Result<String, String> {
     let name = self.take_while(|c| c.is_alphanumeric() || c == '_' || c == '.');
     if name.is_empty() {
@@ -214,7 +214,7 @@ impl<'i> Parser<'i> {
     Ok(name.to_owned())
   }
 
-  // Int = /[0-9]+/ | /0x[0-9a-fA-F]+/ | /0b[01]+/
+  /// Int = /[0-9]+/ | /0x[0-9a-fA-F]+/ | /0b[01]+/
   fn parse_int(&mut self) -> Result<u64, String> {
     self.skip_trivia();
     let radix = if let Some(rest) = self.input.strip_prefix("0x") {
