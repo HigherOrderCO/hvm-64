@@ -55,8 +55,8 @@ pub enum Tree {
   Ref { nam: String },
   /// A binary interaction combinator.
   Ctr {
-    /// The label of the combinator. (Combinators with the same label annihilate,
-    /// and combinators with different labels commute.)
+    /// The label of the combinator. (Combinators with the same label
+    /// annihilate, and combinators with different labels commute.)
     lab: Lab,
     lft: Box<Tree>,
     rgt: Box<Tree>,
@@ -282,7 +282,8 @@ impl<'i> Parser<'i> {
     Ok(())
   }
 
-  /// Consumes all of the contiguous next characters in the input matching a given predicate.
+  /// Consumes all of the contiguous next characters in the input matching a
+  /// given predicate.
   fn take_while(&mut self, mut f: impl FnMut(char) -> bool) -> &'i str {
     let len = self.input.chars().take_while(|&c| f(c)).map(char::len_utf8).sum();
     let (name, rest) = self.input.split_at(len);
@@ -291,7 +292,8 @@ impl<'i> Parser<'i> {
   }
 }
 
-/// Parses the input with the callback, ensuring that the whole input is consumed.
+/// Parses the input with the callback, ensuring that the whole input is
+/// consumed.
 fn parse_eof<'i, T>(input: &'i str, parse_fn: impl Fn(&mut Parser<'i>) -> Result<T, String>) -> Result<T, String> {
   let mut parser = Parser { input };
   let out = parse_fn(&mut parser)?;

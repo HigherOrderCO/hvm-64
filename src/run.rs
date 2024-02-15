@@ -1,11 +1,13 @@
 // An efficient Interaction Combinator runtime
 // ===========================================
-// This file implements an efficient interaction combinator runtime. Nodes are represented by 2 aux
-// ports (P1, P2), with the main port (P1) omitted. A separate vector, 'rdex', holds main ports,
-// and, thus, tracks active pairs that can be reduced in parallel. Pointers are unboxed, meaning
-// that Ptr::ERAs, NUMs and REFs don't use any additional space. REFs lazily expand to closed nets when
-// they interact with nodes, and are cleared when they interact with Ptr::ERAs, allowing for constant
-// space evaluation of recursive functions on Scott encoded datatypes.
+// This file implements an efficient interaction combinator runtime. Nodes are
+// represented by 2 aux ports (P1, P2), with the main port (P1) omitted. A
+// separate vector, 'rdex', holds main ports, and, thus, tracks active pairs
+// that can be reduced in parallel. Pointers are unboxed, meaning
+// that Ptr::ERAs, NUMs and REFs don't use any additional space. REFs lazily
+// expand to closed nets when they interact with nodes, and are cleared when
+// they interact with Ptr::ERAs, allowing for constant space evaluation of
+// recursive functions on Scott encoded datatypes.
 
 use crate::{ops::Op, trace, trace::Tracer, util::bi_enum};
 use nohash_hasher::{IntMap, IsEnabled};
@@ -644,8 +646,8 @@ pub struct InterpretedDef {
 /// Each instruction documents both the native implementation and the polarity
 /// of each `TrgId`.
 ///
-/// Some instructions take a [`Port`]; these must always be statically-valid ports
-/// -- that is, [`Ref`] or [`Num`] ports.
+/// Some instructions take a [`Port`]; these must always be statically-valid
+/// ports -- that is, [`Ref`] or [`Num`] ports.
 #[derive(Debug, Clone)]
 pub enum Instruction {
   /// ```ignore
@@ -790,7 +792,8 @@ pub struct Node(pub AtomicU64, pub AtomicU64);
 /// top-most level, and delegate to monomorphized functions specialized for each
 /// particular mode.
 ///
-/// This trait is `unsafe` as it may only be implemented by [`Strict`] and [`Lazy`].
+/// This trait is `unsafe` as it may only be implemented by [`Strict`] and
+/// [`Lazy`].
 pub unsafe trait Mode: Send + Sync + 'static {
   const LAZY: bool;
 }
@@ -1085,7 +1088,8 @@ impl<'a, M: Mode> Net<'a, M> {
     }
   }
 
-  /// Half-links `a_port` to `b_port`, without linking `b_port` back to `a_port`.
+  /// Half-links `a_port` to `b_port`, without linking `b_port` back to
+  /// `a_port`.
   #[inline(always)]
   fn half_link_port_port(&mut self, a_port: Port, b_port: Port) {
     trace!(self.tracer, a_port, b_port);
@@ -1335,7 +1339,7 @@ impl<'a, M: Mode> Net<'a, M> {
   /// Annihilates two binary agents.
   ///
   /// ```text
-  ///
+  ///  
   ///         a2 |   | a1
   ///           _|___|_
   ///           \     /
@@ -1357,7 +1361,7 @@ impl<'a, M: Mode> Net<'a, M> {
   ///             / \
   ///            |   |
   ///         b1 |   | b2
-  ///
+  ///  
   /// ```
   #[inline(never)]
   pub fn anni2(&mut self, a: Port, b: Port) {
@@ -1372,7 +1376,7 @@ impl<'a, M: Mode> Net<'a, M> {
   /// Commutes two binary agents.
   ///
   /// ```text
-  ///
+  ///  
   ///         a2 |   | a1
   ///           _|___|_
   ///           \     /
@@ -1404,7 +1408,7 @@ impl<'a, M: Mode> Net<'a, M> {
   ///       \ /       \ /
   ///        |         |
   ///     b1 |         | b2
-  ///
+  ///  
   /// ```
   #[inline(never)]
   pub fn comm22(&mut self, a: Port, b: Port) {
@@ -1435,7 +1439,7 @@ impl<'a, M: Mode> Net<'a, M> {
   /// Commutes a nilary agent and a binary agent.
   ///
   /// ```text
-  ///
+  ///  
   ///         a  (---)
   ///              |
   ///              |
@@ -1450,7 +1454,7 @@ impl<'a, M: Mode> Net<'a, M> {
   ///     a (---)   (---) a
   ///         |       |
   ///      b1 |       | b2
-  ///
+  ///  
   /// ```
   #[inline(never)]
   pub fn comm02(&mut self, a: Port, b: Port) {
@@ -1464,7 +1468,7 @@ impl<'a, M: Mode> Net<'a, M> {
   /// Annihilates two unary agents.
   ///
   /// ```text
-  ///
+  ///  
   ///         a2 |
   ///            |   n
   ///           _|___|_
@@ -1490,7 +1494,7 @@ impl<'a, M: Mode> Net<'a, M> {
   ///                |
   ///                |
   ///                | b2
-  ///
+  ///  
   /// ```
   #[inline(never)]
   pub fn anni1(&mut self, a: Port, b: Port) {
@@ -1504,7 +1508,7 @@ impl<'a, M: Mode> Net<'a, M> {
   /// Commutes a unary agent and a unary agent.
   ///
   /// ```text
-  ///
+  ///  
   ///         a2 |   n
   ///           _|___|_
   ///           \     /
@@ -1536,7 +1540,7 @@ impl<'a, M: Mode> Net<'a, M> {
   ///       \ /       \ /
   ///        |         |
   ///     b1 |         | b2
-  ///
+  ///  
   /// ```
   #[inline(never)]
   pub fn comm12(&mut self, a: Port, b: Port) {
@@ -1565,7 +1569,7 @@ impl<'a, M: Mode> Net<'a, M> {
   /// Commutes a nilary agent and a unary agent.
   ///
   /// ```text
-  ///
+  ///  
   ///         a  (---)
   ///              |
   ///              |
@@ -1581,7 +1585,7 @@ impl<'a, M: Mode> Net<'a, M> {
   ///              (---) a
   ///                |
   ///                | b2
-  ///
+  ///  
   /// ```
   #[inline(never)]
   pub fn comm01(&mut self, a: Port, b: Port) {
@@ -1648,7 +1652,7 @@ impl<'a, M: Mode> Net<'a, M> {
   /// Interacts a number and a binary numeric operation node.
   ///
   /// ```text
-  ///                   
+  ///  
   ///         b   (n)    
   ///              |      
   ///              |       
@@ -1668,7 +1672,7 @@ impl<'a, M: Mode> Net<'a, M> {
   ///         \ /      |   
   ///          |       |   
   ///       a1 |       | a2  
-  ///                       
+  ///  
   /// ```
   #[inline(never)]
   pub fn op2_num(&mut self, a: Port, b: Port) {
@@ -1685,7 +1689,7 @@ impl<'a, M: Mode> Net<'a, M> {
   /// Interacts a number and a unary numeric operation node.
   ///
   /// ```text
-  ///                   
+  ///  
   ///         b   (m)    
   ///              |      
   ///              |       
@@ -1701,7 +1705,7 @@ impl<'a, M: Mode> Net<'a, M> {
   ///          (n opr m)
   ///              |         
   ///              | a2
-  ///                       
+  ///  
   /// ```
   #[inline(never)]
   pub fn op1_num(&mut self, a: Port, b: Port) {
@@ -1731,9 +1735,9 @@ impl<'a, M: Mode> Net<'a, M> {
       self.rwts.anni += 1;
       (Trg::wire(node.p1), Trg::wire(node.p2))
     // TODO: fast copy?
-    // } else if !M::LAZY && port.tag() == Num || port.tag() == Ref && lab >= port.lab() {
-    //   self.rwts.comm += 1;
-    //   (Trg::port(port.clone()), Trg::port(port))
+    } else if false && !M::LAZY && port.tag() == Num || port.tag() == Ref && lab >= port.lab() {
+      self.rwts.comm += 1;
+      (Trg::port(port.clone()), Trg::port(port))
     } else {
       let n = self.create_node(Ctr, lab);
       self.link_trg_port(trg, n.p0);

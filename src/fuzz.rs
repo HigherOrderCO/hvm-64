@@ -352,7 +352,8 @@ impl Fuzzer {
     });
   }
 
-  /// Makes a non-deterministic decision, returning an integer within `0..options`.
+  /// Makes a non-deterministic decision, returning an integer within
+  /// `0..options`.
   pub fn decide(&self, options: usize) -> usize {
     self.path.lock().unwrap().decide(options)
   }

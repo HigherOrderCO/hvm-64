@@ -364,8 +364,8 @@ fn calculate_label_sets<'a>(book: &'a Book, host: &Host) -> impl Iterator<Item =
   /// - `depth` is optional; `None` indicates that this is the second processing
   ///   pass (where the depth is irrelevant, as all cycles have been detected)
   /// - `out`, if supplied, will be unioned with the result of this traversal
-  /// - the return value indicates the head depth, as defined above (or
-  ///   an arbitrary value `>= depth` if no cycles are involved)
+  /// - the return value indicates the head depth, as defined above (or an
+  ///   arbitrary value `>= depth` if no cycles are involved)
   impl<'a, 'b> State<'a, 'b> {
     fn visit_def(&mut self, key: &'a str, depth: Option<usize>, out: Option<&mut LabSet>) -> usize {
       match self.labels.entry(key) {

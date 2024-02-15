@@ -10,3 +10,4 @@ use_field_init_shorthand = true
 use_try_shorthand = true
 spaces_around_ranges = true
 overflow_delimited_expr = true
+wrap_comments = true

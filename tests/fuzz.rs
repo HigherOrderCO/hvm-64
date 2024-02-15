@@ -117,9 +117,11 @@ fn fuzz_var_link_link_pri() {
     let at = Port(a.addr().val().read());
     assert_eq!(at, Port::ERA);
     // TODO: reenable leak detection
-    // for x in [b, c, d] {
-    //   assert_eq!(Port(x.loc().val().read()), Port::FREE, "failed to free {:?}", x.wire());
-    // }
+    if false {
+      for x in [b, c, d] {
+        assert_eq!(Port(x.loc().val().read()), Port::FREE, "failed to free {:?}", x.wire());
+      }
+    }
   })
 }
 

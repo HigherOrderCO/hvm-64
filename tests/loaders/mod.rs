@@ -29,7 +29,8 @@ pub fn load_lang(file: &str) -> DefinitionBook {
   parse_lang(&code)
 }
 
-// For every pair in the map, replaces all matches of a string with the other string
+// For every pair in the map, replaces all matches of a string with the other
+// string
 pub fn replace_template(mut code: String, map: &[(&str, &str)]) -> String {
   for (from, to) in map {
     code = code.replace(from, to);
