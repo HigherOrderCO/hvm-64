@@ -11,7 +11,7 @@ use crate::{ops::Op, trace, trace::Tracer, util::bi_enum};
 use nohash_hasher::{IntMap, IsEnabled};
 use std::{
   alloc::{self, Layout},
-  any::TypeId,
+  any::{Any, TypeId},
   borrow::Cow,
   fmt,
   hint::unreachable_unchecked,
@@ -184,7 +184,7 @@ impl Port {
   /// Creates a new `Ref` port corresponding to a given definition.
   #[inline(always)]
   pub fn new_ref(def: &Def) -> Port {
-    Port::new(Ref, def.labs.min_safe(), Addr(def as *const _ as _))
+    Port::new(Ref, def.labs.min_safe, Addr(def as *const _ as _))
   }
 
   /// Accesses the tag of this port; this is valid for all ports.
@@ -457,10 +457,6 @@ impl LabSet {
     bits[index] |= 1 << bit;
   }
 
-  pub fn min_safe(&self) -> Lab {
-    self.min_safe
-  }
-
   pub fn has(&self, lab: Lab) -> bool {
     if lab >= self.min_safe {
       return false;
@@ -501,10 +497,23 @@ impl FromIterator<Lab> for LabSet {
   }
 }
 
-// ensure that the fields will have a consistent alignment, regardless of `T`
-#[repr(C)]
-#[repr(align(16))]
-pub struct Def<T: ?Sized + Send + Sync = Unknown> {
+/// A custom nilary interaction net agent.
+///
+/// This is *roughly* equivalent to the following definition:
+/// ```ignore
+/// struct Def<T: ?Sized + AsDef = dyn AsDef> {
+///   pub labs: LabSet,
+///   pub data: T,
+/// }
+/// ```
+///
+/// Except that, with this definition, `&Def` is a thin pointer, as the vtable
+/// data is effectively stored inline in `Def`.
+#[repr(C)] // ensure that the fields will have a consistent alignment, regardless of `T`
+#[repr(align(16))] // ensure the bottom 4 bits of `Ref` addresses are zero
+pub struct Def<T: ?Sized + Send + Sync = Dynamic> {
+  /// The set of labels used by this agent; the agent commutes with any
+  /// interaction combinator whose label is not in this set.
   pub labs: LabSet,
   ty: TypeId,
   call_strict: unsafe fn(*const Def<T>, &mut Net<Strict>, port: Port),
@@ -513,14 +522,18 @@ pub struct Def<T: ?Sized + Send + Sync = Unknown> {
 }
 
 extern "C" {
+  /// An internal type used to mark dynamic `Def`s.
+  ///
+  /// Because this is an `extern type`, it is unsized, but has zero metadata.
+  /// This is essentially a workaround for the lack of custom DSTs.
   #[doc(hidden)]
-  pub type Unknown;
+  pub type Dynamic;
 }
 
-unsafe impl Send for Unknown {}
-unsafe impl Sync for Unknown {}
+unsafe impl Send for Dynamic {}
+unsafe impl Sync for Dynamic {}
 
-pub trait AsDef: 'static + Send + Sync {
+pub trait AsDef: Any + Send + Sync {
   unsafe fn call<M: Mode>(slf: *const Def<Self>, net: &mut Net<M>, port: Port);
 }
 
@@ -529,7 +542,7 @@ impl<T: Send + Sync> Def<T> {
   where
     T: AsDef,
   {
-    Def { labs, ty: TypeId::of::<T>(), call_lazy: T::call::<Lazy>, call_strict: T::call::<Strict>, data }
+    Def { labs, ty: TypeId::of::<T>(), call_strict: T::call::<Strict>, call_lazy: T::call::<Lazy>, data }
   }
 
   #[inline(always)]
@@ -712,7 +725,7 @@ impl Trg {
 /// When interpreted, the `TrgId` serves as an index into a vector.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TrgId {
-  /// instead of storing the index directly, we store the byte offset, to save a
+  /// Instead of storing the index directly, we store the byte offset, to save a
   /// shift instruction when indexing into the `Trg` vector in interpreted mode.
   ///
   /// This is always `index * size_of::<Trg>()`.
@@ -749,22 +762,35 @@ impl fmt::Debug for TrgId {
 #[derive(Default)]
 pub struct Node(pub AtomicU64, pub AtomicU64);
 
+/// The runtime mode is represented with a generic such that, instead of
+/// repeatedly branching on the mode at runtime, the branch can happen at the
+/// top-most level, and delegate to monomorphized functions specialized for each
+/// particular mode.
+///
+/// This trait is `unsafe` as it may only be implemented by `Strict` and `Lazy`.
 pub unsafe trait Mode: Send + Sync + 'static {
   const LAZY: bool;
 }
 
+/// In strict mode, all active pairs are expanded.
 pub struct Strict;
 unsafe impl Mode for Strict {
   const LAZY: bool = false;
 }
 
+/// In lazy mode, only active pairs that are reached from a walk from the root
+/// port are expanded.
 pub struct Lazy;
 unsafe impl Mode for Lazy {
   const LAZY: bool = true;
 }
 
+/// Stores extra data needed about the nodes when in lazy mode. (In strict mode,
+/// this is unused.)
 struct Head {
+  /// the principal port of this node
   this: Port,
+  /// the port connected to the principal port of this node
   targ: Port,
 }
 
@@ -827,7 +853,7 @@ impl AtomicRewrites {
 }
 
 impl<'a, M: Mode> Net<'a, M> {
-  /// Creates an empty net with a given heap.
+  /// Creates an empty net with a given heap area.
   pub fn new(area: &'a [Node]) -> Self {
     let mut net = Net::new_with_root(area, Wire(std::ptr::null()));
     net.root = Wire::new(net.alloc());
@@ -851,7 +877,7 @@ impl<'a, M: Mode> Net<'a, M> {
     }
   }
 
-  // Boots a net from a Ref.
+  /// Boots a net from a Ref.
   pub fn boot(&mut self, def: &Def) {
     let def = Port::new_ref(def);
     trace!(self.tracer, def);
@@ -864,6 +890,7 @@ impl<'a, M: Mode> Net<'a, M> {
 // -------------
 
 impl<'a, M: Mode> Net<'a, M> {
+  /// Allocate an area for the net's heap with a given size.
   pub fn init_heap(size: usize) -> Box<[Node]> {
     unsafe {
       Box::from_raw(core::ptr::slice_from_raw_parts_mut(
