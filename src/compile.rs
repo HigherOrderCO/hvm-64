@@ -35,7 +35,7 @@ fn _compile_host(host: &Host) -> Result<String, fmt::Error> {
 
   for (_, name, def) in defs.clone() {
     let labs = compile_lab_set(&def.labs)?;
-    write!(
+    writeln!(
       code,
       "pub const DEF_{name}: *const Def = const {{ &Def::new({labs}, (call_{name}, call_{name})) }}.upcast();"
     )?;
