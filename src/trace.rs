@@ -13,8 +13,8 @@
 //! loop.
 //!
 //! To use this utility, compile with `--features trace`, run the resulting
-//! binary in a debugger, and – when the bug occurs – call `_read_traces(-1)` to
-//! dump all traces to stderr. You can also call the `set_hook()` function to
+//! binary in a debugger, and – when the bug occurs – call [`_read_traces()`] to
+//! dump all traces to stderr. You can also call the [`set_hook()`] function to
 //! automatically print traces on panic.
 //!
 //! ```sh
@@ -58,7 +58,7 @@
 //!
 //! For certain bugs, it may be useful to modify `main.rs` to repeatedly run the
 //! program (until an error is encountered). In this case, one can run
-//! `_reset_traces()` before each iteration, to discard the traces of the
+//! [`_reset_traces()`] before each iteration, to discard the traces of the
 //! previous iteration.
 
 #![cfg_attr(not(feature = "trace"), allow(unused))]

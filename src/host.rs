@@ -20,9 +20,9 @@ pub struct Host {
   pub back: HashMap<Addr, String>,
 }
 
-/// A potentially-owned reference to a `Def`. Vitally, the address of the `Def`
-/// is stable, even if the `DefRef` moves –- this is why a `Cow` cannot be used
-/// here.
+/// A potentially-owned reference to a [`Def`]. Vitally, the address of the
+/// `Def` is stable, even if the `DefRef` moves –- this is why
+/// [`std::Borrow::Cow`] cannot be used here.
 pub enum DefRef {
   Owned(Box<dyn DerefMut<Target = Def> + Send + Sync>),
   Static(&'static Def),
@@ -104,7 +104,7 @@ impl Host {
   }
 }
 
-/// See `Host::readback`.
+/// See [`Host::readback`].
 struct ReadbackState<'a> {
   host: &'a Host,
   vars: HashMap<Addr, usize>,

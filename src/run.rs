@@ -43,14 +43,14 @@ use atomic::{AtomicU64, AtomicUsize, Ordering::Relaxed};
 /// The type of a port is determined by its *tag*, which is stored in the bottom
 /// three bits.
 ///
-/// All tags other than `Num` divide the bits of the port as follows:
-/// - the top 16 bits are the *label*, accessible with `.lab()`
+/// All tags other than [`Num`] divide the bits of the port as follows:
+/// - the top 16 bits are the *label*, accessible with [`Port::lab`]
 /// - the middle 45 bits are the non-alignment bits of the *address*, an
-///   8-byte-aligned pointer accessible with `.addr()`
+///   8-byte-aligned pointer accessible with [`Port::addr`]
 /// - the bottom 3 bits are the tag, as always
 ///
 /// The semantics of these fields depend upon the tag; see the documentation for
-/// each `Tag` variant.
+/// each [`Tag`] variant.
 #[derive(Clone, Eq, PartialEq, PartialOrd, Hash, Default)]
 #[repr(transparent)]
 #[must_use]
@@ -68,31 +68,31 @@ bi_enum! {
     /// A `Var` port represents an auxiliary port in the net.
     ///
     /// The address of this port represents the wire leaving this port,
-    /// accessible with `.wire()`.
+    /// accessible with `Port::wire`.
     ///
     /// The label of this port is currently unused and always 0.
     Var = 1,
     /// A `Ref` port represents the principal port of a nilary reference node.
     ///
-    /// The address of this port is a pointer to the corresponding `Def`.
+    /// The address of this port is a pointer to the corresponding [`Def`].
     ///
     /// The label of this port is always equivalent to `def.labs.min_safe`, and
     /// is used as an optimization for the ref commutation interaction.
     ///
     /// Eraser nodes are represented by a null-pointer `Ref`, available as the
-    /// constant `Port::ERA`.
+    /// constant [`Port::ERA`].
     Ref = 2,
     /// A `Num` port represents the principal port of a U60 node.
     ///
     /// The top 60 bits of the port are the value of this node, and are
-    /// accessible with `.num()`.
+    /// accessible with [`Port::num`].
     ///
     /// The 4th bit from the bottom is currently unused in this port.
     Num = 3,
     /// An `Op2` port represents the principal port of an Op2 node.
     ///
     /// The label of this port is the corresponding operation, which can be
-    /// accessed with `.op()`.
+    /// accessed with [`Port::op`].
     ///
     /// The address of this port is the address of a two-word allocation,
     /// storing the targets of the wires connected to the two auxiliary ports of
@@ -101,7 +101,7 @@ bi_enum! {
     /// An `Op1` port represents the principal port of an Op1 node.
     ///
     /// The label of this port is the corresponding operation, which can be
-    /// accessed with `.op()`.
+    /// accessed with [`Port::op`].
     ///
     /// The address of this port is the address of a two-word allocation. The
     /// first word in this allocation stores the first operand as a `Num` port,
@@ -169,19 +169,19 @@ impl Port {
     Port(((lab as u64) << 48) | (addr.0 as u64) | (tag as u64))
   }
 
-  /// Creates a new `Var` port with a given addr.
+  /// Creates a new [`Var`] port with a given addr.
   #[inline(always)]
   pub fn new_var(addr: Addr) -> Self {
     Port::new(Var, 0, addr)
   }
 
-  /// Creates a new `Num` port with a given 60-bit numeric value.
+  /// Creates a new [`Num`] port with a given 60-bit numeric value.
   #[inline(always)]
   pub const fn new_num(val: u64) -> Self {
     Port((val << 4) | (Num as u64))
   }
 
-  /// Creates a new `Ref` port corresponding to a given definition.
+  /// Creates a new [`Ref`] port corresponding to a given definition.
   #[inline(always)]
   pub fn new_ref(def: &Def) -> Port {
     Port::new(Ref, def.labs.min_safe, Addr(def as *const _ as _))
@@ -205,21 +205,21 @@ impl Port {
     Addr((self.0 & 0x0000_FFFF_FFFF_FFF8) as usize as _)
   }
 
-  /// Accesses the operation of this port; this is valid for `Op1` and `Op2`
+  /// Accesses the operation of this port; this is valid for [`Op1`] and [`Op2`]
   /// ports.
   #[inline(always)]
   pub fn op(&self) -> Op {
     unsafe { self.lab().try_into().unwrap_unchecked() }
   }
 
-  /// Accesses the numeric value of this port; this is valid for `Num` ports.
+  /// Accesses the numeric value of this port; this is valid for [`Num`] ports.
   #[inline(always)]
   pub const fn num(&self) -> u64 {
     self.0 >> 4
   }
 
-  /// Accesses the wire leaving this port; this is valid for `Var` ports and
-  /// non-sentinel `Red` ports.
+  /// Accesses the wire leaving this port; this is valid for [`Var`] ports and
+  /// non-sentinel [`Red`] ports.
   #[inline(always)]
   pub fn wire(&self) -> Wire {
     Wire::new(self.addr())
@@ -238,13 +238,13 @@ impl Port {
     self.tag() == Num || self.tag() == Ref && self.lab() != u16::MAX
   }
 
-  /// Converts a `Var` port into a `Red` port with the same address.
+  /// Converts a [`Var`] port into a [`Red`] port with the same address.
   #[inline(always)]
   fn redirect(&self) -> Port {
     Port::new(Red, 0, self.addr())
   }
 
-  /// Converts a `Red` port into a `Var` port with the same address.
+  /// Converts a [`Red`] port into a [`Var`] port with the same address.
   #[inline(always)]
   fn unredirect(&self) -> Port {
     Port::new(Var, 0, self.addr())
@@ -255,7 +255,7 @@ impl Port {
   }
 }
 
-/// See `Port::traverse_node`
+/// See [`Port::traverse_node`].
 pub struct TraverseNode {
   pub tag: Tag,
   pub lab: Lab,
@@ -263,7 +263,7 @@ pub struct TraverseNode {
   pub p2: Wire,
 }
 
-/// See `Port::traverse_op1`
+/// See [`Port::traverse_op1`].
 pub struct TraverseOp1 {
   pub op: Op,
   pub num: Port,
@@ -303,7 +303,7 @@ impl Port {
   }
 }
 
-/// A memory address to be used in a `Port` or a `Wire`.
+/// A memory address to be used in a [`Port`] or a [`Wire`].
 ///
 /// The bottom three bits must be zero; i.e. this address must be at least
 /// 8-byte-aligned.
@@ -610,7 +610,7 @@ impl<F: Fn(&mut Net<Strict>, Port) + Send + Sync + 'static, G: Fn(&mut Net<Lazy>
   }
 }
 
-/// `Def`s, when not pre-compiled, are represented as lists of instructions.
+/// [`Def`]s, when not pre-compiled, are represented as lists of instructions.
 #[derive(Debug, Default, Clone)]
 pub struct InterpretedDef {
   pub instr: Vec<Instruction>,
@@ -620,19 +620,21 @@ pub struct InterpretedDef {
 /// implementation.
 ///
 /// These net fragments may have several free ports, which are each represented
-/// with `TrgId`s.
+/// with [`TrgId`]s.
 ///
 /// Each `TrgId` of an instruction has an associated polarity -- it can either
 /// be an input or an output. Because the underlying interaction net model we're
 /// using does not have polarity, we also need instructions for linking out-out
 /// or in-in.
 ///
-/// Linking two outputs can be done with `Link`, which creates a "cup" wire.
+/// Linking two outputs can be done with [`Instruction::Link`], which creates a
+/// "cup" wire.
 ///
 /// Linking two inputs is more complicated, due to the way locking works. It can
-/// be done with `Wires`, which creates two "cap" wires. One half of each cap
-/// can be used for each input. Once those inputs have been fully unlocked, the
-/// other halves of each cap can be linked with `Link`. For example:
+/// be done with [`Instruction::Wires`], which creates two "cap" wires. One half
+/// of each cap can be used for each input. Once those inputs have been fully
+/// unlocked, the other halves of each cap can be linked with
+/// [`Instruction::Link`]. For example:
 /// ```ignore
 /// let (av, aw, bv, bw) = net.do_wires();
 /// some_subnet(net, av, bv);
@@ -642,31 +644,52 @@ pub struct InterpretedDef {
 /// Each instruction documents both the native implementation and the polarity
 /// of each `TrgId`.
 ///
-/// Some instructions take a `Port`; these must always be statically-valid ports
-/// -- that is, `Ref` or `Num` ports.
+/// Some instructions take a [`Port`]; these must always be statically-valid ports
+/// -- that is, [`Ref`] or [`Num`] ports.
 #[derive(Debug, Clone)]
 pub enum Instruction {
-  /// `let trg = Trg::port(port);`
+  /// ```ignore
+  /// let trg = Trg::port(port);
+  /// ```
   Const { trg: TrgId, port: Port },
-  /// `net.link_trg(a, b);`
+  /// ```ignore
+  /// net.link_trg(a, b);
+  /// ```
   Link { a: TrgId, b: TrgId },
-  /// `net.link(trg, Trg::port(port));`
+  /// ```ignore
+  /// net.link_trg(trg, Trg::port(port));
+  /// ```
   LinkConst { trg: TrgId, port: Port },
-  /// `let (lft, rgt) = net.do_ctr(lab, trg);`
+  /// See [`Net::do_ctr`].
+  /// ```ignore
+  /// let (lft, rgt) = net.do_ctr(lab, trg);
+  /// ```
   Ctr { lab: Lab, trg: TrgId, lft: TrgId, rgt: TrgId },
-  /// `let (lft, rgt) = net.do_op2(lab, trg);`
+  /// See [`Net::do_op2`].
+  /// ```ignore
+  /// let (lft, rgt) = net.do_op2(lab, trg);
+  /// ```
   Op2 { op: Op, trg: TrgId, lft: TrgId, rgt: TrgId },
-  /// `let rgt = net.do_op1(lab, num, trg);`
+  /// See [`Net::do_op1`].
+  /// ```ignore
+  /// let rgt = net.do_op1(lab, num, trg);
+  /// ```
   Op1 { op: Op, num: u64, trg: TrgId, rgt: TrgId },
-  /// `let (lft, rgt) = net.do_mat(trg);`
+  /// See [`Net::do_mat`].
+  /// ```ignore
+  /// let (lft, rgt) = net.do_mat(trg);
+  /// ```
   Mat { trg: TrgId, lft: TrgId, rgt: TrgId },
-  /// `let (av, aw, bv, bw) = net.do_wires();`
+  /// See [`Net::do_wires`].
+  /// ```ignore
+  /// let (av, aw, bv, bw) = net.do_wires();
+  /// ```
   Wires { av: TrgId, aw: TrgId, bv: TrgId, bw: TrgId },
 }
 
 /// Part of the net to link to; either a wire or a port.
 ///
-/// To store this compactly, we reuse the `Red` tag to indicate if this is a
+/// To store this compactly, we reuse the [`Red`] tag to indicate if this is a
 /// wire.
 #[derive(Clone)]
 pub struct Trg(pub(crate) Port);
@@ -717,7 +740,7 @@ impl Trg {
   }
 }
 
-/// An index to a `Trg` in an `Instruction`. These essentially serve the
+/// An index to a [`Trg`] in an [`Instruction`]. These essentially serve the
 /// function of registers.
 ///
 /// When compiled, each `TrgId` will be compiled to a variable.
@@ -767,7 +790,7 @@ pub struct Node(pub AtomicU64, pub AtomicU64);
 /// top-most level, and delegate to monomorphized functions specialized for each
 /// particular mode.
 ///
-/// This trait is `unsafe` as it may only be implemented by `Strict` and `Lazy`.
+/// This trait is `unsafe` as it may only be implemented by [`Strict`] and [`Lazy`].
 pub unsafe trait Mode: Send + Sync + 'static {
   const LAZY: bool;
 }
@@ -1877,7 +1900,7 @@ impl<'a, M: Mode> Net<'a, M> {
 }
 
 impl<'a, M: Mode> Net<'a, M> {
-  /// Expands a `Ref` node connected to `trg`.
+  /// Expands a [`Ref`] node connected to `trg`.
   #[inline(never)]
   pub fn call(&mut self, port: Port, trg: Port) {
     trace!(self.tracer, port, trg);
@@ -1978,7 +2001,7 @@ impl<'a, M: Mode> Net<'a, M> {
     count
   }
 
-  /// Expands `Ref` nodes in the tree connected to `root`.
+  /// Expands [`Ref`] nodes in the tree connected to `root`.
   #[inline(always)]
   pub fn expand(&mut self) {
     assert!(!M::LAZY);
@@ -2233,9 +2256,9 @@ impl<'a, M: Mode> Net<'a, M> {
   }
 }
 
-/// A `Net` whose mode is determined dynamically, at runtime.
+/// A [`Net`] whose mode is determined dynamically, at runtime.
 ///
-/// Use `dispatch_dyn_net!` to wrap operations on the inner net.
+/// Use [`dispatch_dyn_net!`] to wrap operations on the inner net.
 pub enum DynNet<'a> {
   Lazy(Net<'a, Lazy>),
   Strict(Net<'a, Strict>),

@@ -7,7 +7,7 @@ use std::{
   hash::{DefaultHasher, Hasher},
 };
 
-/// Compiles a `Host` to Rust, returning a file to replace `gen.rs`.
+/// Compiles a [`Host`] to Rust, returning a file to replace `gen.rs`.
 pub fn compile_host(host: &Host) -> String {
   _compile_host(host).unwrap()
 }

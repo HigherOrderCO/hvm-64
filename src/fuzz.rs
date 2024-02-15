@@ -3,10 +3,10 @@
 //! This fuzzer can test an algorithm with every possible ordering of parallel
 //! instructions / update propagation.
 //!
-//! This module implements a subset of the `std::sync::atomic` api. To test an
+//! This module implements a subset of the [`std::sync::atomic`] api. To test an
 //! algorithm with the fuzzer, it must first be compiled to use this module's
 //! atomics, rather than std's. Then, it can be called from within
-//! `Fuzzer::fuzz`.
+//! [`Fuzzer::fuzz`].
 //!
 //! For example, here's a test of the ['nomicon][nomicon-example]'s example of
 //! atomic ordering:
@@ -40,7 +40,7 @@
 //! ```
 //!
 //! Note that the atomic types exposed by this module will panic if used outside
-//! of a thread spawned by `Fuzzer::fuzz`.
+//! of a thread spawned by [`Fuzzer::fuzz`].
 //!
 //! Internally, the fuzzer works by iterating through *decision paths*,
 //! sequences of integers indicating which branch is taken at each
@@ -65,9 +65,9 @@
 //!
 //! By default, fuzzing starts at path `[]`, which will test the full decision
 //! tree. Alternatively, one can specify a different path to start at with
-//! `Fuzzer::with_path` -- this is useful, for example, to debug a failing path
-//! late in the tree. (It's important to note, though, that the semantics of the
-//! path are very dependent on the specifics of the algorithm, so if the
+//! [`Fuzzer::with_path`] -- this is useful, for example, to debug a failing
+//! path late in the tree. (It's important to note, though, that the semantics
+//! of the path are very dependent on the specifics of the algorithm, so if the
 //! algorithm is changed (particularly, the atomic instructions it executes),
 //! old paths may no longer be valid.)
 
