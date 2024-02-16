@@ -5,7 +5,6 @@ use loaders::*;
 mod loaders;
 
 #[test]
-#[cfg(not(feature = "cuda"))] // FIXME: gpu runtime errors on nets with `*` on the root
 fn test_era_era() {
   let net = parse_core("@main = * & * ~ *");
   let (rwts, net) = normal(net, 16);
@@ -79,6 +78,6 @@ fn test_queue() {
 
   assert!(valid_readback);
   assert_snapshot!(Net::to_string(&net), @"(((* (a a)) (((((b c) (b c)) (((({3 (d e) (f d)} (f e)) ((* (g g)) h)) (* h)) i)) (* i)) j)) (* j))");
-  assert_snapshot!(readback, @"λa λ* (a λ* λb b λc λ* (c λd λe (d e) λf λ* (f λg λh let#0 {i j} = g; (i (j h)) λ* λk k)))");
+  assert_snapshot!(readback, @"λa λ* (a λ* λb b λc λ* (c λd λe (d e) λf λ* (f λg λh let #0{i j} = g; (i (j h)) λ* λk k)))");
   assert_debug_snapshot!(rwts.total(), @"59");
 }

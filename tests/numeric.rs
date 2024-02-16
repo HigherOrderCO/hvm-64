@@ -136,5 +136,5 @@ fn test_chained_ops() {
   let (rwts, net) = hvm_lang_normal(&mut net, 256);
 
   assert_snapshot!(Net::to_string(&net), @"#7184190578800");
-  assert_debug_snapshot!(rwts.total(), @"1");
+  assert_debug_snapshot!(rwts.total(), @"47");
 }

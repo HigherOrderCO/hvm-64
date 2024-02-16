@@ -93,7 +93,7 @@ pub enum Tree {
     /// An auxiliary port; connects to the branches of this match.
     ///
     /// This should be connected to something of the form:
-    /// ```
+    /// ```text
     /// (+value_if_zero (-predecessor_of_number +value_if_non_zero))
     /// ```
     sel: Box<Tree>,

@@ -3,11 +3,13 @@
 
 use hvmc::{
   fuzz::*,
-  run::{Addr, Net, Port, Tag},
+  run::{Addr, Port, Strict, Tag},
   trace,
 };
 
 use serial_test::serial;
+
+type Net<'a> = hvmc::run::Net<'a, Strict>;
 
 #[test]
 #[serial]
@@ -119,7 +121,7 @@ fn fuzz_var_link_link_pri() {
     // TODO: reenable leak detection
     if false {
       for x in [b, c, d] {
-        assert_eq!(Port(x.loc().val().read()), Port::FREE, "failed to free {:?}", x.wire());
+        assert_eq!(Port(x.addr().val().read()), Port::FREE, "failed to free {:?}", x.wire());
       }
     }
   })
