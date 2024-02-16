@@ -30,7 +30,7 @@ deref!(Book => self.nets: BTreeMap<String, Net>);
 /// the net -- trees connected by their roots -- are stored in `rdex`.
 ///
 /// (The wiring connecting the leaves of all the trees is represented within the
-/// trees via pairs of `Tree::Var` nodes with the same name.)
+/// trees via pairs of [`Tree::Var`] nodes with the same name.)
 #[derive(Clone, Hash, PartialEq, Eq, Debug, Default)]
 pub struct Net {
   pub root: Tree,
@@ -42,8 +42,9 @@ pub struct Net {
 /// Trees in interaction nets are inductively defined as either wires, or an
 /// agent with all of its auxiliary ports (if any) connected to trees.
 ///
-/// Here, the wires at the leaves of the tree are represented with `Tree::Var`,
-/// where the variable name is shared between both sides of the wire.
+/// Here, the wires at the leaves of the tree are represented with
+/// [`Tree::Var`], where the variable name is shared between both sides of the
+/// wire.
 #[derive(Clone, Hash, PartialEq, Eq, Debug, Default)]
 pub enum Tree {
   #[default]
