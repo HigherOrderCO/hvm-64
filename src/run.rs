@@ -502,7 +502,7 @@ impl FromIterator<Lab> for LabSet {
 /// A custom nilary interaction net agent.
 ///
 /// This is *roughly* equivalent to the following definition:
-/// ```ignore
+/// ```rust,ignore
 /// struct Def<T: ?Sized + AsDef = dyn AsDef> {
 ///   pub labs: LabSet,
 ///   pub data: T,
@@ -637,7 +637,7 @@ pub struct InterpretedDef {
 /// of each cap can be used for each input. Once those inputs have been fully
 /// unlocked, the other halves of each cap can be linked with
 /// [`Instruction::Link`]. For example:
-/// ```ignore
+/// ```rust,ignore
 /// let (av, aw, bv, bw) = net.do_wires();
 /// some_subnet(net, av, bv);
 /// net.link(aw, bw);
@@ -650,40 +650,40 @@ pub struct InterpretedDef {
 /// ports -- that is, [`Ref`] or [`Num`] ports.
 #[derive(Debug, Clone)]
 pub enum Instruction {
-  /// ```ignore
+  /// ```rust,ignore
   /// let trg = Trg::port(port);
   /// ```
   Const { trg: TrgId, port: Port },
-  /// ```ignore
+  /// ```rust,ignore
   /// net.link_trg(a, b);
   /// ```
   Link { a: TrgId, b: TrgId },
-  /// ```ignore
+  /// ```rust,ignore
   /// net.link_trg(trg, Trg::port(port));
   /// ```
   LinkConst { trg: TrgId, port: Port },
   /// See [`Net::do_ctr`].
-  /// ```ignore
+  /// ```rust,ignore
   /// let (lft, rgt) = net.do_ctr(lab, trg);
   /// ```
   Ctr { lab: Lab, trg: TrgId, lft: TrgId, rgt: TrgId },
   /// See [`Net::do_op2`].
-  /// ```ignore
+  /// ```rust,ignore
   /// let (lft, rgt) = net.do_op2(lab, trg);
   /// ```
   Op2 { op: Op, trg: TrgId, lft: TrgId, rgt: TrgId },
   /// See [`Net::do_op1`].
-  /// ```ignore
+  /// ```rust,ignore
   /// let rgt = net.do_op1(lab, num, trg);
   /// ```
   Op1 { op: Op, num: u64, trg: TrgId, rgt: TrgId },
   /// See [`Net::do_mat`].
-  /// ```ignore
+  /// ```rust,ignore
   /// let (lft, rgt) = net.do_mat(trg);
   /// ```
   Mat { trg: TrgId, lft: TrgId, rgt: TrgId },
   /// See [`Net::do_wires`].
-  /// ```ignore
+  /// ```rust,ignore
   /// let (av, aw, bv, bw) = net.do_wires();
   /// ```
   Wires { av: TrgId, aw: TrgId, bv: TrgId, bw: TrgId },
