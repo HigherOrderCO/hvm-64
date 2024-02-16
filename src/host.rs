@@ -21,7 +21,7 @@ pub struct Host {
 }
 
 /// A potentially-owned reference to a [`Def`]. Vitally, the address of the
-/// `Def` is stable, even if the `DefRef` moves –- this is why
+/// `Def` is stable, even if the `DefRef` moves -- this is why
 /// [`std::Borrow::Cow`] cannot be used here.
 pub enum DefRef {
   Owned(Box<dyn DerefMut<Target = Def> + Send + Sync>),
