@@ -52,7 +52,7 @@ fn test_church_mul() {
 
   assert!(valid_readback);
   assert_snapshot!(Net::to_string(&net), @"({5 (a {3 b c}) {7 (d a) ({3 c e} d)}} (e b))");
-  assert_snapshot!(readback, @"λa λb let#0 {c g} = (d (e (f #0 {g b}))); c");
+  assert_snapshot!(readback, @"λa λb let #0{c g} = (let #1{d h} = a; d let #2{e f} = h; (e (f #0{g b}))); c");
   assert_debug_snapshot!(rwts.total(), @"12");
 }
 
