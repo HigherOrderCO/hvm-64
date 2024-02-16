@@ -1,13 +1,22 @@
-// An efficient Interaction Combinator runtime
-// ===========================================
-// This file implements an efficient interaction combinator runtime. Nodes are
-// represented by 2 aux ports (P1, P2), with the main port (P1) omitted. A
-// separate vector, 'rdex', holds main ports, and, thus, tracks active pairs
-// that can be reduced in parallel. Pointers are unboxed, meaning
-// that Ptr::ERAs, NUMs and REFs don't use any additional space. REFs lazily
-// expand to closed nets when they interact with nodes, and are cleared when
-// they interact with Ptr::ERAs, allowing for constant space evaluation of
-// recursive functions on Scott encoded datatypes.
+//! The HVM runtime.
+//!
+//! This file can be divided into three major logical components:
+//! - the **allocator**, which manages the creation and destruction of nodes in
+//!   the net
+//! - the **linker**, which links ports and wires in the interaction net, in a
+//!   thread-safe way
+//! - the **interactions**, which define the interaction system used in HVM
+//!   (i.e. the agents and their interaction rules)
+//!
+//! The memory layout is documented within the code, but at a high level:
+//! - references into the net are represented by [`Port`]s and [`Wire`]s, which
+//!   are often tagged pointers into nodes managed by the allocator
+//! - nilary agents are *unboxed* -- they have no backing allocation -- and
+//!   their data is stored inline in their principal `Port`
+//! - other agents are backed by allocated [`Node`]s, which store the targets of
+//!   the *auxiliary ports* of the net (as managed by the linker); the target of
+//!   the principal port is left implicit
+//! - active pairs are thus stored in a dedicated vector, `net.rdex`
 
 use crate::{ops::Op, trace, trace::Tracer, util::bi_enum};
 use nohash_hasher::{IntMap, IsEnabled};
@@ -357,6 +366,17 @@ impl Addr {
   }
 }
 
+/// A wire in the interaction net.
+///
+/// More accurately, this is a *directed view* of a wire. If ports `a` and `b`
+/// are connected, then the wire leaving `a` and the wire leaving `b` are the
+/// same wire, but viewed from opposite directions.
+///
+/// This is represented by a pointer to an `AtomicU64` storing the *target* of
+/// the wire -- the port on the other side. (The target of the wire leaving `a`
+/// is `b`.)
+///
+/// Changes to the target are handled by the linker.
 #[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[must_use]
 pub struct Wire(pub *const AtomicU64);
@@ -1245,7 +1265,7 @@ impl<'a, M: Mode> Net<'a, M> {
     }
   }
 
-  /// Links two `Trg`s, delegating to the appropriate method based on the type
+  /// Links two `Trg`s, delegating to the appropriate method based on the types
   /// of `a` and `b`.
   #[inline(always)]
   pub fn link_trg(&mut self, a: Trg, b: Trg) {
@@ -1279,9 +1299,9 @@ impl<'a, M: Mode> Net<'a, M> {
   }
 }
 
-// ---------------------
-//   Interaction Rules
-// ---------------------
+// ----------------
+//   Interactions
+// ----------------
 
 impl<'a, M: Mode> Net<'a, M> {
   /// Performs an interaction between two connected principal ports.
