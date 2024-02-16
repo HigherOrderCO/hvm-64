@@ -29,7 +29,7 @@ fn main() {
 fn full_main(args: &[String]) {
   let action = args.get(0).map(|x| &**x).unwrap_or("help");
   let file_name = args.get(1);
-  let opts = &args[2 ..];
+  let opts = &args.get(2 ..).unwrap_or(&[]);
   match action {
     "run" => {
       let Some(file_name) = file_name else {
