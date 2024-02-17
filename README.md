@@ -15,7 +15,7 @@ HVM-Core will be used as the compile target for
 Install HVM-Core as:
 
 ```
-cargo install hvm-core
+cargo +nightly install hvm-core
 ```
 
 Then, run the interpeter as:
