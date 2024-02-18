@@ -1386,4 +1386,18 @@ impl Net {
       Net::Eager(this) => this.net.rwts,
     }
   }
+
+  pub fn net_to_runtime(&mut self, net: &crate::ast::Net) {
+    match self {
+      Net::Lazy(rt_net) => crate::ast::net_to_runtime(&mut rt_net.net, net),
+      Net::Eager(rt_net) => crate::ast::net_to_runtime(&mut rt_net.net, net),
+    }
+  }
+
+  pub fn interact(&mut self, book: &Book, a: Ptr, b: Ptr) {
+    match self {
+      Net::Lazy(rt_net) => rt_net.net.interact(book, a, b),
+      Net::Eager(rt_net) => rt_net.net.interact(book, a, b),
+    }
+  }
 }
