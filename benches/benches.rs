@@ -26,7 +26,7 @@ fn load_from_lang<P: AsRef<Path>>(file: P) -> (run::Book, run::Net) {
   let code = fs::read_to_string(file).unwrap();
   let (size, code) = extract_size(&code);
 
-  let mut book = hvml::term::parser::parse_book(code, hvml::term::Book::builtins, false).unwrap();
+  let mut book = hvml::term::parser::parse_book(code, hvml::term::Book::default, false).unwrap();
   let book = hvml::compile_book(&mut book, CompileOpts::heavy(), None).unwrap().core_book;
   let book = ast::book_to_runtime(&book);
 
@@ -101,7 +101,6 @@ fn benchmark(path: &PathBuf, c: &mut Criterion) {
 
 fn benchmark_group(path: &PathBuf, group: String, c: &mut Criterion) {
   let file_name = path.file_stem().unwrap().to_string_lossy();
-  #[cfg(not(feature = "cuda"))]
   c.benchmark_group(group).bench_function(file_name, |b| {
     b.iter_batched(
       || {

@@ -1,6 +1,5 @@
 mod loaders;
 
-#[cfg(not(feature = "cuda"))] // FIXME: Cuda does not support native numbers
 mod numeric_tests {
   use crate::loaders::*;
   use hvmc::{
@@ -18,7 +17,7 @@ mod numeric_tests {
     let net = op_net(10, run::ADD, 2);
     let (rnet, net) = normal(net, 16);
     assert_snapshot!(show_net(&net), @"#12");
-    assert_debug_snapshot!(rnet.rewrites(), @"3");
+    assert_debug_snapshot!(rnet.get_rewrites().total(), @"3");
   }
 
   #[test]
@@ -104,7 +103,7 @@ mod numeric_tests {
     let net = op_net(0, run::NOT, 256);
     let (rnet, net) = normal(net, 16);
     assert_snapshot!(show_net(&net), @"#1152921504606846975");
-    assert_debug_snapshot!(rnet.rewrites(), @"3");
+    assert_debug_snapshot!(rnet.get_rewrites().total(), @"3");
   }
 
   #[test]
@@ -129,7 +128,7 @@ mod numeric_tests {
     let net = op_net(9, run::DIV, 0);
     let (rnet, net) = normal(net, 16);
     assert_snapshot!(show_net(&net), @"#16777215");
-    assert_debug_snapshot!(rnet.rewrites(), @"5");
+    assert_debug_snapshot!(rnet.get_rewrites().total(), @"5");
   }
 
   #[test]
@@ -139,6 +138,6 @@ mod numeric_tests {
     let (rnet, net, _id_map) = hvm_lang_normal(&mut net, 256);
 
     assert_snapshot!(show_net(&net), @"#7184190578800");
-    assert_debug_snapshot!(rnet.rewrites(), @"35");
+    assert_debug_snapshot!(rnet.get_rewrites().total(), @"47");
   }
 }

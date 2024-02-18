@@ -22,13 +22,12 @@ pub fn load_lang(file: &str) -> hvml::term::Book {
 }
 
 #[test]
-#[cfg(not(feature = "cuda"))] // FIXME: hangs indefinitely
 fn dec_bits() {
   let book = load_core("binary-counter/dec_bits.hvmc");
   let (rnet, net) = normal(book, 1 << 16);
 
   assert_snapshot!(show_net(&net), @"(* (* (a a)))");
-  assert_debug_snapshot!(rnet.rewrites(), @"180113");
+  assert_debug_snapshot!(rnet.get_rewrites().total(), @"180113");
 }
 
 #[test]
@@ -36,25 +35,18 @@ fn dec_bits_tree() {
   let book = load_core("binary-counter/dec_bits_tree.hvmc");
   let (rnet, net) = normal(book, 1 << 13);
 
-  // FIXME: The refs to the rule `@E` are not expanded
-  if cfg!(feature = "cuda") {
-    assert_snapshot!(show_net(&net), @"((((((@E @E) (@E @E)) ((@E @E) (@E @E))) (((@E @E) (@E @E)) ((@E @E) (@E @E)))) ((((@E @E) (@E @E)) ((@E @E) (@E @E))) (((@E @E) (@E @E)) ((@E @E) (@E @E))))) (((((@E @E) (@E @E)) ((@E @E) (@E @E))) (((@E @E) (@E @E)) ((@E @E) (@E @E)))) ((((@E @E) (@E @E)) ((@E @E) (@E @E))) (((@E @E) (@E @E)) ((@E @E) (@E @E))))))");
-    assert_debug_snapshot!(rnet.rewrites(), @"2878529");
-  } else {
-    assert_snapshot!(show_net(&net), @"(((((((* (* (a a))) (* (* (b b)))) ((* (* (c c))) (* (* (d d))))) (((* (* (e e))) (* (* (f f)))) ((* (* (g g))) (* (* (h h)))))) ((((* (* (i i))) (* (* (j j)))) ((* (* (k k))) (* (* (l l))))) (((* (* (m m))) (* (* (n n)))) ((* (* (o o))) (* (* (p p))))))) (((((* (* (q q))) (* (* (r r)))) ((* (* (s s))) (* (* (t t))))) (((* (* (u u))) (* (* (v v)))) ((* (* (w w))) (* (* (x x)))))) ((((* (* (y y))) (* (* (z z)))) ((* (* (aa aa))) (* (* (ab ab))))) (((* (* (ac ac))) (* (* (ad ad)))) ((* (* (ae ae))) (* (* (af af)))))))) ((((((* (* (ag ag))) (* (* (ah ah)))) ((* (* (ai ai))) (* (* (aj aj))))) (((* (* (ak ak))) (* (* (al al)))) ((* (* (am am))) (* (* (an an)))))) ((((* (* (ao ao))) (* (* (ap ap)))) ((* (* (aq aq))) (* (* (ar ar))))) (((* (* (as as))) (* (* (at at)))) ((* (* (au au))) (* (* (av av))))))) (((((* (* (aw aw))) (* (* (ax ax)))) ((* (* (ay ay))) (* (* (az az))))) (((* (* (ba ba))) (* (* (bb bb)))) ((* (* (bc bc))) (* (* (bd bd)))))) ((((* (* (be be))) (* (* (bf bf)))) ((* (* (bg bg))) (* (* (bh bh))))) (((* (* (bi bi))) (* (* (bj bj)))) ((* (* (bk bk))) (* (* (bl bl)))))))))");
-    assert_debug_snapshot!(rnet.rewrites(), @"2878593");
-  }
+  assert_snapshot!(show_net(&net), @"(((((((* (* (a a))) (* (* (b b)))) ((* (* (c c))) (* (* (d d))))) (((* (* (e e))) (* (* (f f)))) ((* (* (g g))) (* (* (h h)))))) ((((* (* (i i))) (* (* (j j)))) ((* (* (k k))) (* (* (l l))))) (((* (* (m m))) (* (* (n n)))) ((* (* (o o))) (* (* (p p))))))) (((((* (* (q q))) (* (* (r r)))) ((* (* (s s))) (* (* (t t))))) (((* (* (u u))) (* (* (v v)))) ((* (* (w w))) (* (* (x x)))))) ((((* (* (y y))) (* (* (z z)))) ((* (* (aa aa))) (* (* (ab ab))))) (((* (* (ac ac))) (* (* (ad ad)))) ((* (* (ae ae))) (* (* (af af)))))))) ((((((* (* (ag ag))) (* (* (ah ah)))) ((* (* (ai ai))) (* (* (aj aj))))) (((* (* (ak ak))) (* (* (al al)))) ((* (* (am am))) (* (* (an an)))))) ((((* (* (ao ao))) (* (* (ap ap)))) ((* (* (aq aq))) (* (* (ar ar))))) (((* (* (as as))) (* (* (at at)))) ((* (* (au au))) (* (* (av av))))))) (((((* (* (aw aw))) (* (* (ax ax)))) ((* (* (ay ay))) (* (* (az az))))) (((* (* (ba ba))) (* (* (bb bb)))) ((* (* (bc bc))) (* (* (bd bd)))))) ((((* (* (be be))) (* (* (bf bf)))) ((* (* (bg bg))) (* (* (bh bh))))) (((* (* (bi bi))) (* (* (bj bj)))) ((* (* (bk bk))) (* (* (bl bl)))))))))");
+  assert_debug_snapshot!(rnet.get_rewrites().total(), @"2878593");
 }
 
 #[test]
 #[ignore] // FIXME: panics at src/run.rs::expand with `attempt to multiply with overflow``
-#[cfg(not(feature = "cuda"))] // FIXME: gpu runtime panics with `CUDA_ERROR_ILLEGAL_ADDRESS`
 fn test_church_exp() {
   let book = load_core("church/church_exp.hvmc");
   let (rnet, net) = normal(book, 1 << 12);
 
   assert_snapshot!(show_net(&net));
-  assert_debug_snapshot!(rnet.rewrites(), @"1943");
+  assert_debug_snapshot!(rnet.get_rewrites().total(), @"1943");
 }
 
 #[test]
@@ -67,15 +59,9 @@ fn test_church_mul() {
   assert_debug_snapshot!(valid_readback, @"false"); // invalid because of dup labels 
 
   // TODO: investigate why this difference exists
-  if cfg!(feature = "cuda") {
-    assert_snapshot!(show_net(&net), @"({2 ({2 b {3 c {4 d e}}} f) {3 (f g) {4 (g h) {5 i j}}}} (b k))");
-    assert_snapshot!(readback, @"λa λb ((* {λc d {λd e {λe (a (a (a {b {c {c c}}}))) {a a}}}}) c)");
-    assert_debug_snapshot!(rnet.rewrites(), @"15");
-  } else {
-    assert_snapshot!(show_net(&net), @"({2 ({2 b {3 c {4 d {5 e f}}}} g) {3 (g h) {4 (h i) {5 (i j) k}}}} (b l))");
-    assert_snapshot!(readback, @"λa λb ((* {λc d {λd e {λe f {λf (a (a (a (a {b {c {c {c c}}}})))) a}}}}) c)");
-    assert_debug_snapshot!(rnet.rewrites(), @"17");
-  }
+  assert_snapshot!(show_net(&net), @"({2 ({2 b {3 c {4 d {5 e f}}}} g) {3 (g h) {4 (h i) {5 (i j) k}}}} (b l))");
+  assert_snapshot!(readback, @"λa λb ((* {λc d {λd e {λe f {λf (a (a (a (a {b {c {c {c c}}}})))) a}}}}) c)");
+  assert_debug_snapshot!(rnet.get_rewrites().total(), @"17");
 }
 
 #[test]
@@ -84,7 +70,7 @@ fn alloc_big_tree() {
   let (rnet, net) = normal(book, 1 << 16);
 
   assert_snapshot!(show_net(&net)); // file snapshot
-  assert_debug_snapshot!(rnet.rewrites(), @"28723");
+  assert_debug_snapshot!(rnet.get_rewrites().total(), @"28723");
 }
 
 #[test]
@@ -97,10 +83,5 @@ fn test_neg_fusion() {
   assert_snapshot!(show_net(&net), @"(a (* a))");
   assert_snapshot!(readback, @"λa λ* a");
 
-  // TODO: investigate why this difference exists
-  if cfg!(feature = "cuda") {
-    assert_debug_snapshot!(rnet.rewrites(), @"160");
-  } else {
-    assert_debug_snapshot!(rnet.rewrites(), @"127");
-  }
+  assert_debug_snapshot!(rnet.get_rewrites().total(), @"148");
 }

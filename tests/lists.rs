@@ -21,29 +21,25 @@ fn test_list_got() {
     7,
     // FIXME: Gpu runtime panics with `CUDA_ERROR_ILLEGAL_ADDRESS` when index is >= 14
     // if the list inside `list_put_got.hvm` is [31..0] instead of [0..31], it fails when <= 17
-    #[cfg(not(feature = "cuda"))]
     15,
     // FIXME: Higher numbers than 28 on the `list_put_got.hvm` file are causing a panic `attempt to multiply with overflow` on `hvmc::run::Net::expand`
-    // #[cfg(not(feature = "cuda"))]
     // 31,
   ] {
     let mut book = list_got(index);
     let (rnet, _, _) = hvm_lang_normal(&mut book, 2048);
-    rwts.push(rnet.rewrites())
+    rwts.push(rnet.get_rewrites().total())
   }
 
   assert_debug_snapshot!(rwts[0], @"306");
-  assert_debug_snapshot!(rwts[1], @"341");
-  assert_debug_snapshot!(rwts[2], @"411");
-  assert_debug_snapshot!(rwts[3], @"551");
-  #[cfg(not(feature = "cuda"))]
-  assert_debug_snapshot!(rwts[4], @"831");
+  assert_debug_snapshot!(rwts[1], @"330");
+  assert_debug_snapshot!(rwts[2], @"378");
+  assert_debug_snapshot!(rwts[3], @"474");
+  assert_debug_snapshot!(rwts[4], @"666");
 
   // Tests the linearity of the function
   let delta = rwts[1] - rwts[0];
   assert_eq!(rwts[1] + delta * 2, rwts[2]);
   assert_eq!(rwts[2] + delta * 4, rwts[3]);
-  #[cfg(not(feature = "cuda"))]
   assert_eq!(rwts[3] + delta * 8, rwts[4]);
 }
 
@@ -60,7 +56,7 @@ fn test_list_put() {
   for (index, value) in [(0, 2), (1, 4), (3, 8), (7, 16), (15, 32)] {
     let mut book = list_put(index, value);
     let (rnet, _, _) = hvm_lang_normal(&mut book, 2048);
-    rwts.push(rnet.rewrites())
+    rwts.push(rnet.get_rewrites().total())
   }
 
   assert_debug_snapshot!(rwts[0], @"295");
