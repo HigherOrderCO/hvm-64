@@ -103,14 +103,14 @@ fn compile_port(host: &Host, port: &Port) -> String {
 
 /// Adapts `name` to be a valid suffix for a rust identifier, if necessary.
 fn sanitize_name(name: &str) -> String {
-  if !name.contains('.') {
+  if !name.contains('.') && !name.contains('$') {
     name.to_owned()
   } else {
     // Append a hash to the name to avoid clashes between `foo.bar` and `foo_bar`.
     let mut hasher = DefaultHasher::new();
     hasher.write(name.as_bytes());
     let hash = hasher.finish();
-    let mut sanitized = name.replace('.', "_");
+    let mut sanitized = name.replace(|c| c == '.' || c == '$', "_");
     sanitized.push_str("__");
     write!(sanitized, "__{:016x}", hash).unwrap();
     sanitized

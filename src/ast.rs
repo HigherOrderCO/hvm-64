@@ -206,9 +206,9 @@ impl<'i> Parser<'i> {
     }
   }
 
-  /// Name = /[a-zA-Z0-9_.]+/
+  /// Name = /[a-zA-Z0-9_.$]+/
   fn parse_name(&mut self) -> Result<String, String> {
-    let name = self.take_while(|c| c.is_alphanumeric() || c == '_' || c == '.');
+    let name = self.take_while(|c| c.is_alphanumeric() || c == '_' || c == '.' || c == '$');
     if name.is_empty() {
       return Err(format!("Expected a name character, found {:?}", self.peek_char()));
     }
