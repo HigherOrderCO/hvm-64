@@ -2,9 +2,9 @@ use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use hvmc::{
   ast::{Book, Net},
   host::Host,
-  run::Net as RtNet,
+  run::{Net as RtNet, Strict},
 };
-use hvml::term::DefNames;
+use hvml::{term::Book as HvmlBook, ENTRY_POINT};
 use std::{
   ffi::OsStr,
   fs,
@@ -25,8 +25,9 @@ fn load_from_lang<P: AsRef<Path>>(file: P) -> Book {
   let code = fs::read_to_string(file).unwrap();
   let (_, code) = extract_size(&code);
 
-  let mut book = hvml::term::parser::parse_definition_book(&code).unwrap();
-  let book = hvml::compile_book(&mut book, hvml::Opts::light()).unwrap().core_book;
+  let mut book = hvml::term::parser::parse_book(&code, HvmlBook::default, false).unwrap();
+  let entrypoint = book.entrypoint.clone();
+  let book = hvml::compile_book(&mut book, hvml::CompileOpts::light(), entrypoint).unwrap().core_book;
   book
 }
 
@@ -87,25 +88,25 @@ fn run_file(path: &PathBuf, group: Option<String>, c: &mut Criterion) {
 }
 
 fn benchmark(file_name: &str, book: Book, c: &mut Criterion) {
-  let area = RtNet::init_heap(1 << 24);
+  let area = RtNet::<Strict>::init_heap(1 << 24);
   let host = Host::new(&book);
   c.bench_function(file_name, |b| {
     b.iter(|| {
-      let mut net = RtNet::new(&area);
-      net.boot(host.defs.get(DefNames::ENTRY_POINT).unwrap());
+      let mut net = RtNet::<Strict>::new(&area);
+      net.boot(host.defs.get(ENTRY_POINT).unwrap());
       black_box(black_box(net).normal())
     });
   });
 }
 
 fn benchmark_group(file_name: &str, group: String, book: Book, c: &mut Criterion) {
-  let area = RtNet::init_heap(1 << 24);
+  let area = RtNet::<Strict>::init_heap(1 << 24);
   let host = Host::new(&book);
 
   c.benchmark_group(group).bench_function(file_name, |b| {
     b.iter(|| {
-      let mut net = RtNet::new(&area);
-      net.boot(host.defs.get(DefNames::ENTRY_POINT).unwrap());
+      let mut net = RtNet::<Strict>::new(&area);
+      net.boot(host.defs.get(ENTRY_POINT).unwrap());
       black_box(black_box(net).normal())
     });
   });
@@ -125,13 +126,13 @@ fn interact_benchmark(c: &mut Criterion) {
 
   for (name, redex) in cases {
     let mut book = Book::default();
-    book.insert(DefNames::ENTRY_POINT.to_string(), Net { root: Era, rdex: vec![redex] });
-    let area = RtNet::init_heap(1 << 24);
+    book.insert(ENTRY_POINT.to_string(), Net { root: Era, rdex: vec![redex] });
+    let area = RtNet::<Strict>::init_heap(1 << 24);
     let host = Host::new(&book);
     group.bench_function(name, |b| {
       b.iter(|| {
-        let mut net = RtNet::new(&area);
-        net.boot(host.defs.get(DefNames::ENTRY_POINT).unwrap());
+        let mut net = RtNet::<Strict>::new(&area);
+        net.boot(host.defs.get(ENTRY_POINT).unwrap());
         black_box(black_box(net).normal())
       });
     });
