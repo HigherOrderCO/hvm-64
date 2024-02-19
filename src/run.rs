@@ -404,7 +404,7 @@ impl Wire {
   #[inline(always)]
   fn target<'a>(&self) -> &'a AtomicU64 {
     if cfg!(feature = "_fuzz") {
-      assert_ne!(self.0 as usize, 0xfffffffffff0);
+      assert_ne!(self.0 as usize, 0xfffffffffff0u64 as usize);
       assert_ne!(self.0 as usize, 0);
     }
     unsafe { &*self.0 }
