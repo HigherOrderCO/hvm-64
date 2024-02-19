@@ -59,12 +59,10 @@ meant to be very human readable. Fortunatelly, we have
 instead:
 
 ```javascript
-add = λa λb (+ a b)
+add a b = (+ a b)
 
-sum = λn match n {
-  0   : 1
-  1+p : (add (sum p) (sum p))
-}
+sum  0 = 1
+sum +p = (add (sum p) (sum p))
 
 main = (sum 24)
 ```
