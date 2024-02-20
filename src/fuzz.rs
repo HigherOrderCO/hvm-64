@@ -51,9 +51,7 @@
 //! progressively discovered through execution. Thus, when a path is first
 //! executed, it may not be the full path -- there may be branches that are not
 //! specified. In the extreme case, at the very beginning, the path starts as
-//! `[]`, with no branches specified that are not specified. In the extreme
-//! case, at the very beginning, the path starts as `[]`, with no branches
-//! specified.
+//! `[]`, with no branches specified.
 //!
 //! When a branching point is reached that is not specified in the path, the
 //! *last* branch is automatically chosen, and this decision is appended to the
