@@ -71,8 +71,13 @@ bi_enum! {
   #[repr(u8)]
   #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
   pub enum Tag {
-    /// `Red` ports are an implementation detail of the atomic linking
-    /// algorithm, and don't have a precise analogue in interaction nets.
+    /// `Red` ports represent redirects, which are an implementation detail of
+    /// the atomic linking algorithm, and don't have a precise analogue in
+    /// interaction nets.
+    ///
+    /// These ports are never directly held, but rather replace the backlinks of
+    /// some var ports. They are used to resolve inter-thread conflicts, and
+    /// thus will never appear when single-threaded.
     ///
     /// See the documentation for the linking algorithm for more.
     Red = 0,
