@@ -78,7 +78,7 @@ fn run_with_cli(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     "compile" => {
       if args.argm.len() > 0 {
         let file  = args.argm;
-        let book  = load_book(&file);
+        let book  = load_book_sanitized(&file);
         let net   = run::Net::new(1 << 28, lazy);
         let begin = std::time::Instant::now();
         compile_book_to_rust_crate(&file, &book)?;
@@ -143,6 +143,17 @@ fn load_book(file: &str) -> run::Book {
     std::process::exit(1);
   };
   return ast::book_to_runtime(&ast::do_parse_book(&file));
+}
+
+/// Parses the ast book and applies [ast::book_sanitize_def_names].
+fn load_book_sanitized(file: &str) -> run::Book {
+  let Ok(file) = fs::read_to_string(file) else {
+    eprintln!("Input file not found");
+    std::process::exit(1);
+  };
+  let book = &mut ast::do_parse_book(&file);
+  ast::book_sanitize_def_names(book);
+  return ast::book_to_runtime(book);
 }
 
 pub fn compile_book_to_rust_crate(f_name: &str, book: &run::Book) -> Result<(), std::io::Error> {

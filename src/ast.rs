@@ -797,3 +797,86 @@ pub fn book_from_runtime(rt_book: &run::Book) -> Book {
   }
   book
 }
+
+/// Creates a new [a-z] only name for all definitions except @main
+pub fn book_sanitize_def_names(book: &mut Book) {
+  fn val_to_name(val: u64) -> String {
+    pub fn val_to_letters(num: run::Val) -> Vec<u8> {
+      let mut letters = Vec::new();
+      let mut num = num;
+      while num > 0 {
+        letters.push((num % 26) as u8);
+        num /= 26;
+      }
+      letters.reverse();
+      return letters;
+    }
+    pub fn letters_to_name(letters: Vec<u8>) -> String {
+      let mut name = String::new();
+      for letter in letters {
+        name.push((b'a' + letter) as char);
+      }
+      return name;
+    }
+    return letters_to_name(val_to_letters(val));
+  }
+
+  let mut count = 0;
+  let mut new_names = HashMap::new();
+
+  for (def_name, net) in book.iter_mut() {
+    if def_name == "main" {
+      continue;
+    }
+    let new_def_name = val_to_name(count);
+    new_names.insert(def_name.clone(), new_def_name.clone());
+    count += 1;
+  }
+
+  for (old_name, new_name) in new_names.iter() {
+    let net = book.remove(old_name).unwrap();
+    book.insert(new_name.clone(), net);
+
+    let old_name = name_to_val(old_name);
+    let new_name = name_to_val(new_name);
+
+    for net in book.values_mut() {
+      subst_ref_name(&mut net.root, old_name, new_name);
+      for (a, b) in &mut net.rdex {
+        subst_ref_name(a, old_name, new_name);
+        subst_ref_name(b, old_name, new_name);
+      }
+    }
+  }
+}
+
+fn subst_ref_name(tree: &mut Tree, from: u64, to: u64) {
+  let mut to_subst = vec![tree];
+
+  while let Some(tree) = to_subst.pop() {
+    match tree {
+      Tree::Ref { nam } => if *nam == from {
+        *tree = Tree::Ref { nam: to };
+      }
+
+      Tree::Con { lft, rgt }
+      | Tree::Tup { lft, rgt }
+      | Tree::Dup { lft, rgt, .. }
+      | Tree::Op2 { lft, rgt, .. } => {
+        to_subst.push(lft);
+        to_subst.push(rgt);
+      },
+
+      Tree::Op1 { rgt, .. } => {
+        to_subst.push(rgt);
+      }
+
+      Tree::Mat { sel, ret } => {
+        to_subst.push(sel);
+        to_subst.push(ret);
+      },
+
+      Tree::Era | Tree::Var { .. } | Tree::Num { .. } => {},
+    }
+  }
+}
