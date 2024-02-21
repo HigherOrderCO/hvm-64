@@ -109,7 +109,7 @@ fn load(file: &str) -> Arc<Mutex<host::Host>> {
   };
   let host = Arc::new(Mutex::new(host::Host::default()));
   host.lock().unwrap().insert_def(
-    "HVM.Log",
+    "HVM.log",
     host::DefRef::Owned(Box::new(stdlib::LogDef::new({
       let host = Arc::downgrade(&host);
       move |wire| {

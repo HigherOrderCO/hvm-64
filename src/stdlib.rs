@@ -10,9 +10,9 @@ fn call_identity<M: Mode>(net: &mut Net<M>, port: Port) {
   net.link_trg(a, b);
 }
 
-/// The definition of `HVM.Log`, parameterized by the readback function.
+/// The definition of `HVM.log`, parameterized by the readback function.
 ///
-/// `@HVM.Log ~ (arg out)` waits for `arg` to be normalized, prints it using the
+/// `@HVM.log ~ (arg out)` waits for `arg` to be normalized, prints it using the
 /// supplied readback function, and then reduces to `arg ~ * & out ~ @IDENTITY`.
 ///
 /// The output can therefore either be erased, or used to sequence other
@@ -73,7 +73,9 @@ impl<F: Fn(Wire) + Send + Sync + 'static> AsDef for ActiveLogDef<F> {
   unsafe fn call<M: Mode>(def: *const Def<Self>, net: &mut Net<M>, port: Port) {
     let def = *Box::from_raw(def as *mut Def<Self>);
     match port.tag() {
-      Tag::Red | Tag::Var => unreachable!(),
+      Tag::Red => {
+        unreachable!()
+      },
       Tag::Ref if port != Port::ERA => {
         let other: *const Def = port.addr().def() as *const _;
         if let Some(other) = Def::downcast_ptr::<Self>(other) {
@@ -84,7 +86,7 @@ impl<F: Fn(Wire) + Send + Sync + 'static> AsDef for ActiveLogDef<F> {
           net.link_port_port(def.data.out, port);
         }
       }
-      Tag::Ref | Tag::Num => net.link_port_port(def.data.out, port),
+      Tag::Ref | Tag::Num | Tag::Var => net.link_port_port(def.data.out, port),
       tag @ (Tag::Op2 | Tag::Op1 | Tag::Mat | Tag::Ctr) => {
         let old = port.consume_node();
         let new = net.create_node(tag, old.lab);
