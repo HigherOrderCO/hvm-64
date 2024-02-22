@@ -41,7 +41,7 @@ pub fn hvm_lang_readback(net: &Net, book: &LangBook) -> (String, bool) {
 }
 
 pub fn hvm_lang_normal(book: &mut LangBook, size: usize) -> (hvmc::run::Rewrites, Net) {
-  let compiled = hvml::compile_book(book, hvml::CompileOpts::light(), book.entrypoint.clone()).unwrap();
+  let compiled = hvml::compile_book(book, hvml::CompileOpts::light()).unwrap();
   let (root, res_lnet) = normal(compiled.core_book, size);
   (root, res_lnet)
 }
