@@ -457,7 +457,7 @@ checksum = "809e18805660d7b6b2e2b9f316a5099521b5998d5cba4dda11b5157a21aaef03"
 
 [[package]]
 name = "hvm-core"
-version = "0.2.11"
+version = "0.2.19"
 dependencies = [
  "criterion",
  "hvm-lang",
@@ -469,13 +469,14 @@ dependencies = [
 [[package]]
 name = "hvm-lang"
 version = "0.1.0"
-source = "git+https://github.com/HigherOrderCO/hvm-lang.git?rev=efda39f#efda39f7f0a9eadc97fdb7117f731de7208770a3"
+source = "git+https://github.com/HigherOrderCO/hvm-lang.git#1876c8d6b3e8d6a768624991f5100cb47408355a"
 dependencies = [
  "chumsky",
  "clap",
  "highlight_error",
  "hvm-core",
  "indexmap",
+ "interner",
  "itertools 0.11.0",
  "logos",
 ]
@@ -502,6 +503,12 @@ dependencies = [
  "similar",
  "yaml-rust",
 ]
+
+[[package]]
+name = "interner"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e8c60687056b35a996f2213287048a7092d801b61df5fee3bd5bd9bf6f17a2d0"
 
 [[package]]
 name = "is-terminal"
