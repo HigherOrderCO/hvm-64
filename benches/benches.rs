@@ -26,8 +26,7 @@ fn load_from_lang<P: AsRef<Path>>(file: P) -> Book {
   let (_, code) = extract_size(&code);
 
   let mut book = hvml::term::parser::parse_book(&code, HvmlBook::default, false).unwrap();
-  let entrypoint = book.entrypoint.clone();
-  let book = hvml::compile_book(&mut book, hvml::CompileOpts::light(), entrypoint).unwrap().core_book;
+  let book = hvml::compile_book(&mut book, hvml::CompileOpts::light()).unwrap().core_book;
   book
 }
 
