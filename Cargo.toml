@@ -36,7 +36,7 @@ _fuzz_no_free = ["_fuzz"]
 
 [dev-dependencies]
 criterion = "0.5.1"
-hvm-lang = { git = "https://github.com/HigherOrderCO/hvm-lang.git", branch = "core-ptr-refactor/sc-362/basic-compatibility" } # allows us to use the hvm-lang syntax for tests/benchmarks
+hvm-lang = { git = "https://github.com/HigherOrderCO/hvm-lang.git", rev = "efda39f" } # allows us to use the hvm-lang syntax for tests/benchmarks
 insta = "1.34.0"
 serial_test = "3.0.0"
 
