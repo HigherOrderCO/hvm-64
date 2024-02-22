@@ -8,4 +8,7 @@ target/
 tmp/
 .hvm/
 .hvmx/
-.DS_store/
+**/.DS_Store
+
+flamegraph.svg
+.vscode/

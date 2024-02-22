@@ -1,799 +1,364 @@
-// An interaction combinator language
-// ----------------------------------
-// This file implements a textual syntax to interact with the runtime. It includes a pure AST for
-// nets, as well as functions for parsing, stringifying, and converting pure ASTs to runtime nets.
-// On the runtime, a net is represented by a list of active trees, plus a root tree. The textual
-// syntax reflects this representation. The grammar is specified on this repo's README.
+//! The textual language of HVMC.
+//!
+//! This file defines an AST for interaction nets, and functions to convert this
+//! AST to/from the textual syntax.
+//!
+//! The grammar is documented in the repo README, as well as within the parser
+//! methods, for convenience.
+//!
+//! The AST is based on the [interaction calculus].
+//!
+//! [interaction calculus]: https://en.wikipedia.org/wiki/Interaction_nets#Interaction_calculus
 
-use crate::run;
-use std::collections::BTreeMap;
-use std::collections::HashMap;
-use std::collections::HashSet;
-use std::iter::Peekable;
-use std::str::Chars;
+use crate::{ops::Op, run::Lab, util::deref};
+use std::{collections::BTreeMap, fmt, str::FromStr};
 
-// AST
-// ---
-
-#[derive(Clone, Hash, PartialEq, Eq, Debug)]
-pub enum Tree {
-  Era,
-  Con { lft: Box<Tree>, rgt: Box<Tree> },
-  Tup { lft: Box<Tree>, rgt: Box<Tree> },
-  Dup { lab: run::Lab, lft: Box<Tree>, rgt: Box<Tree> },
-  Var { nam: String },
-  Ref { nam: run::Val },
-  Num { val: run::Val },
-  Op1 { opr: run::Lab, lft: run::Val, rgt: Box<Tree> },
-  Op2 { opr: run::Lab, lft: Box<Tree>, rgt: Box<Tree> },
-  Mat { sel: Box<Tree>, ret: Box<Tree> },
+/// The top level AST node, representing a collection of named nets.
+///
+/// This is a newtype wrapper around a `BTreeMap<String, Net>`, and is
+/// dereferencable to such.
+#[derive(Clone, Hash, PartialEq, Eq, Debug, Default)]
+pub struct Book {
+  pub nets: BTreeMap<String, Net>,
 }
 
-type Redex = Vec<(Tree, Tree)>;
+deref!(Book => self.nets: BTreeMap<String, Net>);
 
-#[derive(Clone, Hash, PartialEq, Eq, Debug)]
+/// An AST node representing an interaction net with one free port.
+///
+/// The tree connected to the free port is stored in `root`. The active pairs in
+/// the net -- trees connected by their roots -- are stored in `rdex`.
+///
+/// (The wiring connecting the leaves of all the trees is represented within the
+/// trees via pairs of [`Tree::Var`] nodes with the same name.)
+#[derive(Clone, Hash, PartialEq, Eq, Debug, Default)]
 pub struct Net {
   pub root: Tree,
-  pub rdex: Redex,
+  pub rdex: Vec<(Tree, Tree)>,
 }
 
-pub type Book = BTreeMap<String, Net>;
-
-// Parser
-// ------
-
-// FIXME: remove after skip is fixed
-fn skip_spaces(chars: &mut Peekable<Chars>) {
-  while let Some(c) = chars.peek() {
-    if !c.is_ascii_whitespace() {
-      break;
-    } else {
-      chars.next();
-    }
-  }
+/// An AST node representing an interaction net tree.
+///
+/// Trees in interaction nets are inductively defined as either wires, or an
+/// agent with all of its auxiliary ports (if any) connected to trees.
+///
+/// Here, the wires at the leaves of the tree are represented with
+/// [`Tree::Var`], where the variable name is shared between both sides of the
+/// wire.
+#[derive(Clone, Hash, PartialEq, Eq, Debug, Default)]
+pub enum Tree {
+  #[default]
+  /// A nilary eraser node.
+  Era,
+  /// A native 60-bit integer.
+  Num { val: u64 },
+  /// A nilary node, referencing a named net.
+  Ref { nam: String },
+  /// A binary interaction combinator.
+  Ctr {
+    /// The label of the combinator. (Combinators with the same label
+    /// annihilate, and combinators with different labels commute.)
+    lab: Lab,
+    lft: Box<Tree>,
+    rgt: Box<Tree>,
+  },
+  /// A binary node representing an operation on native integers.
+  ///
+  /// The principal port connects to the left operand.
+  Op2 {
+    /// The operation associated with this node.
+    opr: Op,
+    /// An auxiliary port; connects to the right operand.
+    lft: Box<Tree>,
+    /// An auxiliary port; connects to the output.
+    rgt: Box<Tree>,
+  },
+  /// A unary node representing a partially-applied operation on native
+  /// integers.
+  ///
+  /// The left operand is already applied. The principal port connects to the
+  /// right operand.
+  Op1 {
+    /// The operation associated with this node.
+    opr: Op,
+    /// The left operand.
+    lft: u64,
+    /// An auxiliary port; connects to the output.
+    rgt: Box<Tree>,
+  },
+  /// A binary node representing a match on native integers.
+  ///
+  /// The principal port connects to the integer to be matched on.
+  Mat {
+    /// An auxiliary port; connects to the branches of this match.
+    ///
+    /// This should be connected to something of the form:
+    /// ```text
+    /// (+value_if_zero (-predecessor_of_number +value_if_non_zero))
+    /// ```
+    sel: Box<Tree>,
+    /// An auxiliary port; connects to the output.
+    ret: Box<Tree>,
+  },
+  /// One side of a wire; the other side will have the same name.
+  Var { nam: String },
 }
 
-// FIXME: detect two '/' for comments, allowing us to remove 'skip_spaces'
-fn skip(chars: &mut Peekable<Chars>) {
-  while let Some(c) = chars.peek() {
-    if *c == '/' {
-      chars.next();
-      while let Some(c) = chars.peek() {
-        if *c == '\n' {
-          break;
-        }
-        chars.next();
-      }
-    } else if !c.is_ascii_whitespace() {
-      break;
-    } else {
-      chars.next();
-    }
-  }
+/// The state of the HVMC parser.
+struct Parser<'i> {
+  /// The remaining characters in the input. An empty string indicates EOF.
+  input: &'i str,
 }
 
-pub fn consume(chars: &mut Peekable<Chars>, text: &str) -> Result<(), String> {
-  skip(chars);
-  for c in text.chars() {
-    if chars.next() != Some(c) {
-      return Err(format!("Expected '{}', found {:?}", text, chars.peek()));
+impl<'i> Parser<'i> {
+  /// Book = ("@" Name "=" Net)*
+  fn parse_book(&mut self) -> Result<Book, String> {
+    let mut book = BTreeMap::new();
+    while self.consume("@").is_ok() {
+      let name = self.parse_name()?;
+      self.consume("=")?;
+      let net = self.parse_net()?;
+      book.insert(name, net);
     }
+    Ok(Book { nets: book })
   }
-  return Ok(());
-}
 
-pub fn parse_decimal(chars: &mut Peekable<Chars>) -> Result<u64, String> {
-  let mut num: u64 = 0;
-  skip(chars);
-  if !chars.peek().map_or(false, |c| c.is_digit(10)) {
-    return Err(format!("Expected a decimal number, found {:?}", chars.peek()));
-  }
-  while let Some(c) = chars.peek() {
-    if !c.is_digit(10) {
-      break;
-    }
-    num = num * 10 + c.to_digit(10).unwrap() as u64;
-    chars.next();
-  }
-  Ok(num)
-}
-
-pub fn parse_name(chars: &mut Peekable<Chars>) -> Result<String, String> {
-  let mut txt = String::new();
-  skip(chars);
-  if !chars.peek().map_or(false, |c| c.is_alphanumeric() || *c == '_' || *c == '.') {
-    return Err(format!("Expected a name character, found {:?}", chars.peek()))
-  }
-  while let Some(c) = chars.peek() {
-    if !c.is_alphanumeric() && *c != '_' && *c != '.' {
-      break;
-    }
-    txt.push(*c);
-    chars.next();
-  }
-  Ok(txt)
-}
-
-pub fn parse_opx_lit(chars: &mut Peekable<Chars>) -> Result<String, String> {
-  let mut opx = String::new();
-  skip_spaces(chars);
-  while let Some(c) = chars.peek() {
-    if !"+-=*/%<>|&^!?".contains(*c) {
-      break;
-    }
-    opx.push(*c);
-    chars.next();
-  }
-  Ok(opx)
-}
-
-fn parse_opr(chars: &mut Peekable<Chars>) -> Result<run::Lab, String> {
-  let opx = parse_opx_lit(chars)?;
-  match opx.as_str() {
-    "+"  => Ok(run::ADD),
-    "-"  => Ok(run::SUB),
-    "*"  => Ok(run::MUL),
-    "/"  => Ok(run::DIV),
-    "%"  => Ok(run::MOD),
-    "==" => Ok(run::EQ),
-    "!=" => Ok(run::NE),
-    "<"  => Ok(run::LT),
-    ">"  => Ok(run::GT),
-    "<=" => Ok(run::LTE),
-    ">=" => Ok(run::GTE),
-    "&&" => Ok(run::AND),
-    "||" => Ok(run::OR),
-    "^"  => Ok(run::XOR),
-    "!"  => Ok(run::NOT),
-    "<<" => Ok(run::LSH),
-    ">>" => Ok(run::RSH),
-    _ => Err(format!("Unknown operator: {}", opx)),
-  }
-}
-
-pub fn parse_tree(chars: &mut Peekable<Chars>) -> Result<Tree, String> {
-  skip(chars);
-  match chars.peek() {
-    Some('*') => {
-      chars.next();
-      Ok(Tree::Era)
-    }
-    Some('(') => {
-      chars.next();
-      let lft = Box::new(parse_tree(chars)?);
-      let rgt = Box::new(parse_tree(chars)?);
-      consume(chars, ")")?;
-      Ok(Tree::Con { lft, rgt })
-    }
-    Some('[') => {
-      chars.next();
-      let lab = 1;
-      let lft = Box::new(parse_tree(chars)?);
-      let rgt = Box::new(parse_tree(chars)?);
-      consume(chars, "]")?;
-      Ok(Tree::Tup { lft, rgt })
-    }
-    Some('{') => {
-      chars.next();
-      let lab = parse_decimal(chars)? as run::Lab;
-      let lft = Box::new(parse_tree(chars)?);
-      let rgt = Box::new(parse_tree(chars)?);
-      consume(chars, "}")?;
-      Ok(Tree::Dup { lab, lft, rgt })
-    }
-    Some('@') => {
-      chars.next();
-      skip(chars);
-      let name = parse_name(chars)?;
-      Ok(Tree::Ref { nam: name_to_val(&name) })
-    }
-    Some('#') => {
-      chars.next();
-      Ok(Tree::Num { val: parse_decimal(chars)? })
-    }
-    Some('<') => {
-      chars.next();
-      if chars.peek().map_or(false, |c| c.is_digit(10)) {
-        let lft = parse_decimal(chars)?;
-        let opr = parse_opr(chars)?;
-        let rgt = Box::new(parse_tree(chars)?);
-        consume(chars, ">")?;
-        Ok(Tree::Op1 { opr, lft, rgt })
-      } else {
-        let opr = parse_opr(chars)?;
-        let lft = Box::new(parse_tree(chars)?);
-        let rgt = Box::new(parse_tree(chars)?);
-        consume(chars, ">")?;
-        Ok(Tree::Op2 { opr, lft, rgt })
-      }
-    }
-    Some('?') => {
-      chars.next();
-      consume(chars, "<")?;
-      let sel = Box::new(parse_tree(chars)?);
-      let ret = Box::new(parse_tree(chars)?);
-      consume(chars, ">")?;
-      Ok(Tree::Mat { sel, ret })
-    }
-    _ => {
-      Ok(Tree::Var { nam: parse_name(chars)? })
-    },
-  }
-}
-
-pub fn parse_net(chars: &mut Peekable<Chars>) -> Result<Net, String> {
-  let mut rdex = Vec::new();
-  let root = parse_tree(chars)?;
-  while let Some(c) = { skip(chars); chars.peek() } {
-    if *c == '&' {
-      chars.next();
-      let tree1 = parse_tree(chars)?;
-      consume(chars, "~")?;
-      let tree2 = parse_tree(chars)?;
+  /// Net = Tree ("&" Tree "~" Tree)*
+  fn parse_net(&mut self) -> Result<Net, String> {
+    let mut rdex = Vec::new();
+    let root = self.parse_tree()?;
+    while self.consume("&").is_ok() {
+      let tree1 = self.parse_tree()?;
+      self.consume("~")?;
+      let tree2 = self.parse_tree()?;
       rdex.push((tree1, tree2));
+    }
+    Ok(Net { root, rdex })
+  }
+
+  fn parse_tree(&mut self) -> Result<Tree, String> {
+    self.skip_trivia();
+    match self.peek_char() {
+      // Era = "*"
+      Some('*') => {
+        self.advance_char();
+        Ok(Tree::Era)
+      }
+      // Ctr = "(" Tree Tree ")" | "[" Tree Tree "]" | "{" Int Tree Tree "}"
+      Some(char @ ('(' | '[' | '{')) => {
+        self.advance_char();
+        let lab = match char {
+          '(' => 0,
+          '[' => 1,
+          '{' => self.parse_int()? as Lab,
+          _ => unreachable!(),
+        };
+        let lft = Box::new(self.parse_tree()?);
+        let rgt = Box::new(self.parse_tree()?);
+        self.consume(match char {
+          '(' => ")",
+          '[' => "]",
+          '{' => "}",
+          _ => unreachable!(),
+        })?;
+        Ok(Tree::Ctr { lab, lft, rgt })
+      }
+      // Ref = "@" Name
+      Some('@') => {
+        self.advance_char();
+        self.skip_trivia();
+        let nam = self.parse_name()?;
+        Ok(Tree::Ref { nam })
+      }
+      // Num = "#" Int
+      Some('#') => {
+        self.advance_char();
+        Ok(Tree::Num { val: self.parse_int()? })
+      }
+      // Op = "<" Op Tree Tree ">" | "<" Int Op Tree ">"
+      Some('<') => {
+        self.advance_char();
+        if self.peek_char().is_some_and(|c| c.is_digit(10)) {
+          let lft = self.parse_int()?;
+          let opr = self.parse_op()?;
+          let rgt = Box::new(self.parse_tree()?);
+          self.consume(">")?;
+          Ok(Tree::Op1 { opr, lft, rgt })
+        } else {
+          let opr = self.parse_op()?;
+          let lft = Box::new(self.parse_tree()?);
+          let rgt = Box::new(self.parse_tree()?);
+          self.consume(">")?;
+          Ok(Tree::Op2 { opr, lft, rgt })
+        }
+      }
+      // Mat = "?<" Tree Tree ">"
+      Some('?') => {
+        self.advance_char();
+        self.consume("<")?;
+        let sel = Box::new(self.parse_tree()?);
+        let ret = Box::new(self.parse_tree()?);
+        self.consume(">")?;
+        Ok(Tree::Mat { sel, ret })
+      }
+      // Var = Name
+      _ => Ok(Tree::Var { nam: self.parse_name()? }),
+    }
+  }
+
+  /// Name = /[a-zA-Z0-9_.$]+/
+  fn parse_name(&mut self) -> Result<String, String> {
+    let name = self.take_while(|c| c.is_alphanumeric() || c == '_' || c == '.' || c == '$');
+    if name.is_empty() {
+      return Err(format!("Expected a name character, found {:?}", self.peek_char()));
+    }
+    Ok(name.to_owned())
+  }
+
+  /// Int = /[0-9]+/ | /0x[0-9a-fA-F]+/ | /0b[01]+/
+  fn parse_int(&mut self) -> Result<u64, String> {
+    self.skip_trivia();
+    let radix = if let Some(rest) = self.input.strip_prefix("0x") {
+      self.input = rest;
+      16
+    } else if let Some(rest) = self.input.strip_prefix("0b") {
+      self.input = rest;
+      2
     } else {
+      10
+    };
+    let mut num: u64 = 0;
+    if !self.peek_char().map_or(false, |c| c.is_digit(radix)) {
+      return Err(format!("Expected a digit, found {:?}", self.peek_char()));
+    }
+    while let Some(digit) = self.peek_char().and_then(|c| c.to_digit(radix)) {
+      self.advance_char();
+      num = num * (radix as u64) + (digit as u64);
+    }
+    Ok(num)
+  }
+
+  /// See `ops.rs` for the available operators.
+  fn parse_op(&mut self) -> Result<Op, String> {
+    let op = self.take_while(|c| "+-=*/%<>|&^!?".contains(c));
+    op.parse().map_err(|_| format!("Unknown operator: {op:?}"))
+  }
+
+  /// Inspects the next character in the input without consuming it.
+  fn peek_char(&self) -> Option<char> {
+    self.input.chars().next()
+  }
+
+  /// Consumes the next character in the input.
+  fn advance_char(&mut self) -> Option<char> {
+    let char = self.input.chars().next()?;
+    self.input = &self.input[char.len_utf8() ..];
+    Some(char)
+  }
+
+  /// Skips whitespace & comments in the input.
+  fn skip_trivia(&mut self) {
+    while let Some(c) = self.peek_char() {
+      if c.is_ascii_whitespace() {
+        self.advance_char();
+        continue;
+      }
+      if c == '/' && self.input.starts_with("//") {
+        while self.peek_char() != Some('\n') {
+          self.advance_char();
+        }
+        continue;
+      }
       break;
     }
   }
-  Ok(Net { root, rdex })
-}
 
-pub fn parse_book(chars: &mut Peekable<Chars>) -> Result<Book, String> {
-  let mut book = BTreeMap::new();
-  while let Some(c) = { skip(chars); chars.peek() } {
-    if *c == '@' {
-      chars.next();
-      let name = parse_name(chars)?;
-      consume(chars, "=")?;
-      let net = parse_net(chars)?;
-      book.insert(name, net);
-    } else {
-      break;
-    }
+  /// Consumes an instance of the given string, erroring if it is not found.
+  fn consume(&mut self, text: &str) -> Result<(), String> {
+    self.skip_trivia();
+    let Some(rest) = self.input.strip_prefix(text) else {
+      return Err(format!("Expected {:?}, found {:?}", text, self.input.split_ascii_whitespace().next().unwrap_or("")));
+    };
+    self.input = rest;
+    Ok(())
   }
-  Ok(book)
-}
 
-fn do_parse<T>(code: &str, parse_fn: impl Fn(&mut Peekable<Chars>) -> Result<T, String>) -> T {
-  let chars = &mut code.chars().peekable();
-  match parse_fn(chars) {
-    Ok(result) => {
-      if chars.next().is_none() {
-        result
-      } else {
-        eprintln!("Unable to parse the whole input. Is this not an hvmc file?");
-        std::process::exit(1);
-      }
-    }
-    Err(err) => {
-      eprintln!("{}", err);
-      std::process::exit(1);
-    }
+  /// Consumes all of the contiguous next characters in the input matching a
+  /// given predicate.
+  fn take_while(&mut self, mut f: impl FnMut(char) -> bool) -> &'i str {
+    let len = self.input.chars().take_while(|&c| f(c)).map(char::len_utf8).sum();
+    let (name, rest) = self.input.split_at(len);
+    self.input = rest;
+    name
   }
 }
 
-pub fn do_parse_tree(code: &str) -> Tree {
-  do_parse(code, parse_tree)
+/// Parses the input with the callback, ensuring that the whole input is
+/// consumed.
+fn parse_eof<'i, T>(input: &'i str, parse_fn: impl Fn(&mut Parser<'i>) -> Result<T, String>) -> Result<T, String> {
+  let mut parser = Parser { input };
+  let out = parse_fn(&mut parser)?;
+  if !parser.input.is_empty() {
+    return Err("Unable to parse the whole input. Is this not an hvmc file?".to_owned());
+  }
+  Ok(out)
 }
 
-pub fn do_parse_net(code: &str) -> Net {
-  do_parse(code, parse_net)
-}
-
-pub fn do_parse_book(code: &str) -> Book {
-  do_parse(code, parse_book)
-}
-
-// Stringifier
-// -----------
-
-pub fn show_opr(opr: run::Lab) -> String {
-  match opr {
-    run::ADD => "+".to_string(),
-    run::SUB => "-".to_string(),
-    run::MUL => "*".to_string(),
-    run::DIV => "/".to_string(),
-    run::MOD => "%".to_string(),
-    run::EQ  => "==".to_string(),
-    run::NE  => "!=".to_string(),
-    run::LT  => "<".to_string(),
-    run::GT  => ">".to_string(),
-    run::LTE => "<=".to_string(),
-    run::GTE => ">=".to_string(),
-    run::AND => "&&".to_string(),
-    run::OR  => "||".to_string(),
-    run::XOR => "^".to_string(),
-    run::NOT => "!".to_string(),
-    run::LSH => "<<".to_string(),
-    run::RSH => ">>".to_string(),
-    _        => panic!("Unknown operator label."),
+impl FromStr for Book {
+  type Err = String;
+  fn from_str(str: &str) -> Result<Self, Self::Err> {
+    parse_eof(str, Parser::parse_book)
   }
 }
 
-pub fn show_tree(tree: &Tree) -> String {
-  match tree {
-    Tree::Era => {
-      "*".to_string()
-    }
-    Tree::Con { lft, rgt } => {
-      format!("({} {})", show_tree(&*lft), show_tree(&*rgt))
-    }
-    Tree::Tup { lft, rgt } => {
-      format!("[{} {}]", show_tree(&*lft), show_tree(&*rgt))
-    }
-    Tree::Dup { lab, lft, rgt } => {
-      format!("{{{} {} {}}}", lab, show_tree(&*lft), show_tree(&*rgt))
-    }
-    Tree::Var { nam } => {
-      nam.clone()
-    }
-    Tree::Ref { nam } => {
-      format!("@{}", val_to_name(*nam))
-    }
-    Tree::Num { val } => {
-      format!("#{}", (*val).to_string())
-    }
-    Tree::Op1 { opr, lft, rgt } => {
-      format!("<{}{} {}>", lft, show_opr(*opr), show_tree(rgt))
-    }
-    Tree::Op2 { opr, lft, rgt } => {
-      format!("<{} {} {}>", show_opr(*opr), show_tree(&*lft), show_tree(&*rgt))
-    }
-    Tree::Mat { sel, ret } => {
-      format!("?<{} {}>", show_tree(&*sel), show_tree(&*ret))
-    }
+impl FromStr for Net {
+  type Err = String;
+  fn from_str(str: &str) -> Result<Self, Self::Err> {
+    parse_eof(str, Parser::parse_net)
   }
 }
 
-pub fn show_net(net: &Net) -> String {
-  let mut result = String::new();
-  result.push_str(&format!("{}", show_tree(&net.root)));
-  for (a, b) in &net.rdex {
-    result.push_str(&format!("\n& {} ~ {}", show_tree(a), show_tree(b)));
-  }
-  return result;
-}
-
-pub fn show_book(book: &Book) -> String {
-  let mut result = String::new();
-  for (name, net) in book {
-    result.push_str(&format!("@{} = {}\n", name, show_net(net)));
-  }
-  return result;
-}
-
-pub fn show_runtime_tree<const LAZY: bool>(rt_net: &run::NetFields<LAZY>, ptr: run::Ptr) -> String where [(); LAZY as usize]:{
-  show_tree(&tree_from_runtime_go(rt_net, ptr, PARENT_ROOT, &mut HashMap::new(), &mut 0))
-}
-
-pub fn show_runtime_net<const LAZY: bool>(rt_net: &run::NetFields<LAZY>) -> String where [(); LAZY as usize]:{
-  show_net(&net_from_runtime(rt_net))
-}
-
-pub fn show_runtime_book(book: &run::Book) -> String {
-  show_book(&book_from_runtime(book))
-}
-
-// Conversion
-// ----------
-
-pub fn num_to_str(mut num: usize) -> String {
-  let mut txt = String::new();
-  num += 1;
-  while num > 0 {
-    num -= 1;
-    let c = ((num % 26) as u8 + b'a') as char;
-    txt.push(c);
-    num /= 26;
-  }
-  return txt.chars().rev().collect();
-}
-
-pub const fn tag_to_port(tag: run::Tag) -> run::Port {
-  match tag {
-    run::VR1 => run::P1,
-    run::VR2 => run::P2,
-    _        => unreachable!(),
+impl FromStr for Tree {
+  type Err = String;
+  fn from_str(str: &str) -> Result<Self, Self::Err> {
+    parse_eof(str, Parser::parse_tree)
   }
 }
 
-pub fn port_to_tag(port: run::Port) -> run::Tag {
-  match port {
-    run::P1 => run::VR1,
-    run::P2 => run::VR2,
-    _       => unreachable!(),
+impl fmt::Display for Book {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    for (name, net) in self.iter() {
+      writeln!(f, "@{name} = {net}")?;
+    }
+    Ok(())
   }
 }
 
-pub fn name_to_letters(name: &str) -> Vec<u8> {
-  let mut letters = Vec::new();
-  for c in name.chars() {
-    letters.push(match c {
-      '0'..='9' => c as u8 - '0' as u8 + 0,
-      'A'..='Z' => c as u8 - 'A' as u8 + 10,
-      'a'..='z' => c as u8 - 'a' as u8 + 36,
-      '_'       => 62,
-      '.'       => 63,
-      _         => panic!("Invalid character in name"),
-    });
-  }
-  return letters;
-}
-
-pub fn letters_to_name(letters: Vec<u8>) -> String {
-  let mut name = String::new();
-  for letter in letters {
-    name.push(match letter {
-       0..= 9 => (letter - 0 + '0' as u8) as char,
-      10..=35 => (letter - 10 + 'A' as u8) as char,
-      36..=61 => (letter - 36 + 'a' as u8) as char,
-      62      => '_',
-      63      => '.',
-      _       => panic!("Invalid letter in name"),
-    });
-  }
-  return name;
-}
-
-pub fn val_to_letters(num: run::Val) -> Vec<u8> {
-  let mut letters = Vec::new();
-  let mut num = num;
-  while num > 0 {
-    letters.push((num % 64) as u8);
-    num /= 64;
-  }
-  letters.reverse();
-  return letters;
-}
-
-pub fn letters_to_val(letters: Vec<u8>) -> run::Val {
-  let mut num = 0;
-  for letter in letters {
-    num = num * 64 + letter as run::Val;
-  }
-  return num;
-}
-
-pub fn name_to_val(name: &str) -> run::Val {
-  letters_to_val(name_to_letters(name))
-}
-
-pub fn val_to_name(num: run::Val) -> String {
-  letters_to_name(val_to_letters(num))
-}
-
-// Injection and Readback
-// ----------------------
-
-// To runtime
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum Parent {
-  Redex,
-  Node { loc: run::Loc, port: run::Port },
-}
-const PARENT_ROOT: Parent = Parent::Node { loc: run::ROOT.loc(), port: tag_to_port(run::ROOT.tag()) };
-
-pub fn tree_to_runtime_go<const LAZY: bool>(rt_net: &mut run::NetFields<LAZY>, tree: &Tree, vars: &mut HashMap<String, Parent>, parent: Parent) -> run::Ptr where [(); LAZY as usize]: {
-  match tree {
-    Tree::Era => {
-      run::ERAS
+impl fmt::Display for Net {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    write!(f, "{}", &self.root)?;
+    for (a, b) in &self.rdex {
+      write!(f, "\n& {a} ~ {b}")?;
     }
-    Tree::Con { lft, rgt } => {
-      let loc = rt_net.alloc();
-      let p1 = tree_to_runtime_go(rt_net, &*lft, vars, Parent::Node { loc, port: run::P1 });
-      rt_net.heap.set(loc, run::P1, p1);
-      let p2 = tree_to_runtime_go(rt_net, &*rgt, vars, Parent::Node { loc, port: run::P2 });
-      rt_net.heap.set(loc, run::P2, p2);
-      run::Ptr::new(run::LAM, 0, loc)
-    }
-    Tree::Tup { lft, rgt } => {
-      let loc = rt_net.alloc();
-      let p1 = tree_to_runtime_go(rt_net, &*lft, vars, Parent::Node { loc, port: run::P1 });
-      rt_net.heap.set(loc, run::P1, p1);
-      let p2 = tree_to_runtime_go(rt_net, &*rgt, vars, Parent::Node { loc, port: run::P2 });
-      rt_net.heap.set(loc, run::P2, p2);
-      run::Ptr::new(run::TUP, 1, loc)
-    }
-    Tree::Dup { lab, lft, rgt } => {
-      let loc = rt_net.alloc();
-      let p1 = tree_to_runtime_go(rt_net, &*lft, vars, Parent::Node { loc, port: run::P1 });
-      rt_net.heap.set(loc, run::P1, p1);
-      let p2 = tree_to_runtime_go(rt_net, &*rgt, vars, Parent::Node { loc, port: run::P2 });
-      rt_net.heap.set(loc, run::P2, p2);
-      run::Ptr::new(run::DUP, *lab, loc)
-    }
-    Tree::Var { nam } => {
-      if let Parent::Redex = parent {
-        panic!("By definition, can't have variable on active pairs.");
-      };
-      match vars.get(nam) {
-        Some(Parent::Redex) => {
-          unreachable!();
-        }
-        Some(Parent::Node { loc: other_loc, port: other_port }) => {
-          match parent {
-            Parent::Redex => { unreachable!(); }
-            Parent::Node { loc, port } => rt_net.heap.set(*other_loc, *other_port, run::Ptr::new(port_to_tag(port), 0, loc)),
-          }
-          return run::Ptr::new(port_to_tag(*other_port), 0, *other_loc);
-        }
-        None => {
-          vars.insert(nam.clone(), parent);
-          run::NULL
-        }
-      }
-    }
-    Tree::Ref { nam } => {
-      run::Ptr::big(run::REF, *nam)
-    }
-    Tree::Num { val } => {
-      run::Ptr::big(run::NUM, *val)
-    }
-    Tree::Op1 { opr, lft, rgt } => {
-      let loc = rt_net.alloc();
-      let p1 = run::Ptr::big(run::NUM, *lft);
-      rt_net.heap.set(loc, run::P1, p1);
-      let p2 = tree_to_runtime_go(rt_net, rgt, vars, Parent::Node { loc, port: run::P2 });
-      rt_net.heap.set(loc, run::P2, p2);
-      run::Ptr::new(run::OP1, *opr, loc)
-    }
-    Tree::Op2 { opr, lft, rgt } => {
-      let loc = rt_net.alloc();
-      let p1 = tree_to_runtime_go(rt_net, &*lft, vars, Parent::Node { loc, port: run::P1 });
-      rt_net.heap.set(loc, run::P1, p1);
-      let p2 = tree_to_runtime_go(rt_net, &*rgt, vars, Parent::Node { loc, port: run::P2 });
-      rt_net.heap.set(loc, run::P2, p2);
-      run::Ptr::new(run::OP2, *opr, loc)
-    }
-    Tree::Mat { sel, ret } => {
-      let loc = rt_net.alloc();
-      let p1 = tree_to_runtime_go(rt_net, &*sel, vars, Parent::Node { loc, port: run::P1 });
-      rt_net.heap.set(loc, run::P1, p1);
-      let p2 = tree_to_runtime_go(rt_net, &*ret, vars, Parent::Node { loc, port: run::P2 });
-      rt_net.heap.set(loc, run::P2, p2);
-      run::Ptr::new(run::MAT, 0, loc)
-    }
+    Ok(())
   }
 }
 
-pub fn tree_to_runtime<const LAZY: bool>(rt_net: &mut run::NetFields<LAZY>, tree: &Tree) -> run::Ptr where [(); LAZY as usize]: {
-  tree_to_runtime_go(rt_net, tree, &mut HashMap::new(), PARENT_ROOT)
-}
-
-pub fn net_to_runtime<const LAZY: bool>(rt_net: &mut run::NetFields<LAZY>, net: &Net) where [(); LAZY as usize]: {
-  let mut vars = HashMap::new();
-  let root = tree_to_runtime_go(rt_net, &net.root, &mut vars, PARENT_ROOT);
-  rt_net.heap.set_root(root);
-  for (tree1, tree2) in &net.rdex {
-    let ptr1 = tree_to_runtime_go(rt_net, tree1, &mut vars, Parent::Redex);
-    let ptr2 = tree_to_runtime_go(rt_net, tree2, &mut vars, Parent::Redex);
-    rt_net.rdex.push((ptr1, ptr2));
-  }
-}
-
-// Holds dup labels and ref ids used by a definition
-type InsideLabs = HashSet<run::Lab, nohash_hasher::BuildNoHashHasher<run::Lab>>;
-type InsideRefs = HashSet<run::Val>;
-#[derive(Debug)]
-pub struct Inside {
-  labs: InsideLabs,
-  refs: InsideRefs,
-}
-
-// Collects dup labels and ref ids used by a definition
-pub fn runtime_def_get_inside(def: &run::Def) -> Inside {
-  let mut inside = Inside {
-    labs: HashSet::with_hasher(std::hash::BuildHasherDefault::default()),
-    refs: HashSet::new(),
-  };
-  fn register(inside: &mut Inside, ptr: run::Ptr) {
-    if ptr.is_dup() {
-      inside.labs.insert(ptr.lab());
-    }
-    if ptr.is_ref() {
-      inside.refs.insert(ptr.val());
+impl fmt::Display for Tree {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    match self {
+      Tree::Era => write!(f, "*"),
+      Tree::Ctr { lab, lft, rgt } => match lab {
+        0 => write!(f, "({lft} {rgt})"),
+        1 => write!(f, "[{lft} {rgt}]"),
+        _ => write!(f, "{{{lab} {lft} {rgt}}}"),
+      },
+      Tree::Var { nam } => write!(f, "{nam}"),
+      Tree::Ref { nam } => write!(f, "@{nam}"),
+      Tree::Num { val } => write!(f, "#{val}"),
+      Tree::Op2 { opr, lft, rgt } => write!(f, "<{opr} {lft} {rgt}>"),
+      Tree::Op1 { opr, lft, rgt } => write!(f, "<{lft}{opr} {rgt}>"),
+      Tree::Mat { sel, ret } => write!(f, "?<{sel} {ret}>"),
     }
   }
-  for i in 0 .. def.node.len() {
-    register(&mut inside, def.node[i].1);
-    register(&mut inside, def.node[i].2);
-  }
-  for i in 0 .. def.rdex.len() {
-    register(&mut inside, def.rdex[i].0);
-    register(&mut inside, def.rdex[i].1);
-  }
-  return inside;
-}
-
-// Computes all dup labels used by a definition, direct or not.
-// FIXME: memoize to avoid duplicated work
-pub fn runtime_def_get_all_labs(labs: &mut InsideLabs, insides: &HashMap<run::Val, Inside>, fid: run::Val, seen: &mut HashSet<run::Val>) {
-  if seen.contains(&fid) {
-    return;
-  } else {
-    seen.insert(fid);
-    if let Some(fid_insides) = insides.get(&fid) {
-      for dup in &fid_insides.labs {
-        labs.insert(*dup);
-      }
-      for child_fid in &fid_insides.refs {
-        runtime_def_get_all_labs(labs, insides, *child_fid, seen);
-      }
-    }
-  }
-}
-
-// Converts a book from the pure AST representation to the runtime representation.
-pub fn book_to_runtime(book: &Book) -> run::Book {
-  let mut rt_book = run::Book::new();
-
-  // Convert each net in 'book' to a runtime net and add to 'rt_book'
-  for (name, net) in book {
-    let fid = name_to_val(name);
-    let nodes = run::Heap::<false>::init(1 << 16);
-    let mut rt = run::NetFields::new(&nodes);
-    net_to_runtime(&mut rt, net);
-    rt_book.def(fid, runtime_net_to_runtime_def(&rt));
-  }
-
-  // Calculate the 'insides' of each runtime definition
-  let mut insides = HashMap::new();
-  for (fid, def) in &rt_book.defs {
-    insides.insert(*fid, runtime_def_get_inside(&def));
-  }
-
-  // Compute labs labels used in each runtime definition
-  let mut labs_by_fid = HashMap::new();
-  for (fid, _) in &rt_book.defs {
-    let mut labs = HashSet::with_hasher(std::hash::BuildHasherDefault::default());
-    let mut seen = HashSet::new();
-    runtime_def_get_all_labs(&mut labs, &insides, *fid, &mut seen);
-    labs_by_fid.insert(*fid, labs);
-  }
-
-  // Set the 'labs' field for each definition
-  for (fid, def) in &mut rt_book.defs {
-    def.labs = labs_by_fid.get(fid).unwrap().clone();
-    //println!("{} {:?}", val_to_name(*fid), def.labs);
-  }
-
-  rt_book
-}
-
-// Converts to a def.
-pub fn runtime_net_to_runtime_def<const LAZY: bool>(net: &run::NetFields<LAZY>) -> run::Def where [(); LAZY as usize]: {
-  let mut node = vec![];
-  let mut rdex = vec![];
-  let labs = HashSet::with_hasher(std::hash::BuildHasherDefault::default());
-  for i in 0 .. net.heap.nodes.len() {
-    let p0 = run::APtr::new(run::Ptr(0));
-    let p1 = net.heap.get(node.len() as run::Loc, run::P1);
-    let p2 = net.heap.get(node.len() as run::Loc, run::P2);
-    if p1 != run::NULL || p2 != run::NULL {
-      node.push(((), p1, p2));
-    } else {
-      break;
-    }
-  }
-  for i in 0 .. net.rdex.len() {
-    let p1 = net.rdex[i].0;
-    let p2 = net.rdex[i].1;
-    rdex.push((p1, p2));
-  }
-  return run::Def { labs, rdex, node };
-}
-
-// Reads back from a def.
-pub fn runtime_def_to_runtime_net<'a, const LAZY: bool>(nodes: &'a run::Nodes<LAZY>, def: &run::Def) -> run::NetFields<'a, LAZY> where [(); LAZY as usize]: {
-  let mut net = run::NetFields::new(&nodes);
-  for (i, &(p0, p1, p2)) in def.node.iter().enumerate() {
-    net.heap.set(i as run::Loc, run::P1, p1);
-    net.heap.set(i as run::Loc, run::P2, p2);
-  }
-  net.rdex = def.rdex.clone();
-  net
-}
-
-pub fn tree_from_runtime_go<const LAZY: bool>(rt_net: &run::NetFields<LAZY>, ptr: run::Ptr, parent: Parent, vars: &mut HashMap<Parent, String>, fresh: &mut usize) -> Tree where [(); LAZY as usize]: {
-  match ptr.tag() {
-    run::ERA => {
-      Tree::Era
-    }
-    run::REF => {
-      Tree::Ref { nam: ptr.val() }
-    }
-    run::NUM => {
-      Tree::Num { val: ptr.val() }
-    }
-    run::OP1 => {
-      let opr = ptr.lab();
-      let lft = tree_from_runtime_go(rt_net, rt_net.heap.get(ptr.loc(), run::P1), Parent::Node { loc: ptr.loc(), port: run::P1 }, vars, fresh);
-      let Tree::Num { val } = lft else { unreachable!() };
-      let rgt = tree_from_runtime_go(rt_net, rt_net.heap.get(ptr.loc(), run::P2), Parent::Node { loc: ptr.loc(), port: run::P2 }, vars, fresh);
-      Tree::Op1 { opr, lft: val, rgt: Box::new(rgt) }
-    }
-    run::OP2 => {
-      let opr = ptr.lab();
-      let lft = tree_from_runtime_go(rt_net, rt_net.heap.get(ptr.loc(), run::P1), Parent::Node { loc: ptr.loc(), port: run::P1 }, vars, fresh);
-      let rgt = tree_from_runtime_go(rt_net, rt_net.heap.get(ptr.loc(), run::P2), Parent::Node { loc: ptr.loc(), port: run::P2 }, vars, fresh);
-      Tree::Op2 { opr, lft: Box::new(lft), rgt: Box::new(rgt) }
-    }
-    run::MAT => {
-      let sel = tree_from_runtime_go(rt_net, rt_net.heap.get(ptr.loc(), run::P1), Parent::Node { loc: ptr.loc(), port: run::P1 }, vars, fresh);
-      let ret = tree_from_runtime_go(rt_net, rt_net.heap.get(ptr.loc(), run::P2), Parent::Node { loc: ptr.loc(), port: run::P2 }, vars, fresh);
-      Tree::Mat { sel: Box::new(sel), ret: Box::new(ret) }
-    }
-    run::VR1 | run::VR2 => {
-      let key = match ptr.tag() {
-        run::VR1 => Parent::Node { loc: ptr.loc(), port: run::P1 },
-        run::VR2 => Parent::Node { loc: ptr.loc(), port: run::P2 },
-        _        => unreachable!(),
-      };
-      if let Some(nam) = vars.get(&key) {
-        Tree::Var { nam: nam.clone() }
-      } else {
-        let nam = num_to_str(*fresh);
-        *fresh += 1;
-        vars.insert(parent, nam.clone());
-        Tree::Var { nam }
-      }
-    }
-    run::LAM => {
-      let p1  = rt_net.heap.get(ptr.loc(), run::P1);
-      let p2  = rt_net.heap.get(ptr.loc(), run::P2);
-      let lft = tree_from_runtime_go(rt_net, p1, Parent::Node { loc: ptr.loc(), port: run::P1 }, vars, fresh);
-      let rgt = tree_from_runtime_go(rt_net, p2, Parent::Node { loc: ptr.loc(), port: run::P2 }, vars, fresh);
-      Tree::Con { lft: Box::new(lft), rgt: Box::new(rgt) }
-    }
-    run::TUP => {
-      let p1  = rt_net.heap.get(ptr.loc(), run::P1);
-      let p2  = rt_net.heap.get(ptr.loc(), run::P2);
-      let lft = tree_from_runtime_go(rt_net, p1, Parent::Node { loc: ptr.loc(), port: run::P1 }, vars, fresh);
-      let rgt = tree_from_runtime_go(rt_net, p2, Parent::Node { loc: ptr.loc(), port: run::P2 }, vars, fresh);
-      Tree::Tup { lft: Box::new(lft), rgt: Box::new(rgt) }
-    }
-    run::DUP => {
-      let p1  = rt_net.heap.get(ptr.loc(), run::P1);
-      let p2  = rt_net.heap.get(ptr.loc(), run::P2);
-      let lft = tree_from_runtime_go(rt_net, p1, Parent::Node { loc: ptr.loc(), port: run::P1 }, vars, fresh);
-      let rgt = tree_from_runtime_go(rt_net, p2, Parent::Node { loc: ptr.loc(), port: run::P2 }, vars, fresh);
-      Tree::Dup { lab: ptr.lab(), lft: Box::new(lft), rgt: Box::new(rgt) }
-    }
-    _ => {
-      unreachable!()
-    }
-  }
-}
-
-pub fn tree_from_runtime<const LAZY: bool>(rt_net: &run::NetFields<LAZY>, ptr: run::Ptr) -> Tree where [(); LAZY as usize]: {
-  let mut vars = HashMap::new();
-  let mut fresh = 0;
-  tree_from_runtime_go(rt_net, ptr, PARENT_ROOT, &mut vars, &mut fresh)
-}
-
-pub fn net_from_runtime<const LAZY: bool>(rt_net: &run::NetFields<LAZY>) -> Net where [(); LAZY as usize]: {
-  let mut vars = HashMap::new();
-  let mut fresh = 0;
-  let mut rdex = Vec::new();
-  let root = tree_from_runtime_go(rt_net, rt_net.heap.get_root(), PARENT_ROOT, &mut vars, &mut fresh);
-  for &(a, b) in &rt_net.rdex {
-    let tree_a = tree_from_runtime_go(rt_net, a, Parent::Redex, &mut vars, &mut fresh);
-    let tree_b = tree_from_runtime_go(rt_net, b, Parent::Redex, &mut vars, &mut fresh);
-    rdex.push((tree_a, tree_b));
-  }
-  Net { root, rdex }
-}
-
-pub fn book_from_runtime(rt_book: &run::Book) -> Book {
-  let mut book = BTreeMap::new();
-  for (fid, def) in rt_book.defs.iter() {
-    if def.node.len() > 0 {
-      let name  = val_to_name(*fid);
-      let nodes = run::Heap::<false>::init(def.node.len());
-      let net   = net_from_runtime(&runtime_def_to_runtime_net(&nodes, &def));
-      book.insert(name, net);
-    }
-  }
-  book
 }

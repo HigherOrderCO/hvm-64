@@ -1,14 +1,20 @@
-#![feature(generic_const_exprs)]
-#![allow(incomplete_features)]
-
-#![allow(dead_code)]
-#![allow(unused_variables)]
-#![allow(unused_imports)]
+#![feature(const_type_id, extern_types, inline_const)]
+#![cfg_attr(feature = "trace", feature(const_type_name))]
 #![allow(non_snake_case)]
-#![allow(non_upper_case_globals)]
 
 pub mod ast;
-pub mod fns;
-pub mod jit;
+pub mod compile;
+pub mod host;
+pub mod ops;
 pub mod run;
-pub mod u60;
+pub mod stdlib;
+
+mod util;
+
+#[doc(hidden)] // not public api
+pub mod fuzz;
+#[doc(hidden)] // not public api
+pub mod trace;
+
+#[doc(hidden)] // shim for compilation
+pub mod gen;
