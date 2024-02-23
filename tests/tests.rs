@@ -33,9 +33,9 @@ fn test_bool_and() {
   let book = parse_core(
     "
     @true = (b (* b))
-    @fals = (* (b b))
-    @and  = ((b (@fals c)) (b c))
-    @main = root & @and ~ (@true (@fals root))
+    @false = (* (b b))
+    @and  = ((b (@false c)) (b c))
+    @main = root & @and ~ (@true (@false root))
   ",
   );
   let (rwts, net) = normal(book, 64);

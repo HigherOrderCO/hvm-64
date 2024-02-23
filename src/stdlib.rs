@@ -75,7 +75,7 @@ impl<F: Fn(Wire) + Send + Sync + 'static> AsDef for ActiveLogDef<F> {
     match port.tag() {
       Tag::Red => {
         unreachable!()
-      },
+      }
       Tag::Ref if port != Port::ERA => {
         let other: *const Def = port.addr().def() as *const _;
         if let Some(other) = Def::downcast_ptr::<Self>(other) {
