@@ -48,6 +48,13 @@ macro_rules! bi_enum {
       }
     }
 
+    impl $Ty {
+      #[allow(unused)]
+      pub unsafe fn from_unchecked(value: $uN) -> $Ty {
+        Self::try_from(value).unwrap_unchecked()
+      }
+    }
+
     impl From<$Ty> for $uN {
       fn from(value: $Ty) -> Self { value as Self }
     }

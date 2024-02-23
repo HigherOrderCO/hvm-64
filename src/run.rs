@@ -206,7 +206,7 @@ impl Port {
   /// Accesses the tag of this port; this is valid for all ports.
   #[inline(always)]
   pub fn tag(&self) -> Tag {
-    unsafe { ((self.0 & 0x7) as u8).try_into().unwrap_unchecked() }
+    unsafe { Tag::from_unchecked((self.0 & 0x7) as u8) }
   }
 
   /// Accesses the label of this port; this is valid for all non-`Num` ports.
@@ -225,7 +225,7 @@ impl Port {
   /// ports.
   #[inline(always)]
   pub fn op(&self) -> Op {
-    unsafe { self.lab().try_into().unwrap_unchecked() }
+    unsafe { Op::from_unchecked(self.lab()) }
   }
 
   /// Accesses the numeric value of this port; this is valid for [`Num`] ports.
@@ -1704,11 +1704,19 @@ impl<'a, M: Mode> Net<'a, M> {
     trace!(self.tracer, a, b);
     self.rwts.oper += 1;
     let a = a.consume_node();
-    let x = self.create_node(Op1, a.lab);
-    trace!(self.tracer, x.p0);
-    self.link_port_port(x.p1, b);
-    self.link_wire_port(a.p2, x.p2);
-    self.link_wire_port(a.p1, x.p0);
+    let a1 = a.p1.load_target();
+    if a1.tag() == Num {
+      // skip creating the Op1 node if it will instantly interact
+      self.rwts.oper += 1;
+      let out = unsafe { Op::from_unchecked(a.lab) }.op(b.num(), a1.num());
+      self.link_wire_port(a.p2, Port::new_num(out));
+    } else {
+      let x = self.create_node(Op1, a.lab);
+      trace!(self.tracer, x.p0);
+      self.link_port_port(x.p1, b);
+      self.link_wire_port(a.p2, x.p2);
+      self.link_wire_port(a.p1, x.p0);
+    }
   }
 
   /// Interacts a number and a unary numeric operation node.
