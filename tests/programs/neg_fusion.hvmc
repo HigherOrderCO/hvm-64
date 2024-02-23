@@ -1,0 +1,23 @@
+@C2 = ({3 (a b) (c a)} (c b))
+@False = (* (a a))
+@Mul = ((a b) ((c a) (c b)))
+@Neg = ((a (b c)) (b (a c)))
+@Not = ((@False (@True a)) a)
+@P2 = a
+& @Mul ~ (@C2 (@C2 a))
+@P3 = a
+& @Mul ~ (@C2 (@P2 a))
+@P4 = a
+& @Mul ~ (@C2 (@P3 a))
+@P5 = a
+& @Mul ~ (@C2 (@P4 a))
+@P6 = a
+& @Mul ~ (@C2 (@P5 a))
+@P7 = a
+& @Mul ~ (@C2 (@P6 a))
+@P8 = a
+& @Mul ~ (@C2 (@P7 a))
+@True = (a (* a))
+@main = a
+& @P8 ~ (@Neg (@True a))
+

@@ -1,0 +1,21 @@
+@False = {6 * {6 a a}}
+@Leaf = (a {2 * {2 {4 a b} b}})
+@Node = (a (b {2 {10 a {8 b c}} {2 * c}}))
+@True = {6 a {6 * a}}
+@all = ((@all$S0 ((a a) b)) b)
+@all$S0 = (a (b c))
+& @and ~ (d (e c))
+& @all ~ (b e)
+& @all ~ (a d)
+@and = (((a a) (@and$S0 b)) b)
+@and$S0 = (* @False)
+@gen = (?<(a @gen$S0) b> b)
+& @Leaf ~ (@True a)
+@gen$S0 = ({3 a b} c)
+& @Node ~ (d (e c))
+& @gen ~ (b e)
+& @gen ~ (a d)
+@main = a
+& @all ~ (b a)
+& @gen ~ (#24 b)
+

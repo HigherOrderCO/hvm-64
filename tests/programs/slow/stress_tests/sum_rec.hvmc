@@ -1,0 +1,9 @@
+@add = (<+ a b> (a b))
+@main = a
+& @sum ~ (#26 a)
+@sum = (?<(#1 @sum$S0) a> a)
+@sum$S0 = ({3 a b} c)
+& @add ~ (d (e c))
+& @sum ~ (b e)
+& @sum ~ (a d)
+

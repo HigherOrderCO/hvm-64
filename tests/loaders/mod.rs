@@ -1,7 +1,6 @@
 #![allow(dead_code)]
 
 use hvmc::{ast::*, host::Host, run};
-use hvml::term::{parser, term_to_net::Labels, Book as LangBook};
 use std::fs;
 
 pub fn load_file(file: &str) -> String {
@@ -9,20 +8,17 @@ pub fn load_file(file: &str) -> String {
   fs::read_to_string(path).unwrap()
 }
 
+pub fn core_apply(net: &mut Net, arg: Tree) {
+  let fun = core::mem::take(&mut net.root);
+  let var = format!("$_TEST_APP{:p}", net);
+  let oth = Tree::Ctr { lab: 0, lft: Box::new(arg), rgt: Box::new(Tree::Var { nam: var.clone() }) };
+  net.root = Tree::Var { nam: var };
+  net.rdex.push((fun, oth));
+}
+
 // Parses code and generate Book from hvm-core syntax
 pub fn parse_core(code: &str) -> Book {
   code.parse().unwrap()
-}
-
-// Parses code and generate LangBook from hvm-lang syntax
-pub fn parse_lang(code: &str) -> LangBook {
-  parser::parse_book(code, LangBook::default, false).unwrap()
-}
-
-// Loads file and generate LangBook from hvm-lang syntax
-pub fn load_lang(file: &str) -> LangBook {
-  let code = load_file(file);
-  parse_lang(&code)
 }
 
 // For every pair in the map, replaces all matches of a string with the other
@@ -32,18 +28,6 @@ pub fn replace_template(mut code: String, map: &[(&str, &str)]) -> String {
     code = code.replace(from, to);
   }
   code
-}
-
-pub fn hvm_lang_readback(net: &Net, book: &LangBook) -> (String, bool) {
-  let net = hvml::net::hvmc_to_net::hvmc_to_net(net);
-  let (res_term, readback_errors) = hvml::term::net_to_term::net_to_term(&net, book, &Labels::default(), true);
-  (format!("{}", res_term), readback_errors.is_empty())
-}
-
-pub fn hvm_lang_normal(book: &mut LangBook, size: usize) -> (hvmc::run::Rewrites, Net) {
-  let compiled = hvml::compile_book(book, hvml::CompileOpts::light()).unwrap();
-  let (root, res_lnet) = normal(compiled.core_book, size);
-  (root, res_lnet)
 }
 
 #[allow(unused_variables)]

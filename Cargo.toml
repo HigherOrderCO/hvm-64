@@ -36,8 +36,7 @@ _fuzz_no_free = ["_fuzz"]
 
 [dev-dependencies]
 criterion = "0.5.1"
-hvm-lang = { git = "https://github.com/HigherOrderCO/hvm-lang.git" } # allows us to use the hvm-lang syntax for tests/benchmarks
-insta = "1.34.0"
+insta = { version = "1.34.0", features = ["glob"] }
 serial_test = "3.0.0"
 
 [patch."https://github.com/HigherOrderCO/hvm-core.git"]

@@ -1,0 +1,7 @@
+---
+source: tests/tests.rs
+assertion_line: 63
+expression: host.readback(&net)
+input_file: tests/programs/alloc_small_tree.hvmc
+---
+(a (* a))

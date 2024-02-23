@@ -11,6 +11,23 @@ pub fn create_var(mut id: usize) -> String {
   String::from_utf8(txt).unwrap()
 }
 
+/// Inverse function of [`create_var`].
+/// Returns None when the provided string is not an output of
+/// `create_var`.
+pub fn var_to_num(s: &str) -> Option<usize> {
+  let mut n = 0usize;
+  for (idx, i) in s.chars().enumerate() {
+    let i = (i as u32).checked_sub('a' as u32)? as usize;
+    if i > 'z' as usize {
+      return None;
+    }
+    n *= 26;
+    n += i;
+    n += 1;
+  }
+  n.checked_sub(1) // if it's none, then it means the initial string was ''
+}
+
 #[test]
 fn test_create_var() {
   assert_eq!(create_var(0), "a");
@@ -28,6 +45,12 @@ fn test_create_var() {
   assert_eq!(create_var(1351), "ayz");
   assert_eq!(create_var(1352), "aza");
   assert_eq!(create_var(1378), "baa");
+}
+#[test]
+fn test_var_to_num() {
+  for i in [0, 1, 2, 3, 10, 26, 27, 30, 50, 70] {
+    assert_eq!(Some(i), var_to_num(&create_var(i)));
+  }
 }
 
 /// Defines bi-directional mappings for a numeric enum.
@@ -123,6 +146,42 @@ macro_rules! deref {
       }
     }
   };
+}
+
+impl crate::ast::Net {
+  /// Transforms the net `x & ...` into `y & x ~ (arg y) & ...`
+  pub fn with_argument(&mut self, arg: crate::ast::Tree) {
+    use crate::ast::Tree;
+    let mut fresh = 0usize;
+    fn ensure_no_conflicts(tree: &Tree, fresh: &mut usize) {
+      match tree {
+        Tree::Ctr { lft, rgt, .. }
+        | Tree::Op2 { lft, rgt, .. }
+        | Tree::Mat { sel: lft, ret: rgt } => {
+          ensure_no_conflicts(lft, fresh);
+          ensure_no_conflicts(rgt, fresh);
+        },
+        Tree::Op1 { rgt, .. } => {
+          ensure_no_conflicts(rgt, fresh);
+        },
+        Tree::Var { nam } => if let Some(var_num) = var_to_num(nam) {
+          *fresh = (*fresh).max(var_num);
+        }
+        _ => ()
+      }
+    }
+    ensure_no_conflicts(&self.root, &mut fresh);
+    for (l, r) in &self.rdex {
+      ensure_no_conflicts(l, &mut fresh);
+      ensure_no_conflicts(r, &mut fresh);
+    }
+    let mut fresh_str = create_var(fresh + 1);
+
+    let fun = core::mem::take(&mut self.root);
+    let oth = Tree::Ctr { lab: 0, lft: Box::new(arg), rgt: Box::new(Tree::Var { nam: fresh_str.clone() }) };
+    self.root = Tree::Var { nam: fresh_str };
+    self.rdex.push((fun, oth));
+  }
 }
 
 pub(crate) use deref;

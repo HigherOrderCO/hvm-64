@@ -1,0 +1,7 @@
+---
+source: tests/tests.rs
+assertion_line: 64
+expression: net.rwts.total()
+input_file: examples/machine_u32/num_add.hvmc
+---
+6

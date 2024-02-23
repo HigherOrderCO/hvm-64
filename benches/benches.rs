@@ -4,7 +4,6 @@ use hvmc::{
   host::Host,
   run::{Net as RtNet, Strict},
 };
-use hvml::{term::Book as HvmlBook, ENTRY_POINT};
 use std::{
   ffi::OsStr,
   fs,
@@ -15,38 +14,11 @@ use std::{
 // Loads file and generate net from hvm-core syntax
 fn load_from_core<P: AsRef<Path>>(file: P) -> Book {
   let code = fs::read_to_string(file).unwrap();
-  let (_, code) = extract_size(&code);
 
   code.parse().unwrap()
 }
-
-// Loads file and generate net from hvm-lang syntax
-fn load_from_lang<P: AsRef<Path>>(file: P) -> Book {
-  let code = fs::read_to_string(file).unwrap();
-  let (_, code) = extract_size(&code);
-
-  let mut book = hvml::term::parser::parse_book(&code, HvmlBook::default, false).unwrap();
-  let book = hvml::compile_book(&mut book, hvml::CompileOpts::light()).unwrap().core_book;
-  book
-}
-
-fn extract_size(code: &str) -> (usize, &str) {
-  code
-    .strip_prefix("// size = ")
-    .and_then(|code| code.split_once('\n'))
-    .and_then(|(size, rest)| {
-      match size.split_ascii_whitespace().collect::<Vec<_>>().as_slice() {
-        [a, "<<", b] => a.parse::<usize>().ok().zip(b.parse::<usize>().ok()).map(|(a, b)| a << b),
-        [a] => a.parse().ok(),
-        _ => None,
-      }
-      .map(|size| (size, rest))
-    })
-    .expect("failed to extract bench size")
-}
-
 fn run_programs_dir(c: &mut Criterion) {
-  let root = PathBuf::from(format!("{}/benches/programs", env!("CARGO_MANIFEST_DIR")));
+  let root = PathBuf::from(format!("{}/tests/programs", env!("CARGO_MANIFEST_DIR")));
   run_dir(&root, None, c);
 }
 
@@ -66,18 +38,15 @@ fn run_dir(path: &PathBuf, group: Option<String>, c: &mut Criterion) {
 
       run_dir(entry, Some(group), c)
     } else {
-      run_file(entry, group.clone(), c);
+      if entry.extension().unwrap().to_str().unwrap() == "hvmc" {
+        run_file(entry, group.clone(), c);
+      }
     }
   }
 }
 
 fn run_file(path: &PathBuf, group: Option<String>, c: &mut Criterion) {
-  let book = match path.extension().and_then(OsStr::to_str) {
-    Some("hvmc") => load_from_core(path),
-    Some("hvm") => load_from_lang(path),
-    _ => panic!("invalid file found: {}", path.to_string_lossy()),
-  };
-
+  let book = load_from_core(path);
   let file_name = path.file_stem().unwrap().to_string_lossy();
 
   match group {
@@ -92,7 +61,7 @@ fn benchmark(file_name: &str, book: Book, c: &mut Criterion) {
   c.bench_function(file_name, |b| {
     b.iter(|| {
       let mut net = RtNet::<Strict>::new(&area);
-      net.boot(host.defs.get(ENTRY_POINT).unwrap());
+      net.boot(host.defs.get("main").unwrap());
       black_box(black_box(net).normal())
     });
   });
@@ -105,7 +74,7 @@ fn benchmark_group(file_name: &str, group: String, book: Book, c: &mut Criterion
   c.benchmark_group(group).bench_function(file_name, |b| {
     b.iter(|| {
       let mut net = RtNet::<Strict>::new(&area);
-      net.boot(host.defs.get(ENTRY_POINT).unwrap());
+      net.boot(host.defs.get("main").unwrap());
       black_box(black_box(net).normal())
     });
   });
@@ -125,13 +94,13 @@ fn interact_benchmark(c: &mut Criterion) {
 
   for (name, redex) in cases {
     let mut book = Book::default();
-    book.insert(ENTRY_POINT.to_string(), Net { root: Era, rdex: vec![redex] });
+    book.insert("main".to_string(), Net { root: Era, rdex: vec![redex] });
     let area = RtNet::<Strict>::init_heap(1 << 24);
     let host = Host::new(&book);
     group.bench_function(name, |b| {
       b.iter(|| {
         let mut net = RtNet::<Strict>::new(&area);
-        net.boot(host.defs.get(ENTRY_POINT).unwrap());
+        net.boot(host.defs.get("main").unwrap());
         black_box(black_box(net).normal())
       });
     });

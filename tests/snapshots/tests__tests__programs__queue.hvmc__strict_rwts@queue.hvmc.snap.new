@@ -1,0 +1,7 @@
+---
+source: tests/tests.rs
+assertion_line: 64
+expression: net.rwts.total()
+input_file: tests/programs/queue.hvmc
+---
+59

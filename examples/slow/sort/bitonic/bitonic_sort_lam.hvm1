@@ -1,0 +1,55 @@
+Leaf = λx      λleaf λnode (leaf x)
+Node = λx0 λx1 λleaf λnode (node x0 x1)
+
+(Match 0 zero succ) = zero
+(Match n zero succ) = (succ (- n 1))
+
+Swap = λn (Match n λx0λx1((Node) x0 x1) λpλx0λx1((Node) x1 x0))
+
+Warp = λa
+  let a_leaf = λax λb
+    let b_leaf = λbx λax λs ((Swap) (^ (> ax bx) s) ((Leaf) ax) ((Leaf) bx))
+    let b_node = λa0 λa1 λax λs 0
+    (b b_leaf b_node ax)
+  let a_node = λa0 λa1 λb
+    let b_leaf = λbx λa0 λa1 λs 0
+    let b_node = λb0 λb1 λa0 λa1 λs ((Join) ((Warp) a0 b0 s) ((Warp) a1 b1 s))
+    (b b_leaf b_node a0 a1)
+  (a a_leaf a_node)
+
+Join = λa
+  let a_leaf = λax λb 0
+  let a_node = λa0 λa1 λb
+    let b_leaf = λbx λa0 λa1 0
+    let b_node = λb0 λb1 λa0 λa1 ((Node) ((Node) a0 b0) ((Node) a1 b1))
+    (b b_leaf b_node a0 a1)
+  (a a_leaf a_node)
+
+Flow = λa
+  let a_leaf = λax λs ((Leaf) ax)
+  let a_node = λa0 λa1 λs ((Down) ((Warp) a0 a1 s) s)
+  (a a_leaf a_node)
+
+Down = λa
+  let a_leaf = λax λs ((Leaf) ax)
+  let a_node = λa0 λa1 λs ((Node) ((Flow) a0 s) ((Flow) a1 s))
+  (a a_leaf a_node)
+
+Sort = λa
+  let a_leaf = λax λs ((Leaf) ax)
+  let a_node = λa0 λa1 λs ((Flow) ((Node) ((Sort) a0 0) ((Sort) a1 1)) s)
+  (a a_leaf a_node)
+
+Gen = λn (Match n λx((Leaf) x) λpλx((Node) ((Gen) p (* x 2)) ((Gen) p (+ (* x 2) 1))))
+
+Rev = λa
+  let a_leaf = λax ((Leaf) ax)
+  let a_node = λa0 λa1 ((Node) ((Rev) a1) ((Rev) a0))
+  (a a_leaf a_node)
+
+Sum = λa
+  let a_leaf = λax ax
+  let a_node = λa0 λa1 (+ ((Sum) a0) ((Sum) a1))
+  (a a_leaf a_node)
+
+Main = ((Sum) ((Sort) ((Rev) ((Gen) 15 0)) 0))

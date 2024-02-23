@@ -1,0 +1,7 @@
+---
+source: tests/tests.rs
+assertion_line: 63
+expression: host.readback(&net)
+input_file: tests/programs/queue.hvmc
+---
+(((* (a a)) (((((b c) (b c)) (((({3 (d e) (f d)} (f e)) ((* (g g)) h)) (* h)) i)) (* i)) j)) (* j))

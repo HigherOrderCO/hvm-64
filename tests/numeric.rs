@@ -128,13 +128,3 @@ fn test_div_by_0() {
   assert_debug_snapshot!(rwts.total(), @"3");
 }
 
-#[test]
-// TODO: we lack a way to check if it's actually doing the chained ops
-// optimization, or if it's doing one op per interaction
-fn test_chained_ops() {
-  let mut net = load_lang("chained_ops.hvm");
-  let (rwts, net) = hvm_lang_normal(&mut net, 256);
-
-  assert_snapshot!(Net::to_string(&net), @"#7184190578800");
-  assert_debug_snapshot!(rwts.total(), @"47");
-}
