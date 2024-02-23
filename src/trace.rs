@@ -179,10 +179,6 @@ impl TraceData {
   }
 }
 
-#[derive(Debug)]
-struct GlobalTracerRef(*const TraceData);
-unsafe impl Send for GlobalTracerRef {}
-
 static ACTIVE_TRACERS: Mutex<Vec<Box<TraceLock>>> = Mutex::new(Vec::new());
 
 struct TraceWriter {
