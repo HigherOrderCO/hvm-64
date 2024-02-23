@@ -18,7 +18,7 @@ Install HVM-Core as:
 cargo +nightly install hvm-core
 ```
 
-Then, run the interpeter as:
+Then, run the interpreter as:
 
 ```
 hvmc run file.hvmc -s
@@ -53,7 +53,7 @@ syntax for wiring interaction nets. For example:
 ```
 
 The file above implements a recursive sum. As you can see, its syntax isn't
-meant to be very human readable. Fortunatelly, we have
+meant to be very human readable. Fortunately, we have
 [HVM-Lang](https://github.com/HigherOrderCO/hvm-lang), a tool that generates
 `.hvmc` files from a familiar functional syntax. On HVM-Lang, you can write
 instead:
@@ -179,7 +179,7 @@ The GPU evaluator is similar to the CPU one, except two main differences: "1/4"
 rewrites and a task-sharing grid.  For example, on NVidia's RTX 4090, we keep a
 grid of 128x128 redex bags, where each bag contains redexes to be processed by a
 "squad", which consists of 4 threads, each one performing "1/4" of the rewrite,
-which increases the granularity. This allows us to keep `16,384` active sqxuads,
+which increases the granularity. This allows us to keep `16,384` active squads,
 for a total of `65,536` active threads, which means the maximum degree of
 parallelism (65k) is achieved at just 16k redexes. Visually:
 
@@ -229,7 +229,7 @@ THREAD ::=
       ... perform atomic links ...
 
     atomic_link(a, b):
-      ... see algorith on 'paper/' ...
+      ... see algorithm on 'paper/' ...
 
 RESULT:
 
@@ -491,7 +491,7 @@ The lock-free approach works by attempting to perform the link with a single
 compare-and-swap. When it succeeds, nothing else needs to be done. When it
 fails, we place redirection wires that semantically complete the rewrite without
 any interaction. Then, when a main port is connected to a redirection wire, it
-traverses and consumes the entire path, eaching its target location. If it is an
+traverses and consumes the entire path, reaching its target location. If it is an
 auxiliary port, we store with a cas, essentially moving a node to another
 thread. If it is a main port, we create a new redex, which can then be reduced
 in parallel. This essentially results in an "implicit ownership" scheme that
