@@ -1,0 +1,54 @@
+name: Checks
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: actions/cache@v2
+        with:
+          path: ~/.cargo/registry ~/.cargo/git target
+          key: ${{ runner.os }}-client-${{ hashFiles('**/Cargo.lock') }}
+      - run: RUSTFLAGS="-D warnings" cargo check --all-targets
+      - run: RUSTFLAGS="-D warnings" cargo check --all-targets --features trace
+      - run: RUSTFLAGS="-D warnings" cargo check --all-targets --features _fuzz
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: actions/cache@v2
+        with:
+          path: ~/.cargo/registry ~/.cargo/git target
+          key: ${{ runner.os }}-client-${{ hashFiles('**/Cargo.lock') }}
+      - run: cargo test
+      - run: cargo test --release --features _fuzz --test fuzz
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt
+      - uses: actions/cache@v2
+        with:
+          path: ~/.cargo/registry ~/.cargo/git target
+          key: ${{ runner.os }}-client-${{ hashFiles('**/Cargo.lock') }}
+      - run: cargo fmt --check
+  bench:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: actions/cache@v2
+        with:
+          path: ~/.cargo/registry ~/.cargo/git target
+          key: ${{ runner.os }}-client-${{ hashFiles('**/Cargo.lock') }}
+      - run: cargo bench
