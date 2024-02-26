@@ -1,7 +1,7 @@
-@False = {6 * {6 a a}}
-@Leaf = (a {2 * {2 {4 a b} b}})
-@Node = (a (b {2 {10 a {8 b c}} {2 * c}}))
-@True = {6 a {6 * a}}
+@False = (* (a a))
+@Leaf = (a (* ((a b) b)))
+@Node = (a (b ((a (b c)) (* c))))
+@True = (a (* a))
 @all = ((@all$S0 ((a a) b)) b)
 @all$S0 = (a (b c))
 & @and ~ (d (e c))

@@ -8,4 +8,4 @@ rec = λa match a {
   +: (+ (rec a-1) (rec a-1))
 }
 
-main = (rec 8)
+main = (rec 6)

@@ -1,5 +1,5 @@
 @main = a
-& @rec ~ (#8 a)
+& @rec ~ (#6 a)
 @rec = (?<(a @rec$S0) b> b)
 & @sum ~ (#1000000 (#0 a))
 @rec$S0 = ({5 a b} c)

@@ -1,5 +1,8 @@
-data Bool = True | False
-data Tree = (Node lft rgt) | (Leaf val)
+True = @True @False True
+False = @True @False False
+
+Node = @lft @rgt @Node @Leaf (Node lft rgt)
+Leaf = @val @Node @Leaf (Leaf val)
 
 and = λa (a λb(b) λb(False))
 

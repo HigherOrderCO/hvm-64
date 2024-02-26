@@ -1,7 +1,9 @@
 use std::{
   fs,
+  io::{self, Write},
   path::{Path, PathBuf},
   str::FromStr,
+  time::Instant,
 };
 
 use hvmc::{
@@ -13,6 +15,8 @@ use insta::{assert_debug_snapshot, assert_display_snapshot, assert_snapshot};
 use loaders::*;
 
 mod loaders;
+
+use serial_test::serial;
 
 #[test]
 fn test_era_era() {
@@ -55,12 +59,18 @@ fn test_bool_and() {
 }
 
 fn test_host(name: &str, host: Host) {
-  println!("{name}");
-  let Some(entrypoint) = host.defs.get("main") else { return };
-  let heap = run::Net::<Strict>::init_heap(1 << 28);
+  print!("{name}...");
+  io::stdout().flush().unwrap();
+  let Some(entrypoint) = host.defs.get("main") else {
+    println!(" skipping");
+    return;
+  };
+  let heap = run::Net::<Strict>::init_heap(1 << 32);
   let mut net = run::Net::<Strict>::new(&heap);
   net.boot(entrypoint);
-  net.normal();
+  let start = Instant::now();
+  net.parallel_normal();
+  println!(" {:.3?}", start.elapsed());
 
   assert_display_snapshot!(format!("{name}/strict"), host.readback(&net));
   assert_display_snapshot!(format!("{name}/strict_rwts"), net.rwts.total());
@@ -93,23 +103,27 @@ fn manifest_relative(sub: &str) -> PathBuf {
 }
 
 #[test]
+#[serial]
 fn test_fast_programs() {
   test_dir(&manifest_relative("tests/programs/"), |p| !is_slow(p))
 }
 
 #[test]
-#[ignore = "very slow"]
+#[ignore = "slow"]
+#[serial]
 fn test_slow_programs() {
   test_dir(&manifest_relative("tests/programs/"), |p| is_slow(p))
 }
 
 #[test]
+#[serial]
 fn test_fast_examples() {
   test_dir(&manifest_relative("examples/"), |p| !is_slow(p));
 }
 
 #[test]
-#[ignore = "very slow"]
+#[serial]
+#[ignore = "slow"]
 fn test_slow_examples() {
   test_dir(&manifest_relative("examples/"), |p| is_slow(p))
 }

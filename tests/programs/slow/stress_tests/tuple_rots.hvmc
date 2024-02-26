@@ -1,4 +1,4 @@
-@MkTup8 = (a (b (c (d (e (f (g (h {2 {18 a {16 b {14 c {12 d {10 e {8 f {6 g {4 h i}}}}}}}} i}))))))))
+@MkTup8 = (a (b (c (d (e (f (g (h ((a (b (c (d (e (f (g (h i)))))))) i)))))))))
 @app = (?<(@app$S0 @app$S1) a> a)
 @app$S0 = (* (a a))
 @app$S1 = (a ({3 b (c d)} (c e)))

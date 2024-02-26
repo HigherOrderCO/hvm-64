@@ -1,0 +1,6 @@
+---
+source: tests/tests.rs
+expression: net.rwts.total()
+input_file: examples/slow/sort/merge/merge_sort.hvmc
+---
+434

@@ -1,0 +1,6 @@
+---
+source: tests/tests.rs
+expression: host.readback(&net)
+input_file: examples/slow/sort/radix/radix_sort_lam.hvmc
+---
+#549755289600

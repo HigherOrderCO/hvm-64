@@ -1,0 +1,6 @@
+---
+source: tests/tests.rs
+expression: host.readback(&net)
+input_file: examples/slow/sort/merge/merge_sort.hvmc
+---
+{8 * {8 {14 {8 * {8 {14 {8 {10 #3 a} {8 * a}} {12 {8 {10 #2 b} {8 * b}} c}} c}} {12 {8 * {8 {14 {8 {10 #1 d} {8 * d}} {12 {8 {10 #0 e} {8 * e}} f}} f}} g}} g}}

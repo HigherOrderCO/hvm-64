@@ -1,5 +1,5 @@
-@Leaf = (a {2 {8 a b} {2 * b}})
-@Node = (a (b {2 * {2 {6 a {4 b c}} c}}))
+@Leaf = (a ((a b) (* b)))
+@Node = (a (b (* ((a (b c)) c))))
 @add = (<+ a b> (a b))
 @gen = (?<(a @gen$S0) b> b)
 & @Leaf ~ (#1 a)

@@ -1,0 +1,6 @@
+---
+source: tests/tests.rs
+expression: net.rwts.total()
+input_file: examples/slow/sort/radix/radix_sort_lam.hvmc
+---
+1505755139
