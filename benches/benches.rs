@@ -5,7 +5,6 @@ use hvmc::{
   run::{Net as RtNet, Strict},
 };
 use std::{
-  ffi::OsStr,
   fs,
   path::{Path, PathBuf},
   time::Duration,

@@ -1,7 +1,6 @@
 ---
 source: tests/tests.rs
-assertion_line: 64
-expression: net.rwts.total()
+expression: host.readback(&net)
 input_file: tests/programs/dec_bits.hvmc
 ---
-180036
+(* (* (a a)))

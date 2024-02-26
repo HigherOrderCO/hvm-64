@@ -1,6 +1,5 @@
 ---
 source: tests/tests.rs
-assertion_line: 63
 expression: host.readback(&net)
 input_file: examples/church_encoding/church.hvmc
 ---

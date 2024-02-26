@@ -2224,7 +2224,7 @@ impl<'a, M: Mode> Net<'a, M> {
       trace!(self.tracer, next);
 
       // If next is root, stop.
-      if next == Port::new_var(root.addr()) || next == Port::new_var(self.root.addr())  {
+      if next == Port::new_var(root.addr()) || next == Port::new_var(self.root.addr()) {
         break;
       }
 

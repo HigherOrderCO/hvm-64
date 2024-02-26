@@ -1,10 +1,7 @@
-
 use crate::loaders::*;
 use hvmc::ast::Book;
 use insta::assert_debug_snapshot;
 mod loaders;
-
-
 
 fn list_got(index: u32) -> Book {
   let code = load_file("list_put_got.hvmc");
@@ -20,11 +17,11 @@ fn list_got(index: u32) -> Book {
 fn list_put(index: u32, value: u32) -> Book {
   let code = load_file("list_put_got.hvmc");
   let mut book = parse_core(&code);
-  let mut def = book.get_mut("GenPutIndexValue").unwrap();
+  let def = book.get_mut("GenPutIndexValue").unwrap();
   def.with_argument(hvmc::ast::Tree::Ref { nam: format!("S{index}") });
   def.with_argument(hvmc::ast::Tree::Ref { nam: format!("S{value}") });
   println!("{:?}", def);
-  let mut def = book.get_mut("main").unwrap();
+  let def = book.get_mut("main").unwrap();
   def.with_argument(hvmc::ast::Tree::Ref { nam: format!("GenPutIndexValue") });
   book
 }
@@ -34,7 +31,7 @@ fn test_list_got() {
   let mut rwts_list = Vec::new();
 
   for index in [0, 1, 3, 7, 15, 31] {
-    let mut book = list_got(index);
+    let book = list_got(index);
     let (rwts, _) = normal(book, 2048);
     rwts_list.push(rwts.total())
   }
@@ -54,13 +51,12 @@ fn test_list_got() {
   assert_eq!(rwts_list[4] + delta * 16, rwts_list[5]);
 }
 
-
 #[test]
 fn test_list_put() {
   let mut rwts_list = Vec::new();
 
   for (index, value) in [(0, 2), (1, 4), (3, 8), (7, 16), (15, 32), (31, 0)] {
-    let mut book = list_put(index, value);
+    let book = list_put(index, value);
     let (rwts, _) = normal(book, 2048);
     rwts_list.push(rwts.total())
   }

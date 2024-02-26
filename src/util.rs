@@ -16,7 +16,7 @@ pub fn create_var(mut id: usize) -> String {
 /// `create_var`.
 pub fn var_to_num(s: &str) -> Option<usize> {
   let mut n = 0usize;
-  for (idx, i) in s.chars().enumerate() {
+  for i in s.chars() {
     let i = (i as u32).checked_sub('a' as u32)? as usize;
     if i > 'z' as usize {
       return None;
@@ -155,19 +155,19 @@ impl crate::ast::Net {
     let mut fresh = 0usize;
     fn ensure_no_conflicts(tree: &Tree, fresh: &mut usize) {
       match tree {
-        Tree::Ctr { lft, rgt, .. }
-        | Tree::Op2 { lft, rgt, .. }
-        | Tree::Mat { sel: lft, ret: rgt } => {
+        Tree::Ctr { lft, rgt, .. } | Tree::Op2 { lft, rgt, .. } | Tree::Mat { sel: lft, ret: rgt } => {
           ensure_no_conflicts(lft, fresh);
           ensure_no_conflicts(rgt, fresh);
-        },
+        }
         Tree::Op1 { rgt, .. } => {
           ensure_no_conflicts(rgt, fresh);
-        },
-        Tree::Var { nam } => if let Some(var_num) = var_to_num(nam) {
-          *fresh = (*fresh).max(var_num);
         }
-        _ => ()
+        Tree::Var { nam } => {
+          if let Some(var_num) = var_to_num(nam) {
+            *fresh = (*fresh).max(var_num);
+          }
+        }
+        _ => (),
       }
     }
     ensure_no_conflicts(&self.root, &mut fresh);
@@ -175,7 +175,7 @@ impl crate::ast::Net {
       ensure_no_conflicts(l, &mut fresh);
       ensure_no_conflicts(r, &mut fresh);
     }
-    let mut fresh_str = create_var(fresh + 1);
+    let fresh_str = create_var(fresh + 1);
 
     let fun = core::mem::take(&mut self.root);
     let oth = Tree::Ctr { lab: 0, lft: Box::new(arg), rgt: Box::new(Tree::Var { nam: fresh_str.clone() }) };

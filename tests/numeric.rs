@@ -127,4 +127,3 @@ fn test_div_by_0() {
   assert_snapshot!(Net::to_string(&net), @"#0");
   assert_debug_snapshot!(rwts.total(), @"3");
 }
-

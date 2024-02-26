@@ -1,7 +1,6 @@
 ---
 source: tests/tests.rs
-assertion_line: 63
-expression: host.readback(&net)
+expression: net.rwts.total()
 input_file: examples/machine_u32/num_add.hvmc
 ---
-#223
+6

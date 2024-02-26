@@ -1,6 +1,14 @@
-use std::{fs, path::{Path, PathBuf}, str::FromStr};
+use std::{
+  fs,
+  path::{Path, PathBuf},
+  str::FromStr,
+};
 
-use hvmc::{ast::{self, Net}, host::Host, run::{self, Lazy, Mode, Strict}};
+use hvmc::{
+  ast::{self, Net},
+  host::Host,
+  run::{self, Strict},
+};
 use insta::{assert_debug_snapshot, assert_display_snapshot, assert_snapshot};
 use loaders::*;
 
@@ -46,13 +54,12 @@ fn test_bool_and() {
   assert_debug_snapshot!(rwts.total(), @"9");
 }
 
-
 #[derive(Default)]
 pub struct TestOpts {
-  lazy: bool,
+  _lazy: bool,
 }
 
-fn test_host(name: &str, host: Host, opts: TestOpts) {
+fn test_host(name: &str, host: Host, _opts: TestOpts) {
   println!("{name}");
   let Some(entrypoint) = host.defs.get("main") else { return };
   let heap = run::Net::<Strict>::init_heap(1 << 28);
@@ -65,7 +72,6 @@ fn test_host(name: &str, host: Host, opts: TestOpts) {
 
   // Now, test lazy mode and
   // ensure the outputs are equal.
-
 }
 
 fn test_path(path: &Path, opts: TestOpts) {
