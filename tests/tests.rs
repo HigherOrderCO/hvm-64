@@ -66,7 +66,7 @@ fn test_run(name: &str, host: Host) {
     println!(" skipping");
     return;
   };
-  let heap = run::Net::<Strict>::init_heap(1 << 32);
+  let heap = run::Net::<Strict>::init_heap(1 << 29);
   let mut net = run::Net::<Strict>::new(&heap);
   net.boot(entrypoint);
   let start = Instant::now();
@@ -95,36 +95,19 @@ fn test_dir(dir: &Path, filter: impl Fn(&Path) -> bool) {
   })
 }
 
-fn is_slow(p: &Path) -> bool {
-  p.components().any(|x| x.as_os_str().to_str().unwrap() == "slow")
-}
-
 fn manifest_relative(sub: &str) -> PathBuf {
   format!("{}/{}", env!("CARGO_MANIFEST_DIR"), sub).into()
 }
 
 #[test]
 #[serial]
-fn test_fast_programs() {
-  test_dir(&manifest_relative("tests/programs/"), |p| !is_slow(p))
-}
-
-#[test]
-#[ignore = "slow"]
-#[serial]
-fn test_slow_programs() {
-  test_dir(&manifest_relative("tests/programs/"), |p| is_slow(p))
+fn test_programs() {
+  test_dir(&manifest_relative("tests/programs/"), |_| true)
 }
 
 #[test]
 #[serial]
-fn test_fast_examples() {
-  test_dir(&manifest_relative("examples/"), |p| !is_slow(p));
+fn test_examples() {
+  test_dir(&manifest_relative("examples/"), |_| true);
 }
 
-#[test]
-#[serial]
-#[ignore = "slow"]
-fn test_slow_examples() {
-  test_dir(&manifest_relative("examples/"), |p| is_slow(p))
-}
