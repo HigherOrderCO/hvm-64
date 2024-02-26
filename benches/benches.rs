@@ -55,7 +55,7 @@ fn run_file(path: &PathBuf, group: Option<String>, c: &mut Criterion) {
 }
 
 fn benchmark(file_name: &str, book: Book, c: &mut Criterion) {
-  let area = RtNet::<Strict>::init_heap(1 << 24);
+  let area = RtNet::<Strict>::init_heap(1 << 29);
   let host = Host::new(&book);
   c.bench_function(file_name, |b| {
     b.iter(|| {
@@ -67,7 +67,7 @@ fn benchmark(file_name: &str, book: Book, c: &mut Criterion) {
 }
 
 fn benchmark_group(file_name: &str, group: String, book: Book, c: &mut Criterion) {
-  let area = RtNet::<Strict>::init_heap(1 << 24);
+  let area = RtNet::<Strict>::init_heap(1 << 29);
   let host = Host::new(&book);
 
   c.benchmark_group(group).bench_function(file_name, |b| {

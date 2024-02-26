@@ -110,4 +110,3 @@ fn test_programs() {
 fn test_examples() {
   test_dir(&manifest_relative("examples/"), |_| true);
 }
-
