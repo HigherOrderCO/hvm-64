@@ -1,7 +1,7 @@
 ---
 source: tests/tests.rs
 expression: output
-input_file: examples/slow/sort/bitonic/bitonic_sort_lam.hvmc
+input_file: examples/sort/bitonic/bitonic_sort_lam.hvmc
 ---
 #523776
 RWTS   :       2_323_894

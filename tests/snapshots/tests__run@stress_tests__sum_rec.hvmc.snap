@@ -1,7 +1,7 @@
 ---
 source: tests/tests.rs
 expression: output
-input_file: tests/programs/slow/stress_tests/sum_rec.hvmc
+input_file: tests/programs/stress_tests/sum_rec.hvmc
 ---
 #67108864
 RWTS   :   1_207_959_540

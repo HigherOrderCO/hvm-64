@@ -1,7 +1,7 @@
 ---
 source: tests/tests.rs
 expression: output
-input_file: examples/slow/sort/radix/radix_sort_lam.hvmc
+input_file: examples/sort/radix/radix_sort_lam.hvmc
 ---
 #549755289600
 RWTS   :   1_505_755_139

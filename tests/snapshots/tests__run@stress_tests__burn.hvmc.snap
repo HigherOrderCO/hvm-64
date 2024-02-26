@@ -1,7 +1,7 @@
 ---
 source: tests/tests.rs
 expression: output
-input_file: tests/programs/slow/stress_tests/burn.hvmc
+input_file: tests/programs/stress_tests/burn.hvmc
 ---
 (a b)
 RWTS   :      92_274_181
