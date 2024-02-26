@@ -23,6 +23,7 @@ panic = "abort"
 debug = "full"
 
 [dependencies]
+clap = { version = "4.5.1", features = ["derive"] }
 nohash-hasher = { version = "0.2.0" }
 
 ##--COMPILER-CUTOFF--##
