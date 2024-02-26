@@ -1,6 +1,0 @@
----
-source: tests/tests.rs
-expression: net.rwts.total()
-input_file: tests/programs/slow/stress_tests/sum_tree.hvmc
----
-754974689

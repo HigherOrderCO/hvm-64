@@ -1,6 +1,0 @@
----
-source: tests/tests.rs
-expression: net.rwts.total()
-input_file: examples/machine_u32/num_match.hvmc
----
-7

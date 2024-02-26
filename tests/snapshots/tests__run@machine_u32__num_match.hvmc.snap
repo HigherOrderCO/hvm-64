@@ -1,0 +1,12 @@
+---
+source: tests/tests.rs
+expression: output
+input_file: examples/machine_u32/num_match.hvmc
+---
+#9
+RWTS   :               7
+- ANNI :               3
+- COMM :               0
+- ERAS :               1
+- DREF :               2
+- OPER :               1

@@ -1,6 +1,0 @@
----
-source: tests/tests.rs
-expression: net.rwts.total()
-input_file: tests/programs/slow/stress_tests/tuple_rots.hvmc
----
-62000019

@@ -1,0 +1,12 @@
+---
+source: tests/tests.rs
+expression: output
+input_file: examples/machine_u32/num_add.hvmc
+---
+#223
+RWTS   :               6
+- ANNI :               2
+- COMM :               0
+- ERAS :               0
+- DREF :               2
+- OPER :               2

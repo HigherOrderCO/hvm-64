@@ -10,8 +10,9 @@ use hvmc::{
   ast::{self, Net},
   host::Host,
   run::{self, Strict},
+  util::show_rewrites,
 };
-use insta::{assert_debug_snapshot, assert_display_snapshot, assert_snapshot};
+use insta::{assert_debug_snapshot, assert_snapshot};
 use loaders::*;
 
 mod loaders;
@@ -58,7 +59,7 @@ fn test_bool_and() {
   assert_debug_snapshot!(rwts.total(), @"9");
 }
 
-fn test_host(name: &str, host: Host) {
+fn test_run(name: &str, host: Host) {
   print!("{name}...");
   io::stdout().flush().unwrap();
   let Some(entrypoint) = host.defs.get("main") else {
@@ -72,8 +73,8 @@ fn test_host(name: &str, host: Host) {
   net.parallel_normal();
   println!(" {:.3?}", start.elapsed());
 
-  assert_display_snapshot!(format!("{name}/strict"), host.readback(&net));
-  assert_display_snapshot!(format!("{name}/strict_rwts"), net.rwts.total());
+  let output = format!("{}\n{}", host.readback(&net), show_rewrites(&net.rwts));
+  assert_snapshot!(output);
 }
 
 fn test_path(path: &Path) {
@@ -83,7 +84,7 @@ fn test_path(path: &Path) {
 
   let path = path.strip_prefix(env!("CARGO_MANIFEST_DIR")).unwrap();
 
-  test_host(path.to_str().unwrap(), host);
+  test_run(path.to_str().unwrap(), host);
 }
 
 fn test_dir(dir: &Path, filter: impl Fn(&Path) -> bool) {

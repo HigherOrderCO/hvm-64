@@ -9,7 +9,7 @@ pub mod ops;
 pub mod run;
 pub mod stdlib;
 
-mod util;
+pub mod util;
 
 #[doc(hidden)] // not public api
 pub mod fuzz;

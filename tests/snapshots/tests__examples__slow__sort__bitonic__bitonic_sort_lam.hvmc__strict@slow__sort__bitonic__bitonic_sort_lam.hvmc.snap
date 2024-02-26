@@ -1,6 +1,0 @@
----
-source: tests/tests.rs
-expression: host.readback(&net)
-input_file: examples/slow/sort/bitonic/bitonic_sort_lam.hvmc
----
-#523776

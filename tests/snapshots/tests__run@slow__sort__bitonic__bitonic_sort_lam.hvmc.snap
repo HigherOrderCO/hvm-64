@@ -1,0 +1,12 @@
+---
+source: tests/tests.rs
+expression: output
+input_file: examples/slow/sort/bitonic/bitonic_sort_lam.hvmc
+---
+#523776
+RWTS   :       2_323_894
+- ANNI :       1_344_981
+- COMM :          96_766
+- ERAS :         222_714
+- DREF :         508_402
+- OPER :         151_031

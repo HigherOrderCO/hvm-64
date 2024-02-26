@@ -1,6 +1,0 @@
----
-source: tests/tests.rs
-expression: host.readback(&net)
-input_file: examples/machine_u32/num_add.hvmc
----
-#223
