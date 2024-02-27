@@ -171,7 +171,7 @@ fn run(host: &Host, opts: RuntimeOpts, args: RunArgs) {
 /// doesn't fail on 32-bit systems. We want it to fail later on, when attempting
 /// to run the program.
 fn mem_parser(arg: &str) -> Result<u64, String> {
-  let (base, mult) = match arg.to_lowercase().chars().last() {
+  let (base, scale) = match arg.to_lowercase().chars().last() {
     None => return Err("Mem size argument is empty".to_string()),
     Some('k') => (&arg[0 .. arg.len() - 1], 1 << 10),
     Some('m') => (&arg[0 .. arg.len() - 1], 1 << 20),
@@ -179,7 +179,7 @@ fn mem_parser(arg: &str) -> Result<u64, String> {
     Some(_) => (arg, 1),
   };
   let base = base.parse::<u64>().map_err(|e| e.to_string())?;
-  Ok(base * mult)
+  Ok(base * scale)
 }
 
 fn load_files(files: &[String]) -> Arc<Mutex<Host>> {
