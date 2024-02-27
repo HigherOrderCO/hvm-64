@@ -11,7 +11,7 @@ use crate::{
 
 impl Host {
   /// Encode `tree` directly into `trg`, skipping the intermediate `Def`
-  /// representationw
+  /// representation.
   pub fn encode_tree<M: Mode>(&self, net: &mut run::Net<M>, trg: Trg, tree: &Tree) {
     EncodeState { host: self, net, vars: Default::default() }.encode(trg, tree);
   }
