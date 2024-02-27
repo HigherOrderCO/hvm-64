@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dsherret/rust-toolchain-file@v1
       - uses: actions/cache@v2
         with:
           path: |
@@ -26,7 +26,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dsherret/rust-toolchain-file@v1
       - uses: actions/cache@v2
         with:
           path: |
@@ -40,7 +40,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dsherret/rust-toolchain-file@v1
         with:
           components: rustfmt
       - run: cargo fmt --check
@@ -48,7 +48,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dsherret/rust-toolchain-file@v1
       - uses: actions/cache@v2
         with:
           path: |
