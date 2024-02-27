@@ -4,7 +4,6 @@
 
 pub mod ast;
 pub mod compile;
-pub mod encode;
 pub mod host;
 pub mod ops;
 pub mod run;

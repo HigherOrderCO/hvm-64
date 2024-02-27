@@ -49,8 +49,16 @@ fn main() {
 }
 
 #[derive(Parser, Debug)]
-#[command(author, version)]
-/// A massively parallel Interaction Combinator evaluator
+#[command(author, version, about = "A massively parallel Interaction Combinator evaluator",
+  long_about = r##"
+A massively parallel Interaction Combinator evaluator
+
+Examples: 
+$ hvmc run examples/church_encoding/church.hvm
+$ hvmc run tests/programs/addition.hvmc "#16" "#3"
+$ hvmc compile tests/programs/addition.hvmc
+$ hvmc reduce tests/programs/addition.hvmc -- "a & @mul ~ (#3 (#4 a))"
+$ hvmc reduce -- "a & #3 ~ <* #4 a>""##)]
 struct FullCli {
   #[command(subcommand)]
   pub mode: CliMode,
@@ -90,6 +98,7 @@ struct RuntimeOpts {
 #[derive(Args, Clone, Debug)]
 struct RunArgs {
   #[arg(short = 'e', default_value = "main")]
+  /// Name of the definition that will get reduced
   entry_point: String,
   /// List of arguments to pass to the program
   ///
@@ -108,7 +117,7 @@ enum CliMode {
     /// hvm-core file to compile
     file: String,
   },
-  /// Run a program, optionally passing a set of arguments into it.
+  /// Run a program, optionally passing a list of arguments to it.
   Run {
     #[command(flatten)]
     opts: RuntimeOpts,
@@ -250,7 +259,7 @@ fn compile_executable(file_name: &str, host: &host::Host) -> Result<(), io::Erro
   fs::write(".hvm/Cargo.toml", cargo_toml)?;
   fs::write(".hvm/src/ast.rs", include_str!("../src/ast.rs"))?;
   fs::write(".hvm/src/compile.rs", include_str!("../src/compile.rs"))?;
-  fs::write(".hvm/src/encode.rs", include_str!("../src/encode.rs"))?;
+  fs::write(".hvm/src/host/encode.rs", include_str!("../src/host/encode.rs"))?;
   fs::write(".hvm/src/fuzz.rs", include_str!("../src/fuzz.rs"))?;
   fs::write(".hvm/src/host.rs", include_str!("../src/host.rs"))?;
   fs::write(".hvm/src/lib.rs", include_str!("../src/lib.rs"))?;

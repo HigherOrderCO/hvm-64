@@ -11,6 +11,8 @@ use std::{
   ops::{Deref, DerefMut, RangeFrom},
 };
 
+pub mod encode;
+
 /// Stores a bidirectional mapping between names and runtime defs.
 #[derive(Default)]
 pub struct Host {

@@ -9,6 +9,24 @@ use crate::{
   run::{self, Mode, Port, Trg},
 };
 
+impl Host {
+  /// Encode a tree `tree` directly into a port or wire `trg`, skipping the intermediate `Def` representation
+  pub fn encode_tree<M: Mode>(&self, net: &mut run::Net<M>, trg: Trg, tree: &Tree) {
+    EncodeState { host: self, net, vars: Default::default() }.encode(trg, tree);
+  }
+  /// Encode the root of `ast_net` directly into `trg` and encode its redexes into `net` redex list.
+  pub fn encode_net<M: Mode>(&self, net: &mut run::Net<M>, trg: Trg, ast_net: &Net) {
+    let mut state = EncodeState { host: self, net, vars: Default::default() };
+    for (l, r) in &ast_net.rdex {
+      let (ap, a, bp, b) = state.net.do_wires();
+      state.encode(ap, l);
+      state.encode(bp, r);
+      state.net.link_trg(a, b);
+    }
+    state.encode(trg, &ast_net.root);
+  }
+}
+
 struct EncodeState<'c, 'n, M: Mode> {
   host: &'c Host,
   net: &'c mut run::Net<'n, M>,
@@ -47,21 +65,5 @@ impl<'c, 'n, M: Mode> EncodeState<'c, 'n, M> {
         }
       },
     }
-  }
-}
-
-impl Host {
-  pub fn encode_tree<M: Mode>(&self, net: &mut run::Net<M>, trg: Trg, tree: &Tree) {
-    EncodeState { host: self, net, vars: Default::default() }.encode(trg, tree);
-  }
-  pub fn encode_net<M: Mode>(&self, net: &mut run::Net<M>, trg: Trg, ast_net: &Net) {
-    let mut state = EncodeState { host: self, net, vars: Default::default() };
-    for (l, r) in &ast_net.rdex {
-      let (ap, a, bp, b) = state.net.do_wires();
-      state.encode(ap, l);
-      state.encode(bp, r);
-      state.net.link_trg(a, b);
-    }
-    state.encode(trg, &ast_net.root);
   }
 }
