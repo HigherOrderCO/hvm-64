@@ -6,10 +6,11 @@ use std::{
   process::{Command, ExitStatus, Stdio},
 };
 
+use hvmc::{ast::{Net, Tree}, host::Host};
 use insta::assert_display_snapshot;
 
 fn get_arithmetic_program_path() -> String {
-  return env!("CARGO_MANIFEST_DIR").to_owned() + "/tests/programs/arithmetic.hvmc";
+  return env!("CARGO_MANIFEST_DIR").to_owned() + "/examples/arithmetic.hvmc";
 }
 
 fn execute_hvmc(args: &[&str]) -> Result<(ExitStatus, String), Box<dyn Error>> {
@@ -126,5 +127,57 @@ fn test_cli_errors() {
     @r###"
  Input file "this-file-does-not-exist.hvmc" not found
  "###
+  );
+}
+
+
+#[test]
+fn test_apply_tree() {
+  use hvmc::run;
+  fn eval_with_args(fun: &str, args: &[&str]) -> Net {
+    let area = run::Net::<run::Strict>::init_heap(1 << 10);
+
+    let mut fun: Net = fun.parse().unwrap();
+    for arg in args {
+      let arg: Tree = arg.parse().unwrap();
+      fun.apply_tree(arg)
+    }
+    // TODO: When feature/sc-472/argument-passing, use encode_net instead.
+    let host = Host::default();
+
+    let mut rnet = run::Net::<run::Strict>::new(&area);
+    let root_port = run::Trg::port(run::Port::new_var(rnet.root.addr()));
+    host.encode_net(&mut rnet, root_port, &fun);
+    rnet.normal();
+    let got_result = host.readback(&rnet);
+    got_result
+  }
+  assert_display_snapshot!(
+    eval_with_args("(a a)", &vec!["(a a)"]),
+    @"(a a)"
+  );
+  assert_display_snapshot!(
+    eval_with_args("b & (a b) ~ a", &vec!["(a a)"]),
+    @"a"
+  );
+  assert_display_snapshot!(
+    eval_with_args("(z0 z0)", &vec!["(z1 z1)"]),
+    @"(a a)"
+  );
+  assert_display_snapshot!(
+    eval_with_args("(* #1)", &vec!["(a a)"]),
+    @"#1"
+  );
+  assert_display_snapshot!(
+    eval_with_args("(<+ a b> (a b))", &vec!["#1", "#2"]),
+    @"#3"
+  );
+  assert_display_snapshot!(
+    eval_with_args("(<* a b> (a b))", &vec!["#2", "#3"]),
+    @"#6"
+  );
+  assert_display_snapshot!(
+    eval_with_args("(<* a b> (a b))", &vec!["#2"]),
+    @"(<2* a> a)"
   );
 }

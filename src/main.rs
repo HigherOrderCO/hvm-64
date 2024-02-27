@@ -80,62 +80,62 @@ struct BareCli {
 #[derive(Args, Clone, Debug)]
 struct RuntimeOpts {
   #[arg(short = 's', long = "stats")]
-  /// Show performance statistics
+  /// Show performance statistics.
   show_stats: bool,
   #[arg(short = '1', long = "single")]
-  /// Single-core mode (no parallelism)
+  /// Single-core mode (no parallelism).
   single_core: bool,
   #[arg(short = 'l', long = "lazy")]
-  /// Lazy mode
+  /// Lazy mode.
   ///
   /// Lazy mode only expands references that are reachable
   /// by a walk from the root of the net. This leads to a dramatic slowdown,
-  /// but allows running programs that would expand indefinitely otherwise
+  /// but allows running programs that would expand indefinitely otherwise.
   lazy_mode: bool,
   #[arg(short = 'm', long = "memory", default_value = "1G", value_parser = mem_parser)]
   /// How much memory to allocate on startup.
   ///
-  /// Supports abbreviations such as '4G' or '400M'
+  /// Supports abbreviations such as '4G' or '400M'.
   memory: u64,
 }
 
 #[derive(Args, Clone, Debug)]
 struct RunArgs {
   #[arg(short = 'e', default_value = "main")]
-  /// Name of the definition that will get reduced
+  /// Name of the definition that will get reduced.
   entry_point: String,
-  /// List of arguments to pass to the program
+  /// List of arguments to pass to the program.
   ///
   /// Arguments are passed using the lambda-calculus interpretation
   /// of interaction combinators. So, for example, if the arguments are
   /// "#1" "#2" "#3", then the expression that will get reduced is
-  /// `r & @main ~ (#1 (#2 (#3 r)))`
+  /// `r & @main ~ (#1 (#2 (#3 r)))`.
   args: Vec<String>,
 }
 
 #[derive(Subcommand, Clone, Debug)]
 #[command(author, version)]
 enum CliMode {
-  /// Compile a hvm-core program into a Rust crate
+  /// Compile a hvm-core program into a Rust crate.
   Compile {
-    /// hvm-core file to compile
+    /// hvm-core file to compile.
     file: String,
   },
   /// Run a program, optionally passing a list of arguments to it.
   Run {
     #[command(flatten)]
     opts: RuntimeOpts,
-    /// Name of the file to load
+    /// Name of the file to load.
     file: String,
     #[command(flatten)]
     args: RunArgs,
   },
-  /// Reduce hvm-core expressions to their normal form
+  /// Reduce hvm-core expressions to their normal form.
   ///
   /// The expressions are passed as command-line arguments.
   /// It is also possible to load files before reducing the expression,
   /// which makes it possible to reference definitions from the file
-  /// in the expression
+  /// in the expression.
   Reduce {
     #[command(flatten)]
     run_opts: RuntimeOpts,
@@ -149,7 +149,7 @@ enum CliMode {
     ///
     /// The normal form of each expression will be
     /// printed on a new line. This list must be separated from the file list
-    /// with a double dash ('--')
+    /// with a double dash ('--').
     exprs: Vec<String>,
   },
 }
@@ -169,7 +169,7 @@ fn run(host: &Host, opts: RuntimeOpts, args: RunArgs) {
 ///
 /// This return a [`u64`] instead of [`usize`] to ensure that parsing CLI args
 /// doesn't fail on 32-bit systems. We want it to fail later on, when attempting
-/// to run the program
+/// to run the program.
 fn mem_parser(arg: &str) -> Result<u64, String> {
   let (base, mult) = match arg.to_lowercase().chars().last() {
     None => return Err("Mem size argument is empty".to_string()),
