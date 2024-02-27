@@ -8,9 +8,9 @@ fn list_got(index: u32) -> Book {
   let mut book = parse_core(&code);
   println!("{:#?}", book.keys().collect::<Vec<_>>());
   let def = book.get_mut("GenGotIndex").unwrap();
-  def.with_argument(hvmc::ast::Tree::Ref { nam: format!("S{index}") });
+  def.apply_tree(hvmc::ast::Tree::Ref { nam: format!("S{index}") });
   let def = book.get_mut("main").unwrap();
-  def.with_argument(hvmc::ast::Tree::Ref { nam: format!("GenGotIndex") });
+  def.apply_tree(hvmc::ast::Tree::Ref { nam: format!("GenGotIndex") });
   book
 }
 
@@ -18,11 +18,11 @@ fn list_put(index: u32, value: u32) -> Book {
   let code = load_file("list_put_got.hvmc");
   let mut book = parse_core(&code);
   let def = book.get_mut("GenPutIndexValue").unwrap();
-  def.with_argument(hvmc::ast::Tree::Ref { nam: format!("S{index}") });
-  def.with_argument(hvmc::ast::Tree::Ref { nam: format!("S{value}") });
+  def.apply_tree(hvmc::ast::Tree::Ref { nam: format!("S{index}") });
+  def.apply_tree(hvmc::ast::Tree::Ref { nam: format!("S{value}") });
   println!("{:?}", def);
   let def = book.get_mut("main").unwrap();
-  def.with_argument(hvmc::ast::Tree::Ref { nam: format!("GenPutIndexValue") });
+  def.apply_tree(hvmc::ast::Tree::Ref { nam: format!("GenPutIndexValue") });
   book
 }
 

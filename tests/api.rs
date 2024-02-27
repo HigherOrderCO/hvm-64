@@ -7,7 +7,7 @@ use hvmc::{
 use insta::assert_display_snapshot;
 
 #[test]
-fn test_with_argument() {
+fn test_apply_tree() {
   use hvmc::run;
   fn eval_with_args(fun: &str, args: &[&str]) -> Net {
     let area = run::Net::<run::Strict>::init_heap(1 << 10);
@@ -15,7 +15,7 @@ fn test_with_argument() {
     let mut fun: Net = fun.parse().unwrap();
     for arg in args {
       let arg: Tree = arg.parse().unwrap();
-      fun.with_argument(arg)
+      fun.apply_tree(arg)
     }
     // TODO: When feature/sc-472/argument-passing, use encode_net instead.
     let mut book = Book::default();

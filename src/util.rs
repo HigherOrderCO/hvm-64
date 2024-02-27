@@ -21,7 +21,7 @@ pub(crate) fn create_var(mut id: usize) -> String {
 ///
 /// Returns None when the provided string is not an output of
 /// `create_var`.
-pub fn var_to_num(s: &str) -> Option<usize> {
+pub(crate) fn var_to_num(s: &str) -> Option<usize> {
   let mut n = 0usize;
   for i in s.chars() {
     let i = (i as u32).checked_sub('a' as u32)? as usize;
@@ -53,6 +53,7 @@ fn test_create_var() {
   assert_eq!(create_var(1352), "aza");
   assert_eq!(create_var(1378), "baa");
 }
+
 #[test]
 fn test_var_to_num() {
   for i in [0, 1, 2, 3, 10, 26, 27, 30, 50, 70] {
@@ -178,9 +179,7 @@ impl Tree {
       Tree::Op1 { rgt, .. } => {
         rgt.ensure_no_conflicts(fresh);
       }
-      Tree::Era => (),
-      Tree::Num { .. } => (),
-      Tree::Ref { .. } => (),
+      Tree::Era | Tree::Num { .. } | Tree::Ref { .. } => {}
     }
   }
 }
@@ -198,8 +197,7 @@ impl Net {
   /// The result is equivalent a λ-calculus application. Thus,
   /// if the net is a λ-calculus term, then this function will
   /// apply an argument to it.
-  #[allow(dead_code)] // used in tests
-  pub(crate) fn with_argument(&mut self, arg: Tree) {
+  pub fn apply_tree(&mut self, arg: Tree) {
     let mut fresh = 0usize;
     self.ensure_no_conflicts(&mut fresh);
     arg.ensure_no_conflicts(&mut fresh);
