@@ -50,6 +50,7 @@ fn main() {
 
 #[derive(Parser, Debug)]
 #[command(author, version)]
+/// A massively parallel Interaction Combinator evaluator
 struct FullCli {
   #[command(subcommand)]
   pub mode: CliMode,
@@ -100,6 +101,7 @@ struct RunArgs {
 }
 
 #[derive(Subcommand, Clone, Debug)]
+#[command(author, version)]
 enum CliMode {
   /// Compile a hvm-core program into a Rust crate
   Compile {
