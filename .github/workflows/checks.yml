@@ -34,7 +34,7 @@ jobs:
             ~/.cargo/git
             target
           key: ${{ runner.os }}-test-${{ hashFiles('**/Cargo.lock') }}
-      - run: cargo test
+      - run: cargo test --release
       - run: cargo test --release --features _fuzz --test fuzz
   fmt:
     runs-on: ubuntu-latest
@@ -65,4 +65,6 @@ jobs:
         with:
           incremental_files_only: false
           config: ./cspell.json
-          files: "**/*.rs **/*.md"
+          files: |
+            **/*.rs
+            **/*.md

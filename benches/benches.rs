@@ -37,6 +37,10 @@ fn run_dir(path: &PathBuf, group: Option<String>, c: &mut Criterion) {
 
       run_dir(entry, Some(group), c)
     } else {
+      // Skip stress tests and sort.
+      if entry.components().any(|x| matches!(x.as_os_str().to_str(), Some("stress_tests" | "sort"))) {
+        continue;
+      }
       if entry.extension().unwrap().to_str().unwrap() == "hvmc" {
         run_file(entry, group.clone(), c);
       }
