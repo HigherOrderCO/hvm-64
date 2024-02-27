@@ -58,9 +58,9 @@ A massively parallel Interaction Combinator evaluator
 
 Examples: 
 $ hvmc run examples/church_encoding/church.hvm
-$ hvmc run tests/programs/addition.hvmc "#16" "#3"
-$ hvmc compile tests/programs/addition.hvmc
-$ hvmc reduce tests/programs/addition.hvmc -- "a & @mul ~ (#3 (#4 a))"
+$ hvmc run examples/addition.hvmc "#16" "#3"
+$ hvmc compile examples/addition.hvmc
+$ hvmc reduce examples/addition.hvmc -- "a & @mul ~ (#3 (#4 a))"
 $ hvmc reduce -- "a & #3 ~ <* #4 a>""##
 )]
 struct FullCli {
