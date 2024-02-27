@@ -7,10 +7,10 @@ fn list_got(index: u32) -> Book {
   let code = load_file("list_put_got.hvmc");
   let mut book = parse_core(&code);
   println!("{:#?}", book.keys().collect::<Vec<_>>());
-  let mut def = book.get_mut("GenGotIndex").unwrap();
-  core_apply(&mut def, hvmc::ast::Tree::Ref { nam: format!("S{index}") });
-  let mut def = book.get_mut("main").unwrap();
-  core_apply(&mut def, hvmc::ast::Tree::Ref { nam: format!("GenGotIndex") });
+  let def = book.get_mut("GenGotIndex").unwrap();
+  def.with_argument(hvmc::ast::Tree::Ref { nam: format!("S{index}") });
+  let def = book.get_mut("main").unwrap();
+  def.with_argument(hvmc::ast::Tree::Ref { nam: format!("GenGotIndex") });
   book
 }
 

@@ -1,4 +1,7 @@
-use crate::run::Rewrites;
+use crate::{
+  ast::{Net, Tree},
+  run::Rewrites,
+};
 use std::time::Duration;
 
 /// Creates a variable uniquely identified by `id`.
@@ -15,6 +18,7 @@ pub(crate) fn create_var(mut id: usize) -> String {
 }
 
 /// Inverse function of [`create_var`].
+///
 /// Returns None when the provided string is not an output of
 /// `create_var`.
 pub fn var_to_num(s: &str) -> Option<usize> {
@@ -151,43 +155,63 @@ macro_rules! deref {
   };
 }
 
-impl crate::ast::Net {
-  /// Transforms the net `x & ...` into `y & x ~ (arg y) & ...`
-  pub fn with_argument(&mut self, arg: crate::ast::Tree) {
-    use crate::ast::Tree;
-    let mut fresh = 0usize;
-    fn ensure_no_conflicts(tree: &Tree, fresh: &mut usize) {
-      match tree {
-        Tree::Ctr { lft, rgt, .. } | Tree::Op2 { lft, rgt, .. } | Tree::Mat { sel: lft, ret: rgt } => {
-          ensure_no_conflicts(lft, fresh);
-          ensure_no_conflicts(rgt, fresh);
-        }
-        Tree::Op1 { rgt, .. } => {
-          ensure_no_conflicts(rgt, fresh);
-        }
-        Tree::Var { nam } => {
-          if let Some(var_num) = var_to_num(nam) {
-            *fresh = (*fresh).max(var_num);
-          }
-        }
-        _ => (),
-      }
-    }
-    ensure_no_conflicts(&self.root, &mut fresh);
-    for (l, r) in &self.rdex {
-      ensure_no_conflicts(l, &mut fresh);
-      ensure_no_conflicts(r, &mut fresh);
-    }
-    let fresh_str = create_var(fresh + 1);
+pub(crate) use deref;
 
-    let fun = core::mem::take(&mut self.root);
-    let oth = Tree::Ctr { lab: 0, lft: Box::new(arg), rgt: Box::new(Tree::Var { nam: fresh_str.clone() }) };
-    self.root = Tree::Var { nam: fresh_str };
-    self.rdex.push((fun, oth));
+impl Tree {
+  /// Increases `fresh` until `create_var(*fresh)` does not conflict
+  /// with a [`Tree::Var`]  in `tree`
+  ///
+  /// This function can be called multiple times with many trees to
+  /// ensure that `fresh` does not conflict with any of them.
+  pub(crate) fn ensure_no_conflicts(&self, fresh: &mut usize) {
+    match self {
+      Tree::Var { nam } => {
+        if let Some(var_num) = var_to_num(nam) {
+          *fresh = (*fresh).max(var_num);
+        }
+      }
+      // Recurse on children
+      Tree::Ctr { lft, rgt, .. } | Tree::Op2 { lft, rgt, .. } | Tree::Mat { sel: lft, ret: rgt } => {
+        lft.ensure_no_conflicts(fresh);
+        rgt.ensure_no_conflicts(fresh);
+      }
+      Tree::Op1 { rgt, .. } => {
+        rgt.ensure_no_conflicts(fresh);
+      }
+      Tree::Era => (),
+      Tree::Num { .. } => (),
+      Tree::Ref { .. } => (),
+    }
   }
 }
 
-pub(crate) use deref;
+impl Net {
+  pub(crate) fn ensure_no_conflicts(&self, fresh: &mut usize) {
+    self.root.ensure_no_conflicts(fresh);
+    for (a, b) in &self.rdex {
+      a.ensure_no_conflicts(fresh);
+      b.ensure_no_conflicts(fresh);
+    }
+  }
+  /// Transforms the net `x & ...` into `y & x ~ (arg y) & ...`
+  ///
+  /// The result is equivalent a λ-calculus application. Thus,
+  /// if the net is a λ-calculus term, then this function will
+  /// apply an argument to it.
+  #[allow(dead_code)] // used in tests
+  pub(crate) fn with_argument(&mut self, arg: Tree) {
+    let mut fresh = 0usize;
+    self.ensure_no_conflicts(&mut fresh);
+    arg.ensure_no_conflicts(&mut fresh);
+
+    let fresh_str = create_var(fresh + 1);
+
+    let fun = core::mem::take(&mut self.root);
+    let app = Tree::Ctr { lab: 0, lft: Box::new(arg), rgt: Box::new(Tree::Var { nam: fresh_str.clone() }) };
+    self.root = Tree::Var { nam: fresh_str };
+    self.rdex.push((fun, app));
+  }
+}
 
 pub fn show_rewrites(rwts: &Rewrites) -> String {
   format!(

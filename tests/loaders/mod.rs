@@ -8,14 +8,6 @@ pub fn load_file(file: &str) -> String {
   fs::read_to_string(path).unwrap()
 }
 
-pub fn core_apply(net: &mut Net, arg: Tree) {
-  let fun = core::mem::take(&mut net.root);
-  let var = format!("$_TEST_APP{:p}", net);
-  let oth = Tree::Ctr { lab: 0, lft: Box::new(arg), rgt: Box::new(Tree::Var { nam: var.clone() }) };
-  net.root = Tree::Var { nam: var };
-  net.rdex.push((fun, oth));
-}
-
 // Parses code and generate Book from hvm-core syntax
 pub fn parse_core(code: &str) -> Book {
   code.parse().unwrap()
