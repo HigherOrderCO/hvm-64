@@ -6,7 +6,10 @@ use std::{
   process::{Command, ExitStatus, Stdio},
 };
 
-use hvmc::{ast::{Net, Tree}, host::Host};
+use hvmc::{
+  ast::{Net, Tree},
+  host::Host,
+};
 use insta::assert_display_snapshot;
 
 fn get_arithmetic_program_path() -> String {
@@ -129,7 +132,6 @@ fn test_cli_errors() {
  "###
   );
 }
-
 
 #[test]
 fn test_apply_tree() {
