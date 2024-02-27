@@ -21,7 +21,28 @@ fn main() {
   if cfg!(feature = "trace") {
     trace::set_hook();
   }
-  full_main();
+  if cfg!(feature = "_full_cli") {
+    let cli = FullCli::parse();
+    match cli.mode {
+      CliMode::Compile { file } => {
+        let host = load_files(&[file.clone()]);
+        compile_executable(&file, &host.lock().unwrap()).unwrap();
+      }
+      CliMode::Run { opts, file, args } => {
+        let host = load_files(&[file]);
+        run(&host.lock().unwrap(), opts, args);
+      }
+      CliMode::Reduce { run_opts, files, exprs } => {
+        let host = load_files(&files);
+        let exprs: Vec<_> = exprs.iter().map(|x| Net::from_str(x).unwrap()).collect();
+        reduce_exprs(&host.lock().unwrap(), &exprs, &run_opts);
+      }
+    }
+  } else {
+    let cli = BareCli::parse();
+    let host = hvmc::gen::host();
+    run(&host, cli.opts, cli.args);
+  }
   if cfg!(feature = "trace") {
     hvmc::trace::_read_traces(usize::MAX);
   }
@@ -118,31 +139,6 @@ enum CliMode {
   },
 }
 
-fn full_main() {
-  if cfg!(feature = "_full_cli") {
-    let cli = FullCli::parse();
-    match cli.mode {
-      CliMode::Compile { file } => {
-        let host = load_files(&[file.clone()]);
-        compile_executable(&file, &host.lock().unwrap()).unwrap();
-      }
-      CliMode::Run { opts, file, args } => {
-        let host = load_files(&[file]);
-        run(&host.lock().unwrap(), opts, args);
-      }
-      CliMode::Reduce { run_opts, files, exprs } => {
-        let host = load_files(&files);
-        let exprs: Vec<_> = exprs.iter().map(|x| Net::from_str(x).unwrap()).collect();
-        reduce_exprs(&host.lock().unwrap(), &exprs, &run_opts);
-      }
-    }
-  } else {
-    let cli = BareCli::parse();
-    let host = hvmc::gen::host();
-    run(&host, cli.opts, cli.args);
-  }
-}
-
 fn run(host: &Host, opts: RuntimeOpts, args: RunArgs) {
   let mut net = Net { root: Tree::Ref { nam: args.entry_point }, rdex: vec![] };
   for arg in args.args {
@@ -153,13 +149,12 @@ fn run(host: &Host, opts: RuntimeOpts, args: RunArgs) {
 
   reduce_exprs(host, &[net], &opts);
 }
-
-/// Turn a string representation of a number, such as `1G` or `400K`, into a
+/// Turn a string representation of a number, such as '1G' or '400K', into a
 /// number.
 ///
-/// This returns a [`u64`] instead of [`usize`] to ensure that parsing CLI args
+/// This return a [`u64`] instead of [`usize`] to ensure that parsing CLI args
 /// doesn't fail on 32-bit systems. We want it to fail later on, when attempting
-/// to run the program.
+/// to run the program
 fn mem_parser(arg: &str) -> Result<u64, String> {
   let (base, mult) = match arg.to_lowercase().chars().last() {
     None => return Err("Mem size argument is empty".to_string()),

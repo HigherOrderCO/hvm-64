@@ -1,0 +1,6 @@
+add = λaλb(+ a b)
+sub = λaλb(- a b)
+mul = λaλb(* a b)
+div = λaλb(/ a b)
+mod = λaλb(% a b)
+main = λaλb((div a b), (mod a b))
