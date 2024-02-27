@@ -49,7 +49,10 @@ fn main() {
 }
 
 #[derive(Parser, Debug)]
-#[command(author, version, about = "A massively parallel Interaction Combinator evaluator",
+#[command(
+  author,
+  version,
+  about = "A massively parallel Interaction Combinator evaluator",
   long_about = r##"
 A massively parallel Interaction Combinator evaluator
 
@@ -58,7 +61,8 @@ $ hvmc run examples/church_encoding/church.hvm
 $ hvmc run tests/programs/addition.hvmc "#16" "#3"
 $ hvmc compile tests/programs/addition.hvmc
 $ hvmc reduce tests/programs/addition.hvmc -- "a & @mul ~ (#3 (#4 a))"
-$ hvmc reduce -- "a & #3 ~ <* #4 a>""##)]
+$ hvmc reduce -- "a & #3 ~ <* #4 a>""##
+)]
 struct FullCli {
   #[command(subcommand)]
   pub mode: CliMode,
