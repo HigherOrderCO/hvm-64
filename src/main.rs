@@ -29,18 +29,22 @@ fn main() {
 
 #[derive(Parser, Debug)]
 #[command(author, version)]
-struct Cli {
+struct FullCli {
   #[command(subcommand)]
-  #[cfg(feature = "_full_cli")]
   pub mode: CliMode,
+}
 
-  #[cfg(not(feature = "_full_cli"))]
+#[derive(Parser, Debug)]
+#[command(author, version)]
+struct BareCli {
   #[command(flatten)]
-  pub run_opts: RunOpts,
+  pub opts: RuntimeOpts,
+  #[command(flatten)]
+  pub args: RunArgs,
 }
 
 #[derive(Args, Clone, Debug)]
-struct RunOpts {
+struct RuntimeOpts {
   #[arg(short = 's', long = "stats")]
   /// Show performance statistics
   show_stats: bool,
@@ -61,7 +65,19 @@ struct RunOpts {
   memory: u64,
 }
 
-#[cfg(feature = "_full_cli")]
+#[derive(Args, Clone, Debug)]
+struct RunArgs {
+  #[arg(short = 'e', default_value = "main")]
+  entry_point: String,
+  /// List of arguments to pass to the program
+  ///
+  /// Arguments are passed using the lambda-calculus interpretation
+  /// of interaction combinators. So, for example, if the arguments are
+  /// "#1" "#2" "#3", then the expression that will get reduced is
+  /// `r & @main ~ (#1 (#2 (#3 r)))`
+  args: Vec<String>,
+}
+
 #[derive(Subcommand, Clone, Debug)]
 enum CliMode {
   /// Compile a hvm-core program into a Rust crate
@@ -72,19 +88,11 @@ enum CliMode {
   /// Run a program, optionally passing a set of arguments into it.
   Run {
     #[command(flatten)]
-    run_opts: RunOpts,
-    #[cfg(feature = "_full_cli")]
+    opts: RuntimeOpts,
     /// Name of the file to load
     file: String,
-    #[arg(short = 'e', default_value = "main")]
-    entry_point: String,
-    /// List of arguments to pass to the program
-    ///
-    /// Arguments are passed using the lambda-calculus interpretation
-    /// of interaction combinators. So, for example, if the arguments are
-    /// "#1" "#2" "#3", then the expression that will get reduced is
-    /// `r & @main ~ (#1 (#2 (#3 r)))`
-    args: Vec<String>,
+    #[command(flatten)]
+    args: RunArgs,
   },
   /// Reduce hvm-core expressions to their normal form
   ///
@@ -94,7 +102,7 @@ enum CliMode {
   /// in the expression
   Reduce {
     #[command(flatten)]
-    run_opts: RunOpts,
+    run_opts: RuntimeOpts,
     #[arg(required = false)]
     /// Files to load before reducing the expressions.
     ///
@@ -111,25 +119,16 @@ enum CliMode {
 }
 
 fn full_main() {
-  let cli = Cli::parse();
-
-  #[cfg(feature = "_full_cli")]
-  {
+  if cfg!(feature = "_full_cli") {
+    let cli = FullCli::parse();
     match cli.mode {
       CliMode::Compile { file } => {
         let host = load_files(&[file.clone()]);
         compile_executable(&file, &host.lock().unwrap()).unwrap();
       }
-      CliMode::Run { run_opts, file, args, entry_point } => {
+      CliMode::Run { opts, file, args } => {
         let host = load_files(&[file]);
-        let mut net = Net { root: Tree::Ref { nam: entry_point }, rdex: vec![] };
-        for arg in args {
-          let arg: Net = Net::from_str(&arg).unwrap();
-          net.rdex.extend(arg.rdex);
-          net.apply_tree(arg.root);
-        }
-
-        reduce_exprs(&host.lock().unwrap(), &[net], &run_opts);
+        run(&host.lock().unwrap(), opts, args);
       }
       CliMode::Reduce { run_opts, files, exprs } => {
         let host = load_files(&files);
@@ -137,21 +136,30 @@ fn full_main() {
         reduce_exprs(&host.lock().unwrap(), &exprs, &run_opts);
       }
     }
-  }
-  #[cfg(not(feature = "_full_cli"))]
-  {
-    let net = Net { root: Tree::Ref { nam: String::from("main") }, rdex: vec![] };
+  } else {
+    let cli = BareCli::parse();
     let host = hvmc::gen::host();
-    reduce_exprs(&host, &[net], &cli.run_opts);
+    run(&host, cli.opts, cli.args);
   }
 }
 
-/// Turn a string representation of a number, such as '1G' or '400K', into a
+fn run(host: &Host, opts: RuntimeOpts, args: RunArgs) {
+  let mut net = Net { root: Tree::Ref { nam: args.entry_point }, rdex: vec![] };
+  for arg in args.args {
+    let arg: Net = Net::from_str(&arg).unwrap();
+    net.rdex.extend(arg.rdex);
+    net.apply_tree(arg.root);
+  }
+
+  reduce_exprs(host, &[net], &opts);
+}
+
+/// Turn a string representation of a number, such as `1G` or `400K`, into a
 /// number.
 ///
-/// This return a [`u64`] instead of [`usize`] to ensure that parsing CLI args
+/// This returns a [`u64`] instead of [`usize`] to ensure that parsing CLI args
 /// doesn't fail on 32-bit systems. We want it to fail later on, when attempting
-/// to run the program
+/// to run the program.
 fn mem_parser(arg: &str) -> Result<u64, String> {
   let (base, mult) = match arg.to_lowercase().chars().last() {
     None => return Err("Mem size argument is empty".to_string()),
@@ -164,7 +172,6 @@ fn mem_parser(arg: &str) -> Result<u64, String> {
   Ok(base * mult)
 }
 
-#[cfg(feature = "_full_cli")]
 fn load_files(files: &[String]) -> Arc<Mutex<Host>> {
   let files: Vec<_> = files
     .iter()
@@ -191,7 +198,7 @@ fn load_files(files: &[String]) -> Arc<Mutex<Host>> {
   host
 }
 
-fn reduce_exprs(host: &Host, exprs: &[Net], opts: &RunOpts) {
+fn reduce_exprs(host: &Host, exprs: &[Net], opts: &RuntimeOpts) {
   let heap = run::Net::<Strict>::init_heap(opts.memory as usize);
   for expr in exprs {
     let mut net = DynNet::new(&heap, opts.lazy_mode);
@@ -234,7 +241,6 @@ fn pretty_num(n: u64) -> String {
     .collect()
 }
 
-#[cfg(feature = "_full_cli")]
 fn compile_executable(file_name: &str, host: &host::Host) -> Result<(), io::Error> {
   let gen = compile::compile_host(host);
   let outdir = ".hvm";
