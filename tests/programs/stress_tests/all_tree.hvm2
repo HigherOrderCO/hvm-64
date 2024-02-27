@@ -1,0 +1,19 @@
+True = @True @False True
+False = @True @False False
+
+Node = @lft @rgt @Node @Leaf (Node lft rgt)
+Leaf = @val @Node @Leaf (Leaf val)
+
+and = λa (a λb(b) λb(False))
+
+gen = λn match n {
+  0: (Leaf True)
+  +: (Node (gen n-1) (gen n-1))
+}
+
+all = λt
+  let case_node = λa λb (and (all a) (all b))
+  let case_leaf = λv v
+  (t case_node case_leaf)
+
+main = (all (gen 24))

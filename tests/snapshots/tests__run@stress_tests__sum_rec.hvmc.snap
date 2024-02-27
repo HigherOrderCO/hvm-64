@@ -1,0 +1,12 @@
+---
+source: tests/tests.rs
+expression: output
+input_file: tests/programs/stress_tests/sum_rec.hvmc
+---
+#67108864
+RWTS   :   1_207_959_540
+- ANNI :     469_762_043
+- COMM :      67_108_863
+- ERAS :     134_217_727
+- DREF :     268_435_454
+- OPER :     268_435_453

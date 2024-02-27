@@ -1,0 +1,12 @@
+---
+source: tests/tests.rs
+expression: output
+input_file: tests/programs/stress_tests/fib_rec.hvmc
+---
+#1346269
+RWTS   :      35_759_994
+- ANNI :      13_266_266
+- COMM :       2_178_308
+- ERAS :       5_702_885
+- DREF :       7_049_154
+- OPER :       7_563_381

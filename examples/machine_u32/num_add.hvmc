@@ -1,4 +1,4 @@
-@add = (<+ b R> (b R))
+@add = (<+ a b> (a b))
+@main = a
+& @add ~ (#123 (#100 a))
 
-@main = R
-  & @add ~ (#123 (#100 R))

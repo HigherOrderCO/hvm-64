@@ -1,4 +1,5 @@
-data Tree = (Leaf x) | (Node x0 x1)
+Leaf = @x @Leaf @Node (Leaf x)
+Node = @x0 @x1 @Leaf @Node (Node x0 x1)
 
 swap = λn match n {
   0: λx0 λx1 (Node x0 x1)
@@ -54,4 +55,4 @@ sum = λa
   let a_node = λa0 λa1 (+ (sum a0) (sum a1))
   (a a_leaf a_node)
 
-main = (sum (sort (rev (gen 18 0)) 0))
+main = (sum (sort (rev (gen 10 0)) 0))

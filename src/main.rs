@@ -1,6 +1,6 @@
 #![cfg_attr(feature = "trace", feature(const_type_name))]
 
-use hvmc::{run::Mode, *};
+use hvmc::*;
 
 use std::{
   collections::HashSet,
@@ -8,7 +8,7 @@ use std::{
   path::Path,
   process::{self, Stdio},
   sync::{Arc, Mutex},
-  time::{Duration, Instant},
+  time::Instant,
 };
 
 fn main() {
@@ -61,7 +61,7 @@ fn full_main(args: &[String]) {
 
 fn run(opts: &[String], host: Arc<Mutex<host::Host>>) {
   let opts = opts.iter().map(|x| &**x).collect::<HashSet<_>>();
-  let data = run::Net::<run::Strict>::init_heap(1 << 32);
+  let data = run::Net::<run::Strict>::init_heap(1 << 29);
   let lazy = opts.contains("-L");
   let net = run::DynNet::new(&data, lazy);
   dispatch_dyn_net! { mut net => {
@@ -75,31 +75,9 @@ fn run(opts: &[String], host: Arc<Mutex<host::Host>>) {
     let elapsed = start_time.elapsed();
     println!("{}", &host.lock().unwrap().readback(&net));
     if opts.contains("-s") {
-      print_stats(&net, elapsed);
+      eprint!("{}", util::show_stats(&net.rwts, elapsed));
     }
   } }
-}
-
-fn print_stats<M: Mode>(net: &run::Net<M>, elapsed: Duration) {
-  eprintln!("RWTS   : {:>15}", pretty_num(net.rwts.total()));
-  eprintln!("- ANNI : {:>15}", pretty_num(net.rwts.anni));
-  eprintln!("- COMM : {:>15}", pretty_num(net.rwts.comm));
-  eprintln!("- ERAS : {:>15}", pretty_num(net.rwts.eras));
-  eprintln!("- DREF : {:>15}", pretty_num(net.rwts.dref));
-  eprintln!("- OPER : {:>15}", pretty_num(net.rwts.oper));
-  eprintln!("TIME   : {:.3?}", elapsed);
-  eprintln!("RPS    : {:.3} M", (net.rwts.total() as f64) / (elapsed.as_millis() as f64) / 1000.0);
-}
-
-fn pretty_num(n: u64) -> String {
-  n.to_string()
-    .as_bytes()
-    .rchunks(3)
-    .rev()
-    .map(|x| std::str::from_utf8(x).unwrap())
-    .flat_map(|x| ["_", x])
-    .skip(1)
-    .collect()
 }
 
 fn load(file: &str) -> Arc<Mutex<host::Host>> {

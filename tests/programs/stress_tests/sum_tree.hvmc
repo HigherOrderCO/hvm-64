@@ -1,0 +1,18 @@
+@Leaf = (a ((a b) (* b)))
+@Node = (a (b (* ((a (b c)) c))))
+@add = (<+ a b> (a b))
+@gen = (?<(a @gen$S0) b> b)
+& @Leaf ~ (#1 a)
+@gen$S0 = ({3 a b} c)
+& @Node ~ (d (e c))
+& @gen ~ (b e)
+& @gen ~ (a d)
+@main = a
+& @sum ~ (b a)
+& @gen ~ (#24 b)
+@sum = (((a a) (@sum$S0 b)) b)
+@sum$S0 = (a (b c))
+& @add ~ (d (e c))
+& @sum ~ (b e)
+& @sum ~ (a d)
+

@@ -1,8 +1,23 @@
-use hvmc::ast::Net;
+use std::{
+  fs,
+  io::{self, Write},
+  path::{Path, PathBuf},
+  str::FromStr,
+  time::Instant,
+};
+
+use hvmc::{
+  ast::{self, Net},
+  host::Host,
+  run::{self, Strict},
+  util::show_rewrites,
+};
 use insta::{assert_debug_snapshot, assert_snapshot};
 use loaders::*;
 
 mod loaders;
+
+use serial_test::serial;
 
 #[test]
 fn test_era_era() {
@@ -44,40 +59,54 @@ fn test_bool_and() {
   assert_debug_snapshot!(rwts.total(), @"9");
 }
 
-#[test]
-fn test_church_mul() {
-  let mut book = load_lang("church_mul.hvm");
-  let (rwts, net) = hvm_lang_normal(&mut book, 64);
-  let (readback, valid_readback) = hvm_lang_readback(&net, &book);
+fn test_run(name: &str, host: Host) {
+  print!("{name}...");
+  io::stdout().flush().unwrap();
+  let Some(entrypoint) = host.defs.get("main") else {
+    println!(" skipping");
+    return;
+  };
+  let heap = run::Net::<Strict>::init_heap(1 << 29);
+  let mut net = run::Net::<Strict>::new(&heap);
+  net.boot(entrypoint);
+  let start = Instant::now();
+  net.parallel_normal();
+  println!(" {:.3?}", start.elapsed());
 
-  assert!(valid_readback);
-  assert_snapshot!(Net::to_string(&net), @"({5 (a {3 b c}) {7 (d a) ({3 c e} d)}} (e b))");
-  assert_snapshot!(readback, @"λa λb let #0{c g} = (let #1{d h} = a; d let #2{e f} = h; (e (f #0{g b}))); c");
-  assert_debug_snapshot!(rwts.total(), @"12");
+  let output = format!("{}\n{}", host.readback(&net), show_rewrites(&net.rwts));
+  assert_snapshot!(output);
+}
+
+fn test_path(path: &Path) {
+  let code = fs::read_to_string(&path).unwrap();
+  let book = ast::Book::from_str(&code).unwrap();
+  let host = Host::new(&book);
+
+  let path = path.strip_prefix(env!("CARGO_MANIFEST_DIR")).unwrap();
+
+  test_run(path.to_str().unwrap(), host);
+}
+
+fn test_dir(dir: &Path, filter: impl Fn(&Path) -> bool) {
+  insta::glob!(dir, "**/*.hvmc", |p| {
+    if filter(p) {
+      test_path(p);
+    }
+  })
+}
+
+fn manifest_relative(sub: &str) -> PathBuf {
+  format!("{}/{}", env!("CARGO_MANIFEST_DIR"), sub).into()
 }
 
 #[test]
-fn test_tree_alloc() {
-  let mut book = load_lang("tree_alloc.hvm");
-  println!("{:?}", book);
-  println!("{:?}", "Hi");
-  let (rwts, net) = hvm_lang_normal(&mut book, 512);
-  let (readback, valid_readback) = hvm_lang_readback(&net, &book);
-
-  assert!(valid_readback);
-  assert_snapshot!(Net::to_string(&net), @"(a (* a))");
-  assert_snapshot!(readback, @"λa λ* a");
-  assert_debug_snapshot!(rwts.total(), @"99");
+#[serial]
+fn test_programs() {
+  test_dir(&manifest_relative("tests/programs/"), |_| true)
 }
 
 #[test]
-fn test_queue() {
-  let mut book = load_lang("queue.hvm");
-  let (rwts, net) = hvm_lang_normal(&mut book, 512);
-  let (readback, valid_readback) = hvm_lang_readback(&net, &book);
-
-  assert!(valid_readback);
-  assert_snapshot!(Net::to_string(&net), @"(((* (a a)) (((((b c) (b c)) (((({3 (d e) (f d)} (f e)) ((* (g g)) h)) (* h)) i)) (* i)) j)) (* j))");
-  assert_snapshot!(readback, @"λa λ* (a λ* λb b λc λ* (c λd λe (d e) λf λ* (f λg λh let #0{i j} = g; (i (j h)) λ* λk k)))");
-  assert_debug_snapshot!(rwts.total(), @"59");
+#[serial]
+fn test_examples() {
+  test_dir(&manifest_relative("examples/"), |_| true);
 }

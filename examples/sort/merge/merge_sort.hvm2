@@ -1,17 +1,16 @@
 data Tree = (Leaf x) | (Node x0 x1) 
-data List = Nil | (Cons h t)
 
 sort = λxs
-  let if_leaf = λv (Cons v Nil)
+  let if_leaf = λv (List.cons v List.nil)
   let if_node = λx0 λx1 (merge (sort x0) (sort x1))
   (xs if_leaf if_node)
 
 merge = λxs
   let xs_nil  = λys ys
   let xs_cons = λx λxs λys
-    let ys_nil  = λx λxs (Cons x xs)
+    let ys_nil  = λx λxs (List.cons x xs)
     let ys_cons = λy λys λx λxs
-      let t = λt (t (Cons x) λx(x) (Cons y))
+      let t = λt (t (List.cons x) λx(x) (List.cons y))
       let t = let k = (< x y); (t (match k { 0: λaλbλcλt(t c a b); +: λaλbλcλt(t a b c) }))
       (t λa λb λc (a (merge (b xs) (c ys))))
     (ys ys_nil ys_cons x xs)
@@ -27,4 +26,4 @@ range = λn match n {
   +: λx (Node (range n-1 (+ (* x 2) 1)) (range n-1 (* x 2)))
 }
 
-main = (sum (sort (range 24 0)))
+main = (sum (sort (range 2 0)))

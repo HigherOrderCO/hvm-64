@@ -1,5 +1,11 @@
+use crate::{
+  ast::{Net, Tree},
+  run::Rewrites,
+};
+use std::time::Duration;
+
 /// Creates a variable uniquely identified by `id`.
-pub fn create_var(mut id: usize) -> String {
+pub(crate) fn create_var(mut id: usize) -> String {
   let mut txt = Vec::new();
   id += 1;
   while id > 0 {
@@ -9,6 +15,24 @@ pub fn create_var(mut id: usize) -> String {
   }
   txt.reverse();
   String::from_utf8(txt).unwrap()
+}
+
+/// Inverse function of [`create_var`].
+///
+/// Returns None when the provided string is not an output of
+/// `create_var`.
+pub(crate) fn var_to_num(s: &str) -> Option<usize> {
+  let mut n = 0usize;
+  for i in s.chars() {
+    let i = (i as u32).checked_sub('a' as u32)? as usize;
+    if i > 'z' as usize {
+      return None;
+    }
+    n *= 26;
+    n += i;
+    n += 1;
+  }
+  n.checked_sub(1) // if it's none, then it means the initial string was ''
 }
 
 #[test]
@@ -28,6 +52,13 @@ fn test_create_var() {
   assert_eq!(create_var(1351), "ayz");
   assert_eq!(create_var(1352), "aza");
   assert_eq!(create_var(1378), "baa");
+}
+
+#[test]
+fn test_var_to_num() {
+  for i in [0, 1, 2, 3, 10, 26, 27, 30, 50, 70] {
+    assert_eq!(Some(i), var_to_num(&create_var(i)));
+  }
 }
 
 /// Defines bi-directional mappings for a numeric enum.
@@ -134,3 +165,88 @@ macro_rules! deref {
 }
 
 pub(crate) use deref;
+
+impl Tree {
+  /// Increases `fresh` until `create_var(*fresh)` does not conflict
+  /// with a [`Tree::Var`]  in `tree`
+  ///
+  /// This function can be called multiple times with many trees to
+  /// ensure that `fresh` does not conflict with any of them.
+  pub(crate) fn ensure_no_conflicts(&self, fresh: &mut usize) {
+    match self {
+      Tree::Var { nam } => {
+        if let Some(var_num) = var_to_num(nam) {
+          *fresh = (*fresh).max(var_num);
+        }
+      }
+      // Recurse on children
+      Tree::Ctr { lft, rgt, .. } | Tree::Op2 { lft, rgt, .. } | Tree::Mat { sel: lft, ret: rgt } => {
+        lft.ensure_no_conflicts(fresh);
+        rgt.ensure_no_conflicts(fresh);
+      }
+      Tree::Op1 { rgt, .. } => {
+        rgt.ensure_no_conflicts(fresh);
+      }
+      Tree::Era | Tree::Num { .. } | Tree::Ref { .. } => {}
+    }
+  }
+}
+
+impl Net {
+  pub(crate) fn ensure_no_conflicts(&self, fresh: &mut usize) {
+    self.root.ensure_no_conflicts(fresh);
+    for (a, b) in &self.rdex {
+      a.ensure_no_conflicts(fresh);
+      b.ensure_no_conflicts(fresh);
+    }
+  }
+  /// Transforms the net `x & ...` into `y & x ~ (arg y) & ...`
+  ///
+  /// The result is equivalent a λ-calculus application. Thus,
+  /// if the net is a λ-calculus term, then this function will
+  /// apply an argument to it.
+  pub fn apply_tree(&mut self, arg: Tree) {
+    let mut fresh = 0usize;
+    self.ensure_no_conflicts(&mut fresh);
+    arg.ensure_no_conflicts(&mut fresh);
+
+    let fresh_str = create_var(fresh + 1);
+
+    let fun = core::mem::take(&mut self.root);
+    let app = Tree::Ctr { lab: 0, lft: Box::new(arg), rgt: Box::new(Tree::Var { nam: fresh_str.clone() }) };
+    self.root = Tree::Var { nam: fresh_str };
+    self.rdex.push((fun, app));
+  }
+}
+
+pub fn show_rewrites(rwts: &Rewrites) -> String {
+  format!(
+    "{}{}{}{}{}{}",
+    format_args!("RWTS   : {:>15}\n", pretty_num(rwts.total())),
+    format_args!("- ANNI : {:>15}\n", pretty_num(rwts.anni)),
+    format_args!("- COMM : {:>15}\n", pretty_num(rwts.comm)),
+    format_args!("- ERAS : {:>15}\n", pretty_num(rwts.eras)),
+    format_args!("- DREF : {:>15}\n", pretty_num(rwts.dref)),
+    format_args!("- OPER : {:>15}\n", pretty_num(rwts.oper)),
+  )
+}
+
+pub fn show_stats(rwts: &Rewrites, elapsed: Duration) -> String {
+  format!(
+    "{}{}{}",
+    show_rewrites(rwts),
+    format_args!("TIME   : {:.3?}\n", elapsed),
+    format_args!("RPS    : {:.3} M\n", (rwts.total() as f64) / (elapsed.as_millis() as f64) / 1000.0),
+  )
+}
+
+fn pretty_num(n: u64) -> String {
+  n.to_string()
+    .as_bytes()
+    .rchunks(3)
+    .rev()
+    .map(|x| std::str::from_utf8(x).unwrap())
+    .flat_map(|x| ["_", x])
+    .skip(1)
+    .collect()
+}

@@ -1,0 +1,11 @@
+sum = λa match a {
+  0: λs s
+  +: λs (sum a-1 (+ a-1 s))
+}
+
+rec = λa match a {
+  0: (sum 1000000 0)
+  +: (+ (rec a-1) (rec a-1))
+}
+
+main = (rec 6)
