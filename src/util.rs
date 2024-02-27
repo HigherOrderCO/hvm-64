@@ -117,7 +117,6 @@ macro_rules! bi_enum {
 pub(crate) use bi_enum;
 
 #[test]
-#[allow(non_local_definitions)]
 fn test_bi_enum() {
   use std::str::FromStr;
   bi_enum! {
