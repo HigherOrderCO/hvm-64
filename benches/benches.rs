@@ -2,7 +2,7 @@ use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use hvmc::{
   ast::{Book, Net},
   host::Host,
-  run::{Net as RtNet, Strict},
+  run::{Heap, Net as RtNet, Strict},
 };
 use std::{
   fs,
@@ -59,7 +59,7 @@ fn run_file(path: &PathBuf, group: Option<String>, c: &mut Criterion) {
 }
 
 fn benchmark(file_name: &str, book: Book, c: &mut Criterion) {
-  let area = RtNet::<Strict>::init_heap(1 << 29);
+  let area = Heap::new(1 << 29);
   let host = Host::new(&book);
   c.bench_function(file_name, |b| {
     b.iter(|| {
@@ -71,7 +71,7 @@ fn benchmark(file_name: &str, book: Book, c: &mut Criterion) {
 }
 
 fn benchmark_group(file_name: &str, group: String, book: Book, c: &mut Criterion) {
-  let area = RtNet::<Strict>::init_heap(1 << 29);
+  let area = Heap::new(1 << 29);
   let host = Host::new(&book);
 
   c.benchmark_group(group).bench_function(file_name, |b| {
@@ -97,8 +97,8 @@ fn interact_benchmark(c: &mut Criterion) {
 
   for (name, redex) in cases {
     let mut book = Book::default();
-    book.insert("main".to_string(), Net { root: Era, rdex: vec![redex] });
-    let area = RtNet::<Strict>::init_heap(1 << 24);
+    book.insert("main".to_string(), Net { root: Era, redexes: vec![redex] });
+    let area = Heap::new(1 << 24);
     let host = Host::new(&book);
     group.bench_function(name, |b| {
       b.iter(|| {
