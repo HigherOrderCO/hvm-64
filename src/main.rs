@@ -260,6 +260,7 @@ fn compile_executable(file_name: &str, host: &host::Host) -> Result<(), io::Erro
   let cargo_toml = include_str!("../Cargo.toml");
   let cargo_toml = cargo_toml.split("##--COMPILER-CUTOFF--##").next().unwrap();
   fs::create_dir_all(format!("{}/src", outdir))?;
+  fs::create_dir_all(format!("{}/src/host", outdir))?;
   fs::write(".hvm/Cargo.toml", cargo_toml)?;
   fs::write(".hvm/src/ast.rs", include_str!("../src/ast.rs"))?;
   fs::write(".hvm/src/compile.rs", include_str!("../src/compile.rs"))?;
