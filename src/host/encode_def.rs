@@ -54,7 +54,7 @@ pub(super) fn ast_net_to_instructions(defs: &HashMap<String, DefRef>, net: &Net)
       self.visit_tree(tree, trg);
     }
     fn visit_tree(&mut self, tree: &'a Tree, trg: TrgId) {
-      match tree {
+      stacker::maybe_grow(1024 * 32, 1024 * 1024, move || match tree {
         Tree::Era => {
           self.instr.push(Instruction::LinkConst { trg, port: Port::ERA });
         }
@@ -99,7 +99,7 @@ pub(super) fn ast_net_to_instructions(defs: &HashMap<String, DefRef>, net: &Net)
           self.visit_tree(sel, l);
           self.visit_tree(ret, r);
         }
-      }
+      })
     }
   }
 }
