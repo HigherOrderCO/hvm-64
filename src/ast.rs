@@ -27,14 +27,14 @@ deref!(Book => self.nets: BTreeMap<String, Net>);
 /// An AST node representing an interaction net with one free port.
 ///
 /// The tree connected to the free port is stored in `root`. The active pairs in
-/// the net -- trees connected by their roots -- are stored in `rdex`.
+/// the net -- trees connected by their roots -- are stored in `redexes`.
 ///
 /// (The wiring connecting the leaves of all the trees is represented within the
 /// trees via pairs of [`Tree::Var`] nodes with the same name.)
 #[derive(Clone, Hash, PartialEq, Eq, Debug, Default)]
 pub struct Net {
   pub root: Tree,
-  pub rdex: Vec<(Tree, Tree)>,
+  pub redexes: Vec<(Tree, Tree)>,
 }
 
 /// An AST node representing an interaction net tree.
@@ -125,15 +125,15 @@ impl<'i> Parser<'i> {
 
   /// Net = Tree ("&" Tree "~" Tree)*
   fn parse_net(&mut self) -> Result<Net, String> {
-    let mut rdex = Vec::new();
+    let mut redexes = Vec::new();
     let root = self.parse_tree()?;
     while self.consume("&").is_ok() {
       let tree1 = self.parse_tree()?;
       self.consume("~")?;
       let tree2 = self.parse_tree()?;
-      rdex.push((tree1, tree2));
+      redexes.push((tree1, tree2));
     }
-    Ok(Net { root, rdex })
+    Ok(Net { root, redexes })
   }
 
   fn parse_tree(&mut self) -> Result<Tree, String> {
@@ -337,7 +337,7 @@ impl fmt::Display for Book {
 impl fmt::Display for Net {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     write!(f, "{}", &self.root)?;
-    for (a, b) in &self.rdex {
+    for (a, b) in &self.redexes {
       write!(f, "\n& {a} ~ {b}")?;
     }
     Ok(())

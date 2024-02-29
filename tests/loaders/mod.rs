@@ -23,8 +23,8 @@ pub fn replace_template(mut code: String, map: &[(&str, &str)]) -> String {
 }
 
 #[allow(unused_variables)]
-pub fn normal(book: Book, size: usize) -> (hvmc::run::Rewrites, Net) {
-  let area = run::Net::<run::Strict>::init_heap(size);
+pub fn normal(book: Book, words: usize) -> (hvmc::run::Rewrites, Net) {
+  let area = run::Heap::new_words(words);
   let host = Host::new(&book);
 
   let mut rnet = run::Net::<run::Strict>::new(&area);

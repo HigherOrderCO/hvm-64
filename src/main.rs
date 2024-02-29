@@ -4,7 +4,7 @@ use clap::{Args, Parser, Subcommand};
 use hvmc::{
   ast::{Net, Tree},
   host::Host,
-  run::{DynNet, Mode, Strict, Trg},
+  run::{DynNet, Mode, Trg},
   *,
 };
 
@@ -93,7 +93,7 @@ struct RuntimeOpts {
   /// but allows running programs that would expand indefinitely otherwise.
   lazy_mode: bool,
   #[arg(short = 'm', long = "memory", default_value = "1G", value_parser = mem_parser)]
-  /// How much memory to allocate on startup.
+  /// How much memory to allocate on startup, measured in bytes.
   ///
   /// Supports abbreviations such as '4G' or '400M'.
   memory: u64,
@@ -155,10 +155,10 @@ enum CliMode {
 }
 
 fn run(host: &Host, opts: RuntimeOpts, args: RunArgs) {
-  let mut net = Net { root: Tree::Ref { nam: args.entry_point }, rdex: vec![] };
+  let mut net = Net { root: Tree::Ref { nam: args.entry_point }, redexes: vec![] };
   for arg in args.args {
     let arg: Net = Net::from_str(&arg).unwrap();
-    net.rdex.extend(arg.rdex);
+    net.redexes.extend(arg.redexes);
     net.apply_tree(arg.root);
   }
 
@@ -209,7 +209,7 @@ fn load_files(files: &[String]) -> Arc<Mutex<Host>> {
 }
 
 fn reduce_exprs(host: &Host, exprs: &[Net], opts: &RuntimeOpts) {
-  let heap = run::Net::<Strict>::init_heap(opts.memory as usize);
+  let heap = run::Heap::new_bytes(opts.memory as usize);
   for expr in exprs {
     let mut net = DynNet::new(&heap, opts.lazy_mode);
     dispatch_dyn_net!(&mut net => {
@@ -259,22 +259,63 @@ fn compile_executable(file_name: &str, host: &host::Host) -> Result<(), io::Erro
   }
   let cargo_toml = include_str!("../Cargo.toml");
   let cargo_toml = cargo_toml.split("##--COMPILER-CUTOFF--##").next().unwrap();
-  fs::create_dir_all(format!("{}/src", outdir))?;
-  fs::create_dir_all(format!("{}/src/host", outdir))?;
+
+  macro_rules! include_files {
+    ($([$($prefix:ident)*])? $mod:ident {$($sub:tt)*} $($rest:tt)*) => {
+      fs::create_dir_all(concat!(".hvm/src/", $($(stringify!($prefix), "/",)*)? stringify!($mod)))?;
+      include_files!([$($($prefix)* $mod)?] $($sub)*);
+      include_files!([$($($prefix)*)?] $mod $($rest)*);
+    };
+    ($([$($prefix:ident)*])? $file:ident $($rest:tt)*) => {
+      fs::write(
+        concat!(".hvm/src/", $($(stringify!($prefix), "/",)*)* stringify!($file), ".rs"),
+        include_str!(concat!($($(stringify!($prefix), "/",)*)* stringify!($file), ".rs")),
+      )?;
+      include_files!([$($($prefix)*)?] $($rest)*);
+    };
+    ($([$($prefix:ident)*])?) => {};
+  }
+
+  fs::create_dir_all(".hvm/src")?;
   fs::write(".hvm/Cargo.toml", cargo_toml)?;
-  fs::write(".hvm/src/ast.rs", include_str!("../src/ast.rs"))?;
-  fs::write(".hvm/src/compile.rs", include_str!("../src/compile.rs"))?;
-  fs::write(".hvm/src/host/encode.rs", include_str!("../src/host/encode.rs"))?;
-  fs::write(".hvm/src/fuzz.rs", include_str!("../src/fuzz.rs"))?;
-  fs::write(".hvm/src/host.rs", include_str!("../src/host.rs"))?;
-  fs::write(".hvm/src/lib.rs", include_str!("../src/lib.rs"))?;
-  fs::write(".hvm/src/main.rs", include_str!("../src/main.rs"))?;
-  fs::write(".hvm/src/ops.rs", include_str!("../src/ops.rs"))?;
-  fs::write(".hvm/src/run.rs", include_str!("../src/run.rs"))?;
-  fs::write(".hvm/src/stdlib.rs", include_str!("../src/stdlib.rs"))?;
-  fs::write(".hvm/src/trace.rs", include_str!("../src/trace.rs"))?;
-  fs::write(".hvm/src/util.rs", include_str!("../src/util.rs"))?;
   fs::write(".hvm/src/gen.rs", gen)?;
+
+  include_files! {
+    ast
+    compile
+    fuzz
+    host {
+      calc_labels
+      encode_def
+      encode_net
+      readback
+    }
+    lib
+    main
+    ops
+    run {
+      addr
+      allocator
+      def
+      instruction
+      interact
+      linker
+      net
+      node
+      parallel
+      port
+      wire
+    }
+    stdlib
+    trace
+    util {
+      apply_tree
+      bi_enum
+      create_var
+      deref
+      stats
+    }
+  }
 
   let output = process::Command::new("cargo")
     .current_dir("./.hvm")

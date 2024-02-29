@@ -66,7 +66,7 @@ fn test_run(name: &str, host: Host) {
     println!(" skipping");
     return;
   };
-  let heap = run::Net::<Strict>::init_heap(1 << 29);
+  let heap = run::Heap::new_words(1 << 29);
   let mut net = run::Net::<Strict>::new(&heap);
   net.boot(entrypoint);
   let start = Instant::now();

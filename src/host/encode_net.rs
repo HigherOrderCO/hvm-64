@@ -19,7 +19,7 @@ impl Host {
   /// into `net` redex list.
   pub fn encode_net<M: Mode>(&self, net: &mut run::Net<M>, trg: Trg, ast_net: &Net) {
     let mut state = EncodeState { host: self, net, vars: Default::default() };
-    for (l, r) in &ast_net.rdex {
+    for (l, r) in &ast_net.redexes {
       let (ap, a, bp, b) = state.net.do_wires();
       state.encode(ap, l);
       state.encode(bp, r);
