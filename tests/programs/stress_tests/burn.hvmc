@@ -38,4 +38,5 @@
 
 @main
   = R
-  & @brn ~ (@c3 R)
+  & @c3 ~ (@S (@Z dep))
+  & @brn ~ (dep R)
