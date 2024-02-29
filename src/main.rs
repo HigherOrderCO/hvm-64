@@ -93,7 +93,7 @@ struct RuntimeOpts {
   /// but allows running programs that would expand indefinitely otherwise.
   lazy_mode: bool,
   #[arg(short = 'm', long = "memory", default_value = "1G", value_parser = mem_parser)]
-  /// How much memory to allocate on startup.
+  /// How much memory to allocate on startup, measured in bytes.
   ///
   /// Supports abbreviations such as '4G' or '400M'.
   memory: u64,
@@ -209,7 +209,7 @@ fn load_files(files: &[String]) -> Arc<Mutex<Host>> {
 }
 
 fn reduce_exprs(host: &Host, exprs: &[Net], opts: &RuntimeOpts) {
-  let heap = run::Heap::new(opts.memory as usize);
+  let heap = run::Heap::new_bytes(opts.memory as usize);
   for expr in exprs {
     let mut net = DynNet::new(&heap, opts.lazy_mode);
     dispatch_dyn_net!(&mut net => {

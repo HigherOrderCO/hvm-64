@@ -137,7 +137,7 @@ fn test_cli_errors() {
 fn test_apply_tree() {
   use hvmc::run;
   fn eval_with_args(fun: &str, args: &[&str]) -> Net {
-    let area = run::Heap::new(1 << 10);
+    let area = run::Heap::new_words(1 << 10);
 
     let mut fun: Net = fun.parse().unwrap();
     for arg in args {

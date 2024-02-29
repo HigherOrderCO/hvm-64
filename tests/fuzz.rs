@@ -18,7 +18,7 @@ fn fuzz_var_link_link_var() {
   trace::set_hook();
   Fuzzer::default().fuzz(|fuzz| {
     unsafe { trace::_reset_traces() };
-    let heap = Heap::new(256);
+    let heap = Heap::new_words(16);
     let mut net = Net::new(&heap);
     let x = net.alloc();
     let y = net.alloc();
@@ -63,7 +63,7 @@ fn fuzz_pri_link_link_pri() {
     unsafe { trace::_reset_traces() };
     let p = Port::new(Tag::Ctr, 0, Addr::NULL);
     let q = Port::new(Tag::Ctr, 1, Addr::NULL);
-    let heap = Heap::new(256);
+    let heap = Heap::new_words(16);
     let mut net = Net::new(&heap);
     let x = net.alloc();
     let a = Port::new_var(x.clone());
@@ -92,7 +92,7 @@ fn fuzz_pri_link_link_pri() {
 fn fuzz_var_link_link_pri() {
   assert!(cfg!(not(feature = "_fuzz_no_free")));
   trace::set_hook();
-  let heap = Heap::new(256);
+  let heap = Heap::new_words(16);
   Fuzzer::default().fuzz(|fuzz| {
     unsafe { trace::_reset_traces() };
     let mut net = Net::new(&heap);
@@ -133,7 +133,7 @@ fn fuzz_var_link_link_pri() {
 fn fuzz_var_link_link_link_var() {
   assert!(cfg!(feature = "_fuzz_no_free"));
   trace::set_hook();
-  let heap = Heap::new(256);
+  let heap = Heap::new_words(16);
   Fuzzer::default().fuzz(|fuzz| {
     unsafe { trace::_reset_traces() };
     let mut net = Net::new(&heap);

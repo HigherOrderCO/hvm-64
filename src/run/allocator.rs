@@ -13,14 +13,21 @@ pub(super) struct Node(pub AtomicU64, pub AtomicU64);
 pub struct Heap(pub(super) [Node]);
 
 impl Heap {
-  /// Allocate an area for the net's heap with a given size.
-  pub fn new(size: usize) -> Box<Heap> {
+  #[inline]
+  /// Allocate a new heap with a given size in words.
+  pub fn new_words(words: usize) -> Box<Self> {
+    let nodes = words / 2;
     unsafe {
       Box::from_raw(core::ptr::slice_from_raw_parts_mut(
-        alloc::alloc(Layout::array::<Node>(size).unwrap()) as *mut _,
-        size,
+        alloc::alloc(Layout::array::<Node>(nodes).unwrap()) as *mut _,
+        nodes,
       ) as *mut _)
     }
+  }
+  #[inline(always)]
+  /// Allocate a new heap with a given size in bytes.
+  pub fn new_bytes(bytes: usize) -> Box<Self> {
+    Heap::new_words(bytes / 8)
   }
 }
 
