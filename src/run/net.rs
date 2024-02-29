@@ -140,7 +140,14 @@ impl ExpandDef {
 impl AsDef for ExpandDef {
   unsafe fn call<M: Mode>(def: *const Def<Self>, net: &mut Net<M>, port: Port) {
     if port.tag() == Tag::Ref && port != Port::ERA {
-      return net.call(port, Port::new_ref(Def::upcast(unsafe { &*def })));
+      let other: *const Def = port.addr().def() as *const _;
+      if let Some(other) = Def::downcast_ptr::<Self>(other) {
+        let def = *Box::from_raw(def as *mut Def<Self>);
+        let other = *Box::from_raw(other as *mut Def<Self>);
+        return net.link_port_port(def.data.out, other.data.out);
+      } else {
+        return net.call(port, Port::new_ref(Def::upcast(unsafe { &*def })));
+      }
     }
     let def = *Box::from_raw(def as *mut Def<Self>);
     match port.tag() {
