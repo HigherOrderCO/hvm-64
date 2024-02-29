@@ -318,7 +318,7 @@ fn compile_executable(file_name: &str, host: &host::Host) -> Result<(), io::Erro
   }
 
   let output = process::Command::new("cargo")
-    .current_dir("./.hvm")
+    .current_dir(".hvm")
     .arg("build")
     .arg("--release")
     .stderr(Stdio::inherit())
@@ -327,8 +327,9 @@ fn compile_executable(file_name: &str, host: &host::Host) -> Result<(), io::Erro
     process::exit(1);
   }
 
-  let target = format!("./{}", file_name.strip_suffix(".hvmc").unwrap_or(file_name));
-  fs::copy("./.hvm/target/release/hvmc", target)?;
+  let target = format!("{}", file_name.strip_suffix(".hvmc").unwrap_or(file_name));
+
+  fs::copy(".hvm/target/release/hvmc", target)?;
 
   Ok(())
 }
