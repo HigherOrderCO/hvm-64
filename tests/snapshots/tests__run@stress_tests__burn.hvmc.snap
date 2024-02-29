@@ -3,10 +3,10 @@ source: tests/tests.rs
 expression: output
 input_file: tests/programs/stress_tests/burn.hvmc
 ---
-(a b)
-RWTS   :      92_274_181
-- ANNI :      50_331_316
-- COMM :              66
-- ERAS :      16_777_138
-- DREF :      25_165_661
+((((* (* (* (a a)))) (* (* (* (b b))))) ((* (* (* (c c)))) (* (* (* (d d)))))) (((* (* (* (e e)))) (* (* (* (f f))))) ((* (* (* (g g)))) (* (* (* (h h)))))))
+RWTS   :     369_096_552
+- ANNI :     201_325_229
+- COMM :             177
+- ERAS :      67_108_511
+- DREF :     100_662_635
 - OPER :               0
