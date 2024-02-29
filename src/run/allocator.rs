@@ -9,6 +9,7 @@ use super::*;
 #[derive(Default)]
 pub(super) struct Node(pub AtomicU64, pub AtomicU64);
 
+/// The memory buffer backing a [`Net`].
 #[repr(align(16))]
 pub struct Heap(pub(super) [Node]);
 
@@ -31,6 +32,7 @@ impl Heap {
   }
 }
 
+/// Manages allocating and freeing nodes within the net.
 pub struct Allocator<'h> {
   pub(super) tracer: Tracer,
   pub(super) heap: &'h Heap,

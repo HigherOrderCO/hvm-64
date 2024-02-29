@@ -9,6 +9,13 @@ pub(super) struct Header {
   pub(super) targ: Port,
 }
 
+/// Manages linking ports and wires within the net.
+///
+/// When threads interfere, this uses the atomic linking algorithm described in
+/// `paper/`.
+///
+/// Linking wires must be done atomically, but linking ports can be done
+/// non-atomically (because they must be locked).
 pub struct Linker<'h, M: Mode> {
   pub(super) allocator: Allocator<'h>,
   pub redexes: Vec<(Port, Port)>,
@@ -19,11 +26,6 @@ pub struct Linker<'h, M: Mode> {
 
 deref!({<'h, M: Mode>} Linker<'h, M> => self.allocator: Allocator<'h>);
 
-/// When threads interfere, this uses the atomic linking algorithm described in
-/// `paper/`.
-///
-/// Linking wires must be done atomically, but linking ports can be done
-/// non-atomically (because they must be locked).
 impl<'h, M: Mode> Linker<'h, M> {
   pub fn new(heap: &'h Heap) -> Self {
     Linker {

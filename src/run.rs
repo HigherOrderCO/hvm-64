@@ -1,6 +1,6 @@
 //! The HVM runtime.
 //!
-//! This file can be divided into three major logical components:
+//! The runtime is divided into three major logical components:
 //! - the **allocator**, which manages the creation and destruction of nodes in
 //!   the net
 //! - the **linker**, which links ports and wires in the interaction net, in a
