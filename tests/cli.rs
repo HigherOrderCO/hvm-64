@@ -3,6 +3,7 @@
 use std::{
   error::Error,
   io::Read,
+  path::PathBuf,
   process::{Command, ExitStatus, Stdio},
 };
 
@@ -182,4 +183,37 @@ fn test_apply_tree() {
     eval_with_args("(<* a b> (a b))", &vec!["#2"]),
     @"(<2* a> a)"
   );
+}
+
+#[test]
+fn test_cli_compile() {
+  // Test normal-form expressions
+
+  if !Command::new(env!("CARGO_BIN_EXE_hvmc"))
+    .args(&["compile", &get_arithmetic_program_path()])
+    .stdout(Stdio::inherit())
+    .stderr(Stdio::inherit())
+    .spawn()
+    .unwrap()
+    .wait()
+    .unwrap()
+    .success()
+  {
+    panic!("{:?}", "compilation failed");
+  };
+
+  let mut output_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+  output_path.push("examples/arithmetic");
+  let mut child = Command::new(&output_path).args(&["#40", "#3"]).stdout(Stdio::piped()).spawn().unwrap();
+
+  let mut stdout = child.stdout.take().ok_or("Couldn't capture stdout!").unwrap();
+  child.wait().unwrap();
+  let mut output = String::new();
+  stdout.read_to_string(&mut output).unwrap();
+
+  assert_display_snapshot!(output, @r###"
+  [#13 #1]
+  "###);
+
+  std::fs::remove_file(&output_path).unwrap();
 }
