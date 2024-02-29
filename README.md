@@ -89,7 +89,7 @@ HVM-Core's textual syntax represents interaction combinators via an AST:
 
 <NET> ::=
   <ROOT> ::= <TERM>
-  <RDEX> ::= "&" <TERM> "~" <TERM> <NET>
+  <REDEX> ::= "&" <TERM> "~" <TERM> <NET>
 
 <BOOK> ::= 
   <DEF> ::= "@" <name> "=" <NET> <BOOK>
@@ -419,7 +419,7 @@ struct Redex {
 // A closed net
 struct Net {
   root: Ptr,       // a free wire
-  rdex: Vec<Redex> // a vector of redexes
+  redexes: Vec<Redex> // a vector of redexes
   heap: Vec<Node>  // a vector of nodes
 }
 ```

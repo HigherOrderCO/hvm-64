@@ -125,15 +125,15 @@ impl<'i> Parser<'i> {
 
   /// Net = Tree ("&" Tree "~" Tree)*
   fn parse_net(&mut self) -> Result<Net, String> {
-    let mut rdex = Vec::new();
+    let mut redexes = Vec::new();
     let root = self.parse_tree()?;
     while self.consume("&").is_ok() {
       let tree1 = self.parse_tree()?;
       self.consume("~")?;
       let tree2 = self.parse_tree()?;
-      rdex.push((tree1, tree2));
+      redexes.push((tree1, tree2));
     }
-    Ok(Net { root, redexes: rdex })
+    Ok(Net { root, redexes })
   }
 
   fn parse_tree(&mut self) -> Result<Tree, String> {
