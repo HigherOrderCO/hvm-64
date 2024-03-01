@@ -1,0 +1,20 @@
+---
+source: tests/tests.rs
+expression: output
+input_file: tests/programs/dec_bits_tree.hvmc
+---
+((((((@brnZ @brnZ) (@brnZ @brnZ)) ((@brnZ @brnZ) (@brnZ @brnZ))) (((@brnZ @brnZ) (@brnZ @brnZ)) ((@brnZ @brnZ) (@brnZ @brnZ)))) ((((@brnZ @brnZ) (@brnZ @brnZ)) ((@brnZ @brnZ) (@brnZ @brnZ))) (((@brnZ @brnZ) (@brnZ @brnZ)) ((@brnZ @brnZ) (@brnZ @brnZ))))) (((((@brnZ @brnZ) (@brnZ @brnZ)) ((@brnZ @brnZ) (@brnZ @brnZ))) (((@brnZ @brnZ) (@brnZ @brnZ)) ((@brnZ @brnZ) (@brnZ @brnZ)))) ((((@brnZ @brnZ) (@brnZ @brnZ)) ((@brnZ @brnZ) (@brnZ @brnZ))) (((@brnZ @brnZ) (@brnZ @brnZ)) ((@brnZ @brnZ) (@brnZ @brnZ))))))
+pre-reduce:
+RWTS   :          18_916
+- ANNI :          10_615
+- COMM :             305
+- ERAS :           5_233
+- DREF :           2_763
+- OPER :               0
+run:
+RWTS   :               1
+- ANNI :               0
+- COMM :               0
+- ERAS :               0
+- DREF :               1
+- OPER :               0

@@ -160,7 +160,7 @@ struct TransformOpts {
   /// and don't have side effects this is usually the entry point of the
   /// program (otherwise, the whole program will get reduced to normal form).
   pre_reduce_skip: Vec<String>,
-  #[arg(long = "pre-reduce-memory", default_value = "1G", value_parser = parse_abbrev_number::<usize>)]
+  #[arg(long = "pre-reduce-memory", default_value = "500M", value_parser = parse_abbrev_number::<usize>)]
   /// How much memory to allocate when pre-reducing.
   ///
   /// Supports abbreviations such as '4G' or '400M'.
@@ -286,13 +286,11 @@ fn load_book(files: &[String], transform_opts: &TransformOpts) -> Book {
     });
   let transform_passes = TransformPass::passes_from_cli(&transform_opts.transform_passes);
   if transform_passes.pre_reduce {
-    book
-      .pre_reduce(
-        &|x| transform_opts.pre_reduce_skip.iter().any(|y| x == y),
-        transform_opts.pre_reduce_memory,
-        transform_opts.pre_reduce_rewrites,
-      )
-      .unwrap();
+    book.pre_reduce(
+      &|x| transform_opts.pre_reduce_skip.iter().any(|y| x == y),
+      transform_opts.pre_reduce_memory,
+      transform_opts.pre_reduce_rewrites,
+    );
   }
   book
 }

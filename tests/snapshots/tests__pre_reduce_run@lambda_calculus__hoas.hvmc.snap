@@ -1,0 +1,20 @@
+---
+source: tests/tests.rs
+expression: output
+input_file: examples/lambda_calculus/hoas.hvmc
+---
+(((a (((* a) b) (* (* b)))) c) (* (* c)))
+pre-reduce:
+RWTS   :             805
+- ANNI :             440
+- COMM :              11
+- ERAS :             141
+- DREF :             213
+- OPER :               0
+run:
+RWTS   :               1
+- ANNI :               0
+- COMM :               0
+- ERAS :               0
+- DREF :               1
+- OPER :               0

@@ -1,0 +1,27 @@
+@C1 = ((a b) (a b))
+@C2 = ({3 (a b) (c a)} (c b))
+@C3 = ({21 (a b) {23 (c a) (d c)}} (d b))
+@C4 = ({15 (a b) {17 (c a) {19 (d c) (e d)}}} (e b))
+@C6 = ({5 (a b) {7 (c a) {9 (d c) {11 (e d) {13 (f e) (g f)}}}}} (g b))
+@black_plus = a
+& @HVM.black_box ~ (@plus a)
+@erase = ((@HVM.black_box (a b)) (a b))
+@expensive = a
+& @fib ~ (b a)
+& @C4 ~ (@C2 b)
+@expensive_1 = a
+& @fib ~ (b a)
+& @C4 ~ (@C2 b)
+@expensive_2 = a
+& @fib ~ (b a)
+& @C4 ~ (@C2 b)
+@fib = ((@fib$S0 ([@C1 @C1] [* a])) a)
+@fib$S0 = ([a {27 b c}] [b d])
+& @plus ~ (a (c d))
+@main = *
+@main_fast = a
+& @black_plus ~ (@expensive (@expensive a))
+@main_slow = a
+& @black_plus ~ (@expensive_1 (@expensive_2 a))
+@plus = ((a (b c)) ((d (e b)) ({25 a d} (e c))))
+

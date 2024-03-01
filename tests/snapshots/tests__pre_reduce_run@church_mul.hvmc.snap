@@ -1,0 +1,20 @@
+---
+source: tests/tests.rs
+expression: output
+input_file: tests/programs/church_mul.hvmc
+---
+({3 (a {3 b {5 c {7 d {9 e {11 f {13 g {15 h {17 i {19 j {21 k {23 l {25 m {27 n {29 o {31 p {33 q {35 r {37 s {39 t u}}}}}}}}}}}}}}}}}}}) {5 (v a) {7 (w v) {9 (x w) {11 (y x) {13 (z y) {15 (aa z) {17 (ab aa) {19 (ac ab) {21 (ad ac) {23 (ae ad) {25 (af ae) {27 (ag af) {29 (ah ag) {31 (ai ah) {33 (aj ai) {35 (ak aj) {37 (al ak) {39 (am al) ({3 c {5 d {7 e {9 f {11 g {13 h {15 i {17 j {19 k {21 l {23 m {25 n {27 o {29 p {31 q {33 r {35 s {37 t {39 u an}}}}}}}}}}}}}}}}}}} am)}}}}}}}}}}}}}}}}}}} (an b))
+pre-reduce:
+RWTS   :              50
+- ANNI :              25
+- COMM :              19
+- ERAS :               0
+- DREF :               6
+- OPER :               0
+run:
+RWTS   :               1
+- ANNI :               0
+- COMM :               0
+- ERAS :               0
+- DREF :               1
+- OPER :               0

@@ -115,6 +115,7 @@ pub fn create_host(book: &Book) -> Arc<Mutex<Host>> {
       }
     }))),
   );
+  host.lock().unwrap().insert_def("HVM.black_box", DefRef::Static(unsafe { IDENTITY.as_ref().unwrap() }));
   host.lock().unwrap().insert_book(&book);
   host
 }

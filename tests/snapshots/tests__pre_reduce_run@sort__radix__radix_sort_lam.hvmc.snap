@@ -1,0 +1,20 @@
+---
+source: tests/tests.rs
+expression: output
+input_file: examples/sort/radix/radix_sort_lam.hvmc
+---
+#549755289600
+pre-reduce:
+RWTS   :   1_167_065_250
+- ANNI :     622_854_182
+- COMM :      28_311_560
+- ERAS :     251_658_239
+- DREF :     171_966_556
+- OPER :      92_274_713
+run:
+RWTS   :               1
+- ANNI :               0
+- COMM :               0
+- ERAS :               0
+- DREF :               1
+- OPER :               0

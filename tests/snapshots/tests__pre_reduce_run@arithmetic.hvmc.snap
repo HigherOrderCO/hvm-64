@@ -1,0 +1,20 @@
+---
+source: tests/tests.rs
+expression: output
+input_file: examples/arithmetic.hvmc
+---
+({3 </ a b> <% c d>} ({5 a c} [b d]))
+pre-reduce:
+RWTS   :              12
+- ANNI :               4
+- COMM :               0
+- ERAS :               0
+- DREF :               8
+- OPER :               0
+run:
+RWTS   :               1
+- ANNI :               0
+- COMM :               0
+- ERAS :               0
+- DREF :               1
+- OPER :               0

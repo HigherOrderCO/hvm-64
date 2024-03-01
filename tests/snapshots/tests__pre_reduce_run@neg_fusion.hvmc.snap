@@ -1,0 +1,20 @@
+---
+source: tests/tests.rs
+expression: output
+input_file: tests/programs/neg_fusion.hvmc
+---
+(a (* a))
+pre-reduce:
+RWTS   :             160
+- ANNI :              85
+- COMM :              36
+- ERAS :               0
+- DREF :              39
+- OPER :               0
+run:
+RWTS   :               1
+- ANNI :               0
+- COMM :               0
+- ERAS :               0
+- DREF :               1
+- OPER :               0

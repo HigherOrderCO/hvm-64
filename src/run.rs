@@ -33,7 +33,7 @@ use std::{
   hint::unreachable_unchecked,
   marker::PhantomData,
   mem::size_of,
-  ops::{Deref, DerefMut},
+  ops::{Add, AddAssign, Deref, DerefMut},
   sync::{Arc, Barrier},
   thread,
 };
@@ -133,6 +133,29 @@ impl AtomicRewrites {
     target.eras += self.eras.load(Relaxed);
     target.dref += self.dref.load(Relaxed);
     target.oper += self.oper.load(Relaxed);
+  }
+}
+
+impl<T: Add<Output = U>, U> Add for Rewrites<T> {
+  type Output = Rewrites<U>;
+
+  fn add(self, rhs: Self) -> Self::Output {
+    Rewrites {
+      anni: self.anni + rhs.anni,
+      comm: self.comm + rhs.comm,
+      eras: self.eras + rhs.eras,
+      dref: self.dref + rhs.dref,
+      oper: self.oper + rhs.oper,
+    }
+  }
+}
+impl<T: AddAssign> AddAssign for Rewrites<T> {
+  fn add_assign(&mut self, rhs: Self) {
+    self.anni += rhs.anni;
+    self.comm += rhs.comm;
+    self.eras += rhs.eras;
+    self.dref += rhs.dref;
+    self.oper += rhs.oper;
   }
 }
 

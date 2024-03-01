@@ -1,0 +1,20 @@
+---
+source: tests/tests.rs
+expression: output
+input_file: tests/programs/chained_ops.hvmc
+---
+#7184190578800
+pre-reduce:
+RWTS   :              47
+- ANNI :               2
+- COMM :               4
+- ERAS :               0
+- DREF :               1
+- OPER :              40
+run:
+RWTS   :               1
+- ANNI :               0
+- COMM :               0
+- ERAS :               0
+- DREF :               1
+- OPER :               0

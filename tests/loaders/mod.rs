@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use hvmc::{ast::*, host::Host, run};
+use hvmc::{ast::*, run, stdlib::create_host};
 use std::fs;
 
 pub fn load_file(file: &str) -> String {
@@ -22,15 +22,18 @@ pub fn replace_template(mut code: String, map: &[(&str, &str)]) -> String {
   code
 }
 
-#[allow(unused_variables)]
-pub fn normal(book: Book, words: usize) -> (hvmc::run::Rewrites, Net) {
+pub fn normal_with(book: Book, words: usize, entry_point: &str) -> (hvmc::run::Rewrites, Net) {
   let area = run::Heap::new_words(words);
-  let host = Host::new(&book);
+  let host = create_host(&book);
 
   let mut rnet = run::Net::<run::Strict>::new(&area);
-  rnet.boot(&host.defs["main"]);
+  rnet.boot(&host.lock().unwrap().defs[entry_point]);
   rnet.normal();
 
-  let net = host.readback(&rnet);
+  let net = host.lock().unwrap().readback(&rnet);
   (rnet.rwts, net)
+}
+
+pub fn normal(book: Book, words: usize) -> (hvmc::run::Rewrites, Net) {
+  normal_with(book, words, "main")
 }

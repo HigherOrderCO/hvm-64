@@ -1,0 +1,20 @@
+---
+source: tests/tests.rs
+expression: output
+input_file: tests/programs/stress_tests/sum_tail.hvmc
+---
+#49999995000000
+pre-reduce:
+RWTS   :     100_000_011
+- ANNI :      30_000_004
+- COMM :      20_000_000
+- ERAS :      10_000_001
+- DREF :      10_000_005
+- OPER :      30_000_001
+run:
+RWTS   :               1
+- ANNI :               0
+- COMM :               0
+- ERAS :               0
+- DREF :               1
+- OPER :               0

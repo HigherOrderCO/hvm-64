@@ -1,0 +1,20 @@
+---
+source: tests/tests.rs
+expression: output
+input_file: tests/programs/stress_tests/apelacion.hvmc
+---
+#31999968000000
+pre-reduce:
+RWTS   :      34_000_727
+- ANNI :      11_000_203
+- COMM :       6_000_063
+- ERAS :       3_000_130
+- DREF :       5_000_075
+- OPER :       9_000_256
+run:
+RWTS   :               1
+- ANNI :               0
+- COMM :               0
+- ERAS :               0
+- DREF :               1
+- OPER :               0

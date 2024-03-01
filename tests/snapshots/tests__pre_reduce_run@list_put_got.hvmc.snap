@@ -1,0 +1,20 @@
+---
+source: tests/tests.rs
+expression: output
+input_file: tests/programs/list_put_got.hvmc
+---
+(((* (((* ((@S0 a) a)) ((* (((* ((@S1 b) b)) ((* (((* ((@S2 c) c)) ((* (((* ((@S3 d) d)) ((* (((* ((@S4 e) e)) ((* (((* ((@S5 f) f)) ((* (((* ((@S6 g) g)) ((* (((* ((@S7 h) h)) ((* (((* ((@S8 i) i)) ((* (((* ((@S9 j) j)) ((* (((* ((@S10 k) k)) ((* (((* ((@S11 l) l)) ((* (((* ((@S12 m) m)) ((* (((* ((@S13 n) n)) ((* (((* ((@S14 o) o)) ((* (((* ((@S15 p) p)) ((* (((* ((@S16 q) q)) ((* (((* ((@S17 r) r)) ((* (((* ((@S18 s) s)) ((* (((* ((@S19 t) t)) ((* (((* ((@S20 u) u)) ((* (((* ((@S21 v) v)) ((* (((* ((@S22 w) w)) ((* (((* ((@S23 x) x)) ((* (((* ((@S24 y) y)) ((* (((* ((@S25 z) z)) ((* (((* ((@S26 aa) aa)) ((* (((* ((@S27 ab) ab)) ((* (((* ((@S28 ac) ac)) ((* (((* ((@S29 ad) ad)) ((* (((* ((@S30 ae) ae)) ((* (((* ((@S31 af) af)) (@Nil ag)) ag)) ah)) ah)) ai)) ai)) aj)) aj)) ak)) ak)) al)) al)) am)) am)) an)) an)) ao)) ao)) ap)) ap)) aq)) aq)) ar)) ar)) as)) as)) at)) at)) au)) au)) av)) av)) aw)) aw)) ax)) ax)) ay)) ay)) az)) az)) ba)) ba)) bb)) bb)) bc)) bc)) bd)) bd)) be)) be)) bf)) bf)) bg)) bg)) bh)) bh)) bi)) bi)) bj)) bj)) bk)) bk)) bl)) bl)) [bm *]) bm)
+pre-reduce:
+RWTS   :             774
+- ANNI :             117
+- COMM :               0
+- ERAS :               0
+- DREF :             657
+- OPER :               0
+run:
+RWTS   :               1
+- ANNI :               0
+- COMM :               0
+- ERAS :               0
+- DREF :               1
+- OPER :               0
