@@ -8,5 +8,5 @@ mod stats;
 pub(crate) use bi_enum::*;
 pub(crate) use create_var::*;
 pub(crate) use deref::*;
-pub use maybe_grow::*;
+pub(crate) use maybe_grow::*;
 pub use stats::*;
