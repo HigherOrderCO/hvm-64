@@ -3,6 +3,12 @@ use crate::util::bi_enum;
 bi_enum! {
   #[repr(u16)]
   /// A native operation on 60-bit integers.
+  ///
+  /// Each operation has a swapped counterpart (accessible with `.swap()`),
+  /// where the order of the operands is swapped.
+  ///
+  /// Operations without an already-named counterpart (e.g. `Add <-> Add` and
+  /// `Lt <-> Gt`) are suffixed with `$`/`S`: `(-$ 1 2) = (- 2 1) = 1`.
   #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
   pub enum Op {
     "+":   Add  = 0,
@@ -32,6 +38,9 @@ bi_enum! {
 use Op::*;
 
 impl Op {
+  /// Returns this operation's swapped counterpart.
+  ///
+  /// For all `op, a, b`, `op.swap().op(a, b) == op.op(b, a)`.
   #[inline]
   pub fn swap(self) -> Self {
     match self {
