@@ -24,9 +24,13 @@ fn main() {
   if cfg!(feature = "_full_cli") {
     let cli = FullCli::parse();
     match cli.mode {
-      CliMode::Compile { file } => {
+      CliMode::Compile { file, output } => {
+        let output = output.as_deref().or_else(|| file.strip_suffix(".hvmc")).unwrap_or_else(|| {
+          eprintln!("file missing `.hvmc` extension; explicitly specify an output path with `--output`.");
+          process::exit(1);
+        });
         let host = load_files(&[file.clone()]);
-        compile_executable(&file, &host.lock().unwrap()).unwrap();
+        compile_executable(output, &host.lock().unwrap()).unwrap();
       }
       CliMode::Run { opts, file, args } => {
         let host = load_files(&[file]);
@@ -120,6 +124,9 @@ enum CliMode {
   Compile {
     /// hvm-core file to compile.
     file: String,
+    #[arg(short = 'o', long = "output")]
+    /// Output path; defaults to the input file with `.hvmc` stripped.
+    output: Option<String>,
   },
   /// Run a program, optionally passing a list of arguments to it.
   Run {
@@ -251,7 +258,7 @@ fn pretty_num(n: u64) -> String {
     .collect()
 }
 
-fn compile_executable(file_name: &str, host: &host::Host) -> Result<(), io::Error> {
+fn compile_executable(target: &str, host: &host::Host) -> Result<(), io::Error> {
   let gen = compile::compile_host(host);
   let outdir = ".hvm";
   if Path::new(&outdir).exists() {
@@ -326,8 +333,6 @@ fn compile_executable(file_name: &str, host: &host::Host) -> Result<(), io::Erro
   if !output.status.success() {
     process::exit(1);
   }
-
-  let target = file_name.strip_suffix(".hvmc").unwrap_or(file_name);
 
   fs::copy(".hvm/target/release/hvmc", target)?;
 
