@@ -4,9 +4,9 @@ expression: output
 input_file: examples/church_encoding/church.hvmc
 ---
 ({11 {7 (a {5 b c}) {9 (d a) ({5 c e} d)}} {3 (f e) {3 (g f) {3 (h g) {3 (i h) *}}}}} (i b))
-RWTS   :              37
+RWTS   :              65
 - ANNI :              25
 - COMM :               1
 - ERAS :               0
-- DREF :              11
+- DREF :              39
 - OPER :               0

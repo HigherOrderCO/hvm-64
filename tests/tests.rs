@@ -25,7 +25,7 @@ fn test_era_era() {
   let net = parse_core("@main = * & * ~ *");
   let (rwts, net) = normal(net, 16);
   assert_snapshot!(Net::to_string(&net), @"*");
-  assert_debug_snapshot!(rwts.total(), @"2");
+  assert_debug_snapshot!(rwts.total(), @"3");
 }
 
 #[test]
@@ -33,7 +33,7 @@ fn test_era_era2() {
   let net = parse_core("@main = (* *) & * ~ *");
   let (rwts, net) = normal(net, 16);
   assert_snapshot!(Net::to_string(&net), @"(* *)");
-  assert_debug_snapshot!(rwts.total(), @"2");
+  assert_debug_snapshot!(rwts.total(), @"5");
 }
 
 #[test]
@@ -41,7 +41,7 @@ fn test_commutation() {
   let net = parse_core("@main = root & (x x) ~ [* root]");
   let (rwts, net) = normal(net, 16);
   assert_snapshot!(Net::to_string(&net), @"(a a)");
-  assert_debug_snapshot!(rwts.total(), @"5");
+  assert_debug_snapshot!(rwts.total(), @"7");
 }
 
 #[test]
@@ -57,13 +57,13 @@ fn test_bool_and() {
   let (rwts, net) = normal(book, 64);
 
   assert_snapshot!(Net::to_string(&net), @"(* (a a))");
-  assert_debug_snapshot!(rwts.total(), @"9");
+  assert_debug_snapshot!(rwts.total(), @"14");
 }
 
 fn test_run(name: &str, host: Arc<Mutex<Host>>) {
   print!("{name}...");
   io::stdout().flush().unwrap();
-  let heap = run::Heap::new_words(1 << 29);
+  let heap = run::Heap::new_words(1 << 30);
   let mut net = run::Net::<Strict>::new(&heap);
   // The host is locked inside this block.
   {

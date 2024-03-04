@@ -4,9 +4,9 @@ expression: output
 input_file: tests/programs/stress_tests/sum_tree.hvmc
 ---
 #16777216
-RWTS   :     738_197_474
+RWTS   :     738_197_475
 - ANNI :     335_544_307
 - COMM :      83_886_075
 - ERAS :     100_663_292
-- DREF :     167_772_154
+- DREF :     167_772_155
 - OPER :      50_331_646

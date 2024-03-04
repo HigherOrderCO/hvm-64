@@ -4,9 +4,9 @@ expression: output
 input_file: examples/arithmetic.hvmc
 ---
 ({3 </ a b> <% c d>} ({5 a c} [b d]))
-RWTS   :               7
+RWTS   :              18
 - ANNI :               4
 - COMM :               0
 - ERAS :               0
-- DREF :               3
+- DREF :              14
 - OPER :               0

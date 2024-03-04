@@ -4,9 +4,9 @@ expression: output
 input_file: tests/programs/stress_tests/fib_rec.hvmc
 ---
 #1346269
-RWTS   :      34_413_726
+RWTS   :      34_413_727
 - ANNI :      13_266_266
 - COMM :       2_178_308
 - ERAS :       5_702_885
-- DREF :       7_049_154
+- DREF :       7_049_155
 - OPER :       6_217_113

@@ -39,7 +39,6 @@ impl Book {
 
       let mut rt = run::Net::<run::Strict>::new(&area);
       rt.boot(host.defs.get(nam).expect("No function."));
-      rt.expand();
       rt.reduce(max_rwts as usize);
 
       // Move interactions with inert defs back into the net redexes array
