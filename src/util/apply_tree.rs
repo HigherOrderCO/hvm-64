@@ -44,11 +44,8 @@ impl Tree {
         }
       }
       // Recurse on children
-      Tree::Ctr { lft, rgt, .. } | Tree::Op2 { lft, rgt, .. } | Tree::Mat { sel: lft, ret: rgt } => {
+      Tree::Ctr { lft, rgt, .. } | Tree::Op { rhs: lft, out: rgt, .. } | Tree::Mat { sel: lft, ret: rgt } => {
         lft.ensure_no_conflicts(fresh);
-        rgt.ensure_no_conflicts(fresh);
-      }
-      Tree::Op1 { rgt, .. } => {
         rgt.ensure_no_conflicts(fresh);
       }
       Tree::Era | Tree::Num { .. } | Tree::Ref { .. } => {}

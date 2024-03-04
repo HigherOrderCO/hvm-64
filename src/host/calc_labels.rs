@@ -185,8 +185,7 @@ impl<'b, F: FnMut(&'b str) -> LabSet> State<'b, F> {
           usize::MAX
         }
       }
-      Tree::Op1 { rgt, .. } => self.visit_tree(rgt, depth, out),
-      Tree::Op2 { lft, rgt, .. } | Tree::Mat { sel: lft, ret: rgt } => {
+      Tree::Op { rhs: lft, out: rgt, .. } | Tree::Mat { sel: lft, ret: rgt } => {
         usize::min(self.visit_tree(lft, depth, out.as_deref_mut()), self.visit_tree(rgt, depth, out.as_deref_mut()))
       }
     })

@@ -46,13 +46,9 @@ impl<'c, 'n, M: Mode> EncodeState<'c, 'n, M> {
         self.encode(l, lft);
         self.encode(r, rgt);
       }
-      Tree::Op2 { opr, lft, rgt } => {
-        let (l, r) = self.net.do_op2(*opr, trg);
+      Tree::Op { op, rhs: lft, out: rgt } => {
+        let (l, r) = self.net.do_op(*op, trg);
         self.encode(l, lft);
-        self.encode(r, rgt);
-      }
-      Tree::Op1 { opr, lft, rgt } => {
-        let r = self.net.do_op1(*opr, *lft, trg);
         self.encode(r, rgt);
       }
       Tree::Mat { sel, ret } => {

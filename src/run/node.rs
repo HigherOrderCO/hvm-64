@@ -8,13 +8,6 @@ pub struct TraverseNode {
   pub p2: Wire,
 }
 
-/// See [`Port::traverse_op1`].
-pub struct TraverseOp1 {
-  pub op: Op,
-  pub num: Port,
-  pub p2: Wire,
-}
-
 impl Port {
   #[inline(always)]
   pub fn consume_node(self) -> TraverseNode {
@@ -29,22 +22,6 @@ impl Port {
       p1: Wire::new(self.addr()),
       p2: Wire::new(self.addr().other_half()),
     }
-  }
-
-  #[inline(always)]
-  pub fn consume_op1(self) -> TraverseOp1 {
-    let op = self.op();
-    let s = self.consume_node();
-    let num = s.p1.swap_target(Port::FREE);
-    TraverseOp1 { op, num, p2: s.p2 }
-  }
-
-  #[inline(always)]
-  pub fn traverse_op1(self) -> TraverseOp1 {
-    let op = self.op();
-    let s = self.traverse_node();
-    let num = s.p1.load_target();
-    TraverseOp1 { op, num, p2: s.p2 }
   }
 }
 

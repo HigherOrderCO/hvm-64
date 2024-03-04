@@ -69,26 +69,13 @@ pub enum Tree {
   /// A binary node representing an operation on native integers.
   ///
   /// The principal port connects to the left operand.
-  Op2 {
+  Op {
     /// The operation associated with this node.
-    opr: Op,
+    op: Op,
     /// An auxiliary port; connects to the right operand.
-    lft: Box<Tree>,
+    rhs: Box<Tree>,
     /// An auxiliary port; connects to the output.
-    rgt: Box<Tree>,
-  },
-  /// A unary node representing a partially-applied operation on native
-  /// integers.
-  ///
-  /// The left operand is already applied. The principal port connects to the
-  /// right operand.
-  Op1 {
-    /// The operation associated with this node.
-    opr: Op,
-    /// The left operand.
-    lft: u64,
-    /// An auxiliary port; connects to the output.
-    rgt: Box<Tree>,
+    out: Box<Tree>,
   },
   /// A binary node representing a match on native integers.
   ///
@@ -185,19 +172,11 @@ impl<'i> Parser<'i> {
         // Op = "<" Op Tree Tree ">" | "<" Int Op Tree ">"
         Some('<') => {
           self.advance_char();
-          if self.peek_char().is_some_and(|c| c.is_digit(10)) {
-            let lft = self.parse_int()?;
-            let opr = self.parse_op()?;
-            let rgt = Box::new(self.parse_tree()?);
-            self.consume(">")?;
-            Ok(Tree::Op1 { opr, lft, rgt })
-          } else {
-            let opr = self.parse_op()?;
-            let lft = Box::new(self.parse_tree()?);
-            let rgt = Box::new(self.parse_tree()?);
-            self.consume(">")?;
-            Ok(Tree::Op2 { opr, lft, rgt })
-          }
+          let op = self.parse_op()?;
+          let rhs = Box::new(self.parse_tree()?);
+          let out = Box::new(self.parse_tree()?);
+          self.consume(">")?;
+          Ok(Tree::Op { op, rhs, out })
         }
         // Mat = "?<" Tree Tree ">"
         Some('?') => {
@@ -248,7 +227,7 @@ impl<'i> Parser<'i> {
 
   /// See `ops.rs` for the available operators.
   fn parse_op(&mut self) -> Result<Op, String> {
-    let op = self.take_while(|c| "+-=*/%<>|&^!?".contains(c));
+    let op = self.take_while(|c| "+-=*/%<>|&^!?$".contains(c));
     op.parse().map_err(|_| format!("Unknown operator: {op:?}"))
   }
 
@@ -364,8 +343,7 @@ impl fmt::Display for Tree {
       Tree::Var { nam } => write!(f, "{nam}"),
       Tree::Ref { nam } => write!(f, "@{nam}"),
       Tree::Num { val } => write!(f, "#{val}"),
-      Tree::Op2 { opr, lft, rgt } => write!(f, "<{opr} {lft} {rgt}>"),
-      Tree::Op1 { opr, lft, rgt } => write!(f, "<{lft}{opr} {rgt}>"),
+      Tree::Op { op, rhs, out } => write!(f, "<{op} {rhs} {out}>"),
       Tree::Mat { sel, ret } => write!(f, "?<{sel} {ret}>"),
     })
   }

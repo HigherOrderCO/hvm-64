@@ -98,7 +98,7 @@ fn test_cli_run_with_args() {
       &arithmetic_program,
       "#64"
     ]).unwrap().1,
-    @"({5 <64/ a> <64% b>} [a b])"
+    @"({5 </$ #64 a> <%$ #64 b>} [a b])"
   );
 
   // Test passing all arguments.
@@ -239,7 +239,7 @@ fn test_apply_tree() {
   );
   assert_display_snapshot!(
     eval_with_args("(<* a b> (a b))", &vec!["#2"]),
-    @"(<2* a> a)"
+    @"(<* #2 a> a)"
   );
 }
 

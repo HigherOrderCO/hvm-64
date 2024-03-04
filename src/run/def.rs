@@ -239,14 +239,14 @@ impl AsDef for InterpretedDef {
             trgs.set_trg(lft, l);
             trgs.set_trg(rgt, r);
           }
-          Instruction::Op2 { op, trg, lft, rgt } => {
-            let (l, r) = net.do_op2(op, trgs.get_trg(trg));
-            trgs.set_trg(lft, l);
-            trgs.set_trg(rgt, r);
+          Instruction::Op { op, trg, rhs, out } => {
+            let (r, o) = net.do_op(op, trgs.get_trg(trg));
+            trgs.set_trg(rhs, r);
+            trgs.set_trg(out, o);
           }
-          Instruction::Op1 { op, trg, num, rgt } => {
-            let r = net.do_op1(op, num, trgs.get_trg(trg));
-            trgs.set_trg(rgt, r);
+          Instruction::OpNum { op, trg, rhs: lhs, out } => {
+            let o = net.do_op_num(op, trgs.get_trg(trg), lhs);
+            trgs.set_trg(out, o);
           }
           Instruction::Mat { trg, lft, rgt } => {
             let (l, r) = net.do_mat(trgs.get_trg(trg));

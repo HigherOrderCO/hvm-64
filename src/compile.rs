@@ -68,11 +68,11 @@ fn compile_def(code: &mut String, host: &Host, name: &str, instr: &[Instruction]
       Instruction::Ctr { lab, trg, lft, rgt } => {
         writeln!(code, "let ({lft}, {rgt}) = net.do_ctr({lab}, {trg});")
       }
-      Instruction::Op2 { op, trg, lft, rgt } => {
-        writeln!(code, "let ({lft}, {rgt}) = net.do_op2({op:?}, {trg});")
+      Instruction::Op { op, trg, rhs, out } => {
+        writeln!(code, "let ({rhs}, {out}) = net.do_op({op:?}, {trg});")
       }
-      Instruction::Op1 { op, num, trg, rgt } => {
-        writeln!(code, "let {rgt} = net.do_op1({op:?}, {num}, {trg});")
+      Instruction::OpNum { op, trg, rhs, out } => {
+        writeln!(code, "let {out} = net.do_op_num({op:?}, {trg}, {rhs});")
       }
       Instruction::Mat { trg, lft, rgt } => {
         writeln!(code, "let ({lft}, {rgt}) = net.do_mat({trg});")
