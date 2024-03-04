@@ -10,7 +10,11 @@
 //!
 //! [interaction calculus]: https://en.wikipedia.org/wiki/Interaction_nets#Interaction_calculus
 
-use crate::{ops::Op, run::Lab, util::deref};
+use crate::{
+  ops::Op,
+  run::Lab,
+  util::{deref, maybe_grow},
+};
 use std::{collections::BTreeMap, fmt, str::FromStr};
 
 /// The top level AST node, representing a collection of named nets.
@@ -113,7 +117,7 @@ struct Parser<'i> {
 impl<'i> Parser<'i> {
   /// Book = ("@" Name "=" Net)*
   fn parse_book(&mut self) -> Result<Book, String> {
-    stacker::maybe_grow(1024 * 32, 1024 * 1024, move || {
+    maybe_grow(move || {
       let mut book = BTreeMap::new();
       while self.consume("@").is_ok() {
         let name = self.parse_name()?;
@@ -139,7 +143,7 @@ impl<'i> Parser<'i> {
   }
 
   fn parse_tree(&mut self) -> Result<Tree, String> {
-    stacker::maybe_grow(1024 * 32, 1024 * 1024, move || {
+    maybe_grow(move || {
       self.skip_trivia();
       match self.peek_char() {
         // Era = "*"
@@ -350,7 +354,7 @@ impl fmt::Display for Net {
 
 impl fmt::Display for Tree {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    stacker::maybe_grow(1024 * 32, 1024 * 1024, move || match self {
+    maybe_grow(move || match self {
       Tree::Era => write!(f, "*"),
       Tree::Ctr { lab, lft, rgt } => match lab {
         0 => write!(f, "({lft} {rgt})"),
