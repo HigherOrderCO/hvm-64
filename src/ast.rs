@@ -10,7 +10,11 @@
 //!
 //! [interaction calculus]: https://en.wikipedia.org/wiki/Interaction_nets#Interaction_calculus
 
-use crate::{ops::Op, run::Lab, util::deref};
+use crate::{
+  ops::Op,
+  run::Lab,
+  util::{deref, maybe_grow},
+};
 use std::{collections::BTreeMap, fmt, str::FromStr};
 
 /// The top level AST node, representing a collection of named nets.
@@ -113,14 +117,16 @@ struct Parser<'i> {
 impl<'i> Parser<'i> {
   /// Book = ("@" Name "=" Net)*
   fn parse_book(&mut self) -> Result<Book, String> {
-    let mut book = BTreeMap::new();
-    while self.consume("@").is_ok() {
-      let name = self.parse_name()?;
-      self.consume("=")?;
-      let net = self.parse_net()?;
-      book.insert(name, net);
-    }
-    Ok(Book { nets: book })
+    maybe_grow(move || {
+      let mut book = BTreeMap::new();
+      while self.consume("@").is_ok() {
+        let name = self.parse_name()?;
+        self.consume("=")?;
+        let net = self.parse_net()?;
+        book.insert(name, net);
+      }
+      Ok(Book { nets: book })
+    })
   }
 
   /// Net = Tree ("&" Tree "~" Tree)*
@@ -137,73 +143,75 @@ impl<'i> Parser<'i> {
   }
 
   fn parse_tree(&mut self) -> Result<Tree, String> {
-    self.skip_trivia();
-    match self.peek_char() {
-      // Era = "*"
-      Some('*') => {
-        self.advance_char();
-        Ok(Tree::Era)
-      }
-      // Ctr = "(" Tree Tree ")" | "[" Tree Tree "]" | "{" Int Tree Tree "}"
-      Some(char @ ('(' | '[' | '{')) => {
-        self.advance_char();
-        let lab = match char {
-          '(' => 0,
-          '[' => 1,
-          '{' => self.parse_int()? as Lab,
-          _ => unreachable!(),
-        };
-        let lft = Box::new(self.parse_tree()?);
-        let rgt = Box::new(self.parse_tree()?);
-        self.consume(match char {
-          '(' => ")",
-          '[' => "]",
-          '{' => "}",
-          _ => unreachable!(),
-        })?;
-        Ok(Tree::Ctr { lab, lft, rgt })
-      }
-      // Ref = "@" Name
-      Some('@') => {
-        self.advance_char();
-        self.skip_trivia();
-        let nam = self.parse_name()?;
-        Ok(Tree::Ref { nam })
-      }
-      // Num = "#" Int
-      Some('#') => {
-        self.advance_char();
-        Ok(Tree::Num { val: self.parse_int()? })
-      }
-      // Op = "<" Op Tree Tree ">" | "<" Int Op Tree ">"
-      Some('<') => {
-        self.advance_char();
-        if self.peek_char().is_some_and(|c| c.is_digit(10)) {
-          let lft = self.parse_int()?;
-          let opr = self.parse_op()?;
-          let rgt = Box::new(self.parse_tree()?);
-          self.consume(">")?;
-          Ok(Tree::Op1 { opr, lft, rgt })
-        } else {
-          let opr = self.parse_op()?;
+    maybe_grow(move || {
+      self.skip_trivia();
+      match self.peek_char() {
+        // Era = "*"
+        Some('*') => {
+          self.advance_char();
+          Ok(Tree::Era)
+        }
+        // Ctr = "(" Tree Tree ")" | "[" Tree Tree "]" | "{" Int Tree Tree "}"
+        Some(char @ ('(' | '[' | '{')) => {
+          self.advance_char();
+          let lab = match char {
+            '(' => 0,
+            '[' => 1,
+            '{' => self.parse_int()? as Lab,
+            _ => unreachable!(),
+          };
           let lft = Box::new(self.parse_tree()?);
           let rgt = Box::new(self.parse_tree()?);
-          self.consume(">")?;
-          Ok(Tree::Op2 { opr, lft, rgt })
+          self.consume(match char {
+            '(' => ")",
+            '[' => "]",
+            '{' => "}",
+            _ => unreachable!(),
+          })?;
+          Ok(Tree::Ctr { lab, lft, rgt })
         }
+        // Ref = "@" Name
+        Some('@') => {
+          self.advance_char();
+          self.skip_trivia();
+          let nam = self.parse_name()?;
+          Ok(Tree::Ref { nam })
+        }
+        // Num = "#" Int
+        Some('#') => {
+          self.advance_char();
+          Ok(Tree::Num { val: self.parse_int()? })
+        }
+        // Op = "<" Op Tree Tree ">" | "<" Int Op Tree ">"
+        Some('<') => {
+          self.advance_char();
+          if self.peek_char().is_some_and(|c| c.is_digit(10)) {
+            let lft = self.parse_int()?;
+            let opr = self.parse_op()?;
+            let rgt = Box::new(self.parse_tree()?);
+            self.consume(">")?;
+            Ok(Tree::Op1 { opr, lft, rgt })
+          } else {
+            let opr = self.parse_op()?;
+            let lft = Box::new(self.parse_tree()?);
+            let rgt = Box::new(self.parse_tree()?);
+            self.consume(">")?;
+            Ok(Tree::Op2 { opr, lft, rgt })
+          }
+        }
+        // Mat = "?<" Tree Tree ">"
+        Some('?') => {
+          self.advance_char();
+          self.consume("<")?;
+          let sel = Box::new(self.parse_tree()?);
+          let ret = Box::new(self.parse_tree()?);
+          self.consume(">")?;
+          Ok(Tree::Mat { sel, ret })
+        }
+        // Var = Name
+        _ => Ok(Tree::Var { nam: self.parse_name()? }),
       }
-      // Mat = "?<" Tree Tree ">"
-      Some('?') => {
-        self.advance_char();
-        self.consume("<")?;
-        let sel = Box::new(self.parse_tree()?);
-        let ret = Box::new(self.parse_tree()?);
-        self.consume(">")?;
-        Ok(Tree::Mat { sel, ret })
-      }
-      // Var = Name
-      _ => Ok(Tree::Var { nam: self.parse_name()? }),
-    }
+    })
   }
 
   /// Name = /[a-zA-Z0-9_.$]+/
@@ -346,7 +354,7 @@ impl fmt::Display for Net {
 
 impl fmt::Display for Tree {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    match self {
+    maybe_grow(move || match self {
       Tree::Era => write!(f, "*"),
       Tree::Ctr { lab, lft, rgt } => match lab {
         0 => write!(f, "({lft} {rgt})"),
@@ -359,6 +367,6 @@ impl fmt::Display for Tree {
       Tree::Op2 { opr, lft, rgt } => write!(f, "<{opr} {lft} {rgt}>"),
       Tree::Op1 { opr, lft, rgt } => write!(f, "<{lft}{opr} {rgt}>"),
       Tree::Mat { sel, ret } => write!(f, "?<{sel} {ret}>"),
-    }
+    })
   }
 }

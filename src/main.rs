@@ -320,6 +320,7 @@ fn compile_executable(target: &str, host: &host::Host) -> Result<(), io::Error> 
       bi_enum
       create_var
       deref
+      maybe_grow
       stats
     }
   }

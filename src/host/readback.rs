@@ -1,4 +1,5 @@
 use super::*;
+use crate::util::maybe_grow;
 
 impl Host {
   /// Creates an ast tree from a wire in a runtime net.
@@ -42,7 +43,7 @@ impl<'a> ReadbackState<'a> {
   /// `wire` this port was reached from must be supplied to key into the
   /// `vars` map.
   fn read_port(&mut self, port: Port, wire: Option<Wire>) -> Tree {
-    match port.tag() {
+    maybe_grow(move || match port.tag() {
       Tag::Var => {
         let key = wire.unwrap().addr().min(port.addr());
         Tree::Var {
@@ -74,6 +75,6 @@ impl<'a> ReadbackState<'a> {
         let node = port.traverse_node();
         Tree::Mat { sel: Box::new(self.read_wire(node.p1)), ret: Box::new(self.read_wire(node.p2)) }
       }
-    }
+    })
   }
 }
