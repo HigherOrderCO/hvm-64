@@ -22,35 +22,32 @@ impl Book {
   pub fn pre_reduce(&mut self, skip: &dyn Fn(&str) -> bool, max_memory: usize, max_rwts: u64) -> PreReduceStats {
     let mut host = Host::default();
     let captured_redexes = Arc::new(Mutex::new(Vec::new()));
-    // When a ref is not found in the `Host`, then
-    // put an inert def in its place
+    // When a ref is not found in the `Host`, put an inert def in its place.
     host.insert_book_with_default(self, &mut |_| {
       DefRef::Owned(Box::new(Def::new(LabSet::ALL, InertDef(captured_redexes.clone()))))
     });
     let area = run::Heap::new_words(max_memory);
-    let (seen, rewrites) = {
-      let mut state = State {
-        book: self,
-        skip,
-        captured_redexes,
-        max_rwts,
-        host,
-        area: &area,
-        seen: HashMap::new(),
-        total_rewrites: Rewrites::default(),
-      };
-      for nam in self.nets.keys() {
-        state.pre_reduce(&nam)
-      }
-      (
-        std::mem::take(&mut state.seen).into_iter().map(|(k, v)| (k.to_owned(), v)).collect::<Vec<_>>(),
-        state.total_rewrites,
-      )
+
+    let mut state = State {
+      book: self,
+      skip,
+      captured_redexes,
+      max_rwts,
+      host,
+      area: &area,
+      seen: HashMap::new(),
+      rewrites: Rewrites::default(),
     };
 
-    for (nam, state) in seen.into_iter() {
+    for nam in self.nets.keys() {
+      state.pre_reduce(&nam)
+    }
+
+    let State { seen, rewrites, .. } = state;
+
+    for (nam, state) in seen {
       if let SeenState::Reduced(net) = state {
-        self.nets.insert(nam.to_owned(), net);
+        self.nets.insert(nam, net);
       }
     }
 
@@ -104,13 +101,13 @@ struct State<'a> {
   captured_redexes: Arc<Mutex<Vec<(run::Port, run::Port)>>>,
 
   skip: &'a dyn Fn(&str) -> bool,
-  seen: HashMap<&'a str, SeenState>,
+  seen: HashMap<String, SeenState>,
 
-  total_rewrites: Rewrites<u64>,
+  rewrites: Rewrites<u64>,
 }
 
 impl<'a> State<'a> {
-  fn visit_tree(&mut self, tree: &'a Tree) {
+  fn visit_tree(&mut self, tree: &Tree) {
     maybe_grow(move || match tree {
       Tree::Era | Tree::Num { .. } | Tree::Var { .. } => (),
       Tree::Ref { nam } => {
@@ -123,18 +120,18 @@ impl<'a> State<'a> {
       Tree::Op1 { rgt, .. } => self.visit_tree(rgt),
     })
   }
-  fn visit_net(&mut self, net: &'a Net) {
+  fn visit_net(&mut self, net: &Net) {
     self.visit_tree(&net.root);
     for (a, b) in &net.redexes {
       self.visit_tree(a);
       self.visit_tree(b);
     }
   }
-  fn pre_reduce(&mut self, nam: &'a str) {
+  fn pre_reduce(&mut self, nam: &str) {
     if self.seen.contains_key(nam) || (self.skip)(nam) || self.book.get(nam).is_none() {
       return;
     }
-    self.seen.insert(nam, SeenState::Cycled);
+    self.seen.insert(nam.to_owned(), SeenState::Cycled);
     // First, pre-reduce all nets referenced by this net by walking the tree
     self.visit_net(self.book.get(nam).unwrap());
 
@@ -143,7 +140,7 @@ impl<'a> State<'a> {
     rt.expand();
     rt.reduce(self.max_rwts as usize);
 
-    self.total_rewrites += rt.rwts;
+    self.rewrites += rt.rwts;
 
     // Move interactions with inert defs back into the net redexes array
     rt.redexes.extend(core::mem::take::<Vec<_>>(self.captured_redexes.lock().unwrap().as_mut()).into_iter());
@@ -158,6 +155,6 @@ impl<'a> State<'a> {
     };
 
     // Replace the "Cycled" state with the "Reduced" state
-    self.seen.insert(nam, SeenState::Reduced(net));
+    *self.seen.get_mut(nam).unwrap() = SeenState::Reduced(net);
   }
 }
