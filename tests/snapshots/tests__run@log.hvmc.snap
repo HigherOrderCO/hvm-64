@@ -1,0 +1,12 @@
+---
+source: tests/tests.rs
+expression: output
+input_file: tests/programs/log.hvmc
+---
+#2
+RWTS   :               7
+- ANNI :               2
+- COMM :               0
+- ERAS :               1
+- DREF :               4
+- OPER :               0

@@ -2,9 +2,10 @@
 
 use clap::{Args, Parser, Subcommand};
 use hvmc::{
-  ast::{Net, Tree},
+  ast::{Book, Net, Tree},
   host::Host,
   run::{DynNet, Mode, Trg},
+  stdlib::create_host,
   *,
 };
 
@@ -13,7 +14,6 @@ use std::{
   path::Path,
   process::{self, Stdio},
   str::FromStr,
-  sync::{Arc, Mutex},
   time::{Duration, Instant},
 };
 
@@ -24,22 +24,28 @@ fn main() {
   if cfg!(feature = "_full_cli") {
     let cli = FullCli::parse();
     match cli.mode {
-      CliMode::Compile { file, output } => {
+      CliMode::Compile { file, transform_opts, output } => {
         let output = output.as_deref().or_else(|| file.strip_suffix(".hvmc")).unwrap_or_else(|| {
           eprintln!("file missing `.hvmc` extension; explicitly specify an output path with `--output`.");
           process::exit(1);
         });
-        let host = load_files(&[file.clone()]);
+        let host = create_host(&load_book(&[file.clone()], &transform_opts));
         compile_executable(output, &host.lock().unwrap()).unwrap();
       }
-      CliMode::Run { opts, file, args } => {
-        let host = load_files(&[file]);
-        run(&host.lock().unwrap(), opts, args);
+      CliMode::Run { run_opts, mut transform_opts, file, args } => {
+        // Don't pre-reduce the main reduction
+        transform_opts.pre_reduce_skip.push(args.entry_point.clone());
+        let host = create_host(&load_book(&[file], &transform_opts));
+        run(&host.lock().unwrap(), run_opts, args);
       }
-      CliMode::Reduce { run_opts, files, exprs } => {
-        let host = load_files(&files);
+      CliMode::Reduce { run_opts, transform_opts, files, exprs } => {
+        let host = create_host(&load_book(&files, &transform_opts));
         let exprs: Vec<_> = exprs.iter().map(|x| Net::from_str(x).unwrap()).collect();
         reduce_exprs(&host.lock().unwrap(), &exprs, &run_opts);
+      }
+      CliMode::Transform { transform_opts, files } => {
+        let book = load_book(&files, &transform_opts);
+        println!("{}", book);
       }
     }
   } else {
@@ -81,6 +87,91 @@ struct BareCli {
   pub args: RunArgs,
 }
 
+#[derive(Subcommand, Clone, Debug)]
+#[command(author, version)]
+enum CliMode {
+  /// Compile a hvm-core program into a Rust crate.
+  Compile {
+    /// hvm-core file to compile.
+    file: String,
+    #[arg(short = 'o', long = "output")]
+    /// Output path; defaults to the input file with `.hvmc` stripped.
+    output: Option<String>,
+    #[command(flatten)]
+    transform_opts: TransformOpts,
+  },
+  /// Run a program, optionally passing a list of arguments to it.
+  Run {
+    /// Name of the file to load.
+    file: String,
+    #[command(flatten)]
+    args: RunArgs,
+    #[command(flatten)]
+    run_opts: RuntimeOpts,
+    #[command(flatten)]
+    transform_opts: TransformOpts,
+  },
+  /// Reduce hvm-core expressions to their normal form.
+  ///
+  /// The expressions are passed as command-line arguments.
+  /// It is also possible to load files before reducing the expression,
+  /// which makes it possible to reference definitions from the file
+  /// in the expression.
+  Reduce {
+    #[arg(required = false)]
+    /// Files to load before reducing the expressions.
+    ///
+    /// Multiple files will act as if they're concatenated together.
+    files: Vec<String>,
+    #[arg(required = false, last = true)]
+    /// Expressions to reduce.
+    ///
+    /// The normal form of each expression will be
+    /// printed on a new line. This list must be separated from the file list
+    /// with a double dash ('--').
+    exprs: Vec<String>,
+    #[command(flatten)]
+    run_opts: RuntimeOpts,
+    #[command(flatten)]
+    transform_opts: TransformOpts,
+  },
+  /// Transform a hvm-core program using one of the optimization passes.
+  Transform {
+    /// Files to load before reducing the expressions.
+    ///
+    /// Multiple files will act as if they're concatenated together.
+    #[arg(required = true)]
+    files: Vec<String>,
+    #[command(flatten)]
+    transform_opts: TransformOpts,
+  },
+}
+
+#[derive(Args, Clone, Debug)]
+struct TransformOpts {
+  #[arg(short = 'O', value_delimiter = ' ', action = clap::ArgAction::Append)]
+  /// Enables or disables transformation passes.
+  transform_passes: Vec<TransformPass>,
+
+  #[arg(long = "pre-reduce-skip", value_delimiter = ' ', action = clap::ArgAction::Append)]
+  /// Names of the definitions that should not get pre-reduced.
+  ///
+  /// For programs that don't take arguments
+  /// and don't have side effects this is usually the entry point of the
+  /// program (otherwise, the whole program will get reduced to normal form).
+  pre_reduce_skip: Vec<String>,
+  #[arg(long = "pre-reduce-memory", default_value = "1G", value_parser = parse_abbrev_number::<usize>)]
+  /// How much memory to allocate when pre-reducing.
+  ///
+  /// Supports abbreviations such as '4G' or '400M'.
+  pre_reduce_memory: usize,
+  #[arg(long = "pre-reduce-rewrites", default_value = "100M", value_parser = parse_abbrev_number::<u64>)]
+  /// Maximum amount of rewrites to do when pre-reducing.
+  ///
+  /// Supports abbreviations such as '4G' or '400M'.
+  pre_reduce_rewrites: u64,
+}
+
 #[derive(Args, Clone, Debug)]
 struct RuntimeOpts {
   #[arg(short = 's', long = "stats")]
@@ -96,13 +187,12 @@ struct RuntimeOpts {
   /// by a walk from the root of the net. This leads to a dramatic slowdown,
   /// but allows running programs that would expand indefinitely otherwise.
   lazy_mode: bool,
-  #[arg(short = 'm', long = "memory", default_value = "1G", value_parser = mem_parser)]
-  /// How much memory to allocate on startup, measured in bytes.
+  #[arg(short = 'm', long = "memory", default_value = "1G", value_parser = parse_abbrev_number::<usize>)]
+  /// How much memory to allocate on startup.
   ///
   /// Supports abbreviations such as '4G' or '400M'.
-  memory: u64,
+  memory: usize,
 }
-
 #[derive(Args, Clone, Debug)]
 struct RunArgs {
   #[arg(short = 'e', default_value = "main")]
@@ -117,48 +207,33 @@ struct RunArgs {
   args: Vec<String>,
 }
 
-#[derive(Subcommand, Clone, Debug)]
-#[command(author, version)]
-enum CliMode {
-  /// Compile a hvm-core program into a Rust crate.
-  Compile {
-    /// hvm-core file to compile.
-    file: String,
-    #[arg(short = 'o', long = "output")]
-    /// Output path; defaults to the input file with `.hvmc` stripped.
-    output: Option<String>,
-  },
-  /// Run a program, optionally passing a list of arguments to it.
-  Run {
-    #[command(flatten)]
-    opts: RuntimeOpts,
-    /// Name of the file to load.
-    file: String,
-    #[command(flatten)]
-    args: RunArgs,
-  },
-  /// Reduce hvm-core expressions to their normal form.
-  ///
-  /// The expressions are passed as command-line arguments.
-  /// It is also possible to load files before reducing the expression,
-  /// which makes it possible to reference definitions from the file
-  /// in the expression.
-  Reduce {
-    #[command(flatten)]
-    run_opts: RuntimeOpts,
-    #[arg(required = false)]
-    /// Files to load before reducing the expressions.
-    ///
-    /// Multiple files will act as if they're concatenated together.
-    files: Vec<String>,
-    #[arg(required = false, last = true)]
-    /// Expressions to reduce.
-    ///
-    /// The normal form of each expression will be
-    /// printed on a new line. This list must be separated from the file list
-    /// with a double dash ('--').
-    exprs: Vec<String>,
-  },
+#[derive(clap::ValueEnum, Clone, Debug)]
+pub enum TransformPass {
+  All,
+  NoAll,
+  PreReduce,
+  NoPreReduce,
+}
+
+#[derive(Default)]
+pub struct TransformPasses {
+  pre_reduce: bool,
+}
+
+impl TransformPass {
+  fn passes_from_cli(args: &Vec<Self>) -> TransformPasses {
+    use TransformPass::*;
+    let mut opts = TransformPasses::default();
+    for arg in args {
+      match arg {
+        All => opts.pre_reduce = true,
+        NoAll => opts.pre_reduce = false,
+        PreReduce => opts.pre_reduce = true,
+        NoPreReduce => opts.pre_reduce = false,
+      }
+    }
+    opts
+  }
 }
 
 fn run(host: &Host, opts: RuntimeOpts, args: RunArgs) {
@@ -177,46 +252,53 @@ fn run(host: &Host, opts: RuntimeOpts, args: RunArgs) {
 /// This return a [`u64`] instead of [`usize`] to ensure that parsing CLI args
 /// doesn't fail on 32-bit systems. We want it to fail later on, when attempting
 /// to run the program.
-fn mem_parser(arg: &str) -> Result<u64, String> {
+fn parse_abbrev_number<T: TryFrom<u64>>(arg: &str) -> Result<T, String>
+where
+  <T as TryFrom<u64>>::Error: core::fmt::Debug,
+{
   let (base, scale) = match arg.to_lowercase().chars().last() {
     None => return Err("Mem size argument is empty".to_string()),
-    Some('k') => (&arg[0 .. arg.len() - 1], 1 << 10),
-    Some('m') => (&arg[0 .. arg.len() - 1], 1 << 20),
-    Some('g') => (&arg[0 .. arg.len() - 1], 1 << 30),
+    Some('k') => (&arg[0 .. arg.len() - 1], 1u64 << 10),
+    Some('m') => (&arg[0 .. arg.len() - 1], 1u64 << 20),
+    Some('g') => (&arg[0 .. arg.len() - 1], 1u64 << 30),
     Some(_) => (arg, 1),
   };
   let base = base.parse::<u64>().map_err(|e| e.to_string())?;
-  Ok(base * scale)
+  Ok((base * scale).try_into().map_err(|e| format!("{:?}", e))?)
 }
 
-fn load_files(files: &[String]) -> Arc<Mutex<Host>> {
-  let files: Vec<_> = files
+fn load_book(files: &[String], transform_opts: &TransformOpts) -> Book {
+  let mut book = files
     .iter()
     .map(|name| {
-      fs::read_to_string(name).unwrap_or_else(|_| {
+      let contents = fs::read_to_string(name).unwrap_or_else(|_| {
         eprintln!("Input file {:?} not found", name);
+        process::exit(1);
+      });
+      contents.parse::<Book>().unwrap_or_else(|e| {
+        eprintln!("Parsing error {e}");
         process::exit(1);
       })
     })
-    .collect();
-  let host = Arc::new(Mutex::new(host::Host::default()));
-  host.lock().unwrap().insert_def(
-    "HVM.log",
-    host::DefRef::Owned(Box::new(stdlib::LogDef::new({
-      let host = Arc::downgrade(&host);
-      move |wire| {
-        println!("{}", host.upgrade().unwrap().lock().unwrap().readback_tree(&wire));
-      }
-    }))),
-  );
-  for file_contents in files {
-    host.lock().unwrap().insert_book(&ast::Book::from_str(&file_contents).unwrap());
+    .fold(Book::default(), |mut acc, i| {
+      acc.nets.extend(i.nets);
+      acc
+    });
+  let transform_passes = TransformPass::passes_from_cli(&transform_opts.transform_passes);
+  if transform_passes.pre_reduce {
+    book
+      .pre_reduce(
+        &|x| transform_opts.pre_reduce_skip.iter().any(|y| x == y),
+        transform_opts.pre_reduce_memory,
+        transform_opts.pre_reduce_rewrites,
+      )
+      .unwrap();
   }
-  host
+  book
 }
 
 fn reduce_exprs(host: &Host, exprs: &[Net], opts: &RuntimeOpts) {
-  let heap = run::Heap::new_bytes(opts.memory as usize);
+  let heap = run::Heap::new_bytes(opts.memory);
   for expr in exprs {
     let mut net = DynNet::new(&heap, opts.lazy_mode);
     dispatch_dyn_net!(&mut net => {
@@ -315,6 +397,9 @@ fn compile_executable(target: &str, host: &host::Host) -> Result<(), io::Error> 
     }
     stdlib
     trace
+    transform {
+      pre_reduce
+    }
     util {
       apply_tree
       bi_enum

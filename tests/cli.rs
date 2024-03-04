@@ -114,6 +114,64 @@ fn test_cli_run_with_args() {
 }
 
 #[test]
+fn test_cli_transform() {
+  let arithmetic_program = get_arithmetic_program_path();
+
+  // Test simple program running
+  assert_display_snapshot!(
+    execute_hvmc(&[
+      "transform",
+      "-Opre-reduce",
+      &arithmetic_program,
+    ]).unwrap().1,
+    @r###"
+  @add = (<+ a b> (a b))
+  @div = (</ a b> (a b))
+  @main = ({3 </ a b> <% c d>} ({5 a c} [b d]))
+  @mod = (<% a b> (a b))
+  @mul = (<* a b> (a b))
+  @sub = (<- a b> (a b))
+
+  "###
+  );
+
+  assert_display_snapshot!(
+    execute_hvmc(&[
+      "transform",
+      "-Opre-reduce",
+      "--pre-reduce-skip", "main",
+      &arithmetic_program,
+    ]).unwrap().1,
+    @r###"
+  @add = (<+ a b> (a b))
+  @div = (</ a b> (a b))
+  @main = ({3 a b} ({5 c d} [e f]))
+  & @mod ~ (b (d f))
+  & @div ~ (a (c e))
+  @mod = (<% a b> (a b))
+  @mul = (<* a b> (a b))
+  @sub = (<- a b> (a b))
+
+  "###
+  );
+
+  // Test log
+
+  assert_display_snapshot!(
+    execute_hvmc(&[
+      "transform",
+      "-Opre-reduce",
+      &(env!("CARGO_MANIFEST_DIR").to_owned() + "/tests/programs/log.hvmc")
+    ]).unwrap().1,
+    @r###"
+  @main = a
+  & @HVM.log ~ (#1 (#2 a))
+
+  "###
+  );
+}
+
+#[test]
 fn test_cli_errors() {
   // Test passing all arguments.
   assert_display_snapshot!(

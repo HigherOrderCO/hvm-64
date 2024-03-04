@@ -1,6 +1,6 @@
 pred = λx match x {
   0: 0
-  +: x-1
+  1+: x-1
 }
 
 main = (pred 10)

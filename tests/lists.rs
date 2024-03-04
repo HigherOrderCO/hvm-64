@@ -6,7 +6,6 @@ mod loaders;
 fn list_got(index: u32) -> Book {
   let code = load_file("list_put_got.hvmc");
   let mut book = parse_core(&code);
-  println!("{:#?}", book.keys().collect::<Vec<_>>());
   let def = book.get_mut("GenGotIndex").unwrap();
   def.apply_tree(hvmc::ast::Tree::Ref { nam: format!("S{index}") });
   let def = book.get_mut("main").unwrap();
@@ -20,7 +19,6 @@ fn list_put(index: u32, value: u32) -> Book {
   let def = book.get_mut("GenPutIndexValue").unwrap();
   def.apply_tree(hvmc::ast::Tree::Ref { nam: format!("S{index}") });
   def.apply_tree(hvmc::ast::Tree::Ref { nam: format!("S{value}") });
-  println!("{:?}", def);
   let def = book.get_mut("main").unwrap();
   def.apply_tree(hvmc::ast::Tree::Ref { nam: format!("GenPutIndexValue") });
   book

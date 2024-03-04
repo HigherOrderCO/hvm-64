@@ -1,5 +1,6 @@
-use super::*;
 use crate::util::maybe_grow;
+
+use super::*;
 
 /// Calculates the labels used in each definition of a book.
 ///
@@ -74,113 +75,121 @@ use crate::util::maybe_grow;
 ///
 /// This algorithm runs in linear time (as refs are traversed at most twice),
 /// and requires no more space than the naive algorithm.
-pub(crate) fn calculate_label_sets<'a>(book: &'a Book, host: &Host) -> impl Iterator<Item = (&'a str, LabSet)> {
-  let mut state = State { book, host, labels: HashMap::with_capacity(book.len()) };
+pub(crate) fn calculate_label_sets<'b, 'l>(book: &'b Book, lookup: impl FnMut(&'b str) -> LabSet) -> LabelSets<'b> {
+  let mut state = State { book, lookup, labels: HashMap::with_capacity(book.len()) };
 
   for name in book.keys() {
     state.visit_def(name, Some(0), None);
   }
 
-  return state.labels.into_iter().map(|(nam, lab)| match lab {
-    LabelState::Done(lab) => (nam, lab),
-    _ => unreachable!(),
-  });
+  LabelSets(state.labels)
+}
 
-  struct State<'a, 'b> {
-    book: &'a Book,
-    host: &'b Host,
-    labels: HashMap<&'a str, LabelState>,
+pub(crate) struct LabelSets<'b>(HashMap<&'b str, LabelState>);
+
+impl<'b> LabelSets<'b> {
+  pub(crate) fn into_iter(self) -> impl Iterator<Item = (&'b str, LabSet)> {
+    self.0.into_iter().map(|(nam, lab)| match lab {
+      LabelState::Done(lab) => (nam, lab),
+      _ => unreachable!(),
+    })
   }
+}
 
-  #[derive(Debug)]
-  enum LabelState {
-    Done(LabSet),
-    /// Encountering this node indicates participation in a cycle with the given
-    /// head depth.
-    Cycle(usize),
-  }
+struct State<'b, F> {
+  book: &'b Book,
+  lookup: F,
+  labels: HashMap<&'b str, LabelState>,
+}
 
-  /// All of these methods share a similar signature:
-  /// - `depth` is optional; `None` indicates that this is the second processing
-  ///   pass (where the depth is irrelevant, as all cycles have been detected)
-  /// - `out`, if supplied, will be unioned with the result of this traversal
-  /// - the return value indicates the head depth, as defined above (or an
-  ///   arbitrary value `>= depth` if no cycles are involved)
-  impl<'a, 'b> State<'a, 'b> {
-    fn visit_def(&mut self, key: &'a str, depth: Option<usize>, out: Option<&mut LabSet>) -> usize {
-      match self.labels.entry(key) {
-        Entry::Vacant(e) => {
-          e.insert(LabelState::Cycle(depth.unwrap()));
+#[derive(Debug)]
+enum LabelState {
+  Done(LabSet),
+  /// Encountering this node indicates participation in a cycle with the given
+  /// head depth.
+  Cycle(usize),
+}
+
+/// All of these methods share a similar signature:
+/// - `depth` is optional; `None` indicates that this is the second processing
+///   pass (where the depth is irrelevant, as all cycles have been detected)
+/// - `out`, if supplied, will be unioned with the result of this traversal
+/// - the return value indicates the head depth, as defined above (or an
+///   arbitrary value `>= depth` if no cycles are involved)
+impl<'b, F: FnMut(&'b str) -> LabSet> State<'b, F> {
+  fn visit_def(&mut self, key: &'b str, depth: Option<usize>, out: Option<&mut LabSet>) -> usize {
+    match self.labels.entry(key) {
+      Entry::Vacant(e) => {
+        e.insert(LabelState::Cycle(depth.unwrap()));
+        self.calc_def(key, depth, out)
+      }
+      Entry::Occupied(mut e) => match e.get_mut() {
+        LabelState::Done(labs) => {
+          if let Some(out) = out {
+            out.union(labs);
+          }
+          usize::MAX
+        }
+        LabelState::Cycle(d) if depth.is_some() => *d,
+        LabelState::Cycle(_) => {
+          e.insert(LabelState::Done(LabSet::default()));
           self.calc_def(key, depth, out)
         }
-        Entry::Occupied(mut e) => match e.get_mut() {
-          LabelState::Done(labs) => {
-            if let Some(out) = out {
-              out.union(labs);
-            }
-            usize::MAX
-          }
-          LabelState::Cycle(d) if depth.is_some() => *d,
-          LabelState::Cycle(_) => {
-            e.insert(LabelState::Done(LabSet::default()));
-            self.calc_def(key, depth, out)
-          }
-        },
-      }
+      },
     }
+  }
 
-    fn calc_def(&mut self, key: &'a str, depth: Option<usize>, out: Option<&mut LabSet>) -> usize {
-      let mut labs = LabSet::default();
-      let head_depth = self.visit_within_def(key, depth, Some(&mut labs));
-      if let Some(out) = out {
-        out.union(&labs);
-      }
-      if depth.is_some_and(|x| x > head_depth) {
-        self.labels.insert(key, LabelState::Cycle(head_depth));
-      } else {
-        self.labels.insert(key, LabelState::Done(labs));
-        if depth == Some(head_depth) {
-          self.visit_within_def(key, None, None);
-        }
-      }
-      head_depth
+  fn calc_def(&mut self, key: &'b str, depth: Option<usize>, out: Option<&mut LabSet>) -> usize {
+    let mut labs = LabSet::default();
+    let head_depth = self.visit_within_def(key, depth, Some(&mut labs));
+    if let Some(out) = out {
+      out.union(&labs);
     }
+    if depth.is_some_and(|x| x > head_depth) {
+      self.labels.insert(key, LabelState::Cycle(head_depth));
+    } else {
+      self.labels.insert(key, LabelState::Done(labs));
+      if depth == Some(head_depth) {
+        self.visit_within_def(key, None, None);
+      }
+    }
+    head_depth
+  }
 
-    fn visit_within_def(&mut self, key: &str, depth: Option<usize>, mut out: Option<&mut LabSet>) -> usize {
-      let def = &self.book[key];
-      let mut head_depth = self.visit_tree(&def.root, depth, out.as_deref_mut());
-      for (a, b) in &def.redexes {
-        head_depth = head_depth.min(self.visit_tree(a, depth, out.as_deref_mut()));
-        head_depth = head_depth.min(self.visit_tree(b, depth, out.as_deref_mut()));
-      }
-      head_depth
+  fn visit_within_def(&mut self, key: &str, depth: Option<usize>, mut out: Option<&mut LabSet>) -> usize {
+    let def = &self.book[key];
+    let mut head_depth = self.visit_tree(&def.root, depth, out.as_deref_mut());
+    for (a, b) in &def.redexes {
+      head_depth = head_depth.min(self.visit_tree(a, depth, out.as_deref_mut()));
+      head_depth = head_depth.min(self.visit_tree(b, depth, out.as_deref_mut()));
     }
+    head_depth
+  }
 
-    fn visit_tree(&mut self, tree: &'a Tree, depth: Option<usize>, mut out: Option<&mut LabSet>) -> usize {
-      maybe_grow(move || match tree {
-        Tree::Era | Tree::Var { .. } | Tree::Num { .. } => usize::MAX,
-        Tree::Ctr { lab, lft, rgt } => {
-          if let Some(out) = out.as_deref_mut() {
-            out.add(*lab);
+  fn visit_tree(&mut self, tree: &'b Tree, depth: Option<usize>, mut out: Option<&mut LabSet>) -> usize {
+    maybe_grow(move || match tree {
+      Tree::Era | Tree::Var { .. } | Tree::Num { .. } => usize::MAX,
+      Tree::Ctr { lab, lft, rgt } => {
+        if let Some(out) = out.as_deref_mut() {
+          out.add(*lab);
+        }
+        usize::min(self.visit_tree(lft, depth, out.as_deref_mut()), self.visit_tree(rgt, depth, out.as_deref_mut()))
+      }
+      Tree::Ref { nam } => {
+        if self.book.contains_key(nam) {
+          self.visit_def(nam, depth.map(|x| x + 1), out)
+        } else {
+          if let Some(out) = out {
+            out.union(&(self.lookup)(nam));
           }
-          usize::min(self.visit_tree(lft, depth, out.as_deref_mut()), self.visit_tree(rgt, depth, out.as_deref_mut()))
+          usize::MAX
         }
-        Tree::Ref { nam } => {
-          if let Some(def) = self.host.defs.get(nam) {
-            if let Some(out) = out {
-              out.union(&def.labs);
-            }
-            usize::MAX
-          } else {
-            self.visit_def(nam, depth.map(|x| x + 1), out)
-          }
-        }
-        Tree::Op1 { rgt, .. } => self.visit_tree(rgt, depth, out),
-        Tree::Op2 { lft, rgt, .. } | Tree::Mat { sel: lft, ret: rgt } => {
-          usize::min(self.visit_tree(lft, depth, out.as_deref_mut()), self.visit_tree(rgt, depth, out.as_deref_mut()))
-        }
-      })
-    }
+      }
+      Tree::Op1 { rgt, .. } => self.visit_tree(rgt, depth, out),
+      Tree::Op2 { lft, rgt, .. } | Tree::Mat { sel: lft, ret: rgt } => {
+        usize::min(self.visit_tree(lft, depth, out.as_deref_mut()), self.visit_tree(rgt, depth, out.as_deref_mut()))
+      }
+    })
   }
 }
 
@@ -203,8 +212,9 @@ fn test_calculate_labels() {
       "
       .parse()
       .unwrap(),
-      &Host::default(),
+      |_| unreachable!(),
     )
+    .into_iter()
     .collect::<BTreeMap<_, _>>(),
     [
       ("a", [0, 1, 2].into_iter().collect()),

@@ -1,8 +1,8 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use hvmc::{
   ast::{Book, Net},
-  host::Host,
   run::{Heap, Net as RtNet, Strict},
+  stdlib::create_host,
 };
 use std::{
   fs,
@@ -60,11 +60,11 @@ fn run_file(path: &PathBuf, group: Option<String>, c: &mut Criterion) {
 
 fn benchmark(file_name: &str, book: Book, c: &mut Criterion) {
   let area = Heap::new_words(1 << 29);
-  let host = Host::new(&book);
+  let host = create_host(&book);
   c.bench_function(file_name, |b| {
     b.iter(|| {
       let mut net = RtNet::<Strict>::new(&area);
-      net.boot(host.defs.get("main").unwrap());
+      net.boot(host.lock().unwrap().defs.get("main").unwrap());
       black_box(black_box(net).normal())
     });
   });
@@ -72,12 +72,12 @@ fn benchmark(file_name: &str, book: Book, c: &mut Criterion) {
 
 fn benchmark_group(file_name: &str, group: String, book: Book, c: &mut Criterion) {
   let area = Heap::new_words(1 << 29);
-  let host = Host::new(&book);
+  let host = create_host(&book);
 
   c.benchmark_group(group).bench_function(file_name, |b| {
     b.iter(|| {
       let mut net = RtNet::<Strict>::new(&area);
-      net.boot(host.defs.get("main").unwrap());
+      net.boot(host.lock().unwrap().defs.get("main").unwrap());
       black_box(black_box(net).normal())
     });
   });
@@ -99,11 +99,11 @@ fn interact_benchmark(c: &mut Criterion) {
     let mut book = Book::default();
     book.insert("main".to_string(), Net { root: Era, redexes: vec![redex] });
     let area = Heap::new_words(1 << 24);
-    let host = Host::new(&book);
+    let host = create_host(&book);
     group.bench_function(name, |b| {
       b.iter(|| {
         let mut net = RtNet::<Strict>::new(&area);
-        net.boot(host.defs.get("main").unwrap());
+        net.boot(host.lock().unwrap().defs.get("main").unwrap());
         black_box(black_box(net).normal())
       });
     });

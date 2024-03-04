@@ -2,9 +2,9 @@ add = λa λb (+ a b)
 
 fib = λx match x {
   0: 1
-  +: let p = x-1; match p {
+  1+: let p = x-1; match p {
     0: 1
-    +: (+ (fib p) (fib p-1))
+    1+: (+ (fib p) (fib p-1))
   }
 }
 
