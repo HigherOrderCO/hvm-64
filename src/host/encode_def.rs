@@ -1,4 +1,5 @@
 use super::*;
+use crate::util::maybe_grow;
 
 /// Converts an ast net to a list of instructions to create the net.
 ///
@@ -54,7 +55,7 @@ pub(super) fn ast_net_to_instructions(defs: &HashMap<String, DefRef>, net: &Net)
       self.visit_tree(tree, trg);
     }
     fn visit_tree(&mut self, tree: &'a Tree, trg: TrgId) {
-      stacker::maybe_grow(1024 * 32, 1024 * 1024, move || match tree {
+      maybe_grow(move || match tree {
         Tree::Era => {
           self.instr.push(Instruction::LinkConst { trg, port: Port::ERA });
         }

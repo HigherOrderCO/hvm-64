@@ -1,4 +1,5 @@
 use super::*;
+use crate::util::maybe_grow;
 
 /// Calculates the labels used in each definition of a book.
 ///
@@ -156,7 +157,7 @@ pub(crate) fn calculate_label_sets<'a>(book: &'a Book, host: &Host) -> impl Iter
     }
 
     fn visit_tree(&mut self, tree: &'a Tree, depth: Option<usize>, mut out: Option<&mut LabSet>) -> usize {
-      stacker::maybe_grow(1024 * 32, 1024 * 1024, move || match tree {
+      maybe_grow(move || match tree {
         Tree::Era | Tree::Var { .. } | Tree::Num { .. } => usize::MAX,
         Tree::Ctr { lab, lft, rgt } => {
           if let Some(out) = out.as_deref_mut() {
