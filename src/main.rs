@@ -313,6 +313,7 @@ fn compile_executable(file_name: &str, host: &host::Host) -> Result<(), io::Erro
       bi_enum
       create_var
       deref
+      maybe_grow
       stats
     }
   }
