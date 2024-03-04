@@ -54,18 +54,33 @@ impl Host {
   }
 
   /// Converts all of the nets from the book into runtime defs, and inserts them
-  /// into the host.
+  /// into the host. The book must not have refs that are not in the book or the
+  /// host.
   pub fn insert_book(&mut self, book: &Book) {
+    self.insert_book_with_default(book, &mut |x| panic!("Found reference {x:?}, which is not in the book!"))
+  }
+
+  /// Like `insert_book`, but allows specifying a function (`default_def`) that
+  /// will be run when the name of a definition is not found in the book.
+  /// The return value of the function will be inserted into the host.
+  pub fn insert_book_with_default(&mut self, book: &Book, default_def: &mut dyn FnMut(&str) -> DefRef) {
     self.defs.reserve(book.len());
     self.back.reserve(book.len());
-
     // Because there may be circular dependencies, inserting the definitions
     // must be done in two phases:
 
     // First, we insert empty defs into the host. Even though their instructions
     // are not yet set, the address of the def will not change, meaning that
     // `net_to_runtime_def` can safely use `Port::new_def` on them.
-    for (name, labs) in calculate_label_sets(book, self) {
+    for (name, labs) in calculate_label_sets(book, |nam| match self.defs.get(nam) {
+      Some(x) => x.labs.clone(),
+      None => {
+        self.insert_def(&nam, default_def(nam));
+        self.defs[nam].labs.clone()
+      }
+    })
+    .into_iter()
+    {
       let def = DefRef::Owned(Box::new(Def::new(labs, InterpretedDef::default())));
       self.insert_def(name, def);
     }
@@ -73,7 +88,9 @@ impl Host {
     // Now that `defs` is fully populated, we can fill in the instructions of
     // each of the new defs.
     for (nam, net) in book.iter() {
-      let instr = ast_net_to_instructions(&self.defs, net);
+      let instr = ast_net_to_instructions(net, |nam| {
+        Port::new_ref(&self.defs[nam] /* calculate_label_sets already ensures all ref names are in self.defs */)
+      });
       match self.defs.get_mut(nam).unwrap() {
         DefRef::Owned(def) => def.downcast_mut::<InterpretedDef>().unwrap().data.instr = instr,
         DefRef::Static(_) => unreachable!(),

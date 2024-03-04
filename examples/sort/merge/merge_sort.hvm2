@@ -11,7 +11,7 @@ merge = λxs
     let ys_nil  = λx λxs (List.cons x xs)
     let ys_cons = λy λys λx λxs
       let t = λt (t (List.cons x) λx(x) (List.cons y))
-      let t = let k = (< x y); (t (match k { 0: λaλbλcλt(t c a b); +: λaλbλcλt(t a b c) }))
+      let t = let k = (< x y); (t (match k { 0: λaλbλcλt(t c a b); 1+: λaλbλcλt(t a b c) }))
       (t λa λb λc (a (merge (b xs) (c ys))))
     (ys ys_nil ys_cons x xs)
   (xs xs_nil xs_cons)
@@ -23,7 +23,7 @@ sum = λxs
 
 range = λn match n {
   0: λx (Leaf x)
-  +: λx (Node (range n-1 (+ (* x 2) 1)) (range n-1 (* x 2)))
+  1+: λx (Node (range n-1 (+ (* x 2) 1)) (range n-1 (* x 2)))
 }
 
 main = (sum (sort (range 2 0)))

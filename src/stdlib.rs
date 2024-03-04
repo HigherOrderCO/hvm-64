@@ -1,6 +1,10 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
-use crate::run::{AsDef, Def, LabSet, Mode, Net, Port, Tag, Trg, Wire};
+use crate::{
+  ast::Book,
+  host::{DefRef, Host},
+  run::{AsDef, Def, LabSet, Mode, Net, Port, Tag, Trg, Wire},
+};
 
 /// `@IDENTITY = (x x)`
 pub const IDENTITY: *const Def = const { &Def::new(LabSet::from_bits(&[1]), (call_identity, call_identity)) }.upcast();
@@ -97,4 +101,20 @@ impl<F: Fn(Wire) + Send + Sync + 'static> AsDef for ActiveLogDef<F> {
     }
     def.data.logger.maybe_log(net);
   }
+}
+
+/// Create a `Host` from a `Book`, including `hvm-core`'s built-in definitions
+pub fn create_host(book: &Book) -> Arc<Mutex<Host>> {
+  let host = Arc::new(Mutex::new(Host::default()));
+  host.lock().unwrap().insert_def(
+    "HVM.log",
+    DefRef::Owned(Box::new(crate::stdlib::LogDef::new({
+      let host = Arc::downgrade(&host);
+      move |wire| {
+        println!("{}", host.upgrade().unwrap().lock().unwrap().readback_tree(&wire));
+      }
+    }))),
+  );
+  host.lock().unwrap().insert_book(&book);
+  host
 }

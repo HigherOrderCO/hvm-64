@@ -8,7 +8,7 @@ pub mod host;
 pub mod ops;
 pub mod run;
 pub mod stdlib;
-
+pub mod transform;
 pub mod util;
 
 #[doc(hidden)] // not public api

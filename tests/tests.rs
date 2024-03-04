@@ -3,6 +3,7 @@ use std::{
   io::{self, Write},
   path::{Path, PathBuf},
   str::FromStr,
+  sync::{Arc, Mutex},
   time::Instant,
 };
 
@@ -59,28 +60,32 @@ fn test_bool_and() {
   assert_debug_snapshot!(rwts.total(), @"9");
 }
 
-fn test_run(name: &str, host: Host) {
+fn test_run(name: &str, host: Arc<Mutex<Host>>) {
   print!("{name}...");
   io::stdout().flush().unwrap();
-  let Some(entrypoint) = host.defs.get("main") else {
-    println!(" skipping");
-    return;
-  };
   let heap = run::Heap::new_words(1 << 29);
   let mut net = run::Net::<Strict>::new(&heap);
-  net.boot(entrypoint);
+  // The host is locked inside this block.
+  {
+    let lock = host.lock().unwrap();
+    let Some(entrypoint) = lock.defs.get("main") else {
+      println!(" skipping");
+      return;
+    };
+    net.boot(entrypoint);
+  }
   let start = Instant::now();
   net.parallel_normal();
   println!(" {:.3?}", start.elapsed());
 
-  let output = format!("{}\n{}", host.readback(&net), show_rewrites(&net.rwts));
+  let output = format!("{}\n{}", host.lock().unwrap().readback(&net), show_rewrites(&net.rwts));
   assert_snapshot!(output);
 }
 
 fn test_path(path: &Path) {
   let code = fs::read_to_string(&path).unwrap();
   let book = ast::Book::from_str(&code).unwrap();
-  let host = Host::new(&book);
+  let host = hvmc::stdlib::create_host(&book);
 
   let path = path.strip_prefix(env!("CARGO_MANIFEST_DIR")).unwrap();
 

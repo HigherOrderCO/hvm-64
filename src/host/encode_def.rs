@@ -4,9 +4,12 @@ use crate::util::maybe_grow;
 /// Converts an ast net to a list of instructions to create the net.
 ///
 /// `defs` must be populated with every `Ref` node that may appear in the net.
-pub(super) fn ast_net_to_instructions(defs: &HashMap<String, DefRef>, net: &Net) -> Vec<Instruction> {
+/// Converts an ast net to a list of instructions to create the net.
+///
+/// `get_def` gets the `Port` corresponding to a `Ref` name
+pub(crate) fn ast_net_to_instructions<F: FnMut(&str) -> Port>(net: &Net, get_def: F) -> Vec<Instruction> {
   let mut state =
-    State { defs, scope: Default::default(), instr: Default::default(), end: Default::default(), next_index: 1 };
+    State { get_def, scope: Default::default(), instr: Default::default(), end: Default::default(), next_index: 1 };
 
   state.visit_tree(&net.root, TrgId::new(0));
 
@@ -18,15 +21,15 @@ pub(super) fn ast_net_to_instructions(defs: &HashMap<String, DefRef>, net: &Net)
 
   return state.instr;
 
-  struct State<'a> {
-    defs: &'a HashMap<String, DefRef>,
+  struct State<'a, F: FnMut(&str) -> Port> {
+    get_def: F,
     scope: HashMap<&'a str, TrgId>,
     instr: Vec<Instruction>,
     end: Vec<Instruction>,
     next_index: usize,
   }
 
-  impl<'a> State<'a> {
+  impl<'a, F: FnMut(&str) -> Port> State<'a, F> {
     fn id(&mut self) -> TrgId {
       let i = self.next_index;
       self.next_index += 1;
@@ -35,7 +38,7 @@ pub(super) fn ast_net_to_instructions(defs: &HashMap<String, DefRef>, net: &Net)
     fn visit_redex(&mut self, a: &'a Tree, b: &'a Tree) {
       let (port, tree) = match (a, b) {
         (Tree::Era, t) | (t, Tree::Era) => (Port::ERA, t),
-        (Tree::Ref { nam }, t) | (t, Tree::Ref { nam }) => (Port::new_ref(&self.defs[nam]), t),
+        (Tree::Ref { nam }, t) | (t, Tree::Ref { nam }) => ((self.get_def)(&nam), t),
         (Tree::Num { val }, t) | (t, Tree::Num { val }) => (Port::new_num(*val), t),
         (t, u) => {
           let av = self.id();
@@ -60,7 +63,7 @@ pub(super) fn ast_net_to_instructions(defs: &HashMap<String, DefRef>, net: &Net)
           self.instr.push(Instruction::LinkConst { trg, port: Port::ERA });
         }
         Tree::Ref { nam } => {
-          self.instr.push(Instruction::LinkConst { trg, port: Port::new_ref(&self.defs[nam]) });
+          self.instr.push(Instruction::LinkConst { trg, port: (self.get_def)(&nam) });
         }
         Tree::Num { val } => {
           self.instr.push(Instruction::LinkConst { trg, port: Port::new_num(*val) });

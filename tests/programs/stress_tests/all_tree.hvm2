@@ -8,7 +8,7 @@ and = λa (a λb(b) λb(False))
 
 gen = λn match n {
   0: (Leaf True)
-  +: (Node (gen n-1) (gen n-1))
+  1+: (Node (gen n-1) (gen n-1))
 }
 
 all = λt
