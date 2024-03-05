@@ -199,26 +199,40 @@ impl<'a, M: Mode> Net<'a, M> {
 /// [`Def`]s, when not pre-compiled, are represented as lists of instructions.
 #[derive(Debug, Default, Clone)]
 pub struct InterpretedDef {
-  pub instr: Vec<Instruction>,
+  pub(crate) instr: Vec<Instruction>,
+  /// The number of targets used in the def; must be greater than all of the
+  /// `TrgId` indices in `instr`.
+  pub(crate) trgs: usize,
 }
 
 impl AsDef for InterpretedDef {
   unsafe fn call<M: Mode>(slf: *const Def<Self>, net: &mut Net<M>, trg: Port) {
-    let instructions = unsafe { &(*slf).data.instr };
+    let def = unsafe { &(*slf).data };
+    let instructions = &def.instr;
 
-    let mut trgs = unsafe { std::mem::transmute::<_, Trgs>(Trgs(&mut net.trgs[..])) };
+    if def.trgs >= net.trgs.len() {
+      net.trgs = Box::new_uninit_slice(def.trgs);
+    }
 
-    struct Trgs<'a>(&'a mut [Trg]);
+    let mut trgs = Trgs(&mut net.trgs[..] as *mut _ as *mut _);
 
-    impl<'a> Trgs<'a> {
+    /// Points to an array of `Trg`s of length at least `def.trgs`. The `Trg`s
+    /// may not all be initialized.
+    ///
+    /// Only `TrgId`s with index less than `def.trgs` may be passed to `get_trg`
+    /// and `set_trg`, and `get_trg` can only be called after `set_trg` was
+    /// called with the same `TrgId`.
+    struct Trgs(*mut Trg);
+
+    impl Trgs {
       #[inline(always)]
       fn get_trg(&self, i: TrgId) -> Trg {
-        unsafe { (*self.0.as_ptr().byte_offset(i.byte_offset as _)).clone() }
+        unsafe { (*self.0.byte_offset(i.byte_offset as _)).clone() }
       }
 
       #[inline(always)]
       fn set_trg(&mut self, i: TrgId, trg: Trg) {
-        unsafe { *self.0.as_mut_ptr().byte_offset(i.byte_offset as _) = trg }
+        unsafe { *self.0.byte_offset(i.byte_offset as _) = trg }
       }
     }
 

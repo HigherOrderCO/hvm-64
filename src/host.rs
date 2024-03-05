@@ -17,7 +17,7 @@ mod encode_net;
 mod readback;
 
 use calc_labels::calculate_label_sets;
-use encode_def::ast_net_to_instructions;
+use encode_def::encode_def;
 
 /// Stores a bidirectional mapping between names and runtime defs.
 #[derive(Default)]
@@ -88,11 +88,11 @@ impl Host {
     // Now that `defs` is fully populated, we can fill in the instructions of
     // each of the new defs.
     for (nam, net) in book.iter() {
-      let instr = ast_net_to_instructions(net, |nam| {
+      let data = encode_def(net, |nam| {
         Port::new_ref(&self.defs[nam] /* calculate_label_sets already ensures all ref names are in self.defs */)
       });
       match self.defs.get_mut(nam).unwrap() {
-        DefRef::Owned(def) => def.downcast_mut::<InterpretedDef>().unwrap().data.instr = instr,
+        DefRef::Owned(def) => def.downcast_mut::<InterpretedDef>().unwrap().data = data,
         DefRef::Static(_) => unreachable!(),
       }
     }
