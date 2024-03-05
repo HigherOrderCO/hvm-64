@@ -199,8 +199,10 @@ impl<'a, M: Mode> Net<'a, M> {
 /// [`Def`]s, when not pre-compiled, are represented as lists of instructions.
 #[derive(Debug, Default, Clone)]
 pub struct InterpretedDef {
-  pub instr: Vec<Instruction>,
-  pub trgs: usize,
+  pub(crate) instr: Vec<Instruction>,
+  /// The number of targets used in the def; must be greater than all of the
+  /// `TrgId` indices in `instr`.
+  pub(crate) trgs: usize,
 }
 
 impl AsDef for InterpretedDef {
@@ -214,6 +216,12 @@ impl AsDef for InterpretedDef {
 
     let mut trgs = Trgs(&mut net.trgs[..] as *mut _ as *mut _);
 
+    /// Points to an array of `Trg`s of length at least `def.trgs`. The `Trg`s
+    /// may not all be initialized.
+    ///
+    /// Only `TrgId`s with index less than `def.trgs` may be passed to `get_trg`
+    /// and `set_trg`, and `get_trg` can only be called after `set_trg` was
+    /// called with the same `TrgId`.
     struct Trgs(*mut Trg);
 
     impl Trgs {
