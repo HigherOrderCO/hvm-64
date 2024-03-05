@@ -374,8 +374,7 @@ fn compile_executable(target: &str, host: &host::Host) -> Result<(), io::Error> 
     fuzz
     host {
       calc_labels
-      encode_def
-      encode_net
+      encode
       readback
     }
     lib
@@ -401,6 +400,7 @@ fn compile_executable(target: &str, host: &host::Host) -> Result<(), io::Error> 
     }
     util {
       apply_tree
+      array_vec
       bi_enum
       create_var
       deref

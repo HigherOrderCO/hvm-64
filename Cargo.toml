@@ -23,6 +23,7 @@ panic = "abort"
 debug = "full"
 
 [dependencies]
+arrayvec = "0.7.4"
 clap = { version = "4.5.1", features = ["derive"] }
 nohash-hasher = { version = "0.2.0" }
 stacker = "0.1.15"

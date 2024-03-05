@@ -10,10 +10,12 @@
 //!
 //! [interaction calculus]: https://en.wikipedia.org/wiki/Interaction_nets#Interaction_calculus
 
+use arrayvec::ArrayVec;
+
 use crate::{
   ops::Op,
   run::Lab,
-  util::{deref, maybe_grow},
+  util::{array_vec, deref, maybe_grow},
 };
 use std::{collections::BTreeMap, fmt, str::FromStr};
 
@@ -58,13 +60,21 @@ pub enum Tree {
   Num { val: u64 },
   /// A nilary node, referencing a named net.
   Ref { nam: String },
-  /// A binary interaction combinator.
+  /// A n-ary interaction combinator.
   Ctr {
     /// The label of the combinator. (Combinators with the same label
     /// annihilate, and combinators with different labels commute.)
     lab: Lab,
-    lft: Box<Tree>,
-    rgt: Box<Tree>,
+    /// The auxiliary ports of this node.
+    ///
+    /// - 0 ports: this behaves identically to an eraser node.
+    /// - 1 port: this behaves identically to a wire.
+    /// - 2 ports: this is a standard binary combinator node.
+    /// - 3+ ports: equivalent to right-chained binary nodes; `(a b c)` is
+    ///   equivalent to `(a (b c))`.
+    ///
+    /// The length of this vector must be less than [`MAX_ARITY`].
+    ports: Vec<Tree>,
   },
   /// A binary node representing an operation on native integers.
   ///
@@ -81,18 +91,101 @@ pub enum Tree {
   ///
   /// The principal port connects to the integer to be matched on.
   Mat {
-    /// An auxiliary port; connects to the branches of this match.
-    ///
-    /// This should be connected to something of the form:
-    /// ```text
-    /// (+value_if_zero (-predecessor_of_number +value_if_non_zero))
-    /// ```
-    sel: Box<Tree>,
+    /// An auxiliary port; connects to the zero branch.
+    zero: Box<Tree>,
+    /// An auxiliary port; connects to the predecessor input of the succ branch.
+    pred: Box<Tree>,
+    /// An auxiliary port; connects to the output of the succ branch.
+    succ: Box<Tree>,
     /// An auxiliary port; connects to the output.
-    ret: Box<Tree>,
+    out: Box<Tree>,
+  },
+  /// An Scott-encoded ADT node.
+  ///
+  /// This is always equivalent to:
+  /// ```text
+  /// {$lab
+  ///   * * * ...                // one era node per `variant_index`
+  ///   {$lab $f0 $f1 $f2 ... R} // each field, in order, followed by a var node
+  ///   * * * ...                // one era node per `variant_count - variant_index - 1`
+  ///   R                        // a var node
+  /// }
+  /// ```
+  ///
+  /// For example:
+  /// ```text
+  /// data Option = None | (Some value):
+  ///   None:
+  ///     (0:2) = Adt { lab: 0, variant_index: 0, variant_count: 2, fields: [] }
+  ///     (R * R) = Ctr { lab: 0, ports: [Var { nam: "R" }, Era, Var { nam: "R" }]}
+  ///   (Some 123):
+  ///     (1:2 #123) = Adt { lab: 0, variant_index: 0, variant_count: 2, fields: [Num { val: 123 }] }
+  ///     (* (#123 R) R) = Ctr { lab: 0, ports: [Era, Ctr { lab: 0, ports: [Num { val: 123 }, Var { nam: "R" }] }, Var { nam: "R" }]}
+  /// ```
+  Adt {
+    lab: Lab,
+    /// The index of the variant of this ADT node.
+    ///
+    /// Must be less than `variant_count`.
+    variant_index: usize,
+    /// The number of variants in the data type.
+    ///
+    /// Must be greater than `0` and less than `MAX_ADT_VARIANTS`.
+    variant_count: usize,
+    /// The fields of this ADT node.
+    ///
+    /// Must have a length less than `MAX_ADT_FIELDS`.
+    fields: Vec<Tree>,
   },
   /// One side of a wire; the other side will have the same name.
   Var { nam: String },
+}
+
+pub const MAX_ARITY: usize = 8;
+pub const MAX_ADT_VARIANTS: usize = MAX_ARITY - 1;
+pub const MAX_ADT_FIELDS: usize = MAX_ARITY - 1;
+
+impl Tree {
+  #[inline(always)]
+  pub fn children(&self) -> impl Iterator<Item = &Tree> {
+    ArrayVec::<_, MAX_ARITY>::into_iter(match self {
+      Tree::Era | Tree::Num { .. } | Tree::Ref { .. } | Tree::Var { .. } => array_vec::from_array([]),
+      Tree::Ctr { ports, .. } => array_vec::from_iter(ports),
+      Tree::Op { rhs, out, .. } => array_vec::from_array([rhs, out]),
+      Tree::Mat { zero, pred, succ, out } => array_vec::from_array([zero, pred, succ, out]),
+      Tree::Adt { fields, .. } => array_vec::from_iter(fields),
+    })
+  }
+
+  #[inline(always)]
+  pub fn children_mut(&mut self) -> impl Iterator<Item = &mut Tree> {
+    ArrayVec::<_, MAX_ARITY>::into_iter(match self {
+      Tree::Era | Tree::Num { .. } | Tree::Ref { .. } | Tree::Var { .. } => array_vec::from_array([]),
+      Tree::Ctr { ports, .. } => array_vec::from_iter(ports),
+      Tree::Op { rhs, out, .. } => array_vec::from_array([rhs, out]),
+      Tree::Mat { zero, pred, succ, out } => array_vec::from_array([zero, pred, succ, out]),
+      Tree::Adt { fields, .. } => array_vec::from_iter(fields),
+    })
+  }
+
+  pub(crate) fn lab(&self) -> Option<Lab> {
+    match self {
+      Tree::Ctr { lab, ports } if ports.len() >= 2 => Some(*lab),
+      Tree::Adt { lab, .. } => Some(*lab),
+      _ => None,
+    }
+  }
+
+  pub fn legacy_mat(arms: Tree, out: Tree) -> Option<Tree> {
+    let Tree::Ctr { lab: 0, ports } = arms else { None? };
+    let Ok([zero, succ]) = <[_; 2]>::try_from(ports) else { None? };
+    let Tree::Ctr { lab: 0, ports } = succ else { None? };
+    let Ok([pred, succ]) = <[_; 2]>::try_from(ports) else { None? };
+    let zero = Box::new(zero);
+    let pred = Box::new(pred);
+    let succ = Box::new(succ);
+    Some(Tree::Mat { zero, pred, succ, out: Box::new(out) })
+  }
 }
 
 /// The state of the HVMC parser.
@@ -147,15 +240,52 @@ impl<'i> Parser<'i> {
             '{' => self.parse_int()? as Lab,
             _ => unreachable!(),
           };
-          let lft = Box::new(self.parse_tree()?);
-          let rgt = Box::new(self.parse_tree()?);
-          self.consume(match char {
-            '(' => ")",
-            '[' => "]",
-            '{' => "}",
+          let close = match char {
+            '(' => ')',
+            '[' => ']',
+            '{' => '}',
             _ => unreachable!(),
-          })?;
-          Ok(Tree::Ctr { lab, lft, rgt })
+          };
+          self.skip_trivia();
+          if self.peek_char().is_some_and(|x| x.is_ascii_digit()) {
+            let variant_index = self.parse_int()?;
+            self.consume(":")?;
+            let variant_count = self.parse_int()?;
+            let mut fields = Vec::new();
+            self.skip_trivia();
+            while self.peek_char() != Some(close) {
+              fields.push(self.parse_tree()?);
+              self.skip_trivia();
+            }
+            self.advance_char();
+            if variant_count == 0 {
+              Err("variant count cannot be zero".to_owned())?;
+            }
+            if variant_count > (MAX_ADT_VARIANTS as u64) {
+              Err("adt has too many variants".to_owned())?;
+            }
+            if variant_index >= variant_count {
+              Err("variant index out of range".to_owned())?;
+            }
+            let variant_index = variant_index as usize;
+            let variant_count = variant_count as usize;
+            if fields.len() > MAX_ADT_FIELDS {
+              Err("adt has too many fields".to_owned())?;
+            }
+            Ok(Tree::Adt { lab, variant_index, variant_count, fields })
+          } else {
+            let mut ports = Vec::new();
+            self.skip_trivia();
+            while self.peek_char() != Some(close) {
+              ports.push(self.parse_tree()?);
+              self.skip_trivia();
+            }
+            self.advance_char();
+            if ports.len() > MAX_ARITY {
+              Err("ctr has too many ports".to_owned())?;
+            }
+            Ok(Tree::Ctr { lab, ports })
+          }
         }
         // Ref = "@" Name
         Some('@') => {
@@ -182,10 +312,20 @@ impl<'i> Parser<'i> {
         Some('?') => {
           self.advance_char();
           self.consume("<")?;
-          let sel = Box::new(self.parse_tree()?);
-          let ret = Box::new(self.parse_tree()?);
-          self.consume(">")?;
-          Ok(Tree::Mat { sel, ret })
+          let zero = self.parse_tree()?;
+          let pred = self.parse_tree()?;
+          self.skip_trivia();
+          if self.peek_char() == Some('>') {
+            self.advance_char();
+            Tree::legacy_mat(zero, pred).ok_or_else(|| "invalid legacy match".to_owned())
+          } else {
+            let zero = Box::new(zero);
+            let pred = Box::new(pred);
+            let succ = Box::new(self.parse_tree()?);
+            let out = Box::new(self.parse_tree()?);
+            self.consume(">")?;
+            Ok(Tree::Mat { zero, pred, succ, out })
+          }
         }
         // Var = Name
         _ => Ok(Tree::Var { nam: self.parse_name()? }),
@@ -335,16 +475,49 @@ impl fmt::Display for Tree {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     maybe_grow(move || match self {
       Tree::Era => write!(f, "*"),
-      Tree::Ctr { lab, lft, rgt } => match lab {
-        0 => write!(f, "({lft} {rgt})"),
-        1 => write!(f, "[{lft} {rgt}]"),
-        _ => write!(f, "{{{lab} {lft} {rgt}}}"),
-      },
+      Tree::Ctr { lab, ports } => {
+        match lab {
+          0 => write!(f, "("),
+          1 => write!(f, "["),
+          _ => write!(f, "{{{lab}"),
+        }?;
+        let mut space = *lab > 1;
+        for port in ports {
+          if space {
+            write!(f, " ")?;
+          }
+          write!(f, "{port}")?;
+          space = true;
+        }
+        match lab {
+          0 => write!(f, ")"),
+          1 => write!(f, "]"),
+          _ => write!(f, "}}"),
+        }?;
+        Ok(())
+      }
+      Tree::Adt { lab, variant_index, variant_count, fields } => {
+        match lab {
+          0 => write!(f, "("),
+          1 => write!(f, "["),
+          _ => write!(f, "{{{lab} "),
+        }?;
+        write!(f, "{}:{}", variant_index, variant_count)?;
+        for field in fields {
+          write!(f, " {field}")?;
+        }
+        match lab {
+          0 => write!(f, ")"),
+          1 => write!(f, "]"),
+          _ => write!(f, "}}"),
+        }?;
+        Ok(())
+      }
       Tree::Var { nam } => write!(f, "{nam}"),
       Tree::Ref { nam } => write!(f, "@{nam}"),
       Tree::Num { val } => write!(f, "#{val}"),
       Tree::Op { op, rhs, out } => write!(f, "<{op} {rhs} {out}>"),
-      Tree::Mat { sel, ret } => write!(f, "?<{sel} {ret}>"),
+      Tree::Mat { zero, pred, succ, out } => write!(f, "?<{zero} {pred} {succ} {out}>"),
     })
   }
 }

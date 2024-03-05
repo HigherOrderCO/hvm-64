@@ -12,12 +12,10 @@ use std::{
 };
 
 mod calc_labels;
-mod encode_def;
-mod encode_net;
+mod encode;
 mod readback;
 
 use calc_labels::calculate_label_sets;
-pub(crate) use encode_def::encode_def;
 
 /// Stores a bidirectional mapping between names and runtime defs.
 #[derive(Default)]
@@ -88,9 +86,7 @@ impl Host {
     // Now that `defs` is fully populated, we can fill in the instructions of
     // each of the new defs.
     for (nam, net) in book.iter() {
-      let data = encode_def(net, |nam| {
-        Port::new_ref(&self.defs[nam] /* calculate_label_sets already ensures all ref names are in self.defs */)
-      });
+      let data = self.encode_def(net);
       match self.defs.get_mut(nam).unwrap() {
         DefRef::Owned(def) => def.downcast_mut::<InterpretedDef>().unwrap().data = data,
         DefRef::Static(_) => unreachable!(),

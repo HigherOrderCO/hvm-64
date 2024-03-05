@@ -167,27 +167,21 @@ impl<'b, F: FnMut(&'b str) -> LabSet> State<'b, F> {
   }
 
   fn visit_tree(&mut self, tree: &'b Tree, depth: Option<usize>, mut out: Option<&mut LabSet>) -> usize {
-    maybe_grow(move || match tree {
-      Tree::Era | Tree::Var { .. } | Tree::Num { .. } => usize::MAX,
-      Tree::Ctr { lab, lft, rgt } => {
+    maybe_grow(move || {
+      if let Some(lab) = tree.lab() {
         if let Some(out) = out.as_deref_mut() {
-          out.add(*lab);
+          out.add(lab);
         }
-        usize::min(self.visit_tree(lft, depth, out.as_deref_mut()), self.visit_tree(rgt, depth, out.as_deref_mut()))
       }
-      Tree::Ref { nam } => {
+      if let Tree::Ref { nam } = tree {
         if self.book.contains_key(nam) {
-          self.visit_def(nam, depth.map(|x| x + 1), out)
-        } else {
-          if let Some(out) = out {
-            out.union(&(self.lookup)(nam));
-          }
-          usize::MAX
+          return self.visit_def(nam, depth.map(|x| x + 1), out);
+        }
+        if let Some(out) = &mut out {
+          out.union(&(self.lookup)(nam));
         }
       }
-      Tree::Op { rhs: lft, out: rgt, .. } | Tree::Mat { sel: lft, ret: rgt } => {
-        usize::min(self.visit_tree(lft, depth, out.as_deref_mut()), self.visit_tree(rgt, depth, out.as_deref_mut()))
-      }
+      tree.children().map(|child| self.visit_tree(child, depth, out.as_deref_mut())).fold(usize::MAX, usize::min)
     })
   }
 }
