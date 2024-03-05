@@ -57,15 +57,10 @@ impl<'a> ReadbackState<'a> {
       Tag::Ref if port == Port::ERA => Tree::Era,
       Tag::Ref => Tree::Ref { nam: self.host.back[&port.addr()].clone() },
       Tag::Num => Tree::Num { val: port.num() },
-      Tag::Op2 => {
-        let opr = port.op();
+      Tag::Op => {
+        let op = port.op();
         let node = port.traverse_node();
-        Tree::Op2 { opr, lft: Box::new(self.read_wire(node.p1)), rgt: Box::new(self.read_wire(node.p2)) }
-      }
-      Tag::Op1 => {
-        let opr = port.op();
-        let node = port.traverse_op1();
-        Tree::Op1 { opr, lft: node.num.num(), rgt: Box::new(self.read_wire(node.p2)) }
+        Tree::Op { op, rhs: Box::new(self.read_wire(node.p1)), out: Box::new(self.read_wire(node.p2)) }
       }
       Tag::Ctr => {
         let node = port.traverse_node();

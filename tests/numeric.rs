@@ -18,7 +18,7 @@ fn test_add() {
   let net = op_net(10, Op::Add, 2);
   let (rwts, net) = normal(net, 16);
   assert_snapshot!(Net::to_string(&net), @"#12");
-  assert_debug_snapshot!(rwts.total(), @"3");
+  assert_debug_snapshot!(rwts.total(), @"2");
 }
 
 #[test]
@@ -99,23 +99,15 @@ fn test_xor() {
 }
 
 #[test]
-fn test_not() {
-  let net = op_net(0, Op::Not, 256);
-  let (rwts, net) = normal(net, 16);
-  assert_snapshot!(Net::to_string(&net), @"#1152921504606846975");
-  assert_debug_snapshot!(rwts.total(), @"3");
-}
-
-#[test]
 fn test_lsh() {
-  let net = op_net(10, Op::Lsh, 2);
+  let net = op_net(10, Op::Shl, 2);
   let (_rwts, net) = normal(net, 16);
   assert_snapshot!(Net::to_string(&net), @"#40");
 }
 
 #[test]
 fn test_rsh() {
-  let net = op_net(10, Op::Rsh, 2);
+  let net = op_net(10, Op::Shr, 2);
   let (_rwts, net) = normal(net, 16);
   assert_snapshot!(Net::to_string(&net), @"#2");
 }
@@ -125,5 +117,5 @@ fn test_div_by_0() {
   let net = op_net(9, Op::Div, 0);
   let (rwts, net) = normal(net, 16);
   assert_snapshot!(Net::to_string(&net), @"#0");
-  assert_debug_snapshot!(rwts.total(), @"3");
+  assert_debug_snapshot!(rwts.total(), @"2");
 }

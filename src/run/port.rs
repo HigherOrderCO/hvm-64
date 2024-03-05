@@ -56,7 +56,7 @@ bi_enum! {
     ///
     /// The 4th bit from the bottom is currently unused in this port.
     Num = 3,
-    /// An `Op2` port represents the principal port of an Op2 node.
+    /// An `Op` port represents the principal port of an Op node.
     ///
     /// The label of this port is the corresponding operation, which can be
     /// accessed with [`Port::op`].
@@ -64,17 +64,7 @@ bi_enum! {
     /// The address of this port is the address of a two-word allocation,
     /// storing the targets of the wires connected to the two auxiliary ports of
     /// this node.
-    Op2 = 4,
-    /// An `Op1` port represents the principal port of an Op1 node.
-    ///
-    /// The label of this port is the corresponding operation, which can be
-    /// accessed with [`Port::op`].
-    ///
-    /// The address of this port is the address of a two-word allocation. The
-    /// first word in this allocation stores the first operand as a `Num` port,
-    /// and the second word stores the target of the wire connected to the
-    /// auxiliary port of this node.
-    Op1 = 5,
+    Op = 4,
     /// A `Mat` port represents the principal port of a Mat node.
     ///
     /// The address of this port is the address of a two-word allocation,
@@ -107,7 +97,7 @@ impl fmt::Debug for Port {
       _ => match self.tag() {
         Num => write!(f, "[Num {}]", self.num()),
         Var | Red | Mat => write!(f, "[{:?} {:?}]", self.tag(), self.addr()),
-        Op2 | Op1 | Ctr | Ref => write!(f, "[{:?} {:?} {:?}]", self.tag(), self.lab(), self.addr()),
+        Op | Ctr | Ref => write!(f, "[{:?} {:?} {:?}]", self.tag(), self.lab(), self.addr()),
       },
     }
   }

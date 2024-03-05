@@ -91,7 +91,7 @@ impl<F: Fn(Wire) + Send + Sync + 'static> AsDef for ActiveLogDef<F> {
         }
       }
       Tag::Ref | Tag::Num | Tag::Var => net.link_port_port(def.data.out, port),
-      tag @ (Tag::Op2 | Tag::Op1 | Tag::Mat | Tag::Ctr) => {
+      tag @ (Tag::Op | Tag::Mat | Tag::Ctr) => {
         let old = port.consume_node();
         let new = net.create_node(tag, old.lab);
         net.link_port_port(def.data.out, new.p0);

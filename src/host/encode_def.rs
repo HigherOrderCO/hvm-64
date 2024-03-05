@@ -84,17 +84,18 @@ pub(crate) fn ast_net_to_instructions<F: FnMut(&str) -> Port>(net: &Net, get_def
           self.visit_tree(lft, l);
           self.visit_tree(rgt, r);
         }
-        Tree::Op2 { opr, lft, rgt } => {
-          let l = self.id();
-          let r = self.id();
-          self.instr.push(Instruction::Op2 { op: *opr, trg, lft: l, rgt: r });
-          self.visit_tree(lft, l);
-          self.visit_tree(rgt, r);
-        }
-        Tree::Op1 { opr, lft, rgt } => {
-          let r = self.id();
-          self.instr.push(Instruction::Op1 { op: *opr, num: *lft, trg, rgt: r });
-          self.visit_tree(rgt, r);
+        Tree::Op { op, rhs, out } => {
+          if let Tree::Num { val } = &**rhs {
+            let o = self.id();
+            self.instr.push(Instruction::OpNum { op: *op, rhs: *val, trg, out: o });
+            self.visit_tree(out, o);
+          } else {
+            let r = self.id();
+            let o = self.id();
+            self.instr.push(Instruction::Op { op: *op, trg, rhs: r, out: o });
+            self.visit_tree(rhs, r);
+            self.visit_tree(out, o);
+          }
         }
         Tree::Mat { sel, ret } => {
           let l = self.id();
