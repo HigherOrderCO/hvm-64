@@ -1,3 +1,5 @@
+use std::mem::MaybeUninit;
+
 use super::*;
 
 /// An interaction combinator net.
@@ -5,7 +7,7 @@ pub struct Net<'a, M: Mode> {
   linker: Linker<'a, M>,
   pub tid: usize,  // thread id
   pub tids: usize, // thread count
-  pub trgs: Vec<Trg>,
+  pub trgs: Box<[MaybeUninit<Trg>]>,
   pub root: Wire,
 }
 
@@ -20,7 +22,7 @@ impl<'h, M: Mode> Net<'h, M> {
   }
 
   pub(super) fn new_with_root(heap: &'h Heap, root: Wire) -> Self {
-    Net { linker: Linker::new(heap), tid: 0, tids: 1, trgs: vec![Trg::port(Port(0)); 1 << 16], root }
+    Net { linker: Linker::new(heap), tid: 0, tids: 1, trgs: Box::new_uninit_slice(1 << 16), root }
   }
 
   /// Boots a net from a Ref.
