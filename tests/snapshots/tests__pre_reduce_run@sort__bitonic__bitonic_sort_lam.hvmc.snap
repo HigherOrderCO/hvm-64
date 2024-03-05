@@ -1,0 +1,20 @@
+---
+source: tests/tests.rs
+expression: output
+input_file: examples/sort/bitonic/bitonic_sort_lam.hvmc
+---
+#523776
+pre-reduce:
+RWTS   :       1_563_230
+- ANNI :         944_667
+- COMM :          96_766
+- ERAS :         221_692
+- DREF :         209_486
+- OPER :          90_619
+run:
+RWTS   :               0
+- ANNI :               0
+- COMM :               0
+- ERAS :               0
+- DREF :               0
+- OPER :               0

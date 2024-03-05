@@ -17,7 +17,7 @@ mod encode_net;
 mod readback;
 
 use calc_labels::calculate_label_sets;
-use encode_def::encode_def;
+pub(crate) use encode_def::encode_def;
 
 /// Stores a bidirectional mapping between names and runtime defs.
 #[derive(Default)]

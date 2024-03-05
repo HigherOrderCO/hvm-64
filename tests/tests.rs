@@ -8,7 +8,7 @@ use std::{
 };
 
 use hvmc::{
-  ast::{self, Net},
+  ast::{self, Book, Net},
   host::Host,
   run::{self, Strict},
   util::show_rewrites,
@@ -60,25 +60,50 @@ fn test_bool_and() {
   assert_debug_snapshot!(rwts.total(), @"14");
 }
 
-fn test_run(name: &str, host: Arc<Mutex<Host>>) {
-  print!("{name}...");
-  io::stdout().flush().unwrap();
-  let heap = run::Heap::new_words(1 << 30);
+fn execute_host(host: Arc<Mutex<Host>>) -> Option<(run::Rewrites, Net)> {
+  let heap = run::Heap::new_words(1 << 29);
   let mut net = run::Net::<Strict>::new(&heap);
   // The host is locked inside this block.
   {
     let lock = host.lock().unwrap();
     let Some(entrypoint) = lock.defs.get("main") else {
       println!(" skipping");
-      return;
+      return None;
     };
     net.boot(entrypoint);
   }
   let start = Instant::now();
   net.parallel_normal();
   println!(" {:.3?}", start.elapsed());
+  Some((net.rwts, host.lock().unwrap().readback(&net)))
+}
 
-  let output = format!("{}\n{}", host.lock().unwrap().readback(&net), show_rewrites(&net.rwts));
+fn test_run(name: &str, host: Arc<Mutex<Host>>) {
+  print!("{name}...");
+  io::stdout().flush().unwrap();
+
+  let Some((rwts, net)) = execute_host(host) else { return };
+
+  let output = format!("{}\n{}", net, show_rewrites(&rwts));
+  assert_snapshot!(output);
+}
+
+fn test_pre_reduce_run(path: &str, mut book: Book) {
+  print!("{path}...");
+  print!(" pre-reduce");
+  let pre_stats = book.pre_reduce(&|_| false, 1 << 29, u64::MAX);
+  let host = hvmc::stdlib::create_host(&book);
+
+  let Some((mut rwts, net)) = execute_host(host) else {
+    assert_snapshot!(show_rewrites(&pre_stats.rewrites));
+    return;
+  };
+  // Don't take into account deref rewrites
+  // because expand() is terrible.
+  // Remove when #73 is merged.
+  rwts.dref = 0;
+
+  let output = format!("{}\npre-reduce:\n{}run:\n{}", net, show_rewrites(&pre_stats.rewrites), show_rewrites(&rwts));
   assert_snapshot!(output);
 }
 
@@ -88,8 +113,10 @@ fn test_path(path: &Path) {
   let host = hvmc::stdlib::create_host(&book);
 
   let path = path.strip_prefix(env!("CARGO_MANIFEST_DIR")).unwrap();
+  let path = path.to_str().unwrap();
 
-  test_run(path.to_str().unwrap(), host);
+  test_pre_reduce_run(path, book.clone());
+  test_run(path, host);
 }
 
 fn test_dir(dir: &Path, filter: impl Fn(&Path) -> bool) {

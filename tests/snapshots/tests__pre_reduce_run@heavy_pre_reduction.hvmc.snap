@@ -1,0 +1,20 @@
+---
+source: tests/tests.rs
+expression: output
+input_file: tests/programs/heavy_pre_reduction.hvmc
+---
+*
+pre-reduce:
+RWTS   :          53_148
+- ANNI :          13_124
+- COMM :          35_175
+- ERAS :           4_794
+- DREF :              55
+- OPER :               0
+run:
+RWTS   :               0
+- ANNI :               0
+- COMM :               0
+- ERAS :               0
+- DREF :               0
+- OPER :               0

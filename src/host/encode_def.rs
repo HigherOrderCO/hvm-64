@@ -1,5 +1,6 @@
-use super::*;
 use crate::util::maybe_grow;
+
+use super::*;
 
 /// Converts an ast net to a list of instructions to create the net.
 ///

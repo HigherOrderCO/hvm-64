@@ -1,0 +1,20 @@
+---
+source: tests/tests.rs
+expression: output
+input_file: examples/machine_u32/num_match.hvmc
+---
+#9
+pre-reduce:
+RWTS   :               8
+- ANNI :               3
+- COMM :               0
+- ERAS :               1
+- DREF :               3
+- OPER :               1
+run:
+RWTS   :               0
+- ANNI :               0
+- COMM :               0
+- ERAS :               0
+- DREF :               0
+- OPER :               0
