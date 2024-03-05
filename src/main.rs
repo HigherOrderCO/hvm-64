@@ -225,6 +225,10 @@ pub enum TransformPass {
   EncodeAdts,
   #[value(alias = "no-adts")]
   NoEncodeAdts,
+  #[value(alias = "eta")]
+  EtaReduce,
+  #[value(alias = "no-eta")]
+  NoEtaReduce,
 }
 
 #[derive(Default)]
@@ -232,6 +236,7 @@ pub struct TransformPasses {
   pre_reduce: bool,
   coalesce_ctrs: bool,
   encode_adts: bool,
+  eta_reduce: bool,
 }
 
 impl TransformPasses {
@@ -239,6 +244,7 @@ impl TransformPasses {
     self.pre_reduce = true;
     self.coalesce_ctrs = true;
     self.encode_adts = true;
+    self.eta_reduce = true;
   }
 }
 
@@ -256,6 +262,8 @@ impl TransformPass {
         NoCoalesceCtrs => opts.coalesce_ctrs = false,
         EncodeAdts => opts.encode_adts = true,
         NoEncodeAdts => opts.encode_adts = false,
+        EtaReduce => opts.eta_reduce = true,
+        NoEtaReduce => opts.eta_reduce = false,
       }
     }
     opts
@@ -320,6 +328,9 @@ fn load_book(files: &[String], transform_opts: &TransformOpts) -> Book {
     );
   }
   for (_, def) in &mut book.nets {
+    if transform_passes.eta_reduce {
+      def.eta_reduce();
+    }
     for tree in def.trees_mut() {
       if transform_passes.coalesce_ctrs {
         tree.coalesce_constructors();
@@ -432,6 +443,9 @@ fn compile_executable(target: &str, host: &host::Host) -> Result<(), io::Error> 
     stdlib
     trace
     transform {
+      coalesce_ctrs
+      encode_adts
+      eta_reduce
       pre_reduce
       encode_adts
       coalesce_ctrs
