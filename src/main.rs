@@ -348,7 +348,7 @@ fn reduce_exprs(host: &Host, exprs: &[Net], opts: &RuntimeOpts) {
   for expr in exprs {
     let mut net = DynNet::new(&heap, opts.lazy_mode);
     dispatch_dyn_net!(&mut net => {
-      host.encode_net(net, Trg::port(run::Port::new_var(net.root.addr())), expr);
+      host.encode_net(net, Trg::port(net.root.as_var()), expr);
       let start_time = Instant::now();
       if opts.single_core {
         net.normal();

@@ -26,6 +26,7 @@ impl Host {
     net
   }
 }
+
 /// See [`Host::readback`].
 struct ReadbackState<'a> {
   host: &'a Host,

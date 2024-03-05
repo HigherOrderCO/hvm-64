@@ -4,42 +4,47 @@ impl<'a, M: Mode> Net<'a, M> {
   /// Performs an interaction between two connected principal ports.
   #[inline(always)]
   pub fn interact(&mut self, a: Port, b: Port) {
-    self.tracer.sync();
-    trace!(self.tracer, a, b);
+    self.sync();
+    trace!(self, a, b);
+    use Tag::*;
     match (a.tag(), b.tag()) {
       // not actually an active pair
       (Var | Red, _) | (_, Var | Red) => unreachable!(),
       // nil-nil
       (Ref, Ref | Num) if !a.is_skippable() => self.call(a, b),
       (Ref | Num, Ref) if !b.is_skippable() => self.call(b, a),
-      (Num | Ref, Num | Ref) => self.rwts.eras += 1,
+      (Num | Ref | AdtZ, Num | Ref | AdtZ) => self.rwts.eras += 1,
       // comm 2/2
-      (Ctr, Mat) if a.lab() != 0 => self.comm22(a, b),
-      (Mat, Ctr) if b.lab() != 0 => self.comm22(a, b),
-      (Ctr, Op) | (Op, Ctr) => self.comm22(a, b),
-      (Ctr, Ctr) if a.lab() != b.lab() => self.comm22(a, b),
+      (Mat | Op, CtrN!() | AdtN!()) => self.comm2N(a, b),
+      (CtrN!() | AdtN!(), Mat | Op) => self.comm2N(b, a),
       // anni
-      (Mat, Mat) | (Op, Op) | (Ctr, Ctr) => self.anni2(a, b),
+      (CtrN!(), CtrN!()) => self.anniNM(a, b),
+      (Mat, Mat) | (Op, Op) => self.anni2(a, b),
       // comm 2/0
-      (Ref, Ctr) if b.lab() >= a.lab() => self.comm02(a, b),
-      (Ctr, Ref) if a.lab() >= b.lab() => self.comm02(b, a),
-      (Num, Ctr) => self.comm02(a, b),
-      (Ctr, Num) => self.comm02(b, a),
-      (Ref, _) if a == Port::ERA => self.comm02(a, b),
-      (_, Ref) if b == Port::ERA => self.comm02(b, a),
+      (Ref, CtrN!() | AdtN!()) if b.lab() >= a.lab() => self.comm0N(a, b),
+      (CtrN!() | AdtN!(), Ref) if a.lab() >= b.lab() => self.comm0N(b, a),
+      (Num, CtrN!() | AdtN!()) => self.comm0N(a, b),
+      (CtrN!() | AdtN!(), Num) => self.comm0N(b, a),
+      (AdtZ, Op | Mat) => self.comm02(a, b),
+      (Op | Mat, AdtZ) => self.comm02(a, b),
+      // TODO
+      (AdtN!() | AdtZ, CtrN!()) => self.adt_ctr(a, b),
+      (CtrN!(), AdtN!() | AdtZ) => self.adt_ctr(b, a),
+      (AdtN!() | AdtZ, AdtN!() | AdtZ) => todo!(),
       // deref
-      (Ref, _) => self.call(a, b),
-      (_, Ref) => self.call(b, a),
+      (Ref, Mat | Op) if a == Port::ERA => self.comm02(a, b),
+      (Mat | Op, Ref) if b == Port::ERA => self.comm02(b, a),
+      (Ref, CtrN!() | AdtN!()) if a == Port::ERA => self.comm0N(a, b),
+      (CtrN!() | AdtN!(), Ref) if b == Port::ERA => self.comm0N(b, a),
+      (Ref, CtrN!() | AdtN!() | Mat | Op) => self.call(a, b),
+      (CtrN!() | AdtN!() | Mat | Op, Ref) => self.call(b, a),
       // native ops
-      (Op, Num) => self.op_num(a, b),
-      (Num, Op) => self.op_num(b, a),
+      (Op, Num) => self.opr_num(a, b),
+      (Num, Op) => self.opr_num(b, a),
       (Mat, Num) => self.mat_num(a, b),
       (Num, Mat) => self.mat_num(b, a),
       // todo: what should the semantics of these be?
-      (Mat, Ctr) // b.lab() == 0
-      | (Ctr, Mat) // a.lab() == 0
-      | (Op, Mat)
-      | (Mat, Op) => unimplemented!("{:?}-{:?}", a.tag(), b.tag()),
+      (Op, Mat) | (Mat, Op) => unimplemented!("{:?}-{:?}", a.tag(), b.tag()),
     }
   }
 
@@ -72,7 +77,7 @@ impl<'a, M: Mode> Net<'a, M> {
   /// ```
   #[inline(never)]
   pub fn anni2(&mut self, a: Port, b: Port) {
-    trace!(self.tracer, a, b);
+    trace!(self, a, b);
     self.rwts.anni += 1;
     let a = a.consume_node();
     let b = b.consume_node();
@@ -119,7 +124,7 @@ impl<'a, M: Mode> Net<'a, M> {
   /// ```
   #[inline(never)]
   pub fn comm22(&mut self, a: Port, b: Port) {
-    trace!(self.tracer, a, b);
+    trace!(self, a, b);
     self.rwts.comm += 1;
 
     let a = a.consume_node();
@@ -130,13 +135,13 @@ impl<'a, M: Mode> Net<'a, M> {
     let B1 = self.create_node(b.tag, b.lab);
     let B2 = self.create_node(b.tag, b.lab);
 
-    trace!(self.tracer, A1.p0, A2.p0, B1.p0, B2.p0);
+    trace!(self, A1.p0, A2.p0, B1.p0, B2.p0);
     self.link_port_port(A1.p1, B1.p1);
     self.link_port_port(A1.p2, B2.p1);
     self.link_port_port(A2.p1, B1.p2);
     self.link_port_port(A2.p2, B2.p2);
 
-    trace!(self.tracer);
+    trace!(self);
     self.link_wire_port(a.p1, B1.p0);
     self.link_wire_port(a.p2, B2.p0);
     self.link_wire_port(b.p1, A1.p0);
@@ -165,7 +170,7 @@ impl<'a, M: Mode> Net<'a, M> {
   /// ```
   #[inline(never)]
   pub fn comm02(&mut self, a: Port, b: Port) {
-    trace!(self.tracer, a, b);
+    trace!(self, a, b);
     self.rwts.comm += 1;
     let b = b.consume_node();
     self.link_wire_port(b.p1, a.clone());
@@ -204,20 +209,20 @@ impl<'a, M: Mode> Net<'a, M> {
   /// ```
   #[inline(never)]
   pub fn mat_num(&mut self, a: Port, b: Port) {
-    trace!(self.tracer, a, b);
+    trace!(self, a, b);
     self.rwts.oper += 1;
     let a = a.consume_node();
     let b = b.num();
     if b == 0 {
       let x = self.create_node(Ctr, 0);
-      trace!(self.tracer, x.p0);
+      trace!(self, x.p0);
       self.link_port_port(x.p2, Port::ERA);
       self.link_wire_port(a.p2, x.p1);
       self.link_wire_port(a.p1, x.p0);
     } else {
-      let x = self.create_node(Ctr, 0);
-      let y = self.create_node(Ctr, 0);
-      trace!(self.tracer, x.p0, y.p0);
+      let x = self.create_node(Tag::Ctr, 0);
+      let y = self.create_node(Tag::Ctr, 0);
+      trace!(self, x.p0, y.p0);
       self.link_port_port(x.p1, Port::ERA);
       self.link_port_port(x.p2, y.p0);
       self.link_port_port(y.p1, Port::new_num(b - 1));
@@ -253,21 +258,37 @@ impl<'a, M: Mode> Net<'a, M> {
   /// ```
   #[inline(never)]
   pub fn op_num(&mut self, a: Port, b: Port) {
-    trace!(self.tracer, a, b);
+    trace!(self, a, b);
     let a = a.consume_node();
     let op = unsafe { Op::from_unchecked(a.lab) };
     let a1 = a.p1.load_target();
-    if a1.tag() == Num {
+    if a1.is(Tag::Num) {
       self.rwts.oper += 1;
       let out = op.op(b.num(), a1.num());
       self.link_wire_port(a.p2, Port::new_num(out));
     } else {
       let op = op.swap();
-      let x = self.create_node(Op, op as u16);
-      trace!(self.tracer, x.p0);
+      let x = self.create_node(Tag::Op, op as u16);
+      trace!(self, x.p0);
       self.link_port_port(x.p1, b);
       self.link_wire_port(a.p2, x.p2);
       self.link_wire_port(a.p1, x.p0);
     }
+  }
+
+  fn comm2N(&mut self, a: Port, b: Port) {
+    todo!()
+  }
+
+  fn anniNM(&mut self, a: Port, b: Port) {
+    todo!()
+  }
+
+  fn comm0N(&mut self, a: Port, b: Port) {
+    todo!()
+  }
+
+  fn adt_ctr(&mut self, b: Port, a: Port) {
+    todo!()
   }
 }

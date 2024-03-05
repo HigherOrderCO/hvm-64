@@ -10,7 +10,7 @@ impl<'h, M: Mode> Net<'h, M> {
       let area = unsafe { std::mem::transmute(&self.heap.0[heap_start .. heap_start + heap_size]) };
       let mut net = Net::new_with_root(area, self.root.clone());
       net.next = self.next.saturating_sub(heap_start);
-      net.head = if tid == 0 { net.head } else { Addr::NULL };
+      net.heads = if tid == 0 { net.heads } else { [Addr::NULL; 4] };
       net.tid = tid;
       net.tids = tids;
       net.tracer.set_tid(tid);

@@ -186,7 +186,7 @@ impl<'a, M: Mode> Net<'a, M> {
 
     let def = port.addr().def();
 
-    if trg.tag() == Ctr && !def.labs.has(trg.lab()) {
+    if trg.is_ctr_ish() && !def.labs.has(trg.lab()) {
       return self.comm02(port, trg);
     }
 

@@ -112,14 +112,14 @@ impl<'a, M: Mode> Net<'a, M> {
   #[inline(always)]
   pub(crate) fn do_ctr(&mut self, lab: Lab, trg: Trg) -> (Trg, Trg) {
     let port = trg.target();
-    if !M::LAZY && port.tag() == Ctr && port.lab() == lab {
-      trace!(self.tracer, "fast");
+    if !M::LAZY && port.is(Tag::Ctr) && port.lab() == lab {
+      trace!(self, "fast");
       self.free_trg(trg);
       let node = port.consume_node();
       self.rwts.anni += 1;
       (Trg::wire(node.p1), Trg::wire(node.p2))
     // TODO: fast copy?
-    } else if false && !M::LAZY && port.tag() == Num || port.tag() == Ref && lab >= port.lab() {
+    } else if false && !M::LAZY && port.is(Tag::Num) || port.is(Tag::Ref) && lab >= port.lab() {
       self.rwts.comm += 1;
       (Trg::port(port.clone()), Trg::port(port))
     } else {
@@ -170,7 +170,7 @@ impl<'a, M: Mode> Net<'a, M> {
   #[inline(always)]
   pub(crate) fn do_mat(&mut self, trg: Trg) -> (Trg, Trg) {
     let port = trg.target();
-    if !M::LAZY && port.tag() == Num {
+    if !M::LAZY && port.is(Tag::Num) {
       self.rwts.oper += 1;
       self.free_trg(trg);
       let num = port.num();
@@ -198,13 +198,13 @@ impl<'a, M: Mode> Net<'a, M> {
 
   #[inline(always)]
   pub(crate) fn do_wires(&mut self) -> (Trg, Trg, Trg, Trg) {
-    let a = self.alloc();
-    let b = a.other_half();
+    let a = self.alloc(Align2);
+    let b = a.offset(1);
     (
-      Trg::port(Port::new_var(a.clone())),
-      Trg::wire(Wire::new(a)),
-      Trg::port(Port::new_var(b.clone())),
-      Trg::wire(Wire::new(b)),
+      Trg::port(Port::new_var(Align2, a.clone())),
+      Trg::wire(Wire::new(Align2, a)),
+      Trg::port(Port::new_var(Align2, b.clone())),
+      Trg::wire(Wire::new(Align2, b)),
     )
   }
 
@@ -213,7 +213,7 @@ impl<'a, M: Mode> Net<'a, M> {
   #[allow(unused)] // TODO: emit this instruction
   pub(crate) fn do_mat_con_con(&mut self, trg: Trg, out: Trg) -> (Trg, Trg, Trg) {
     let port = trg.target();
-    if !M::LAZY && trg.target().tag() == Num {
+    if !M::LAZY && trg.target().is(Tag::Num) {
       self.rwts.oper += 1;
       self.free_trg(trg);
       let num = port.num();
@@ -241,7 +241,7 @@ impl<'a, M: Mode> Net<'a, M> {
   #[allow(unused)] // TODO: emit this instruction
   pub(crate) fn do_mat_con(&mut self, trg: Trg, out: Trg) -> (Trg, Trg) {
     let port = trg.target();
-    if trg.target().tag() == Num {
+    if trg.target().is(Tag::Num) {
       self.rwts.oper += 1;
       self.free_trg(trg);
       let num = port.num();
