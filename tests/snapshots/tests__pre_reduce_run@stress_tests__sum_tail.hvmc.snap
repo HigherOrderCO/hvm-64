@@ -12,9 +12,9 @@ RWTS   :     100_000_011
 - DREF :      10_000_005
 - OPER :      30_000_001
 run:
-RWTS   :               1
+RWTS   :               0
 - ANNI :               0
 - COMM :               0
 - ERAS :               0
-- DREF :               1
+- DREF :               0
 - OPER :               0

@@ -136,8 +136,8 @@ impl AtomicRewrites {
   }
 }
 
-impl<T: Add<Output = U>, U> Add for Rewrites<T> {
-  type Output = Rewrites<U>;
+impl<T: Add> Add for Rewrites<T> {
+  type Output = Rewrites<T::Output>;
 
   fn add(self, rhs: Self) -> Self::Output {
     Rewrites {

@@ -1,4 +1,18 @@
-//! Reduce the solving any annihilations and commutations.
+//! Reduce the nets in the book, to avoid repeating work at runtime.
+//!
+//! Here's how it works:
+//! - Each definition is visited in topological order (dependencies before
+//!   dependents). In the case of cycles, one will be arbitrarily selected to be
+//!   first.
+//! - The definition is reduced in a [`run::Net`]
+//! - The reduced [`run::Net`] is readback into an [`ast::Net`]
+//! - The [`ast::Net`] is encoded into a [`Vec<Instruction>`]
+//! - The [`ast::Net`] is stored in the [`State`], as it will be used later.
+//! - The [`InterpretedDef`] corresponding to the definition is mutated in-place
+//!   and its instructions are replaced with the generated [`Vec<Instruction>`]
+//!
+//! At the end, each mutated [`ast::Net`] is placed into the [`Book`],
+//! overriding the previous one.
 
 use std::{
   collections::HashMap,
@@ -77,20 +91,6 @@ impl run::AsDef for InertDef {
 }
 
 /// State of the pre-reduction algorithm.
-///
-/// Here's how it works:
-/// - Each definition is visited in topological order (dependencies before
-///   dependents). In the case of cycles, one will be arbitrarily selected to be
-///   first.
-/// - The definition is reduced in a [`run::Net`]
-/// - The reduced [`run::Net`] is readback into an [`ast::Net`]
-/// - The [`ast::Net`] is encoded into a [`Vec<Instruction>`]
-/// - The [`ast::Net`] is stored in the [`State`], as it will be used later.
-/// - The [`InterpretedDef`] corresponding to the definition is mutated in-place
-///   and its instructions are replaced with the generated [`Vec<Instruction>`]
-///
-/// At the end, each mutated [`ast::Net`] is placed into the [`Book`],
-/// overriding the previous one.
 struct State<'a> {
   book: &'a Book,
 
@@ -131,6 +131,7 @@ impl<'a> State<'a> {
     if self.seen.contains_key(nam) || (self.skip)(nam) || self.book.get(nam).is_none() {
       return;
     }
+
     self.seen.insert(nam.to_owned(), SeenState::Cycled);
     // First, pre-reduce all nets referenced by this net by walking the tree
     self.visit_net(self.book.get(nam).unwrap());
@@ -143,7 +144,7 @@ impl<'a> State<'a> {
     self.rewrites += rt.rwts;
 
     // Move interactions with inert defs back into the net redexes array
-    rt.redexes.extend(core::mem::take::<Vec<_>>(self.captured_redexes.lock().unwrap().as_mut()).into_iter());
+    rt.redexes.extend(self.captured_redexes.lock().unwrap().drain(..));
 
     let net = self.host.readback(&mut rt);
 

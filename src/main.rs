@@ -33,7 +33,7 @@ fn main() {
         compile_executable(output, &host.lock().unwrap()).unwrap();
       }
       CliMode::Run { run_opts, mut transform_opts, file, args } => {
-        // Don't pre-reduce the main reduction
+        // Don't pre-reduce the entry point
         transform_opts.pre_reduce_skip.push(args.entry_point.clone());
         let host = create_host(&load_book(&[file], &transform_opts));
         run(&host.lock().unwrap(), run_opts, args);
@@ -285,6 +285,7 @@ fn load_book(files: &[String], transform_opts: &TransformOpts) -> Book {
       acc
     });
   let transform_passes = TransformPass::passes_from_cli(&transform_opts.transform_passes);
+
   if transform_passes.pre_reduce {
     book.pre_reduce(
       &|x| transform_opts.pre_reduce_skip.iter().any(|y| x == y),

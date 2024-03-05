@@ -1,3 +1,5 @@
+use crate::util::maybe_grow;
+
 use super::*;
 
 /// Converts an ast net to a list of instructions to create the net.
@@ -79,7 +81,7 @@ impl<'a, F: FnMut(&str) -> Port> State<'a, F> {
       self.visit_tree(tree, trg);
     }
     fn visit_tree(&mut self, tree: &'a Tree, trg: TrgId) {
-      match tree {
+      maybe_grow(move || match tree {
         Tree::Era => {
           self.instr.push(Instruction::LinkConst { trg, port: Port::ERA });
 >>>>>>> cc29e4c ([sc-484] Optimize pre-reduce pass)
@@ -135,7 +137,7 @@ impl<'a, F: FnMut(&str) -> Port> State<'a, F> {
           self.visit_tree(sel, l);
           self.visit_tree(ret, r);
         }
-      }
+      })
     }
 >>>>>>> cc29e4c ([sc-484] Optimize pre-reduce pass)
   }

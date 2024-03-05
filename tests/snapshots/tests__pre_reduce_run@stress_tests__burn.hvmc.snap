@@ -3,7 +3,7 @@ source: tests/tests.rs
 expression: output
 input_file: tests/programs/stress_tests/burn.hvmc
 ---
-(((@brnZ @brnZ) ((* @E) (* @E))) (((* @E) (* @E)) ((* @E) (* @E))))
+(((@brnZ @brnZ) (@brnZ @brnZ)) ((@brnZ @brnZ) (@brnZ @brnZ)))
 pre-reduce:
 RWTS   :      18_350_176
 - ANNI :      10_485_759
@@ -12,9 +12,9 @@ RWTS   :      18_350_176
 - DREF :       2_621_512
 - OPER :               0
 run:
-RWTS   :               7
+RWTS   :               0
 - ANNI :               0
 - COMM :               0
 - ERAS :               0
-- DREF :               7
+- DREF :               0
 - OPER :               0
