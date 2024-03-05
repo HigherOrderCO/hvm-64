@@ -4,9 +4,9 @@ expression: output
 input_file: tests/programs/heavy_pre_reduction.hvmc
 ---
 *
-RWTS   :               1
+RWTS   :               2
 - ANNI :               0
 - COMM :               0
 - ERAS :               0
-- DREF :               1
+- DREF :               2
 - OPER :               0

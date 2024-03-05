@@ -21,18 +21,18 @@ pub fn test_fast_pre_reduce() {
 
   assert_snapshot!(format!("Fast:\n{rwts_1}Slow:\n{rwts_2}"), @r###"
   Fast:
-  RWTS   :          17_730
+  RWTS   :          33_236
   - ANNI :           4_385
   - COMM :          11_725
   - ERAS :           1_598
-  - DREF :              22
+  - DREF :          15_528
   - OPER :               0
   Slow:
-  RWTS   :          35_445
+  RWTS   :          50_951
   - ANNI :           8_763
   - COMM :          23_450
   - ERAS :           3_196
-  - DREF :              36
+  - DREF :          15_542
   - OPER :               0
   "###)
 }

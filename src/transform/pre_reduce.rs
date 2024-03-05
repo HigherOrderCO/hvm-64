@@ -137,7 +137,6 @@ impl<'a> State<'a> {
 
     let mut rt = run::Net::<run::Strict>::new(self.area);
     rt.boot(self.host.defs.get(nam).expect("No function."));
-    rt.expand();
     rt.reduce(self.max_rwts as usize);
 
     self.rewrites += rt.rwts;
