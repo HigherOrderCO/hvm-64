@@ -196,16 +196,15 @@ fn test_cli_errors() {
 fn test_apply_tree() {
   use hvmc::run;
   fn eval_with_args(fun: &str, args: &[&str]) -> Net {
-    let area = run::Heap::new_words(1 << 10);
+    let area = run::Heap::new_words(16);
 
     let mut fun: Net = fun.parse().unwrap();
     for arg in args {
       let arg: Tree = arg.parse().unwrap();
       fun.apply_tree(arg)
     }
-    // TODO: When feature/sc-472/argument-passing, use encode_net instead.
-    let host = Host::default();
 
+    let host = Host::default();
     let mut rnet = run::Net::<run::Strict>::new(&area);
     let root_port = run::Trg::port(run::Port::new_var(rnet.root.addr()));
     host.encode_net(&mut rnet, root_port, &fun);

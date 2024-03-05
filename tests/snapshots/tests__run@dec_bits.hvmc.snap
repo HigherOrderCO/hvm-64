@@ -4,9 +4,9 @@ expression: output
 input_file: tests/programs/dec_bits.hvmc
 ---
 (* (* (a a)))
-RWTS   :         180_036
+RWTS   :         180_043
 - ANNI :          98_190
 - COMM :              11
 - ERAS :          32_738
-- DREF :          49_097
+- DREF :          49_104
 - OPER :               0

@@ -44,7 +44,8 @@ impl<'a> ReadbackState<'a> {
   /// `vars` map.
   fn read_port(&mut self, port: Port, wire: Option<Wire>) -> Tree {
     maybe_grow(move || match port.tag() {
-      Tag::Var => {
+      Tag::Var | Tag::Red => {
+        // todo: resolve redirects
         let key = wire.unwrap().addr().min(port.addr());
         Tree::Var {
           nam: create_var(match self.vars.entry(key) {
@@ -53,7 +54,6 @@ impl<'a> ReadbackState<'a> {
           }),
         }
       }
-      Tag::Red => self.read_wire(port.wire()),
       Tag::Ref if port == Port::ERA => Tree::Era,
       Tag::Ref => Tree::Ref { nam: self.host.back[&port.addr()].clone() },
       Tag::Num => Tree::Num { val: port.num() },

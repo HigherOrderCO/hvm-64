@@ -4,9 +4,9 @@ expression: output
 input_file: tests/programs/stress_tests/sum_tail.hvmc
 ---
 #49999995000000
-RWTS   :     110_000_007
+RWTS   :     110_000_008
 - ANNI :      40_000_003
 - COMM :      20_000_000
 - ERAS :      10_000_001
-- DREF :      20_000_002
+- DREF :      20_000_003
 - OPER :      20_000_001

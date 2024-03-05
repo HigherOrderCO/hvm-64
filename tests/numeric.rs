@@ -18,7 +18,7 @@ fn test_add() {
   let net = op_net(10, Op::Add, 2);
   let (rwts, net) = normal(net, 16);
   assert_snapshot!(Net::to_string(&net), @"#12");
-  assert_debug_snapshot!(rwts.total(), @"2");
+  assert_debug_snapshot!(rwts.total(), @"3");
 }
 
 #[test]
@@ -117,5 +117,5 @@ fn test_div_by_0() {
   let net = op_net(9, Op::Div, 0);
   let (rwts, net) = normal(net, 16);
   assert_snapshot!(Net::to_string(&net), @"#0");
-  assert_debug_snapshot!(rwts.total(), @"2");
+  assert_debug_snapshot!(rwts.total(), @"3");
 }

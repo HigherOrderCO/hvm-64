@@ -4,9 +4,9 @@ expression: output
 input_file: examples/lambda_calculus/hoas.hvmc
 ---
 (((a (((* a) b) (* (* b)))) c) (* (* c)))
-RWTS   :             868
+RWTS   :             886
 - ANNI :             484
 - COMM :              11
 - ERAS :             141
-- DREF :             232
+- DREF :             250
 - OPER :               0
