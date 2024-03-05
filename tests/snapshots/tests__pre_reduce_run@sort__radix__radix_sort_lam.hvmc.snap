@@ -5,12 +5,12 @@ input_file: examples/sort/radix/radix_sort_lam.hvmc
 ---
 #549755289600
 pre-reduce:
-RWTS   :   1_167_065_250
+RWTS   :   1_134_559_381
 - ANNI :     622_854_182
 - COMM :      28_311_560
 - ERAS :     251_658_239
 - DREF :     171_966_556
-- OPER :      92_274_713
+- OPER :      59_768_844
 run:
 RWTS   :               0
 - ANNI :               0

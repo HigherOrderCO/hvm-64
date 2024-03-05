@@ -71,20 +71,8 @@ impl<'a, F: FnMut(&str) -> Port> State<'a, F> {
           let other = e.remove();
           self.instr.push(Instruction::Link { a: other, b: trg });
         }
-<<<<<<< HEAD
         Entry::Vacant(e) => {
           e.insert(trg);
-=======
-      };
-      let trg = self.id();
-      self.instr.push(Instruction::Const { port, trg });
-      self.visit_tree(tree, trg);
-    }
-    fn visit_tree(&mut self, tree: &'a Tree, trg: TrgId) {
-      maybe_grow(move || match tree {
-        Tree::Era => {
-          self.instr.push(Instruction::LinkConst { trg, port: Port::ERA });
->>>>>>> cc29e4c ([sc-484] Optimize pre-reduce pass)
         }
       },
       Tree::Ctr { lab, lft, rgt } => {
@@ -106,7 +94,6 @@ impl<'a, F: FnMut(&str) -> Port> State<'a, F> {
           self.visit_tree(rhs, r);
           self.visit_tree(out, o);
         }
-<<<<<<< HEAD
       }
       Tree::Mat { sel, ret } => {
         let l = self.id();
@@ -116,29 +103,5 @@ impl<'a, F: FnMut(&str) -> Port> State<'a, F> {
         self.visit_tree(ret, r);
       }
     })
-=======
-        Tree::Op { op, rhs, out } => {
-          if let Tree::Num { val } = &**rhs {
-            let o = self.id();
-            self.instr.push(Instruction::OpNum { op: *op, rhs: *val, trg, out: o });
-            self.visit_tree(out, o);
-          } else {
-            let r = self.id();
-            let o = self.id();
-            self.instr.push(Instruction::Op { op: *op, trg, rhs: r, out: o });
-            self.visit_tree(rhs, r);
-            self.visit_tree(out, o);
-          }
-        }
-        Tree::Mat { sel, ret } => {
-          let l = self.id();
-          let r = self.id();
-          self.instr.push(Instruction::Mat { trg, lft: l, rgt: r });
-          self.visit_tree(sel, l);
-          self.visit_tree(ret, r);
-        }
-      })
-    }
->>>>>>> cc29e4c ([sc-484] Optimize pre-reduce pass)
   }
 }

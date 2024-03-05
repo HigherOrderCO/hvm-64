@@ -21,7 +21,7 @@ use std::{
 
 use crate::{
   ast::{Book, Net, Tree},
-  host::{ast_net_to_instructions, DefRef, Host},
+  host::{encode_def, DefRef, Host},
   run::{self, Def, Heap, InterpretedDef, LabSet, Rewrites},
   util::maybe_grow,
 };
@@ -113,11 +113,10 @@ impl<'a> State<'a> {
       Tree::Ref { nam } => {
         self.pre_reduce(nam);
       }
-      Tree::Ctr { lft, rgt, .. } | Tree::Op2 { lft, rgt, .. } | Tree::Mat { sel: lft, ret: rgt } => {
+      Tree::Ctr { lft, rgt, .. } | Tree::Op { rhs: lft, out: rgt, .. } | Tree::Mat { sel: lft, ret: rgt } => {
         self.visit_tree(lft);
         self.visit_tree(rgt);
       }
-      Tree::Op1 { rgt, .. } => self.visit_tree(rgt),
     })
   }
   fn visit_net(&mut self, net: &Net) {
@@ -149,10 +148,10 @@ impl<'a> State<'a> {
     let net = self.host.readback(&mut rt);
 
     // Mutate the host in-place with the pre-reduced net.
-    let instr = ast_net_to_instructions(&net, |nam| run::Port::new_ref(&self.host.defs[nam]));
+    let instr = encode_def(&net, |nam| run::Port::new_ref(&self.host.defs[nam]));
     if let DefRef::Owned(def_box) = self.host.defs.get_mut(nam).unwrap() {
       let interpreted_def: &mut crate::run::Def<InterpretedDef> = def_box.downcast_mut().unwrap();
-      interpreted_def.data.instr = instr;
+      interpreted_def.data = instr;
     };
 
     // Replace the "Cycled" state with the "Reduced" state

@@ -5,12 +5,12 @@ input_file: tests/programs/stress_tests/sum_rec.hvmc
 ---
 #67108864
 pre-reduce:
-RWTS   :     738_197_509
+RWTS   :     671_088_646
 - ANNI :     201_326_595
 - COMM :      67_108_863
 - ERAS :     134_217_727
 - DREF :      67_108_871
-- OPER :     268_435_453
+- OPER :     201_326_590
 run:
 RWTS   :               0
 - ANNI :               0

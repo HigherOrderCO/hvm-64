@@ -3,7 +3,7 @@ source: tests/tests.rs
 expression: output
 input_file: tests/programs/queue.hvmc
 ---
-((@C0 (((@C1 (((@C2 (@Nil a)) (* a)) b)) (* b)) c)) (* c))
+((@C0 (((((a b) (a b)) (((({3 (c d) (e c)} (e d)) ((* (f f)) g)) (* g)) h)) (* h)) i)) (* i))
 pre-reduce:
 RWTS   :              63
 - ANNI :              39

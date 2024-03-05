@@ -5,12 +5,12 @@ input_file: examples/sort/merge/merge_sort.hvmc
 ---
 {8 * {8 {14 {8 * {8 {14 {8 {10 #3 a} {8 * a}} {12 {8 {10 #2 b} {8 * b}} c}} c}} {12 {8 * {8 {14 {8 {10 #1 d} {8 * d}} {12 {8 {10 #0 e} {8 * e}} f}} f}} g}} g}}
 pre-reduce:
-RWTS   :             454
+RWTS   :             445
 - ANNI :              65
 - COMM :             242
 - ERAS :              79
 - DREF :              43
-- OPER :              25
+- OPER :              16
 run:
 RWTS   :               0
 - ANNI :               0
