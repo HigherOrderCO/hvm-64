@@ -3,7 +3,7 @@ source: tests/tests.rs
 expression: output
 input_file: tests/programs/dec_bits_tree.hvmc
 ---
-((((((@brnZ @brnZ) (@brnZ @brnZ)) ((@brnZ @brnZ) (@brnZ @brnZ))) (((@brnZ @brnZ) (@brnZ @brnZ)) ((@brnZ @brnZ) (@brnZ @brnZ)))) ((((@E @E) (@E @E)) ((@E @E) (@E @E))) (((@E @E) (@E @E)) ((@E @E) (@E @E))))) (((((@E @E) (@E @E)) ((@E @E) (@E @E))) (((@E @E) (@E @E)) ((@E @E) (@E @E)))) ((((@E @E) (@E @E)) ((@E @E) (@E @E))) (((@E @E) (@E @E)) ((@E @E) (@E @E))))))
+((((((@brnZ @brnZ) (@brnZ @brnZ)) ((@brnZ @brnZ) (@brnZ @brnZ))) (((@brnZ @brnZ) (@brnZ @brnZ)) ((@brnZ @brnZ) (@brnZ @brnZ)))) ((((@brnZ @brnZ) (@brnZ @brnZ)) ((@brnZ @brnZ) (@brnZ @brnZ))) (((@brnZ @brnZ) (@brnZ @brnZ)) ((@brnZ @brnZ) (@brnZ @brnZ))))) (((((@brnZ @brnZ) (@brnZ @brnZ)) ((@brnZ @brnZ) (@brnZ @brnZ))) (((@brnZ @brnZ) (@brnZ @brnZ)) ((@brnZ @brnZ) (@brnZ @brnZ)))) ((((@brnZ @brnZ) (@brnZ @brnZ)) ((@brnZ @brnZ) (@brnZ @brnZ))) (((@brnZ @brnZ) (@brnZ @brnZ)) ((@brnZ @brnZ) (@brnZ @brnZ))))))
 pre-reduce:
 RWTS   :          18_916
 - ANNI :          10_615
