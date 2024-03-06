@@ -209,15 +209,50 @@ struct RunArgs {
 
 #[derive(clap::ValueEnum, Clone, Debug)]
 pub enum TransformPass {
+  #[value(alias = "all")]
   All,
+  #[value(alias = "no-all")]
   NoAll,
+  #[value(alias = "pre")]
   PreReduce,
+  #[value(alias = "no-pre")]
   NoPreReduce,
+  #[value(alias = "coalesce")]
+  CoalesceCtrs,
+  #[value(alias = "no-coalesce")]
+  NoCoalesceCtrs,
+  #[value(alias = "adts")]
+  EncodeAdts,
+  #[value(alias = "no-adts")]
+  NoEncodeAdts,
+  #[value(alias = "eta")]
+  EtaReduce,
+  #[value(alias = "no-eta")]
+  NoEtaReduce,
+  #[value(alias = "prune")]
+  PruneDefs,
+  #[value(alias = "no-prune")]
+  NoPruneDefs,
 }
 
 #[derive(Default)]
 pub struct TransformPasses {
   pre_reduce: bool,
+  coalesce_ctrs: bool,
+  encode_adts: bool,
+  eta_reduce: bool,
+  prune_defs: bool,
+}
+
+impl TransformPasses {
+
+  fn set_all(&mut self) {
+    self.pre_reduce = true;
+    self.coalesce_ctrs = true;
+    self.encode_adts = true;
+    self.eta_reduce = true;
+    self.prune_defs = true;
+  }
 }
 
 impl TransformPass {
@@ -226,10 +261,18 @@ impl TransformPass {
     let mut opts = TransformPasses::default();
     for arg in args {
       match arg {
-        All => opts.pre_reduce = true,
-        NoAll => opts.pre_reduce = false,
+        All => opts.set_all(),
+        NoAll => opts = Default::default(),
         PreReduce => opts.pre_reduce = true,
         NoPreReduce => opts.pre_reduce = false,
+        CoalesceCtrs => opts.coalesce_ctrs = true,
+        NoCoalesceCtrs => opts.coalesce_ctrs = false,
+        EncodeAdts => opts.encode_adts = true,
+        NoEncodeAdts => opts.encode_adts = false,
+        EtaReduce => opts.eta_reduce = true,
+        NoEtaReduce => opts.eta_reduce = false,
+        PruneDefs => opts.prune_defs = true,
+        NoPruneDefs => opts.prune_defs = false,
       }
     }
     opts
@@ -292,6 +335,16 @@ fn load_book(files: &[String], transform_opts: &TransformOpts) -> Book {
       transform_opts.pre_reduce_memory,
       transform_opts.pre_reduce_rewrites,
     );
+  }
+  for (_, def) in &mut book.nets {
+    for tree in def.trees_mut() {
+      if transform_passes.coalesce_ctrs {
+        tree.coalesce_constructors();
+      }
+      if transform_passes.encode_adts {
+        tree.encode_scott_adts();
+      }
+    }
   }
   book
 }

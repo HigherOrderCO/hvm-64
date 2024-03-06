@@ -145,6 +145,15 @@ pub const MAX_ARITY: usize = 8;
 pub const MAX_ADT_VARIANTS: usize = MAX_ARITY - 1;
 pub const MAX_ADT_FIELDS: usize = MAX_ARITY - 1;
 
+impl Net {
+  pub fn trees(&self)  -> impl Iterator<Item = &Tree>{
+    std::iter::once(&self.root).chain(self.redexes.iter().map(|(x, y)| [x, y]).flatten())
+  }
+  pub fn trees_mut(&mut self)  -> impl Iterator<Item = &mut Tree> {
+    std::iter::once(&mut self.root).chain(self.redexes.iter_mut().map(|(x, y)| [x, y]).flatten())
+  }
+}
+
 impl Tree {
   #[inline(always)]
   pub fn children(&self) -> impl Iterator<Item = &Tree> {

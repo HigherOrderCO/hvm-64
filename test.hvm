@@ -1,0 +1,142 @@
+// Interaction Calculus of Constructions
+// =====================================
+
+// Type
+// ----
+
+data Term
+  = (Lam bod)
+  | (App fun arg)
+  | (Val bod)
+  | (Ann val typ)
+  | (Var idx)
+  | (Err term)
+
+// Evaluation
+// ----------
+
+(APP fun arg) = match fun {
+  Lam: (fun.bod arg)
+  Val: (Val λx(APP (fun.bod (Lam λ$k(x))) (ANN $k arg)))
+  Err: (App (Err fun.term) arg)
+  var: (App var arg)
+}
+
+// Compares two reduced types
+(Equal (Var i1) (Var i2)) = (== i1 i2)
+(Equal (App f1 a1) (App f2 a2)) = (& (Equal f1 f2) (Equal a1 a2))
+(Equal t1 t2) = 0
+
+// Checks if a term can be an instance of a reduced type.
+(Check (Var i) (Var j)) = match k = (== i j) {
+  0: (Ann (Var i) (Var j))
+  1+: (Err (Ann (Var i) (Var j)))
+}
+(Check (Ann val t1) t2) = match k = (Equal t1 t2) {
+  0: (Err (Ann (Ann val t1) t2))
+  1+: (Check val t1)
+}
+(Check (App val t1) (Var j)) = (Ann (App val t1) (Var j))
+(Check val typ) = (Err (Ann val typ))
+
+(ANN val typ) = match typ {
+  Lam: (Lam λx(ANN (APP val $k) (typ.bod (Val λ$k(x)))))
+  Val: (typ.bod val)
+  Err: (Ann val (Err typ.term))
+  var: (Check val var)
+}
+
+// Equality
+// --------
+
+// TODO!
+
+// Encodings
+// ---------
+
+// (A -> B) ::= θv λx {(v {x: A}): B}
+(Arr A B) = (Val λv(Lam λx(ANN (APP v (ANN x A)) B)))
+
+// (Π(x: A). B[x]) ::= θv λx {(v {x: A}): (B x)}
+(All A B) = (Val λv(Lam λx(ANN (APP v (ANN x A)) (B x))))
+
+// Stringification
+// ---------------
+
+(Concat String.nil         ys) = ys
+(Concat (String.cons x xs) ys) = (String.cons x (Concat xs ys))
+
+(Join List.nil)         = ""
+(Join (List.cons x xs)) = (Concat x (Join xs))
+
+(U60.show n) = (U60.show.go n String.nil)
+(U60.show.go n res) = match k = (< n 10) {
+  0: (U60.show.go (/ n 10) (String.cons (+ '0' (% n 10)) res))
+  1+: (String.cons (+ '0' n) res)
+}
+
+(Show term dep) = match term {
+  Lam: (Join ["λx" (U60.show dep) " " (Show (term.bod (Var dep)) (+ dep 1))])
+  App: (Join ["(" (Show term.fun dep) " " (Show term.arg dep) ")"])
+  Val: (Join ["θx" (U60.show dep) " " (Show (term.bod (Var dep)) (+ dep 1))])
+  Ann: (Join ["{" (Show term.val dep) " : " (Show term.typ dep) "}"])
+  Var: (Join ["x" (U60.show term.idx)])
+  Err: (Join ["Err[" (Show term.term dep) "]"])
+}
+
+LF = (String.cons 10 String.nil) 
+
+(CheckShow term type) = (Join [
+  "Checking: " (Show (Ann term type) 0) LF
+  "Result: " (Show (ANN term type) 0) LF
+])
+
+// Tests
+// -----
+
+Main =
+  let Set = (Var (- 0 1))
+  let Any = (Val λx(x))
+
+  let id = (Lam λx x)
+
+  //  Bool = ∀(P: *) ∀(t: P) ∀(f: P) P
+  let Bool = (All Any λp (All p λt (All p λf(p))))
+
+  // Eq (T: Type) (a: T) (b: T) : Type = (P: T -> Type) (h: P a) -> P b
+  let Eq = (Lam λT (All T λa (All T λb(All (Arr T Any) λP(Arr (P a) (P b))))))
+  let refl = (Lam λT (Lam λa (Lam λb (Lam λP(Lam λh h)))))
+
+  let Empty = (All Any λp p)
+
+  //  true = λP λt λf t
+  let true = (Lam λP(Lam λt(Lam λf(t))))
+
+  //  false = λP λt λf f
+  let false = (Lam λP(Lam λt(Lam λf(f))))
+
+  //  Test : ∀(A: *) ∀(B: *) ∀(A -> B) ∀(B -> A) ∀A A
+  //       = λA λB λab λba λa a
+  let TEST = (All Any λA(All Any λB(Arr (Arr A B) (Arr (Arr B A) (Arr A B)))))
+  let test = (Lam λA(Lam λB(Lam λab(Lam λba(Lam λa(APP ab a)))))) 
+
+  // doesn't work :(
+  let funext = (CheckShow
+    (Lam λT(Lam λU(Lam λf(Lam λg(Lam λh(Lam λP(Lam λa
+      (APP (APP (APP h $t) (All U λu(APP P (All T λ$t(u))))) a)
+    )))))))
+    (All Any λT(All Any λU(All (Arr T U) λf(All (Arr T U) λg(
+      All (All T λt (APP (APP (APP Eq U) (APP f t)) (APP g t))) λh
+      (APP (APP (APP Eq (Arr T U)) f) g)
+    )))))
+  )
+
+ (Join [
+    (CheckShow (Lam λA(Lam λB(Lam λab(Lam λba(Lam λa(APP ab a)))))) (All Any λA(All Any λB(Arr (Arr A B) (Arr (Arr B A) (Arr A B))))))
+    (CheckShow (Lam λA(Lam λB(Lam λab(Lam λba(Lam λa(APP ab a)))))) (All Any λA(All Any λB(Arr (Arr A B) (Arr (Arr B A) (Arr A A))))))
+    (CheckShow (Lam λA(Lam λB(Lam λab(Lam λba(Lam λa a))))) (All Any λA(All Any λB(Arr (Arr A B) (Arr (Arr B A) (Arr A A))))))
+    (CheckShow (Lam λx x) (All Any λP P))
+    (CheckShow (Lam λx (APP x Bool)) (Arr (All Any λP P) Bool))
+    (CheckShow true Bool)
+    (CheckShow (APP refl Bool) (APP Eq Bool))
+  ])
