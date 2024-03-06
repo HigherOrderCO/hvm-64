@@ -16,14 +16,14 @@
 & @App ~ (b (d f))
 @C3 = a
 & @Lam ~ (@C3$S0 a)
-@C3$S0 = ({5 a {7 b c}} d)
+@C3$S0 = ({5 a {5 b c}} d)
 & @Lam ~ ((e f) d)
 & @App ~ (a (g f))
 & @App ~ (b (h g))
 & @App ~ (c (e h))
 @C4 = a
 & @Lam ~ (@C4$S0 a)
-@C4$S0 = ({9 a {11 b {13 c d}}} e)
+@C4$S0 = ({7 a {7 b {7 c d}}} e)
 & @Lam ~ ((f g) e)
 & @App ~ (a (h g))
 & @App ~ (b (i h))
@@ -31,7 +31,7 @@
 & @App ~ (d (f j))
 @C6 = a
 & @Lam ~ (@C6$S0 a)
-@C6$S0 = ({15 a {17 b {19 c {21 d {23 e f}}}}} g)
+@C6$S0 = ({9 a {9 b {9 c {9 d {9 e f}}}}} g)
 & @Lam ~ ((h i) g)
 & @App ~ (a (j i))
 & @App ~ (b (k j))
@@ -41,7 +41,7 @@
 & @App ~ (f (h n))
 @C8 = a
 & @Lam ~ (@C8$S0 a)
-@C8$S0 = ({25 a {27 b {29 c {31 d {33 e {35 f g}}}}}} h)
+@C8$S0 = ({11 a {11 b {11 c {11 d {11 e {11 f g}}}}}} h)
 & @Lam ~ ((i j) h)
 & @App ~ (a (k j))
 & @App ~ (b (l k))
@@ -53,14 +53,14 @@
 @CS = a
 & @Lam ~ (@CS$S0 a)
 @CS$S0 = (a b)
-& @Lam ~ (({37 c d} e) b)
+& @Lam ~ (({13 c d} e) b)
 & @Lam ~ ((f g) e)
 & @App ~ (c (h g))
 & @App ~ (i (f h))
 & @App ~ (a (d i))
 @FOO = a
 & @Lam ~ (@FOO$S0 a)
-@FOO$S0 = ({39 a b} c)
+@FOO$S0 = ({15 a b} c)
 & @App ~ (a (b c))
 @False = a
 & @Lam ~ (@False$S0 a)

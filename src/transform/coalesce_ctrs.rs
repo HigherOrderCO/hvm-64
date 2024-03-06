@@ -1,4 +1,7 @@
-use crate::{ast::{Tree, MAX_ARITY}, util::maybe_grow};
+use crate::{
+  ast::{Tree, MAX_ARITY},
+  util::maybe_grow,
+};
 
 impl Tree {
   /// Join chains of CTR nodes, such as (a (b (c d))) into n-ary nodes (a b c d)

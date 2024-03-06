@@ -4,8 +4,8 @@ expression: output
 input_file: examples/machine_u32/num_match.hvmc
 ---
 #9
-RWTS   :               8
-- ANNI :               3
+RWTS   :               9
+- ANNI :               4
 - COMM :               0
 - ERAS :               1
 - DREF :               3

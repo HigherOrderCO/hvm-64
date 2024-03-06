@@ -245,7 +245,6 @@ pub struct TransformPasses {
 }
 
 impl TransformPasses {
-
   fn set_all(&mut self) {
     self.pre_reduce = true;
     self.coalesce_ctrs = true;
@@ -450,6 +449,8 @@ fn compile_executable(target: &str, host: &host::Host) -> Result<(), io::Error> 
     trace
     transform {
       pre_reduce
+      encode_adts
+      coalesce_ctrs
     }
     util {
       apply_tree

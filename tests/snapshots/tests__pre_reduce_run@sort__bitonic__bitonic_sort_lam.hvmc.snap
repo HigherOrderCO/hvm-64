@@ -5,8 +5,8 @@ input_file: examples/sort/bitonic/bitonic_sort_lam.hvmc
 ---
 #523776
 pre-reduce:
-RWTS   :       1_563_230
-- ANNI :         944_667
+RWTS   :       1_563_234
+- ANNI :         944_671
 - COMM :          96_766
 - ERAS :         221_692
 - DREF :         209_486

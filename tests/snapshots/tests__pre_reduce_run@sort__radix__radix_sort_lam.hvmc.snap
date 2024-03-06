@@ -5,8 +5,8 @@ input_file: examples/sort/radix/radix_sort_lam.hvmc
 ---
 #549755289600
 pre-reduce:
-RWTS   :   1_134_559_381
-- ANNI :     622_854_182
+RWTS   :   1_134_559_385
+- ANNI :     622_854_186
 - COMM :      28_311_560
 - ERAS :     251_658_239
 - DREF :     171_966_556

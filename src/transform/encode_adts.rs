@@ -18,8 +18,7 @@ impl Tree {
           };
           match i {
             Tree::Era => (),
-            Tree::Ctr { lab: inner_lab, ports } 
-            if ports.len() <= MAX_ADT_FIELDS+1 && lab == *inner_lab => {
+            Tree::Ctr { lab: inner_lab, ports } if ports.len() <= MAX_ADT_FIELDS + 1 && lab == *inner_lab => {
               if let Some(Tree::Var { nam }) = ports.last() {
                 if let Some(old_nam) = ret_var.replace(nam.clone()) {
                   if old_nam != *nam {
@@ -37,7 +36,7 @@ impl Tree {
                   break;
                 }
               }
-            },
+            }
             _ => {
               // Does not encode an ADT.
               fields_idx = None;
@@ -55,7 +54,7 @@ impl Tree {
               println!("-- {old}\n -> {new}");
               *ctr = new;
             }
-            x => {
+            _ => {
               unreachable!()
             }
           }

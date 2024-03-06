@@ -51,7 +51,7 @@ pub struct Net {
 /// Here, the wires at the leaves of the tree are represented with
 /// [`Tree::Var`], where the variable name is shared between both sides of the
 /// wire.
-#[derive(Clone, Hash, PartialEq, Eq, Debug, Default)]
+#[derive(Hash, PartialEq, Eq, Debug, Default)]
 pub enum Tree {
   #[default]
   /// A nilary eraser node.
@@ -93,9 +93,8 @@ pub enum Tree {
   Mat {
     /// An auxiliary port; connects to the zero branch.
     zero: Box<Tree>,
-    /// An auxiliary port; connects to the predecessor input of the succ branch.
-    pred: Box<Tree>,
-    /// An auxiliary port; connects to the output of the succ branch.
+    /// An auxiliary port; connects to the a CTR with label 0 containing the
+    /// predecessor and the output of the succ branch.
     succ: Box<Tree>,
     /// An auxiliary port; connects to the output.
     out: Box<Tree>,
@@ -146,10 +145,10 @@ pub const MAX_ADT_VARIANTS: usize = MAX_ARITY - 1;
 pub const MAX_ADT_FIELDS: usize = MAX_ARITY - 1;
 
 impl Net {
-  pub fn trees(&self)  -> impl Iterator<Item = &Tree>{
+  pub fn trees(&self) -> impl Iterator<Item = &Tree> {
     std::iter::once(&self.root).chain(self.redexes.iter().map(|(x, y)| [x, y]).flatten())
   }
-  pub fn trees_mut(&mut self)  -> impl Iterator<Item = &mut Tree> {
+  pub fn trees_mut(&mut self) -> impl Iterator<Item = &mut Tree> {
     std::iter::once(&mut self.root).chain(self.redexes.iter_mut().map(|(x, y)| [x, y]).flatten())
   }
 }
@@ -161,7 +160,7 @@ impl Tree {
       Tree::Era | Tree::Num { .. } | Tree::Ref { .. } | Tree::Var { .. } => array_vec::from_array([]),
       Tree::Ctr { ports, .. } => array_vec::from_iter(ports),
       Tree::Op { rhs, out, .. } => array_vec::from_array([rhs, out]),
-      Tree::Mat { zero, pred, succ, out } => array_vec::from_array([zero, pred, succ, out]),
+      Tree::Mat { zero, succ, out } => array_vec::from_array([zero, succ, out]),
       Tree::Adt { fields, .. } => array_vec::from_iter(fields),
     })
   }
@@ -172,7 +171,7 @@ impl Tree {
       Tree::Era | Tree::Num { .. } | Tree::Ref { .. } | Tree::Var { .. } => array_vec::from_array([]),
       Tree::Ctr { ports, .. } => array_vec::from_iter(ports),
       Tree::Op { rhs, out, .. } => array_vec::from_array([rhs, out]),
-      Tree::Mat { zero, pred, succ, out } => array_vec::from_array([zero, pred, succ, out]),
+      Tree::Mat { zero, succ, out } => array_vec::from_array([zero, succ, out]),
       Tree::Adt { fields, .. } => array_vec::from_iter(fields),
     })
   }
@@ -188,12 +187,9 @@ impl Tree {
   pub fn legacy_mat(arms: Tree, out: Tree) -> Option<Tree> {
     let Tree::Ctr { lab: 0, ports } = arms else { None? };
     let Ok([zero, succ]) = <[_; 2]>::try_from(ports) else { None? };
-    let Tree::Ctr { lab: 0, ports } = succ else { None? };
-    let Ok([pred, succ]) = <[_; 2]>::try_from(ports) else { None? };
     let zero = Box::new(zero);
-    let pred = Box::new(pred);
     let succ = Box::new(succ);
-    Some(Tree::Mat { zero, pred, succ, out: Box::new(out) })
+    Some(Tree::Mat { zero, succ, out: Box::new(out) })
   }
 }
 
@@ -322,18 +318,17 @@ impl<'i> Parser<'i> {
           self.advance_char();
           self.consume("<")?;
           let zero = self.parse_tree()?;
-          let pred = self.parse_tree()?;
+          let succ = self.parse_tree()?;
           self.skip_trivia();
           if self.peek_char() == Some('>') {
             self.advance_char();
-            Tree::legacy_mat(zero, pred).ok_or_else(|| "invalid legacy match".to_owned())
+            Tree::legacy_mat(zero, succ).ok_or_else(|| "invalid legacy match".to_owned())
           } else {
             let zero = Box::new(zero);
-            let pred = Box::new(pred);
-            let succ = Box::new(self.parse_tree()?);
+            let succ = Box::new(succ);
             let out = Box::new(self.parse_tree()?);
             self.consume(">")?;
-            Ok(Tree::Mat { zero, pred, succ, out })
+            Ok(Tree::Mat { zero, succ, out })
           }
         }
         // Var = Name
@@ -526,7 +521,26 @@ impl fmt::Display for Tree {
       Tree::Ref { nam } => write!(f, "@{nam}"),
       Tree::Num { val } => write!(f, "#{val}"),
       Tree::Op { op, rhs, out } => write!(f, "<{op} {rhs} {out}>"),
-      Tree::Mat { zero, pred, succ, out } => write!(f, "?<{zero} {pred} {succ} {out}>"),
+      Tree::Mat { zero, succ, out } => write!(f, "?<{zero} {succ} {out}>"),
+    })
+  }
+}
+impl Clone for Tree {
+  fn clone(&self) -> Tree {
+    maybe_grow(|| match self {
+      Tree::Era => Tree::Era,
+      Tree::Num { val } => Tree::Num { val: val.clone() },
+      Tree::Ref { nam } => Tree::Ref { nam: nam.clone() },
+      Tree::Ctr { lab, ports } => Tree::Ctr { lab: lab.clone(), ports: ports.clone() },
+      Tree::Op { op, rhs, out } => Tree::Op { op: op.clone(), rhs: rhs.clone(), out: out.clone() },
+      Tree::Mat { zero, succ, out } => Tree::Mat { zero: zero.clone(), succ: succ.clone(), out: out.clone() },
+      Tree::Adt { lab, variant_index, variant_count, fields } => Tree::Adt {
+        lab: lab.clone(),
+        variant_index: variant_index.clone(),
+        variant_count: variant_count.clone(),
+        fields: fields.clone(),
+      },
+      Tree::Var { nam } => Tree::Var { nam: nam.clone() },
     })
   }
 }

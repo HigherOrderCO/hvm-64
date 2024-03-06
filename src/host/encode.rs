@@ -102,12 +102,10 @@ impl<'a, E: Encoder> State<'a, E> {
         self.visit_tree(lft, l);
         self.visit_tree(rgt, r);
       }
-      Tree::Mat { zero, pred, succ, out } => {
+      Tree::Mat { zero, succ, out } => {
         let (a, o) = self.encoder.mat(trg);
-        let (z, b) = self.encoder.ctr(0, a);
+        let (z, s) = self.encoder.ctr(0, a);
         self.visit_tree(zero, z);
-        let (p, s) = self.encoder.ctr(0, b);
-        self.visit_tree(pred, p);
         self.visit_tree(succ, s);
         self.visit_tree(out, o);
       }
