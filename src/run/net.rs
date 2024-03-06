@@ -100,6 +100,7 @@ impl<'a, M: Mode> Net<'a, M> {
       let next = self.weak_normal(prev, root.clone());
       trace!(self, "got", next);
       if next.is_full_node() {
+        for i in 0 .. next.tag().arity() {}
         todo!();
         // visit.push(Port::new_var( next.addr()));
         // visit.push(Port::new_var( next.addr().other_half()));

@@ -25,6 +25,10 @@ use super::*;
 /// net.link(aw, bw);
 /// ```
 ///
+/// ```js
+/// let a  =5;
+/// ```
+///
 /// Each instruction documents both the native implementation and the polarity
 /// of each `TrgId`.
 ///

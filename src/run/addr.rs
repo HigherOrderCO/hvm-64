@@ -37,19 +37,20 @@ impl Addr {
 
   const HALF_MASK: usize = 0b1000;
 
-  /// TODO
+  /// Rounds this address down to be aligned to `align`.
   #[inline(always)]
   pub(super) fn floor(&self, align: Align) -> Self {
     Addr(self.0 & (usize::MAX << align.tag_bits()))
   }
 
-  /// TODO
+  /// Returns the other address of alignment `align` within alignment
+  /// `align.next()`.
   #[inline(always)]
   pub(super) fn other(&self, align: Align) -> Self {
     Addr(self.0 ^ (1 << align.tag_bits()))
   }
 
-  /// TODO
+  /// Offsets the address by a specified number of words.
   #[inline(always)]
   pub(super) fn offset(&self, words: usize) -> Self {
     Addr(self.0 + (words << 3))

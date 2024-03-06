@@ -84,7 +84,7 @@ impl Port {
 
   /// TODO
   #[inline(always)]
-  pub fn new_adtz(variant_count: u8, variant_index: u8) -> Self {
+  pub const fn new_adtz(variant_count: u8, variant_index: u8) -> Self {
     Port(Tag::AdtZ as u64 | ((variant_count as u64) << 16) | ((variant_index as u64) << 8))
   }
 
@@ -112,11 +112,12 @@ impl Port {
     unsafe { Tag::from_unchecked((self.0 & (1 << self.align().tag_bits()) - 1) as u8) }
   }
 
-  /// TODO
+  /// Checks if this port is of the given `tag`.
   #[inline(always)]
   pub fn is(&self, tag: Tag) -> bool {
-    // TODO: optimize
-    self.tag() == tag
+    // This could be `self.tag() == tag`, but this is more efficient when `tag`
+    // is a constant.
+    (self.0 & ((1 << tag.align().tag_bits()) - 1)) as u8 == tag as u8
   }
 
   /// Accesses the label of this port; this is valid for all non-`Num` ports.
@@ -192,6 +193,6 @@ impl Port {
   /// TODO
   #[inline(always)]
   pub(super) fn is_ctr_ish(&self) -> bool {
-    (self.0 * 0b111) > 0b100
+    (self.0 & 0b111) > 0b100
   }
 }

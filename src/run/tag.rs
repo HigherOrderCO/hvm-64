@@ -49,6 +49,8 @@ impl Tag {
   pub(super) fn align(self) -> Align {
     unsafe { Align::from_unchecked(self as u8 & 0b11) }
   }
+
+  /// Returns the width -- the size of the allocation -- of nodes of this tag.
   #[inline]
   pub(super) fn width(self) -> u8 {
     match self {
@@ -58,6 +60,9 @@ impl Tag {
       CtrN!() | AdtN!() => (1 << (self.align() as u8 - 1)) + 1 + (self as u8 >> 4),
     }
   }
+
+  /// Returns the arity -- the number of auxiliary ports -- of nodes of this
+  /// tag.
   #[inline]
   pub(super) fn arity(self) -> u8 {
     match self {
@@ -67,12 +72,14 @@ impl Tag {
   }
 }
 
+/// Matches any `Ctr` tag.
 macro_rules! CtrN {
   () => {
     Tag::Ctr2 | Tag::Ctr3 | Tag::Ctr4 | Tag::Ctr5 | Tag::Ctr6 | Tag::Ctr7 | Tag::Ctr8
   };
 }
 
+/// Matches any `Adt` tag except `AdtZ` (which is handled quite differently).
 macro_rules! AdtN {
   () => {
     Tag::Adt2 | Tag::Adt3 | Tag::Adt4 | Tag::Adt5 | Tag::Adt6 | Tag::Adt7 | Tag::Adt8
@@ -84,6 +91,9 @@ pub(crate) use CtrN;
 
 bi_enum! {
   #[repr(u8)]
+  /// The alignment of an [`Addr`], measured in words.
+  ///
+  /// The numeric representation of the alignment is `log2(align.width())`.
   #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
   pub(crate) enum Align {
     Align1 = 0b00,
@@ -96,6 +106,7 @@ bi_enum! {
 pub(crate) use Align::*;
 
 impl Align {
+  /// The number of bits available for tagging in addresses of this alignment.
   #[inline(always)]
   pub(super) fn tag_bits(self) -> u8 {
     self as u8 + 3
@@ -104,6 +115,7 @@ impl Align {
   pub(super) fn width(self) -> u8 {
     1 << self as u8
   }
+  /// Returns the next largest alignment, if it exists.
   #[inline(always)]
   pub(super) fn next(self) -> Option<Self> {
     match self {
