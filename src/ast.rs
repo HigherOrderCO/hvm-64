@@ -252,7 +252,7 @@ impl<'i> Parser<'i> {
             _ => unreachable!(),
           };
           self.skip_trivia();
-          if self.peek_char().is_some_and(|x| x.is_ascii_digit()) {
+          if self.peek_char().is_some_and(|x| x == ':') {
             let variant_index = self.parse_int()?;
             self.consume(":")?;
             let variant_count = self.parse_int()?;
@@ -504,9 +504,9 @@ impl fmt::Display for Tree {
         match lab {
           0 => write!(f, "("),
           1 => write!(f, "["),
-          _ => write!(f, "{{{lab} "),
+          _ => write!(f, "{{{lab}"),
         }?;
-        write!(f, "{}:{}", variant_index, variant_count)?;
+        write!(f, ":{}:{}", variant_index, variant_count)?;
         for field in fields {
           write!(f, " {field}")?;
         }
