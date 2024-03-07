@@ -206,7 +206,7 @@ A2 --|b|       |a|-- B1
 ```
 ### Num, Op, and Mat
 
-`hvm-core` allows programs to employ the host architecture's native number operators. `hvm-core` nums are 60 bits long. 
+`hvm-core` allows programs to employ the host architecture's native number operators. `hvm-core` numbers are 60 bits long. 
 
 - `Num` is a 60-bit unsigned integer type. 
 -  `Op` is a binary operation carried out on the integer in its principal port.
@@ -228,7 +228,7 @@ An `Op` node is a 2-ary node that carries out an operation on the numbers betwee
       \-----|2--- out
 ~~~~~~~~~~~~~~~~~~~~~~~ OP-NUM (B)
          /------|1--- #X
-other --|Op[op']|              // Operator inside Op node gets flippe
+other --|Op[op']|              // Operator inside Op node gets flipped
          \------|2--- out
 ```
 
@@ -376,6 +376,7 @@ represented as a vector of trees, with the 'redex' buffer storing the tree roots
 (as active pairs), and the 'nodes' buffer storing all the nodes. Each node has
 two 64-bit pointers and, thus, uses exactly 128 bits. 
 
+[comment]: <> (/* cSpell:disable */)
 ``` 
                                                              2-0
                                                               v 
@@ -385,6 +386,7 @@ LLLLLLLLLLLLLLLLAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAATTT
                                                               ^
                                                              Tag
 ```
+[comment]: <> (/* cSpell:enable */)
 
 Pointers include a 4-bit tag, a 16-bit label (used for DUP labels, OP operators) and a 48-bit aligned addr,
 which allows addressing a 281 TB space per instance. There are 7 pointer types:
