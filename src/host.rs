@@ -2,9 +2,7 @@
 //! the runtime.
 
 use crate::{
-  ast::{Book, Net, Tree},
-  run::{self, Addr, Def, Instruction, InterpretedDef, LabSet, Mode, Port, Tag, TrgId, Wire},
-  util::create_var,
+  ast::{Book, Net, Tree}, run::{self, Addr, Def, Instruction, InterpretedDef, LabSet, Mode, Port, Tag, TrgId, Wire}, stdlib::HostedDef, util::create_var
 };
 use std::{
   collections::{hash_map::Entry, HashMap},
@@ -79,7 +77,7 @@ impl Host {
     })
     .into_iter()
     {
-      let def = DefRef::Owned(Box::new(Def::new(labs, InterpretedDef::default())));
+      let def = unsafe { HostedDef::new_hosted(labs, InterpretedDef::default()) };
       self.insert_def(name, def);
     }
 

@@ -1,3 +1,5 @@
+use crate::stdlib::AsHostedDef;
+
 use super::*;
 
 /// A bitset representing the set of labels used in a def.
@@ -205,9 +207,9 @@ pub struct InterpretedDef {
   pub(crate) trgs: usize,
 }
 
-impl AsDef for InterpretedDef {
-  unsafe fn call<M: Mode>(slf: *const Def<Self>, net: &mut Net<M>, trg: Port) {
-    let def = unsafe { &(*slf).data };
+impl AsHostedDef for InterpretedDef {
+  fn call<M: Mode>(def: &Def<InterpretedDef>, net: &mut Net<M>, trg: Port) {
+    let def = &def.data;
     let instructions = &def.instr;
 
     if def.trgs >= net.trgs.len() {

@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex};
+use std::{marker::PhantomData, sync::{Arc, Mutex}};
 
 use crate::{
   ast::Book,
@@ -21,17 +21,19 @@ fn call_identity<M: Mode>(net: &mut Net<M>, port: Port) {
 ///
 /// The output can therefore either be erased, or used to sequence other
 /// operations after the log.
-pub struct LogDef<F>(F);
 
 impl<F: Fn(Wire) + Clone + Send + Sync + 'static> LogDef<F> {
-  pub fn new(f: F) -> Def<Self> {
-    Def::new(LabSet::ALL, LogDef(f))
+  /// # SAFETY
+  /// The caller must ensure that the returned value lives at least as long as the port where it is used.
+  pub unsafe fn new(f: F) -> DefRef {
+    HostedDef::new_hosted(LabSet::ALL, LogDef(f))
   }
 }
 
-impl<F: Fn(Wire) + Clone + Send + Sync + 'static> AsDef for LogDef<F> {
-  unsafe fn call<M: Mode>(def: *const Def<Self>, net: &mut Net<M>, port: Port) {
-    let def = unsafe { &*def };
+struct LogDef<F>(F);
+
+impl<F: Fn(Wire) + Clone + Send + Sync + 'static> AsHostedDef for LogDef<F> {
+  fn call<M: Mode>(def: &Def<Self>, net: &mut Net<M>, port: Port) {
     let (arg, seq) = net.do_ctr(0, Trg::port(port));
     let (wire, port) = net.create_wire();
     if M::LAZY {
@@ -69,23 +71,21 @@ struct ActiveLogDef<F> {
 
 impl<F: Fn(Wire) + Send + Sync + 'static> ActiveLogDef<F> {
   fn new(logger: Arc<Logger<F>>, out: Port) -> Port {
-    Port::new_ref(Box::leak(Box::new(Def::new(LabSet::ALL, ActiveLogDef { logger, out }))))
+    Port::new_ref(BoxDef::new_boxed(LabSet::ALL, ActiveLogDef { logger, out }).as_ref())
   }
 }
 
-impl<F: Fn(Wire) + Send + Sync + 'static> AsDef for ActiveLogDef<F> {
-  unsafe fn call<M: Mode>(def: *const Def<Self>, net: &mut Net<M>, port: Port) {
-    let def = *Box::from_raw(def as *mut Def<Self>);
+
+impl<F: Fn(Wire) + Send + Sync + 'static> AsBoxDef for ActiveLogDef<F> {
+  fn call<M: Mode>(def: Box<Def<Self>>, net: &mut Net<M>, port: Port) {
     match port.tag() {
       Tag::Red => {
         unreachable!()
       }
       Tag::Ref if port != Port::ERA => {
-        let other: *const Def = port.addr().def() as *const _;
-        if let Some(other) = Def::downcast_ptr::<Self>(other) {
-          let other = *Box::from_raw(other as *mut Def<Self>);
-          net.link_port_port(def.data.out, other.data.out);
-          other.data.logger.maybe_log(net);
+        if let Some(other) = unsafe { BoxDef::<Self>::try_downcast_box(port.clone()) } {
+          net.link_port_port(def.data.out, other.data.0.out);
+          other.data.0.logger.maybe_log(net);
         } else {
           net.link_port_port(def.data.out, port);
         }
@@ -108,14 +108,100 @@ pub fn create_host(book: &Book) -> Arc<Mutex<Host>> {
   let host = Arc::new(Mutex::new(Host::default()));
   host.lock().unwrap().insert_def(
     "HVM.log",
-    DefRef::Owned(Box::new(crate::stdlib::LogDef::new({
+    unsafe { crate::stdlib::LogDef::new({
       let host = Arc::downgrade(&host);
       move |wire| {
         println!("{}", host.upgrade().unwrap().lock().unwrap().readback_tree(&wire));
       }
-    }))),
+    })},
   );
   host.lock().unwrap().insert_def("HVM.black_box", DefRef::Static(unsafe { &*IDENTITY }));
   host.lock().unwrap().insert_book(&book);
   host
 }
+
+
+#[repr(transparent)]
+pub struct BoxDef<T: AsBoxDef>(pub T, PhantomData<()>);
+
+impl<T: AsBoxDef> BoxDef<T> {
+  pub fn new_boxed(labs: LabSet, data: T) -> Box<Def<Self>> {
+    Box::new(Def::new(labs, BoxDef(data, PhantomData)))
+  }
+  /// SAFETY: if port is a ref, it must be a valid pointer.
+  pub unsafe fn try_downcast_box(port: Port) -> Option<Box<Def<Self>>> {
+    if port.is(Tag::Ref) {
+      if let Some(port) = unsafe { Def::downcast_ptr::<Self>(port.addr().0 as *const _) }{
+        Some(unsafe { Box::from_raw(port as *mut Def<Self>) })
+      } else {
+        None
+      }
+    } else {
+      None
+    }
+  }
+}
+
+pub trait AsBoxDef: Send + Sync + 'static {
+  fn call<M: Mode>(slf: Box<Def<Self>>, net: &mut Net<M>, port: Port);
+}
+
+impl<T: AsBoxDef> AsDef for BoxDef<T> {
+    unsafe fn call<M: Mode>(slf: *const Def<Self>, net: &mut Net<M>, port: Port) {
+      T::call(Box::from_raw(slf as *mut _), net, port)
+    }
+}
+
+#[repr(transparent)]
+pub struct ArcDef<T: AsArcDef>(pub T, PhantomData<()>);
+
+impl<T: AsArcDef> ArcDef<T> {
+  pub fn new_arc(labs: LabSet, data: T) -> Arc<Def<Self>> {
+    Arc::new(Def::new(labs, ArcDef(data, PhantomData)))
+  }
+  /// SAFETY: if port is a ref, it must be a valid pointer.
+  pub unsafe fn try_downcast_arc(port: Port) -> Option<Arc<Def<Self>>> {
+    if port.is(Tag::Ref) && port != Port::ERA {
+      if let Some(port) = unsafe { Def::downcast_ptr::<Self>(port.addr().0 as *const _) }{
+        Some(unsafe { Arc::from_raw(port as *mut Def<Self>) })
+      } else {
+        None
+      }
+    } else {
+      None
+    }
+  }
+}
+
+pub trait AsArcDef: Send + Sync + 'static {
+  fn call<M: Mode>(slf: Arc<Def<Self>>, net: &mut Net<M>, port: Port);
+}
+
+impl<T: AsArcDef> AsDef for ArcDef<T> {
+    unsafe fn call<M: Mode>(slf: *const Def<Self>, net: &mut Net<M>, port: Port) {
+      T::call(Arc::from_raw(slf as *mut _), net, port);
+    }
+}
+
+#[repr(transparent)]
+pub struct HostedDef<T: AsHostedDef>(pub T, PhantomData<()>);
+
+impl<T: AsHostedDef> HostedDef<T> {
+  pub unsafe fn new_hosted(labs: LabSet, data: T) -> DefRef {
+    DefRef::Owned(Box::new(Def::new(labs, HostedDef(data, PhantomData))))
+  }
+}
+
+pub trait AsHostedDef: Send + Sync + 'static {
+  fn call<M: Mode>(slf: &Def<Self>, net: &mut Net<M>, port: Port);
+}
+
+impl<T: AsHostedDef> AsDef for HostedDef<T> {
+    unsafe fn call<M: Mode>(slf: *const Def<Self>, net: &mut Net<M>, port: Port) {
+      T::call((slf as *const Def<T>).as_ref().unwrap(), net, port)
+    }
+}
+
+
+
+
