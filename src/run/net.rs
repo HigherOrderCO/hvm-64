@@ -32,9 +32,6 @@ impl<'h, M: Mode> Net<'h, M> {
 }
 
 impl<'a, M: Mode> Net<'a, M> {
-  pub fn set_port<'c, 'd: 'c>(&'c self, def: &'d Def<Dynamic>, address: Addr) {
-
-  }
   /// Reduces at most `limit` redexes.
   #[inline(always)]
   pub fn reduce(&mut self, limit: usize) -> usize {

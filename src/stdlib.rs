@@ -1,4 +1,7 @@
-use std::{marker::PhantomData, sync::{Arc, Mutex}};
+use std::{
+  marker::PhantomData,
+  sync::{Arc, Mutex},
+};
 
 use crate::{
   ast::Book,
@@ -24,13 +27,14 @@ fn call_identity<M: Mode>(net: &mut Net<M>, port: Port) {
 
 impl<F: Fn(Wire) + Clone + Send + Sync + 'static> LogDef<F> {
   /// # SAFETY
-  /// The caller must ensure that the returned value lives at least as long as the port where it is used.
+  /// The caller must ensure that the returned value lives at least as long as
+  /// the port where it is used.
   pub unsafe fn new(f: F) -> DefRef {
     HostedDef::new_hosted(LabSet::ALL, LogDef(f))
   }
 }
 
-struct LogDef<F>(F);
+pub struct LogDef<F>(F);
 
 impl<F: Fn(Wire) + Clone + Send + Sync + 'static> AsHostedDef for LogDef<F> {
   fn call<M: Mode>(def: &Def<Self>, net: &mut Net<M>, port: Port) {
@@ -71,10 +75,9 @@ struct ActiveLogDef<F> {
 
 impl<F: Fn(Wire) + Send + Sync + 'static> ActiveLogDef<F> {
   fn new(logger: Arc<Logger<F>>, out: Port) -> Port {
-    Port::new_ref(BoxDef::new_boxed(LabSet::ALL, ActiveLogDef { logger, out }).as_ref())
+    Port::new_ref(Box::leak(BoxDef::new_boxed(LabSet::ALL, ActiveLogDef { logger, out })))
   }
 }
-
 
 impl<F: Fn(Wire) + Send + Sync + 'static> AsBoxDef for ActiveLogDef<F> {
   fn call<M: Mode>(def: Box<Def<Self>>, net: &mut Net<M>, port: Port) {
@@ -106,20 +109,18 @@ impl<F: Fn(Wire) + Send + Sync + 'static> AsBoxDef for ActiveLogDef<F> {
 /// Create a `Host` from a `Book`, including `hvm-core`'s built-in definitions
 pub fn create_host(book: &Book) -> Arc<Mutex<Host>> {
   let host = Arc::new(Mutex::new(Host::default()));
-  host.lock().unwrap().insert_def(
-    "HVM.log",
-    unsafe { crate::stdlib::LogDef::new({
+  host.lock().unwrap().insert_def("HVM.log", unsafe {
+    crate::stdlib::LogDef::new({
       let host = Arc::downgrade(&host);
       move |wire| {
         println!("{}", host.upgrade().unwrap().lock().unwrap().readback_tree(&wire));
       }
-    })},
-  );
+    })
+  });
   host.lock().unwrap().insert_def("HVM.black_box", DefRef::Static(unsafe { &*IDENTITY }));
   host.lock().unwrap().insert_book(&book);
   host
 }
-
 
 #[repr(transparent)]
 pub struct BoxDef<T: AsBoxDef>(pub T, PhantomData<()>);
@@ -131,7 +132,7 @@ impl<T: AsBoxDef> BoxDef<T> {
   /// SAFETY: if port is a ref, it must be a valid pointer.
   pub unsafe fn try_downcast_box(port: Port) -> Option<Box<Def<Self>>> {
     if port.is(Tag::Ref) {
-      if let Some(port) = unsafe { Def::downcast_ptr::<Self>(port.addr().0 as *const _) }{
+      if let Some(port) = unsafe { Def::downcast_ptr::<Self>(port.addr().0 as *const _) } {
         Some(unsafe { Box::from_raw(port as *mut Def<Self>) })
       } else {
         None
@@ -147,9 +148,9 @@ pub trait AsBoxDef: Send + Sync + 'static {
 }
 
 impl<T: AsBoxDef> AsDef for BoxDef<T> {
-    unsafe fn call<M: Mode>(slf: *const Def<Self>, net: &mut Net<M>, port: Port) {
-      T::call(Box::from_raw(slf as *mut _), net, port)
-    }
+  unsafe fn call<M: Mode>(slf: *const Def<Self>, net: &mut Net<M>, port: Port) {
+    T::call(Box::from_raw(slf as *mut _), net, port)
+  }
 }
 
 #[repr(transparent)]
@@ -159,10 +160,13 @@ impl<T: AsArcDef> ArcDef<T> {
   pub fn new_arc(labs: LabSet, data: T) -> Arc<Def<Self>> {
     Arc::new(Def::new(labs, ArcDef(data, PhantomData)))
   }
+  pub fn to_port(slf: Arc<Def<T>>) -> Port {
+    unsafe { Port::new_ref(Arc::into_raw(slf).as_ref().unwrap()) }
+  }
   /// SAFETY: if port is a ref, it must be a valid pointer.
   pub unsafe fn try_downcast_arc(port: Port) -> Option<Arc<Def<Self>>> {
     if port.is(Tag::Ref) && port != Port::ERA {
-      if let Some(port) = unsafe { Def::downcast_ptr::<Self>(port.addr().0 as *const _) }{
+      if let Some(port) = unsafe { Def::downcast_ptr::<Self>(port.addr().0 as *const _) } {
         Some(unsafe { Arc::from_raw(port as *mut Def<Self>) })
       } else {
         None
@@ -178,9 +182,9 @@ pub trait AsArcDef: Send + Sync + 'static {
 }
 
 impl<T: AsArcDef> AsDef for ArcDef<T> {
-    unsafe fn call<M: Mode>(slf: *const Def<Self>, net: &mut Net<M>, port: Port) {
-      T::call(Arc::from_raw(slf as *mut _), net, port);
-    }
+  unsafe fn call<M: Mode>(slf: *const Def<Self>, net: &mut Net<M>, port: Port) {
+    T::call(Arc::from_raw(slf as *mut _), net, port);
+  }
 }
 
 #[repr(transparent)]
@@ -197,11 +201,96 @@ pub trait AsHostedDef: Send + Sync + 'static {
 }
 
 impl<T: AsHostedDef> AsDef for HostedDef<T> {
-    unsafe fn call<M: Mode>(slf: *const Def<Self>, net: &mut Net<M>, port: Port) {
-      T::call((slf as *const Def<T>).as_ref().unwrap(), net, port)
-    }
+  unsafe fn call<M: Mode>(slf: *const Def<Self>, net: &mut Net<M>, port: Port) {
+    T::call((slf as *const Def<T>).as_ref().unwrap(), net, port)
+  }
 }
 
+use crate::ast::Tree;
 
+pub struct UniqueTreePtr(*mut Tree);
+unsafe impl Send for UniqueTreePtr {}
+unsafe impl Sync for UniqueTreePtr {}
 
+pub struct ReadbackDef<F: FnOnce() + Send + Sync + 'static> {
+  root: Arc<F>,
+  host: Arc<Mutex<Host>>,
+  tree: UniqueTreePtr,
+  out: Port,
+}
 
+impl<F: FnOnce() + Send + Sync + 'static> ReadbackDef<F> {
+  fn maybe_finish(root: Arc<F>) {
+    let Some(root) = Arc::into_inner(root) else { return };
+    (root)()
+  }
+  fn with(&self, tree: *mut Tree, out: Port) -> Port {
+    Port::new_ref(&*BoxDef::new_boxed(LabSet::ALL, Self {
+      tree: UniqueTreePtr(tree),
+      out,
+      root: self.root.clone(),
+      host: self.host.clone(),
+    }))
+  }
+}
+
+impl<F: FnOnce() + Send + Sync + 'static> AsBoxDef for ReadbackDef<F> {
+  fn call<M: Mode>(def: Box<Def<Self>>, net: &mut Net<M>, port: Port) {
+    match port.tag() {
+      Tag::Red => {
+        unreachable!()
+      }
+      Tag::Ref if port != Port::ERA => {
+        if let Some(other) = unsafe { BoxDef::<Self>::try_downcast_box(port.clone()) } {
+          net.link_port_port(def.data.out, other.data.0.out);
+          Self::maybe_finish(other.data.0.root);
+        } else {
+          net.link_port_port(def.data.out, port);
+        }
+      }
+      Tag::Ref => {
+        unsafe { *(def.data.tree.0) = Tree::Era };
+        net.link_port_port(def.data.out, port);
+      }
+      Tag::Num => {
+        unsafe { *(def.data.tree.0) = Tree::Num { val: port.num() } };
+        net.link_port_port(def.data.out, port)
+      }
+      Tag::Var => net.link_port_port(def.data.out, port),
+      tag @ (Tag::Op | Tag::Mat | Tag::Ctr) => {
+        let old = port.clone().consume_node();
+        let new = net.create_node(tag, old.lab);
+        let (lhs, rhs): (*mut Tree, *mut Tree) = match tag {
+          Tag::Op => {
+            unsafe {
+              *(def.data.tree.0) = Tree::Op { op: port.op(), rhs: Box::new(Tree::Era), out: Box::new(Tree::Era) }
+            };
+            let Tree::Op { rhs, out, .. } = (unsafe { &mut *(def.data.tree.0) }) else { unreachable!() };
+            (out.as_mut(), rhs.as_mut())
+          }
+          Tag::Mat => {
+            unsafe { *(def.data.tree.0) = Tree::Mat { sel: Box::new(Tree::Era), ret: Box::new(Tree::Era) } };
+            let Tree::Mat { sel, ret } = (unsafe { &mut *(def.data.tree.0) }) else { unreachable!() };
+            (sel.as_mut(), ret.as_mut())
+          }
+          Tag::Ctr => {
+            unsafe {
+              *(def.data.tree.0) = Tree::Ctr { lab: port.lab(), lft: Box::new(Tree::Era), rgt: Box::new(Tree::Era) }
+            };
+            let Tree::Ctr { lft, rgt, .. } = (unsafe { &mut *(def.data.tree.0) }) else { unreachable!() };
+            (lft.as_mut(), rgt.as_mut())
+          }
+          _ => unreachable!(),
+        };
+        net.link_port_port(def.data.out.clone(), new.p0);
+        net.link_wire_port(old.p1, def.data.with(rhs, new.p1));
+        net.link_wire_port(old.p2, def.data.with(lhs, new.p2));
+      }
+    }
+    Self::maybe_finish(def.data.root);
+  }
+}
+
+// public api:
+// readback: Wire -> FnOnce(Tree) -> ()
+// readback_and_wait: Net -> Wire -> Tree

@@ -23,6 +23,7 @@ use crate::{
   ast::{Book, Net, Tree},
   host::{DefRef, Host},
   run::{self, Def, Heap, InterpretedDef, LabSet, Rewrites},
+  stdlib::{AsHostedDef, HostedDef},
   util::maybe_grow,
 };
 
@@ -37,8 +38,8 @@ impl Book {
     let mut host = Host::default();
     let captured_redexes = Arc::new(Mutex::new(Vec::new()));
     // When a ref is not found in the `Host`, put an inert def in its place.
-    host.insert_book_with_default(self, &mut |_| {
-      DefRef::Owned(Box::new(Def::new(LabSet::ALL, InertDef(captured_redexes.clone()))))
+    host.insert_book_with_default(self, &mut |_| unsafe {
+      HostedDef::new_hosted(LabSet::ALL, InertDef(captured_redexes.clone()))
     });
     let area = run::Heap::new_words(max_memory);
 
@@ -83,9 +84,8 @@ enum SeenState {
 #[derive(Default)]
 struct InertDef(Arc<Mutex<Vec<(run::Port, run::Port)>>>);
 
-impl run::AsDef for InertDef {
-  unsafe fn call<M: run::Mode>(def: *const run::Def<Self>, _: &mut run::Net<M>, port: run::Port) {
-    let def = unsafe { &*def };
+impl AsHostedDef for InertDef {
+  fn call<M: run::Mode>(def: &run::Def<Self>, _: &mut run::Net<M>, port: run::Port) {
     def.data.0.lock().unwrap().push((run::Port::new_ref(def), port));
   }
 }
@@ -145,8 +145,8 @@ impl<'a> State<'a> {
     // Mutate the host in-place with the pre-reduced net.
     let instr = self.host.encode_def(&net);
     if let DefRef::Owned(def_box) = self.host.defs.get_mut(nam).unwrap() {
-      let interpreted_def: &mut crate::run::Def<InterpretedDef> = def_box.downcast_mut().unwrap();
-      interpreted_def.data = instr;
+      let interpreted_def: &mut crate::run::Def<HostedDef<InterpretedDef>> = def_box.downcast_mut().unwrap();
+      interpreted_def.data.0 = instr;
     };
 
     // Replace the "Cycled" state with the "Reduced" state

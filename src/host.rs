@@ -2,7 +2,10 @@
 //! the runtime.
 
 use crate::{
-  ast::{Book, Net, Tree}, run::{self, Addr, Def, Instruction, InterpretedDef, LabSet, Mode, Port, Tag, TrgId, Wire}, stdlib::HostedDef, util::create_var
+  ast::{Book, Net, Tree},
+  run::{self, Addr, Def, Instruction, InterpretedDef, LabSet, Mode, Port, Tag, TrgId, Wire},
+  stdlib::HostedDef,
+  util::create_var,
 };
 use std::{
   collections::{hash_map::Entry, HashMap},
@@ -86,7 +89,7 @@ impl Host {
     for (nam, net) in book.iter() {
       let data = self.encode_def(net);
       match self.defs.get_mut(nam).unwrap() {
-        DefRef::Owned(def) => def.downcast_mut::<InterpretedDef>().unwrap().data = data,
+        DefRef::Owned(def) => def.downcast_mut::<HostedDef<InterpretedDef>>().unwrap().data.0 = data,
         DefRef::Static(_) => unreachable!(),
       }
     }

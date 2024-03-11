@@ -14,6 +14,7 @@ use std::{
   path::Path,
   process::{self, Stdio},
   str::FromStr,
+  sync::{Arc, Mutex},
   time::{Duration, Instant},
 };
 
@@ -30,18 +31,18 @@ fn main() {
           process::exit(1);
         });
         let host = create_host(&load_book(&[file.clone()], &transform_opts));
-        compile_executable(output, &host.lock().unwrap()).unwrap();
+        compile_executable(output, host).unwrap();
       }
       CliMode::Run { run_opts, mut transform_opts, file, args } => {
         // Don't pre-reduce the entry point
         transform_opts.pre_reduce_skip.push(args.entry_point.clone());
         let host = create_host(&load_book(&[file], &transform_opts));
-        run(&host.lock().unwrap(), run_opts, args);
+        run(host, run_opts, args);
       }
       CliMode::Reduce { run_opts, transform_opts, files, exprs } => {
         let host = create_host(&load_book(&files, &transform_opts));
         let exprs: Vec<_> = exprs.iter().map(|x| Net::from_str(x).unwrap()).collect();
-        reduce_exprs(&host.lock().unwrap(), &exprs, &run_opts);
+        reduce_exprs(host, &exprs, &run_opts);
       }
       CliMode::Transform { transform_opts, files } => {
         let book = load_book(&files, &transform_opts);
@@ -51,7 +52,7 @@ fn main() {
   } else {
     let cli = BareCli::parse();
     let host = hvmc::gen::host();
-    run(&host, cli.opts, cli.args);
+    run(Arc::new(Mutex::new(host)), cli.opts, cli.args);
   }
   if cfg!(feature = "trace") {
     hvmc::trace::_read_traces(usize::MAX);
@@ -270,7 +271,7 @@ impl TransformPass {
   }
 }
 
-fn run(host: &Host, opts: RuntimeOpts, args: RunArgs) {
+fn run(host: Arc<Mutex<Host>>, opts: RuntimeOpts, args: RunArgs) {
   let mut net = Net { root: Tree::Ref { nam: args.entry_point }, redexes: vec![] };
   for arg in args.args {
     let arg: Net = Net::from_str(&arg).unwrap();
@@ -343,12 +344,12 @@ fn load_book(files: &[String], transform_opts: &TransformOpts) -> Book {
   book
 }
 
-fn reduce_exprs(host: &Host, exprs: &[Net], opts: &RuntimeOpts) {
+fn reduce_exprs(host: Arc<Mutex<Host>>, exprs: &[Net], opts: &RuntimeOpts) {
   let heap = run::Heap::new_bytes(opts.memory);
   for expr in exprs {
     let mut net = DynNet::new(&heap, opts.lazy_mode);
     dispatch_dyn_net!(&mut net => {
-      host.encode_net(net, Trg::port(run::Port::new_var(net.root.addr())), expr);
+      host.lock().unwrap().encode_net(net, Trg::port(run::Port::new_var(net.root.addr())), expr);
       let start_time = Instant::now();
       if opts.single_core {
         net.normal();
@@ -356,7 +357,7 @@ fn reduce_exprs(host: &Host, exprs: &[Net], opts: &RuntimeOpts) {
         net.parallel_normal();
       }
       let elapsed = start_time.elapsed();
-      println!("{}", host.readback(net));
+      println!("{}", host.lock().unwrap().readback(net));
       if opts.show_stats {
         print_stats(net, elapsed);
       }
@@ -386,8 +387,8 @@ fn pretty_num(n: u64) -> String {
     .collect()
 }
 
-fn compile_executable(target: &str, host: &host::Host) -> Result<(), io::Error> {
-  let gen = compile::compile_host(host);
+fn compile_executable(target: &str, host: Arc<Mutex<host::Host>>) -> Result<(), io::Error> {
+  let gen = compile::compile_host(&host.lock().unwrap());
   let outdir = ".hvm";
   if Path::new(&outdir).exists() {
     fs::remove_dir_all(outdir)?;
