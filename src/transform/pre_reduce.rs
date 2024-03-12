@@ -21,7 +21,7 @@ use std::{
 
 use crate::{
   ast::{Book, Net, Tree},
-  host::{DefRef, Host},
+  host::{encode_def, DefRef, Host},
   run::{self, Def, Heap, InterpretedDef, LabSet, Rewrites},
   stdlib::{AsHostedDef, HostedDef},
   util::maybe_grow,

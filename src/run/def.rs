@@ -145,10 +145,9 @@ impl Def {
   }
   #[inline(always)]
   pub unsafe fn call<M: Mode>(slf: *const Def, net: &mut Net<M>, port: Port) {
-    if M::LAZY {
-      ((*slf).call_lazy)(slf as *const _, std::mem::transmute(net), port)
-    } else {
-      ((*slf).call_strict)(slf as *const _, std::mem::transmute(net), port)
+    match net.match_lazyness_mut() {
+      Ok(net) => ((*slf).call_lazy)(slf as *const _, net, port),
+      Err(net) => ((*slf).call_strict)(slf as *const _, net, port),
     }
   }
 }
@@ -172,10 +171,9 @@ impl<F: Fn(&mut Net<Strict>, Port) + Send + Sync + 'static, G: Fn(&mut Net<Lazy>
   for (F, G)
 {
   unsafe fn call<M: Mode>(slf: *const Def<Self>, net: &mut Net<M>, port: Port) {
-    if M::LAZY {
-      ((*slf).data.1)(std::mem::transmute::<_, &mut Net<Lazy>>(net), port)
-    } else {
-      ((*slf).data.0)(std::mem::transmute::<_, &mut Net<Strict>>(net), port)
+    match net.match_lazyness_mut() {
+      Ok(net) => ((*slf).data.1)(net, port),
+      Err(net) => ((*slf).data.0)(net, port),
     }
   }
 }
