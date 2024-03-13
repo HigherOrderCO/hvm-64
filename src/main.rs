@@ -432,6 +432,7 @@ fn compile_executable(target: &str, host: Arc<Mutex<host::Host>>) -> Result<(), 
       addr
       allocator
       def
+      dyn_net
       instruction
       interact
       linker
