@@ -151,16 +151,16 @@ impl<'h, M: Mode> Net<'h, M> {
       // ctx.barry.wait();
       // ctx.workers_with_non_empty_queues.store(0, Ordering::Relaxed);
       // ctx.barry.wait();
-      // let cur_frame_val = !ctx.net.rdex.is_empty() as isize;
+      // let cur_frame_val = !ctx.net.redex.is_empty() as isize;
       // ctx.rlens[ctx.tid].store(cur_frame_val as _, Ordering::Relaxed);
       // ctx.workers_with_non_empty_queues.fetch_add(cur_frame_val,
       // Ordering::Relaxed); ctx.barry.wait();
       // ctx.workers_with_non_empty_queues.load(Ordering::Relaxed) as usize
 
       // // This is a bit faster (2 barriers instead of 3), but we're iterating
-      // // over the entire array of `rlens``, which could be slow on a manycore CPU.
+      // // over the entire array of `rlens``, which could be slow on a many-core CPU.
       // ctx.barry.wait();
-      // ctx.rlens[ctx.tid].store(!ctx.net.rdex.is_empty() as _, Ordering::Relaxed);
+      // ctx.rlens[ctx.tid].store(!ctx.net.redex.is_empty() as _, Ordering::Relaxed);
       // ctx.barry.wait();
       // ctx.rlens.iter().map(|x| x.load(Ordering::Relaxed)).sum()
 
