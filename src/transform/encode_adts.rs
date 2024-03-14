@@ -51,7 +51,7 @@ impl Tree {
             Tree::Var { nam } if nam == ret_var => {
               vec![]
             }
-            _ => unreachable!()
+            _ => unreachable!(),
           };
           let new = Tree::Adt { lab, variant_index: fields_idx, variant_count: ports.len(), fields };
           *ctr = new;
