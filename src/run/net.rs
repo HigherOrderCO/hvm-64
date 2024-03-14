@@ -159,6 +159,8 @@ impl AsDef for ExpandDef {
         unreachable!()
       }
       Tag::Ref | Tag::Num | Tag::Var => net.link_port_port(def.data.out, port),
+      _ => todo!(),
+      #[cfg(todo)]
       tag @ (Tag::Op | Tag::Mat | Tag::Ctr) => {
         let old = port.consume_node();
         let new = net.create_node(tag, old.lab);

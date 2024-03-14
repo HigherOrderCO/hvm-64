@@ -56,7 +56,8 @@ impl Tag {
     match self {
       Tag::Num | Tag::Ref | Tag::AdtZ => 0,
       Tag::Red | Tag::Var => 1,
-      Tag::Op | Tag::Mat => 2,
+      Tag::Op => 2,
+      Tag::Mat => 3,
       CtrN!() | AdtN!() => (1 << (self.align() as u8 - 1)) + 1 + (self as u8 >> 4),
     }
   }
@@ -69,6 +70,14 @@ impl Tag {
       AdtN!() => self.width() - 1,
       _ => self.width(),
     }
+  }
+
+  pub(super) fn ctr_with_arity(arity: u8) -> Tag {
+    let sub = arity - 1;
+    let ilog = unsafe { sub.checked_ilog2().unwrap_unchecked() as u8 };
+    let ext = sub - (1 << ilog);
+    let tag = (ilog + 1) | 0b100 | (ext << 4);
+    unsafe { Tag::from_unchecked(tag) }
   }
 }
 
@@ -132,4 +141,7 @@ fn test_tag_width() {
   use Tag::*;
   assert_eq!([Ctr2, Ctr3, Ctr4, Ctr5, Ctr6, Ctr7, Ctr8].map(Tag::width), [2, 3, 4, 5, 6, 7, 8]);
   assert_eq!([Adt2, Adt3, Adt4, Adt5, Adt6, Adt7, Adt8].map(Tag::width), [2, 3, 4, 5, 6, 7, 8]);
+  for t in [Ctr2, Ctr3, Ctr4, Ctr5, Ctr6, Ctr7, Ctr8] {
+    assert_eq!(Tag::ctr_with_arity(t.width()), t);
+  }
 }

@@ -10,8 +10,12 @@ use crate::{
 pub const IDENTITY: *const Def = const { &Def::new(LabSet::from_bits(&[1]), (call_identity, call_identity)) }.upcast();
 
 fn call_identity<M: Mode>(net: &mut Net<M>, port: Port) {
-  let (a, b) = net.do_ctr(0, Trg::port(port));
-  net.link_trg(a, b);
+  #[cfg(todo)]
+  {
+    let (a, b) = net.do_ctr(0, Trg::port(port));
+    net.link_trg(a, b);
+  }
+  todo!()
 }
 
 /// The definition of `HVM.log`, parameterized by the readback function.
@@ -25,10 +29,13 @@ pub struct LogDef<F>(F);
 
 impl<F: Fn(Wire) + Clone + Send + Sync + 'static> LogDef<F> {
   pub fn new(f: F) -> Def<Self> {
-    Def::new(LabSet::ALL, LogDef(f))
+    #[cfg(todo)]
+    Def::new(LabSet::ALL, LogDef(f));
+    todo!()
   }
 }
 
+#[cfg(todo)]
 impl<F: Fn(Wire) + Clone + Send + Sync + 'static> AsDef for LogDef<F> {
   unsafe fn call<M: Mode>(def: *const Def<Self>, net: &mut Net<M>, port: Port) {
     let def = unsafe { &*def };
@@ -91,6 +98,8 @@ impl<F: Fn(Wire) + Send + Sync + 'static> AsDef for ActiveLogDef<F> {
         }
       }
       Tag::Ref | Tag::Num | Tag::Var => net.link_port_port(def.data.out, port),
+      _ => todo!(),
+      #[cfg(todo)]
       tag @ (Tag::Op | Tag::Mat | Tag::Ctr) => {
         let old = port.consume_node();
         let new = net.create_node(tag, old.lab);

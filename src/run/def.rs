@@ -239,6 +239,8 @@ impl AsDef for InterpretedDef {
     trgs.set_trg(TrgId::new(0), Trg::port(trg));
     for i in instructions {
       unsafe {
+        todo!();
+        #[cfg(todo)]
         match *i {
           Instruction::Const { trg, ref port } => trgs.set_trg(trg, Trg::port(port.clone())),
           Instruction::Link { a, b } => net.link_trg(trgs.get_trg(a), trgs.get_trg(b)),

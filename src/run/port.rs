@@ -195,4 +195,12 @@ impl Port {
   pub(super) fn is_ctr_ish(&self) -> bool {
     (self.0 & 0b111) > 0b100
   }
+
+  pub(super) fn aux_port(&self, i: u8) -> Port {
+    todo!()
+  }
+
+  pub(super) fn with_addr(&self, addr: Addr) -> Port {
+    todo!()
+  }
 }

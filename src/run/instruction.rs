@@ -111,6 +111,7 @@ impl fmt::Debug for TrgId {
   }
 }
 
+#[cfg(todo)]
 impl<'a, M: Mode> Net<'a, M> {
   /// `trg ~ {#lab x y}`
   #[inline(always)]

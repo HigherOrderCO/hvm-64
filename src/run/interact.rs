@@ -1,3 +1,5 @@
+use std::mem::MaybeUninit;
+
 use super::*;
 
 impl<'a, M: Mode> Net<'a, M> {
@@ -10,41 +12,32 @@ impl<'a, M: Mode> Net<'a, M> {
     match (a.tag(), b.tag()) {
       // not actually an active pair
       (Var | Red, _) | (_, Var | Red) => unreachable!(),
-      // nil-nil
-      (Ref, Ref | Num) if !a.is_skippable() => self.call(a, b),
-      (Ref | Num, Ref) if !b.is_skippable() => self.call(b, a),
+
+      (Ref, _) if a != Port::ERA => self.call(a, b),
+      (_, Ref) if b != Port::ERA => self.call(b, a),
+
       (Num | Ref | AdtZ, Num | Ref | AdtZ) => self.rwts.eras += 1,
-      // comm 2/2
-      (Mat | Op, CtrN!() | AdtN!()) => self.comm2N(a, b),
-      (CtrN!() | AdtN!(), Mat | Op) => self.comm2N(b, a),
-      // anni
-      (CtrN!(), CtrN!()) => self.anniNM(a, b),
-      (Mat, Mat) | (Op, Op) => self.anni2(a, b),
-      // comm 2/0
-      (Ref, CtrN!() | AdtN!()) if b.lab() >= a.lab() => self.comm0N(a, b),
-      (CtrN!() | AdtN!(), Ref) if a.lab() >= b.lab() => self.comm0N(b, a),
-      (Num, CtrN!() | AdtN!()) => self.comm0N(a, b),
-      (CtrN!() | AdtN!(), Num) => self.comm0N(b, a),
-      (AdtZ, Op | Mat) => self.comm02(a, b),
-      (Op | Mat, AdtZ) => self.comm02(a, b),
-      // TODO
-      (AdtN!() | AdtZ, CtrN!()) => self.adt_ctr(a, b),
-      (CtrN!(), AdtN!() | AdtZ) => self.adt_ctr(b, a),
-      (AdtN!() | AdtZ, AdtN!() | AdtZ) => todo!(),
-      // deref
-      (Ref, Mat | Op) if a == Port::ERA => self.comm02(a, b),
-      (Mat | Op, Ref) if b == Port::ERA => self.comm02(b, a),
-      (Ref, CtrN!() | AdtN!()) if a == Port::ERA => self.comm0N(a, b),
-      (CtrN!() | AdtN!(), Ref) if b == Port::ERA => self.comm0N(b, a),
-      (Ref, CtrN!() | AdtN!() | Mat | Op) => self.call(a, b),
-      (CtrN!() | AdtN!() | Mat | Op, Ref) => self.call(b, a),
-      // native ops
-      (Op, Num) => self.opr_num(a, b),
-      (Num, Op) => self.opr_num(b, a),
+
+      (CtrN!(), CtrN!()) if a.lab() == b.lab() => self.anni(a, b),
+
+      (AdtN!() | AdtZ, CtrN!()) if a.lab() == b.lab() => self.adt_ctr(a, b),
+      (CtrN!(), AdtN!() | AdtZ) if a.lab() == b.lab() => self.adt_ctr(b, a),
+      (AdtN!() | AdtZ, AdtN!() | AdtZ) if a.lab() == b.lab() => todo!(),
+
+      (Mat, Mat) | (Op, Op) => self.anni(a, b),
+
+      (CtrN!(), Mat) if a.lab() == 0 => todo!(),
+      (Mat, CtrN!()) if b.lab() == 0 => todo!(),
+      (Op, Op) if a.op() != b.op() => todo!(),
+
+      (CtrN!(), CtrN!()) | (Op, Op) => self.anni(a, b),
+
+      (Op, Num) => self.op_num(a, b),
+      (Num, Op) => self.op_num(b, a),
       (Mat, Num) => self.mat_num(a, b),
       (Num, Mat) => self.mat_num(b, a),
-      // todo: what should the semantics of these be?
-      (Op, Mat) | (Mat, Op) => unimplemented!("{:?}-{:?}", a.tag(), b.tag()),
+
+      (_, _) => self.comm(a, b),
     }
   }
 
@@ -209,26 +202,27 @@ impl<'a, M: Mode> Net<'a, M> {
   /// ```
   #[inline(never)]
   pub fn mat_num(&mut self, a: Port, b: Port) {
-    trace!(self, a, b);
-    self.rwts.oper += 1;
-    let a = a.consume_node();
-    let b = b.num();
-    if b == 0 {
-      let x = self.create_node(Ctr, 0);
-      trace!(self, x.p0);
-      self.link_port_port(x.p2, Port::ERA);
-      self.link_wire_port(a.p2, x.p1);
-      self.link_wire_port(a.p1, x.p0);
-    } else {
-      let x = self.create_node(Tag::Ctr, 0);
-      let y = self.create_node(Tag::Ctr, 0);
-      trace!(self, x.p0, y.p0);
-      self.link_port_port(x.p1, Port::ERA);
-      self.link_port_port(x.p2, y.p0);
-      self.link_port_port(y.p1, Port::new_num(b - 1));
-      self.link_wire_port(a.p2, y.p2);
-      self.link_wire_port(a.p1, x.p0);
-    }
+    todo!()
+    // trace!(self, a, b);
+    // self.rwts.oper += 1;
+    // let a = a.consume_node();
+    // let b = b.num();
+    // if b == 0 {
+    //   let x = self.create_node(Ctr, 0);
+    //   trace!(self, x.p0);
+    //   self.link_port_port(x.p2, Port::ERA);
+    //   self.link_wire_port(a.p2, x.p1);
+    //   self.link_wire_port(a.p1, x.p0);
+    // } else {
+    //   let x = self.create_node(Tag::Ctr, 0);
+    //   let y = self.create_node(Tag::Ctr, 0);
+    //   trace!(self, x.p0, y.p0);
+    //   self.link_port_port(x.p1, Port::ERA);
+    //   self.link_port_port(x.p2, y.p0);
+    //   self.link_port_port(y.p1, Port::new_num(b - 1));
+    //   self.link_wire_port(a.p2, y.p2);
+    //   self.link_wire_port(a.p1, x.p0);
+    // }
   }
 
   /// Interacts a number and a binary numeric operation node.
@@ -276,19 +270,56 @@ impl<'a, M: Mode> Net<'a, M> {
     }
   }
 
-  fn comm2N(&mut self, a: Port, b: Port) {
+  fn adt_ctr(&mut self, adt: Port, ctr: Port) {
+    let ctr_arity = ctr.tag().arity();
     todo!()
   }
 
-  fn anniNM(&mut self, a: Port, b: Port) {
+  fn anni(&self, a: Port, b: Port) {
     todo!()
   }
 
-  fn comm0N(&mut self, a: Port, b: Port) {
-    todo!()
-  }
-
-  fn adt_ctr(&mut self, b: Port, a: Port) {
-    todo!()
+  fn comm(&mut self, a: Port, b: Port) {
+    let mut Bs = [const { MaybeUninit::<Port>::uninit() }; 8];
+    let mut As = [const { MaybeUninit::<Port>::uninit() }; 8];
+    let aa = a.tag().arity();
+    // let aw = b.tag().width();
+    let ba = b.tag().arity();
+    // let bw = b.tag().width();
+    let Bs = &mut Bs[0 .. aa as usize];
+    let As = &mut As[0 .. ba as usize];
+    if ba != 0 {
+      for B in &mut *Bs {
+        let addr = self.alloc(b.align());
+        *B = MaybeUninit::new(b.with_addr(addr));
+      }
+    }
+    if aa != 0 {
+      for A in &mut *As {
+        let addr = self.alloc(a.align());
+        *A = MaybeUninit::new(a.with_addr(addr));
+      }
+    }
+    for bi in 0 .. aa {
+      for ai in 0 .. ba {
+        unsafe {
+          self.link_port_port(
+            As.get_unchecked(ai as usize).assume_init_ref().aux_port(bi),
+            Bs.get_unchecked(bi as usize).assume_init_ref().aux_port(ai),
+          );
+        }
+      }
+    }
+    // TODO: copy width - arity
+    for i in 0 .. aa {
+      unsafe {
+        self.link_wire_port(a.aux_port(i).wire(), Bs.get_unchecked(i as usize).assume_init_read());
+      }
+    }
+    for i in 0 .. ba {
+      unsafe {
+        self.link_wire_port(b.aux_port(i).wire(), As.get_unchecked(i as usize).assume_init_read());
+      }
+    }
   }
 }
