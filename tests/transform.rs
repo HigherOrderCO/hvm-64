@@ -63,4 +63,5 @@ pub fn test_adt_encoding() {
   assert_display_snapshot!(parse_and_encode("(* ((a (b (c R))) R))"), @"(:1:2 a b c)");
   assert_display_snapshot!(parse_and_encode("{4 * {4 {4 a {4 b {4 c R}}} R}}"), @"{4:1:2 a b c}");
   assert_display_snapshot!(parse_and_encode("(* x x)"), @"(:1:2)");
+  assert_display_snapshot!(parse_and_encode("(((((* x x) x) * x) x) * x)"), @"(:0:2 (:0:2 (:1:2)))");
 }
