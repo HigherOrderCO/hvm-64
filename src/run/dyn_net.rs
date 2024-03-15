@@ -24,7 +24,7 @@ impl<'h> DynNet<'h> {
 
 impl<'r, 'h, M: Mode> From<&'r mut Net<'h, M>> for DynNetMut<'r, 'h> {
   fn from(value: &'r mut Net<'h, M>) -> Self {
-    match value.match_lazyness_mut() {
+    match value.match_laziness_mut() {
       Ok(net) => DynNetMut::Lazy(net),
       Err(net) => DynNetMut::Strict(net),
     }

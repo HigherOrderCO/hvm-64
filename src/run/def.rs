@@ -145,7 +145,7 @@ impl Def {
   }
   #[inline(always)]
   pub unsafe fn call<M: Mode>(slf: *const Def, net: &mut Net<M>, port: Port) {
-    match net.match_lazyness_mut() {
+    match net.match_laziness_mut() {
       Ok(net) => ((*slf).call_lazy)(slf as *const _, net, port),
       Err(net) => ((*slf).call_strict)(slf as *const _, net, port),
     }
@@ -171,7 +171,7 @@ impl<F: Fn(&mut Net<Strict>, Port) + Send + Sync + 'static, G: Fn(&mut Net<Lazy>
   for (F, G)
 {
   unsafe fn call<M: Mode>(slf: *const Def<Self>, net: &mut Net<M>, port: Port) {
-    match net.match_lazyness_mut() {
+    match net.match_laziness_mut() {
       Ok(net) => ((*slf).data.1)(net, port),
       Err(net) => ((*slf).data.0)(net, port),
     }

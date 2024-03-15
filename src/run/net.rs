@@ -30,10 +30,10 @@ impl<'h, M: Mode> Net<'h, M> {
     self.call(Port::new_ref(def), self.root.as_var());
   }
 
-  pub fn match_lazyness_mut(&mut self) -> Result<&mut Net<'h, Lazy>, &mut Net<'h, Strict>> {
+  pub fn match_laziness_mut(&mut self) -> Result<&mut Net<'h, Lazy>, &mut Net<'h, Strict>> {
     if M::LAZY { Ok(unsafe { core::mem::transmute(self) }) } else { Err(unsafe { core::mem::transmute(self) }) }
   }
-  pub fn match_lazyness(self) -> Result<Net<'h, Lazy>, Net<'h, Strict>> {
+  pub fn match_laziness(self) -> Result<Net<'h, Lazy>, Net<'h, Strict>> {
     if M::LAZY { Ok(unsafe { core::mem::transmute(self) }) } else { Err(unsafe { core::mem::transmute(self) }) }
   }
 }
