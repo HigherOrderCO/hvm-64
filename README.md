@@ -79,9 +79,9 @@ HVM-Core's textual syntax represents interaction combinators via an AST:
 ```
 <TERM> ::=
   <ERA> ::= "*"
-  <CON> ::= "(" <TERM>{0-8} ")"
-  <TUP> ::= "[" <TERM>{0-8} "]"
-  <DUP> ::= "{" <label> " " <TERM>{0-8} "}"
+  <CON> ::= "(" <TERM> " " <TERM> ")"
+  <TUP> ::= "[" <TERM> " " <TERM> "]"
+  <DUP> ::= "{" <label> " " <TERM> " " <TERM> "}"
   <REF> ::= "@" <name>
   <U60> ::= "#" <value>
   <OP2> ::= "<" <op> " " <TERM> " " <TERM> ">"
