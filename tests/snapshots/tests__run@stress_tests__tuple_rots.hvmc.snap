@@ -4,8 +4,8 @@ expression: output
 input_file: tests/programs/stress_tests/tuple_rots.hvmc
 ---
 ((#1 (#2 (#3 (#4 (#5 (#6 (#7 (#8 a)))))))) a)
-RWTS   :      62_000_037
-- ANNI :      46_000_012
+RWTS   :      64_000_038
+- ANNI :      48_000_013
 - COMM :       2_000_000
 - ERAS :       2_000_002
 - DREF :      10_000_022

@@ -90,9 +90,21 @@ fn interact_benchmark(c: &mut Criterion) {
 
   let cases = [
     ("era-era", (Era, Era)),
-    ("era-con", (Era, Ctr { lab: 0, lft: Era.into(), rgt: Era.into() })),
-    ("con-con", ((Ctr { lab: 0, lft: Era.into(), rgt: Era.into() }), Ctr { lab: 0, lft: Era.into(), rgt: Era.into() })),
-    ("con-dup", ((Ctr { lab: 0, lft: Era.into(), rgt: Era.into() }), Ctr { lab: 2, lft: Era.into(), rgt: Era.into() })),
+    ("era-con", (Era, Ctr { lab: 0, ports: [Era.into(), Era.into()].into() })),
+    (
+      "con-con",
+      ((Ctr { lab: 0, ports: [Era.into(), Era.into()].into() }, Ctr {
+        lab: 0,
+        ports: [Era.into(), Era.into()].into(),
+      })),
+    ),
+    (
+      "con-dup",
+      ((Ctr { lab: 0, ports: [Era.into(), Era.into()].into() }, Ctr {
+        lab: 2,
+        ports: [Era.into(), Era.into()].into(),
+      })),
+    ),
   ];
 
   for (name, redex) in cases {

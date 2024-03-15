@@ -16,7 +16,7 @@ impl Net {
     let fresh_str = create_var(fresh + 1);
 
     let fun = core::mem::take(&mut self.root);
-    let app = Tree::Ctr { lab: 0, lft: Box::new(arg), rgt: Box::new(Tree::Var { nam: fresh_str.clone() }) };
+    let app = Tree::Ctr { lab: 0, ports: vec![arg, Tree::Var { nam: fresh_str.clone() }] };
     self.root = Tree::Var { nam: fresh_str };
     self.redexes.push((fun, app));
   }
@@ -37,18 +37,11 @@ impl Tree {
   /// This function can be called multiple times with many trees to
   /// ensure that `fresh` does not conflict with any of them.
   pub(crate) fn ensure_no_conflicts(&self, fresh: &mut usize) {
-    match self {
-      Tree::Var { nam } => {
-        if let Some(var_num) = var_to_num(nam) {
-          *fresh = (*fresh).max(var_num);
-        }
+    if let Tree::Var { nam } = self {
+      if let Some(var_num) = var_to_num(nam) {
+        *fresh = (*fresh).max(var_num);
       }
-      // Recurse on children
-      Tree::Ctr { lft, rgt, .. } | Tree::Op { rhs: lft, out: rgt, .. } | Tree::Mat { sel: lft, ret: rgt } => {
-        lft.ensure_no_conflicts(fresh);
-        rgt.ensure_no_conflicts(fresh);
-      }
-      Tree::Era | Tree::Num { .. } | Tree::Ref { .. } => {}
     }
+    self.children().for_each(|child| child.ensure_no_conflicts(fresh));
   }
 }

@@ -21,7 +21,7 @@ use std::{
 
 use crate::{
   ast::{Book, Net, Tree},
-  host::{encode_def, DefRef, Host},
+  host::{DefRef, Host},
   run::{self, Def, Heap, InterpretedDef, LabSet, Rewrites},
   util::maybe_grow,
 };
@@ -108,15 +108,11 @@ struct State<'a> {
 
 impl<'a> State<'a> {
   fn visit_tree(&mut self, tree: &Tree) {
-    maybe_grow(move || match tree {
-      Tree::Era | Tree::Num { .. } | Tree::Var { .. } => (),
-      Tree::Ref { nam } => {
+    maybe_grow(move || {
+      if let Tree::Ref { nam } = tree {
         self.pre_reduce(nam);
       }
-      Tree::Ctr { lft, rgt, .. } | Tree::Op { rhs: lft, out: rgt, .. } | Tree::Mat { sel: lft, ret: rgt } => {
-        self.visit_tree(lft);
-        self.visit_tree(rgt);
-      }
+      tree.children().for_each(|child| self.visit_tree(child))
     })
   }
   fn visit_net(&mut self, net: &Net) {
@@ -147,7 +143,7 @@ impl<'a> State<'a> {
     let net = self.host.readback(&mut rt);
 
     // Mutate the host in-place with the pre-reduced net.
-    let instr = encode_def(&net, |nam| run::Port::new_ref(&self.host.defs[nam]));
+    let instr = self.host.encode_def(&net);
     if let DefRef::Owned(def_box) = self.host.defs.get_mut(nam).unwrap() {
       let interpreted_def: &mut crate::run::Def<InterpretedDef> = def_box.downcast_mut().unwrap();
       interpreted_def.data = instr;

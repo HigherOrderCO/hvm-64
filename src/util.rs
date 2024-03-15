@@ -1,4 +1,5 @@
 mod apply_tree;
+pub(crate) mod array_vec;
 mod bi_enum;
 mod create_var;
 mod deref;

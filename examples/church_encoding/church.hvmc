@@ -1,8 +1,8 @@
 @S = ((a (b c)) ({3 (c d) a} (b d)))
 @Z = (* (a a))
-@add = ((a (b c)) ((d (e b)) ({11 a d} (e c))))
+@add = ((a (b c)) ((d (e b)) ({9 a d} (e c))))
 @c2 = ({5 (a b) (c a)} (c b))
-@c3 = ({7 (a b) {9 (c a) (d c)}} (d b))
+@c3 = ({7 (a b) {7 (c a) (d c)}} (d b))
 @c4 = a
 & @S ~ (b a)
 & @S ~ (c b)

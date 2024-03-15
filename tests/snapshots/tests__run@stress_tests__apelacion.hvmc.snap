@@ -4,8 +4,8 @@ expression: output
 input_file: tests/programs/stress_tests/apelacion.hvmc
 ---
 #31999968000000
-RWTS   :   1_397_001_651
-- ANNI :     508_000_698
+RWTS   :   1_524_001_905
+- ANNI :     635_000_952
 - COMM :     254_000_063
 - ERAS :     127_000_254
 - DREF :     254_000_319

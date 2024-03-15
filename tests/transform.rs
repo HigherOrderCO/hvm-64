@@ -3,7 +3,7 @@
 pub mod loaders;
 
 use hvmc::util::show_rewrites;
-use insta::assert_snapshot;
+use insta::{assert_display_snapshot, assert_snapshot};
 use loaders::*;
 
 #[test]
@@ -35,4 +35,33 @@ pub fn test_fast_pre_reduce() {
   - DREF :          15_542
   - OPER :               0
   "###)
+}
+
+#[test]
+pub fn test_adt_encoding() {
+  use hvmc::ast::{Net, Tree};
+  use std::str::FromStr;
+  pub fn parse_and_encode(net: &str) -> String {
+    let mut net = Net::from_str(net).unwrap();
+    println!("{net}");
+    net.trees_mut().for_each(Tree::coalesce_constructors);
+    println!("{net}");
+    net.trees_mut().for_each(Tree::encode_scott_adts);
+    format!("{net}")
+  }
+  assert_display_snapshot!(parse_and_encode("(a (b (c d)))"), @"(a b c d)");
+  assert_display_snapshot!(parse_and_encode("(a (b c (d e)))"), @"(a b c d e)");
+  assert_display_snapshot!(parse_and_encode("(a b c d e f g h)"), @"(a b c d e f g h)");
+  assert_display_snapshot!(parse_and_encode("(a b c d (e f g h (i j k l)))"), @"(a b c d (e f g h (i j k l)))");
+
+  assert_display_snapshot!(parse_and_encode("(* ((a R) R))"), @"(:1:2 a)");
+  assert_display_snapshot!(parse_and_encode("((a R) (* R))"), @"(:0:2 a)");
+  assert_display_snapshot!(parse_and_encode("(* (* ((a R) R)))"), @"(:2:3 a)");
+  assert_display_snapshot!(parse_and_encode("(* ((a R) (* R)))"), @"(:1:3 a)");
+  assert_display_snapshot!(parse_and_encode("((a (b R)) R)"), @"(:0:1 a b)");
+  assert_display_snapshot!(parse_and_encode("((a (b (c R))) R)"), @"(:0:1 a b c)");
+  assert_display_snapshot!(parse_and_encode("(* ((a (b (c R))) R))"), @"(:1:2 a b c)");
+  assert_display_snapshot!(parse_and_encode("{4 * {4 {4 a {4 b {4 c R}}} R}}"), @"{4:1:2 a b c}");
+  assert_display_snapshot!(parse_and_encode("(* x x)"), @"(:1:2)");
+  assert_display_snapshot!(parse_and_encode("(((((* x x) x) * x) x) * x)"), @"(:0:2 (:0:2 (:1:2)))");
 }

@@ -209,15 +209,37 @@ struct RunArgs {
 
 #[derive(clap::ValueEnum, Clone, Debug)]
 pub enum TransformPass {
+  #[value(alias = "all")]
   All,
+  #[value(alias = "no-all")]
   NoAll,
+  #[value(alias = "pre")]
   PreReduce,
+  #[value(alias = "no-pre")]
   NoPreReduce,
+  #[value(alias = "coalesce")]
+  CoalesceCtrs,
+  #[value(alias = "no-coalesce")]
+  NoCoalesceCtrs,
+  #[value(alias = "adts")]
+  EncodeAdts,
+  #[value(alias = "no-adts")]
+  NoEncodeAdts,
 }
 
 #[derive(Default)]
 pub struct TransformPasses {
   pre_reduce: bool,
+  coalesce_ctrs: bool,
+  encode_adts: bool,
+}
+
+impl TransformPasses {
+  fn set_all(&mut self) {
+    self.pre_reduce = true;
+    self.coalesce_ctrs = true;
+    self.encode_adts = true;
+  }
 }
 
 impl TransformPass {
@@ -226,10 +248,14 @@ impl TransformPass {
     let mut opts = TransformPasses::default();
     for arg in args {
       match arg {
-        All => opts.pre_reduce = true,
-        NoAll => opts.pre_reduce = false,
+        All => opts.set_all(),
+        NoAll => opts = Default::default(),
         PreReduce => opts.pre_reduce = true,
         NoPreReduce => opts.pre_reduce = false,
+        CoalesceCtrs => opts.coalesce_ctrs = true,
+        NoCoalesceCtrs => opts.coalesce_ctrs = false,
+        EncodeAdts => opts.encode_adts = true,
+        NoEncodeAdts => opts.encode_adts = false,
       }
     }
     opts
@@ -292,6 +318,16 @@ fn load_book(files: &[String], transform_opts: &TransformOpts) -> Book {
       transform_opts.pre_reduce_memory,
       transform_opts.pre_reduce_rewrites,
     );
+  }
+  for (_, def) in &mut book.nets {
+    for tree in def.trees_mut() {
+      if transform_passes.coalesce_ctrs {
+        tree.coalesce_constructors();
+      }
+      if transform_passes.encode_adts {
+        tree.encode_scott_adts();
+      }
+    }
   }
   book
 }
@@ -374,8 +410,7 @@ fn compile_executable(target: &str, host: &host::Host) -> Result<(), io::Error> 
     fuzz
     host {
       calc_labels
-      encode_def
-      encode_net
+      encode
       readback
     }
     lib
@@ -398,9 +433,12 @@ fn compile_executable(target: &str, host: &host::Host) -> Result<(), io::Error> 
     trace
     transform {
       pre_reduce
+      encode_adts
+      coalesce_ctrs
     }
     util {
       apply_tree
+      array_vec
       bi_enum
       create_var
       deref

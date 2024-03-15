@@ -4,8 +4,8 @@ expression: output
 input_file: examples/sort/bitonic/bitonic_sort_lam.hvmc
 ---
 #523776
-RWTS   :       2_263_483
-- ANNI :       1_344_981
+RWTS   :       2_293_690
+- ANNI :       1_375_188
 - COMM :          96_766
 - ERAS :         222_714
 - DREF :         508_403
