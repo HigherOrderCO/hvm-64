@@ -447,8 +447,6 @@ fn compile_executable(target: &str, host: &host::Host) -> Result<(), io::Error> 
       encode_adts
       eta_reduce
       pre_reduce
-      encode_adts
-      coalesce_ctrs
     }
     util {
       apply_tree
