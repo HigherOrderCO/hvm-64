@@ -225,14 +225,6 @@ pub enum TransformPass {
   EncodeAdts,
   #[value(alias = "no-adts")]
   NoEncodeAdts,
-  #[value(alias = "eta")]
-  EtaReduce,
-  #[value(alias = "no-eta")]
-  NoEtaReduce,
-  #[value(alias = "prune")]
-  PruneDefs,
-  #[value(alias = "no-prune")]
-  NoPruneDefs,
 }
 
 #[derive(Default)]
@@ -240,8 +232,6 @@ pub struct TransformPasses {
   pre_reduce: bool,
   coalesce_ctrs: bool,
   encode_adts: bool,
-  eta_reduce: bool,
-  prune_defs: bool,
 }
 
 impl TransformPasses {
@@ -249,8 +239,6 @@ impl TransformPasses {
     self.pre_reduce = true;
     self.coalesce_ctrs = true;
     self.encode_adts = true;
-    self.eta_reduce = true;
-    self.prune_defs = true;
   }
 }
 
@@ -268,10 +256,6 @@ impl TransformPass {
         NoCoalesceCtrs => opts.coalesce_ctrs = false,
         EncodeAdts => opts.encode_adts = true,
         NoEncodeAdts => opts.encode_adts = false,
-        EtaReduce => opts.eta_reduce = true,
-        NoEtaReduce => opts.eta_reduce = false,
-        PruneDefs => opts.prune_defs = true,
-        NoPruneDefs => opts.prune_defs = false,
       }
     }
     opts

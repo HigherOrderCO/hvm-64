@@ -10,7 +10,6 @@
     "combinators",
     "condvar",
     "ctrs",
-    "Ctrs",
     "dereferencable",
     "dref",
     "dups",

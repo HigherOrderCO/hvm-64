@@ -4,7 +4,7 @@ use crate::{
 };
 
 impl Tree {
-  /// Join chains of CTR nodes, such as (a (b (c d))) into n-ary nodes (a b c d)
+  /// Join chains of CTR nodes, such as `(a (b (c d)))` into n-ary nodes `(a b c d)`
   pub fn coalesce_constructors(&mut self) {
     maybe_grow(|| match self {
       Tree::Ctr { lab, ports } => {
