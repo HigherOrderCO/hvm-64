@@ -43,9 +43,7 @@ pub fn test_adt_encoding() {
   use std::str::FromStr;
   pub fn parse_and_encode(net: &str) -> String {
     let mut net = Net::from_str(net).unwrap();
-    println!("{net}");
     net.trees_mut().for_each(Tree::coalesce_constructors);
-    println!("{net}");
     net.trees_mut().for_each(Tree::encode_scott_adts);
     format!("{net}")
   }
@@ -64,4 +62,27 @@ pub fn test_adt_encoding() {
   assert_display_snapshot!(parse_and_encode("{4 * {4 {4 a {4 b {4 c R}}} R}}"), @"{4:1:2 a b c}");
   assert_display_snapshot!(parse_and_encode("(* x x)"), @"(:1:2)");
   assert_display_snapshot!(parse_and_encode("(((((* x x) x) * x) x) * x)"), @"(:0:2 (:0:2 (:1:2)))");
+}
+
+#[test]
+pub fn test_eta() {
+  use hvmc::ast::Net;
+  use std::str::FromStr;
+  pub fn parse_and_reduce(net: &str) -> String {
+    let mut net = Net::from_str(net).unwrap();
+    net.eta_reduce();
+    format!("{net}")
+  }
+  assert_display_snapshot!(parse_and_reduce("((x y) (x y))"), @"(x x)");
+  assert_display_snapshot!(parse_and_reduce("((a b c d e f) (a b c d e f))"), @"(a a)");
+  assert_display_snapshot!(parse_and_reduce("<+ (a b) (a b)>"), @"<+ a a>");
+  assert_display_snapshot!(parse_and_reduce("(a b) & ((a b) (c d)) ~ (c d) "), @r###"
+  a
+  & (a c) ~ c
+  "###);
+  assert_display_snapshot!(parse_and_reduce("((a b) [a b])"), @"((a b) [a b])");
+  assert_display_snapshot!(parse_and_reduce("((a b c) b c)"), @"((a b) b)");
+  assert_display_snapshot!(parse_and_reduce("([(a b) (c d)] [(a b) (c d)])"), @"(a a)");
+  assert_display_snapshot!(parse_and_reduce("(* *)"), @"*");
+  assert_display_snapshot!(parse_and_reduce("([(#0 #0) (#12345 #12345)] [(* *) (a a)])"), @"([#0 #12345] [* (a a)])");
 }
