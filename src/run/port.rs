@@ -109,7 +109,7 @@ impl Port {
   /// Accesses the tag of this port; this is valid for all ports.
   #[inline(always)]
   pub fn tag(&self) -> Tag {
-    unsafe { Tag::from_unchecked((self.0 & (1 << self.align().tag_bits()) - 1) as u8) }
+    unsafe { Tag::from_unchecked((self.0 & ((1 << self.align().tag_bits()) - 1)) as u8) }
   }
 
   /// Checks if this port is of the given `tag`.
@@ -128,9 +128,8 @@ impl Port {
 
   /// Accesses the addr of this port; this is valid for all non-`Num` ports.
   #[inline(always)]
-  pub const fn addr(&self) -> Addr {
-    // todo
-    Addr((self.0 & 0x0000_FFFF_FFFF_FFF8) as usize as _)
+  pub fn addr(&self) -> Addr {
+    Addr((self.0 & self.align().addr_mask()) as usize)
   }
 
   /// Accesses the operation of this port; this is valid for [`Opr`] ports.
@@ -196,11 +195,13 @@ impl Port {
     (self.0 & 0b111) > 0b100
   }
 
+  #[inline(always)]
   pub(super) fn aux_port(&self, i: u8) -> Port {
-    todo!()
+    Port::new_var(self.align(), self.addr().offset(i as usize))
   }
 
+  #[inline(always)]
   pub(super) fn with_addr(&self, addr: Addr) -> Port {
-    todo!()
+    Port(self.0 & !self.align().addr_mask() | addr.0 as u64)
   }
 }

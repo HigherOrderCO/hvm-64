@@ -239,8 +239,6 @@ impl AsDef for InterpretedDef {
     trgs.set_trg(TrgId::new(0), Trg::port(trg));
     for i in instructions {
       unsafe {
-        todo!();
-        #[cfg(todo)]
         match *i {
           Instruction::Const { trg, ref port } => trgs.set_trg(trg, Trg::port(port.clone())),
           Instruction::Link { a, b } => net.link_trg(trgs.get_trg(a), trgs.get_trg(b)),
@@ -264,6 +262,7 @@ impl AsDef for InterpretedDef {
             let o = net.do_op_num(op, trgs.get_trg(trg), lhs);
             trgs.set_trg(out, o);
           }
+          #[cfg(todo)]
           Instruction::Mat { trg, lft, rgt } => {
             let (l, r) = net.do_mat(trgs.get_trg(trg));
             trgs.set_trg(lft, l);
@@ -276,6 +275,7 @@ impl AsDef for InterpretedDef {
             trgs.set_trg(bv, bvt);
             trgs.set_trg(bw, bwt);
           }
+          _ => todo!(),
         }
       }
     }

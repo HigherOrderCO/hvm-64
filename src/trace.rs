@@ -74,7 +74,7 @@ use std::{
 
 use crate::{
   ops::Op,
-  run::{Addr, Port, Trg, Wire},
+  run::{Addr, Align, Port, Trg, Wire},
 };
 
 #[cfg(not(feature = "trace"))]
@@ -366,6 +366,15 @@ impl TraceArg for Op {
   }
   fn from_word(word: u64) -> impl Debug {
     unsafe { Op::try_from(word as u16).unwrap_unchecked() }
+  }
+}
+
+impl TraceArg for Align {
+  fn to_word(&self) -> u64 {
+    *self as u64
+  }
+  fn from_word(word: u64) -> impl Debug {
+    unsafe { Align::try_from(word as u8).unwrap_unchecked() }
   }
 }
 

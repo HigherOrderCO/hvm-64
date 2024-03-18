@@ -120,6 +120,9 @@ impl Align {
   pub(super) fn tag_bits(self) -> u8 {
     self as u8 + 3
   }
+  pub(super) fn addr_mask(self) -> u64 {
+    0x0000_FFFF_FFFF_FFFF & (u64::MAX << self.tag_bits())
+  }
   #[inline(always)]
   pub(super) fn width(self) -> u8 {
     1 << self as u8

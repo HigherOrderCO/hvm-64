@@ -73,6 +73,7 @@ impl<'h> Allocator<'h> {
     }
     let mut align = Align1;
     if align == alloc_align {
+      trace!(self.tracer, "free");
       return Self::push_addr(self.head(align), addr);
     }
     addr.val().store(align.free(), Relaxed);
@@ -110,9 +111,10 @@ impl<'h> Allocator<'h> {
     } else {
       let index = self.next;
       self.next += 8;
-      Addr(&self.heap.0.get(index).expect("OOM") as *const _ as _)
+      trace!(self, index);
+      Addr(self.heap.0.get(index).expect("OOM") as *const AtomicU64 as usize)
     };
-    trace!(self, addr);
+    trace!(self, align, addr);
     for i in 0 .. align.width() {
       addr.offset(i as usize).val().store(Port::LOCK.0, Relaxed);
     }

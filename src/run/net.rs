@@ -113,7 +113,8 @@ impl<'a, M: Mode> Net<'a, M> {
     if M::LAZY {
       self.normal_from(self.root.clone());
     } else {
-      self.expand();
+      // todo!
+      // self.expand();
       while !self.redexes.is_empty() {
         self.reduce(usize::MAX);
       }

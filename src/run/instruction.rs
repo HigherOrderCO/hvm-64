@@ -111,13 +111,12 @@ impl fmt::Debug for TrgId {
   }
 }
 
-#[cfg(todo)]
 impl<'a, M: Mode> Net<'a, M> {
   /// `trg ~ {#lab x y}`
   #[inline(always)]
   pub(crate) fn do_ctr(&mut self, lab: Lab, trg: Trg) -> (Trg, Trg) {
     let port = trg.target();
-    if !M::LAZY && port.is(Tag::Ctr) && port.lab() == lab {
+    if !M::LAZY && port.is(Tag::Ctr2) && port.lab() == lab {
       trace!(self, "fast");
       self.free_trg(trg);
       let node = port.consume_node();
@@ -128,7 +127,7 @@ impl<'a, M: Mode> Net<'a, M> {
       self.rwts.comm += 1;
       (Trg::port(port.clone()), Trg::port(port))
     } else {
-      let n = self.create_node(Ctr, lab);
+      let n = self.create_node(Ctr2, lab);
       self.link_trg_port(trg, n.p0);
       (Trg::port(n.p1), Trg::port(n.p2))
     }
@@ -171,6 +170,7 @@ impl<'a, M: Mode> Net<'a, M> {
     }
   }
 
+  #[cfg(todo)]
   /// `trg ~ ?<x y>`
   #[inline(always)]
   pub(crate) fn do_mat(&mut self, trg: Trg) -> (Trg, Trg) {
@@ -213,6 +213,7 @@ impl<'a, M: Mode> Net<'a, M> {
     )
   }
 
+  #[cfg(todo)]
   /// `trg ~ ?<(x (y z)) out>`
   #[inline(always)]
   #[allow(unused)] // TODO: emit this instruction
@@ -241,6 +242,7 @@ impl<'a, M: Mode> Net<'a, M> {
     }
   }
 
+  #[cfg(todo)]
   /// `trg ~ ?<(x y) out>`
   #[inline(always)]
   #[allow(unused)] // TODO: emit this instruction

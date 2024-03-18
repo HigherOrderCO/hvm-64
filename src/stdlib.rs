@@ -115,6 +115,7 @@ impl<F: Fn(Wire) + Send + Sync + 'static> AsDef for ActiveLogDef<F> {
 /// Create a `Host` from a `Book`, including `hvm-core`'s built-in definitions
 pub fn create_host(book: &Book) -> Arc<Mutex<Host>> {
   let host = Arc::new(Mutex::new(Host::default()));
+  #[cfg(todo)]
   host.lock().unwrap().insert_def(
     "HVM.log",
     DefRef::Owned(Box::new(crate::stdlib::LogDef::new({

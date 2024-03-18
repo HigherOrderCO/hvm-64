@@ -24,13 +24,11 @@ impl<'a, M: Mode> Net<'a, M> {
       (CtrN!(), AdtN!() | AdtZ) if a.lab() == b.lab() => self.adt_ctr(b, a),
       (AdtN!() | AdtZ, AdtN!() | AdtZ) if a.lab() == b.lab() => todo!(),
 
-      (Mat, Mat) | (Op, Op) => self.anni(a, b),
-
       (CtrN!(), Mat) if a.lab() == 0 => todo!(),
       (Mat, CtrN!()) if b.lab() == 0 => todo!(),
       (Op, Op) if a.op() != b.op() => todo!(),
 
-      (CtrN!(), CtrN!()) | (Op, Op) => self.anni(a, b),
+      (Mat, Mat) | (Op, Op) => self.anni(a, b),
 
       (Op, Num) => self.op_num(a, b),
       (Num, Op) => self.op_num(b, a),
@@ -275,8 +273,18 @@ impl<'a, M: Mode> Net<'a, M> {
     todo!()
   }
 
-  fn anni(&self, a: Port, b: Port) {
-    todo!()
+  fn anni(&mut self, a: Port, b: Port) {
+    if a.tag() == b.tag() {
+      for i in 0 .. a.tag().arity() {
+        self.link_wire_wire(a.aux_port(i).wire(), b.aux_port(i).wire());
+      }
+      for i in a.tag().arity() .. a.tag().width() {
+        self.free_wire(a.aux_port(i).wire());
+        self.free_wire(b.aux_port(i).wire());
+      }
+    } else {
+      todo!()
+    }
   }
 
   fn comm(&mut self, a: Port, b: Port) {

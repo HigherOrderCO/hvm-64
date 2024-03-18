@@ -24,7 +24,8 @@ impl<'h, M: Mode> Net<'h, M> {
   pub fn parallel_normal(&mut self) {
     assert!(!M::LAZY);
 
-    self.expand();
+    // todo
+    // self.expand();
 
     const SHARE_LIMIT: usize = 1 << 12; // max share redexes per split
     const LOCAL_LIMIT: usize = 1 << 18; // max local rewrites per epoch

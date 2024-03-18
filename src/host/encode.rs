@@ -16,17 +16,17 @@ impl Host {
   /// Encode `tree` directly into `trg`, skipping the intermediate `Def`
   /// representation.
   pub fn encode_tree<M: Mode>(&self, net: &mut run::Net<M>, trg: run::Trg, tree: &Tree) {
-    // let mut state = State { host: self, encoder: net, scope:
-    // Default::default() }; state.visit_tree(tree, trg);
-    // state.finish();
+    let mut state = State { host: self, encoder: net, scope: Default::default() };
+    state.visit_tree(tree, trg);
+    state.finish();
   }
 
   /// Encode the root of `ast_net` directly into `trg` and encode its redexes
   /// into `net` redex list.
   pub fn encode_net<M: Mode>(&self, net: &mut run::Net<M>, trg: run::Trg, ast_net: &Net) {
-    // let mut state = State { host: self, encoder: net, scope:
-    // Default::default() }; state.visit_net(ast_net, trg);
-    // state.finish();
+    let mut state = State { host: self, encoder: net, scope: Default::default() };
+    state.visit_net(ast_net, trg);
+    state.finish();
   }
 }
 
@@ -185,7 +185,6 @@ impl Encoder for InterpretedDef {
   }
 }
 
-#[cfg(todo)]
 impl<'a, M: Mode> Encoder for run::Net<'a, M> {
   type Trg = run::Trg;
   fn link_const(&mut self, trg: Self::Trg, port: Port) {
@@ -207,7 +206,9 @@ impl<'a, M: Mode> Encoder for run::Net<'a, M> {
     self.do_op_num(op, trg, rhs)
   }
   fn mat(&mut self, trg: Self::Trg) -> (Self::Trg, Self::Trg) {
-    self.do_mat(trg)
+    #[cfg(todo)]
+    self.do_mat(trg);
+    todo!();
   }
   fn wires(&mut self) -> (Self::Trg, Self::Trg, Self::Trg, Self::Trg) {
     self.do_wires()

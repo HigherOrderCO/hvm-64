@@ -35,8 +35,6 @@ impl Addr {
     unsafe { &*(self.0 as *const _) }
   }
 
-  const HALF_MASK: usize = 0b1000;
-
   /// Rounds this address down to be aligned to `align`.
   #[inline(always)]
   pub(super) fn floor(&self, align: Align) -> Self {
