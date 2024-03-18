@@ -84,19 +84,19 @@ impl Port {
 
   /// TODO
   #[inline(always)]
-  pub const fn new_adtz(variant_count: u8, variant_index: u8) -> Self {
-    Port(Tag::AdtZ as u64 | ((variant_count as u64) << 16) | ((variant_index as u64) << 8))
-  }
-
-  /// TODO
-  #[inline(always)]
-  pub fn variant_count(&self) -> u8 {
-    (self.0 >> 16) as u8
+  pub const fn new_adtz(variant_index: u8, variant_count: u8) -> Self {
+    Port(Tag::AdtZ as u64 | ((variant_index as u64) << 16) | ((variant_count as u64) << 8))
   }
 
   /// TODO
   #[inline(always)]
   pub fn variant_index(&self) -> u8 {
+    (self.0 >> 16) as u8
+  }
+
+  /// TODO
+  #[inline(always)]
+  pub fn variant_count(&self) -> u8 {
     (self.0 >> 8) as u8
   }
 
@@ -196,7 +196,7 @@ impl Port {
   }
 
   #[inline(always)]
-  pub(super) fn aux_port(&self, i: u8) -> Port {
+  pub(crate) fn aux_port(&self, i: u8) -> Port {
     Port::new_var(self.align(), self.addr().offset(i as usize))
   }
 

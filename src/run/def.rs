@@ -248,8 +248,8 @@ impl AsDef for InterpretedDef {
             }
             net.link_trg_port(trgs.get_trg(trg), port.clone())
           }
-          Instruction::Ctr { lab, trg, lft, rgt } => {
-            let (l, r) = net.do_ctr(lab, trgs.get_trg(trg));
+          Instruction::Ctr2 { lab, trg, lft, rgt } => {
+            let (l, r) = net.do_ctr2(lab, trgs.get_trg(trg));
             trgs.set_trg(lft, l);
             trgs.set_trg(rgt, r);
           }

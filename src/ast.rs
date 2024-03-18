@@ -253,6 +253,7 @@ impl<'i> Parser<'i> {
           };
           self.skip_trivia();
           if self.peek_char().is_some_and(|x| x == ':') {
+            self.advance_char();
             let variant_index = self.parse_int()?;
             self.consume(":")?;
             let variant_count = self.parse_int()?;

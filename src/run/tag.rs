@@ -52,7 +52,7 @@ impl Tag {
 
   /// Returns the width -- the size of the allocation -- of nodes of this tag.
   #[inline]
-  pub(super) fn width(self) -> u8 {
+  pub(crate) fn width(self) -> u8 {
     match self {
       Tag::Num | Tag::Ref | Tag::AdtZ => 0,
       Tag::Red | Tag::Var => 1,
@@ -65,19 +65,23 @@ impl Tag {
   /// Returns the arity -- the number of auxiliary ports -- of nodes of this
   /// tag.
   #[inline]
-  pub(super) fn arity(self) -> u8 {
+  pub(crate) fn arity(self) -> u8 {
     match self {
       AdtN!() => self.width() - 1,
       _ => self.width(),
     }
   }
 
-  pub(super) fn ctr_with_arity(arity: u8) -> Tag {
-    let sub = arity - 1;
+  pub(super) fn ctr_with_width(width: u8) -> Tag {
+    let sub = width - 1;
     let ilog = unsafe { sub.checked_ilog2().unwrap_unchecked() as u8 };
     let ext = sub - (1 << ilog);
     let tag = (ilog + 1) | 0b100 | (ext << 4);
     unsafe { Tag::from_unchecked(tag) }
+  }
+
+  pub(super) fn adt_with_width(width: u8) -> Tag {
+    unsafe { Tag::from_unchecked(Tag::ctr_with_width(width) as u8 | 0b1000) }
   }
 }
 
@@ -120,13 +124,16 @@ impl Align {
   pub(super) fn tag_bits(self) -> u8 {
     self as u8 + 3
   }
+
   pub(super) fn addr_mask(self) -> u64 {
     0x0000_FFFF_FFFF_FFFF & (u64::MAX << self.tag_bits())
   }
+
   #[inline(always)]
   pub(super) fn width(self) -> u8 {
     1 << self as u8
   }
+
   /// Returns the next largest alignment, if it exists.
   #[inline(always)]
   pub(super) fn next(self) -> Option<Self> {
@@ -137,6 +144,10 @@ impl Align {
       Align8 => None,
     }
   }
+
+  pub(super) fn of_width(width: u8) -> Self {
+    unsafe { Align::from_unchecked((width - 1).checked_ilog2().unwrap_unchecked() as u8 + 1) }
+  }
 }
 
 #[test]
@@ -145,6 +156,7 @@ fn test_tag_width() {
   assert_eq!([Ctr2, Ctr3, Ctr4, Ctr5, Ctr6, Ctr7, Ctr8].map(Tag::width), [2, 3, 4, 5, 6, 7, 8]);
   assert_eq!([Adt2, Adt3, Adt4, Adt5, Adt6, Adt7, Adt8].map(Tag::width), [2, 3, 4, 5, 6, 7, 8]);
   for t in [Ctr2, Ctr3, Ctr4, Ctr5, Ctr6, Ctr7, Ctr8] {
-    assert_eq!(Tag::ctr_with_arity(t.width()), t);
+    assert_eq!(Tag::ctr_with_width(t.width()), t);
+    assert_eq!(Align::of_width(t.width()), t.align());
   }
 }

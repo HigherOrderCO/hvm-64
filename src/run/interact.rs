@@ -270,7 +270,22 @@ impl<'a, M: Mode> Net<'a, M> {
 
   fn adt_ctr(&mut self, adt: Port, ctr: Port) {
     let ctr_arity = ctr.tag().arity();
-    todo!()
+    let adtz = if adt.is(AdtZ) { adt.clone() } else { adt.aux_port(adt.tag().arity()).wire().swap_target(Port::LOCK) };
+    if ctr_arity != adtz.variant_count() + 1 {
+      todo!();
+    }
+    if adt.is(AdtZ) {
+      self.link_wire_wire(ctr.aux_port(adtz.variant_index()).wire(), ctr.aux_port(ctr_arity - 1).wire());
+    } else {
+      self.link_wire_port(ctr.aux_port(ctr_arity - 1).wire(), adt.aux_port(adt.tag().arity()));
+      self.link_wire_port(ctr.aux_port(adtz.variant_index()).wire(), Port(adt.0 ^ 0b1000));
+    }
+    for i in 0 .. adtz.variant_index() {
+      self.link_wire_port(ctr.aux_port(i).wire(), Port::ERA);
+    }
+    for i in adtz.variant_index() + 1 .. ctr_arity {
+      self.link_wire_port(ctr.aux_port(i).wire(), Port::ERA);
+    }
   }
 
   fn anni(&mut self, a: Port, b: Port) {
@@ -288,12 +303,13 @@ impl<'a, M: Mode> Net<'a, M> {
   }
 
   fn comm(&mut self, a: Port, b: Port) {
+    trace!(self, a, b);
     let mut Bs = [const { MaybeUninit::<Port>::uninit() }; 8];
     let mut As = [const { MaybeUninit::<Port>::uninit() }; 8];
     let aa = a.tag().arity();
-    // let aw = b.tag().width();
+    let aw = a.tag().width();
     let ba = b.tag().arity();
-    // let bw = b.tag().width();
+    let bw = b.tag().width();
     let Bs = &mut Bs[0 .. aa as usize];
     let As = &mut As[0 .. ba as usize];
     if ba != 0 {
@@ -301,12 +317,16 @@ impl<'a, M: Mode> Net<'a, M> {
         let addr = self.alloc(b.align());
         *B = MaybeUninit::new(b.with_addr(addr));
       }
+    } else {
+      Bs.fill_with(|| MaybeUninit::new(b.clone()));
     }
     if aa != 0 {
       for A in &mut *As {
         let addr = self.alloc(a.align());
         *A = MaybeUninit::new(a.with_addr(addr));
       }
+    } else {
+      As.fill_with(|| MaybeUninit::new(a.clone()));
     }
     for bi in 0 .. aa {
       for ai in 0 .. ba {
@@ -318,7 +338,22 @@ impl<'a, M: Mode> Net<'a, M> {
         }
       }
     }
-    // TODO: copy width - arity
+    for i in aa .. aw {
+      let t = a.aux_port(i).wire().load_target();
+      for A in &*As {
+        unsafe {
+          A.assume_init_ref().aux_port(i).wire().set_target(t.clone());
+        }
+      }
+    }
+    for i in ba .. bw {
+      let t = b.aux_port(i).wire().load_target();
+      for B in &*Bs {
+        unsafe {
+          B.assume_init_ref().aux_port(i).wire().set_target(t.clone());
+        }
+      }
+    }
     for i in 0 .. aa {
       unsafe {
         self.link_wire_port(a.aux_port(i).wire(), Bs.get_unchecked(i as usize).assume_init_read());

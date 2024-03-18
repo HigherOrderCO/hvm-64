@@ -1,3 +1,5 @@
+use arrayvec::ArrayVec;
+
 use super::*;
 
 /// Each instruction corresponds to a fragment of a net that has a native
@@ -48,11 +50,21 @@ pub enum Instruction {
   /// net.link_trg(trg, Trg::port(port));
   /// ```
   LinkConst { trg: TrgId, port: Port },
-  /// See [`Net::do_ctr`].
+  /// See [`Net::do_ctr2`].
   /// ```rust,ignore
-  /// let (lft, rgt) = net.do_ctr(lab, trg);
+  /// let (lft, rgt) = net.do_ctr2(lab, trg);
   /// ```
-  Ctr { lab: Lab, trg: TrgId, lft: TrgId, rgt: TrgId },
+  Ctr2 { lab: Lab, trg: TrgId, lft: TrgId, rgt: TrgId },
+  /// See [`Net::do_ctrn`].
+  /// ```rust,ignore
+  /// let ports = net.do_ctrn(lab, trg, ports.len());
+  /// ```
+  CtrN { lab: Lab, trg: TrgId, ports: ArrayVec<TrgId, 8> },
+  /// See [`Net::do_ctrn`].
+  /// ```rust,ignore
+  /// let ports = net.do_ctrn(lab, trg, variant_index, variant_count, fields.len() + 1);
+  /// ```
+  AdtN { lab: Lab, trg: TrgId, variant_index: u8, variant_count: u8, fields: ArrayVec<TrgId, 7> },
   /// See [`Net::do_op`].
   /// ```rust,ignore
   /// let (rhs, out) = net.do_op(lab, trg);
@@ -114,7 +126,7 @@ impl fmt::Debug for TrgId {
 impl<'a, M: Mode> Net<'a, M> {
   /// `trg ~ {#lab x y}`
   #[inline(always)]
-  pub(crate) fn do_ctr(&mut self, lab: Lab, trg: Trg) -> (Trg, Trg) {
+  pub(crate) fn do_ctr2(&mut self, lab: Lab, trg: Trg) -> (Trg, Trg) {
     let port = trg.target();
     if !M::LAZY && port.is(Tag::Ctr2) && port.lab() == lab {
       trace!(self, "fast");
@@ -131,6 +143,48 @@ impl<'a, M: Mode> Net<'a, M> {
       self.link_trg_port(trg, n.p0);
       (Trg::port(n.p1), Trg::port(n.p2))
     }
+  }
+
+  /// `trg ~ {#lab ...}`
+  #[inline(always)]
+  pub(crate) fn do_ctrn(&mut self, lab: Lab, trg: Trg, n: u8) -> ArrayVec<Trg, 8> {
+    let tag = Tag::ctr_with_width(n);
+    let align = tag.align();
+    let addr = self.alloc(align);
+    let mut out = ArrayVec::new();
+    self.link_trg_port(trg, Port::new(tag, lab, addr));
+    for i in 0 .. n {
+      unsafe { out.push_unchecked(Trg::port(Port::new_var(align, addr.offset(i as usize)))) }
+    }
+    out
+  }
+
+  /// `trg ~ {lab:idx:count ...}`
+  #[inline(always)]
+  pub(crate) fn do_adtn(
+    &mut self,
+    lab: Lab,
+    trg: Trg,
+    variant_index: u8,
+    variant_count: u8,
+    arity: u8,
+  ) -> ArrayVec<Trg, 7> {
+    let adtz = Port::new_adtz(variant_index, variant_count);
+    let mut out = ArrayVec::new();
+    if arity == 0 {
+      self.link_trg_port(trg, adtz);
+    } else {
+      let width = arity + 1;
+      let tag = Tag::adt_with_width(width);
+      let align = tag.align();
+      let addr = self.alloc(align);
+      self.link_trg_port(trg, Port::new(tag, lab, addr));
+      for i in 0 .. arity {
+        unsafe { out.push_unchecked(Trg::port(Port::new_var(align, addr.offset(i as usize)))) }
+      }
+      Wire::new(align, addr.offset(arity as usize)).set_target(adtz);
+    }
+    out
   }
 
   /// `trg ~ <op x y>`

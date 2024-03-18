@@ -65,7 +65,7 @@ fn compile_def(code: &mut String, host: &Host, name: &str, instr: &[Instruction]
       Instruction::LinkConst { trg, port } => {
         writeln!(code, "net.link_trg({trg}, Trg::port({}));", compile_port(host, port))
       }
-      Instruction::Ctr { lab, trg, lft, rgt } => {
+      Instruction::Ctr2 { lab, trg, lft, rgt } => {
         writeln!(code, "let ({lft}, {rgt}) = net.do_ctr({lab}, {trg});")
       }
       Instruction::Op { op, trg, rhs, out } => {
@@ -80,6 +80,7 @@ fn compile_def(code: &mut String, host: &Host, name: &str, instr: &[Instruction]
       Instruction::Wires { av, aw, bv, bw } => {
         writeln!(code, "let ({av}, {aw}, {bv}, {bw}) = net.do_wires();")
       }
+      _ => todo!(),
     }?;
   }
   writeln!(code, "}}")?;

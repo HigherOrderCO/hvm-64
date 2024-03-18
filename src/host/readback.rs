@@ -1,3 +1,5 @@
+use self::run::{AdtN, CtrN};
+
 use super::*;
 use crate::util::maybe_grow;
 
@@ -63,17 +65,30 @@ impl<'a> ReadbackState<'a> {
         let node = port.traverse_node();
         Tree::Op { op, rhs: Box::new(self.read_wire(node.p1)), out: Box::new(self.read_wire(node.p2)) }
       }
-      Tag::Ctr2 => {
-        let node = port.traverse_node();
-        Tree::Ctr { lab: node.lab, ports: vec![self.read_wire(node.p1), self.read_wire(node.p2)] }
-      }
+      // Tag::Ctr2 => {
+      //   let node = port.traverse_node();
+      //   Tree::Ctr { lab: node.lab, ports: vec![self.read_wire(node.p1), self.read_wire(node.p2)] }
+      // }
       Tag::Mat => {
         let node = port.traverse_node();
         let arms = self.read_wire(node.p1);
         let out = self.read_wire(node.p2);
         Tree::legacy_mat(arms, out).expect("invalid mat node")
       }
-      _ => todo!(),
+      CtrN!() => Tree::Ctr {
+        lab: port.lab(),
+        ports: (0 .. port.tag().width()).map(|i| self.read_wire(port.aux_port(i).wire())).collect(),
+      },
+      AdtN!() | Tag::AdtZ => {
+        let adtz =
+          if port.is(Tag::AdtZ) { port.clone() } else { port.aux_port(port.tag().arity()).wire().load_target() };
+        Tree::Adt {
+          lab: port.lab(),
+          variant_index: adtz.variant_index() as usize,
+          variant_count: adtz.variant_count() as usize,
+          fields: (0 .. port.tag().arity()).map(|i| self.read_wire(port.aux_port(i).wire())).collect(),
+        }
+      }
     })
   }
 }
