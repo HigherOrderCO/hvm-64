@@ -269,6 +269,7 @@ impl<'a, M: Mode> Net<'a, M> {
   }
 
   fn adt_ctr(&mut self, adt: Port, ctr: Port) {
+    self.rwts.anni += 1;
     let ctr_arity = ctr.tag().arity();
     let adtz = if adt.is(AdtZ) { adt.clone() } else { adt.aux_port(adt.tag().arity()).wire().swap_target(Port::LOCK) };
     if ctr_arity != adtz.variant_count() + 1 {
@@ -289,6 +290,7 @@ impl<'a, M: Mode> Net<'a, M> {
   }
 
   fn anni(&mut self, a: Port, b: Port) {
+    self.rwts.anni += 1;
     if a.tag() == b.tag() {
       for i in 0 .. a.tag().arity() {
         self.link_wire_wire(a.aux_port(i).wire(), b.aux_port(i).wire());
@@ -303,6 +305,11 @@ impl<'a, M: Mode> Net<'a, M> {
   }
 
   fn comm(&mut self, a: Port, b: Port) {
+    if a == Port::ERA || b == Port::ERA {
+      self.rwts.eras += 1;
+    } else {
+      self.rwts.comm += 1;
+    }
     trace!(self, a, b);
     let mut Bs = [const { MaybeUninit::<Port>::uninit() }; 8];
     let mut As = [const { MaybeUninit::<Port>::uninit() }; 8];
