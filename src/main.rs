@@ -45,7 +45,7 @@ fn main() {
       }
       CliMode::Transform { transform_opts, files } => {
         let book = load_book(&files, &transform_opts);
-        println!("{}", book);
+        print!("{}", book);
       }
     }
   } else {
