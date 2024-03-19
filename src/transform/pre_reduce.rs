@@ -21,7 +21,7 @@ use std::{
 
 use crate::{
   ast::{Book, Net, Tree},
-  host::{encode_def, DefRef, Host},
+  host::{DefRef, Host},
   run::{self, Def, Heap, InterpretedDef, LabSet, Rewrites},
   stdlib::{AsHostedDef, HostedDef},
   util::maybe_grow,
@@ -145,7 +145,7 @@ impl<'a> State<'a> {
     // Mutate the host in-place with the pre-reduced net.
     let instr = self.host.encode_def(&net);
     if let DefRef::Owned(def_box) = self.host.defs.get_mut(nam).unwrap() {
-      let interpreted_def: &mut crate::run::Def<HostedDef<InterpretedDef>> = def_box.downcast_mut().unwrap();
+      let interpreted_def: &mut Def<HostedDef<InterpretedDef>> = def_box.downcast_mut().unwrap();
       interpreted_def.data.0 = instr;
     };
 

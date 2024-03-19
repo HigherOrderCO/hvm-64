@@ -238,9 +238,22 @@ impl<F: FnOnce(DynNetMut) + Send + Sync + 'static> AsBoxDef for ReadbackDef<F> {
       Tag::Num => {
         unsafe { *(def.data.tree.0) = Tree::Num { val: port.num() } };
         net.link_port_port(def.data.out, port)
+      },
+      Tag::Mat => {
+        unsafe { *(def.data.tree.0) = Tree::Mat { zero: Box::new(Tree::Era), succ: Box::new(Tree::Era), out: Box::new(Tree::Era) } };
+        let Tree::Mat { zero, succ, out } = (unsafe { &mut *(def.data.tree.0) }) else { unreachable!() };
+        let old = port.clone().consume_node();
+        let new = net.create_node(Tag::Mat, old.lab);
+        let old_sel = old.p1.load_target().consume_node();
+        let new_sel = net.create_node(Tag::Ctr, old_sel.lab);
+        net.link_port_port(def.data.out.clone(), new.p0);
+        net.link_port_port(new.p1, new_sel.p0);
+        net.link_wire_port(old.p2, def.data.with(out.as_mut(), new.p2));
+        net.link_wire_port(old_sel.p1, def.data.with(zero.as_mut(), new_sel.p1));
+        net.link_wire_port(old_sel.p2, def.data.with(succ.as_mut(), new_sel.p2));
       }
       Tag::Var => net.link_port_port(def.data.out, port),
-      tag @ (Tag::Op | Tag::Mat | Tag::Ctr) => {
+      tag @ (Tag::Op | Tag::Ctr) => {
         let old = port.clone().consume_node();
         let new = net.create_node(tag, old.lab);
         let (lhs, rhs): (*mut Tree, *mut Tree) = match tag {
@@ -251,17 +264,12 @@ impl<F: FnOnce(DynNetMut) + Send + Sync + 'static> AsBoxDef for ReadbackDef<F> {
             let Tree::Op { rhs, out, .. } = (unsafe { &mut *(def.data.tree.0) }) else { unreachable!() };
             (out.as_mut(), rhs.as_mut())
           }
-          Tag::Mat => {
-            unsafe { *(def.data.tree.0) = Tree::Mat { sel: Box::new(Tree::Era), ret: Box::new(Tree::Era) } };
-            let Tree::Mat { sel, ret } = (unsafe { &mut *(def.data.tree.0) }) else { unreachable!() };
-            (sel.as_mut(), ret.as_mut())
-          }
           Tag::Ctr => {
             unsafe {
-              *(def.data.tree.0) = Tree::Ctr { lab: port.lab(), lft: Box::new(Tree::Era), rgt: Box::new(Tree::Era) }
+              *(def.data.tree.0) = Tree::Ctr { lab: port.lab(), ports: vec![Tree::Era, Tree::Era] }
             };
-            let Tree::Ctr { lft, rgt, .. } = (unsafe { &mut *(def.data.tree.0) }) else { unreachable!() };
-            (rgt.as_mut(), lft.as_mut())
+            let Tree::Ctr { ports, .. } = (unsafe { &mut *(def.data.tree.0) }) else { unreachable!() };
+            (&mut ports[0], &mut ports[1])
           }
           _ => unreachable!(),
         };
