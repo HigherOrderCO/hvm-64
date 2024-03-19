@@ -136,7 +136,6 @@ fn test_cli_transform() {
   @mul = (<* a b> (a b))
 
   @sub = (<- a b> (a b))
-
   "###
   );
 
@@ -161,7 +160,6 @@ fn test_cli_transform() {
   @mul = (<* a b> (a b))
 
   @sub = (<- a b> (a b))
-
   "###
   );
 
@@ -176,7 +174,6 @@ fn test_cli_transform() {
     @r###"
   @main = a
     & @HVM.log ~ (#1 (#2 a))
-
   "###
   );
 }

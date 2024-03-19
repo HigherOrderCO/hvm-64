@@ -458,8 +458,11 @@ impl FromStr for Tree {
 
 impl fmt::Display for Book {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    for (name, net) in self.iter() {
-      writeln!(f, "@{name} = {net}\n")?;
+    for (i, (name, net)) in self.iter().enumerate() {
+      if i != 0 {
+        f.write_str("\n\n")?;
+      }
+      write!(f, "@{name} = {net}")?;
     }
     Ok(())
   }
