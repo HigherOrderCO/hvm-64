@@ -78,7 +78,7 @@ pub fn test_eta() {
   assert_display_snapshot!(parse_and_reduce("<+ (a b) (a b)>"), @"<+ a a>");
   assert_display_snapshot!(parse_and_reduce("(a b) & ((a b) (c d)) ~ (c d) "), @r###"
   a
-  & (a c) ~ c
+    & (a c) ~ c
   "###);
   assert_display_snapshot!(parse_and_reduce("((a b) [a b])"), @"((a b) [a b])");
   assert_display_snapshot!(parse_and_reduce("((a b c) b c)"), @"((a b) b)");
