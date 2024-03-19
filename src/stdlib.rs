@@ -238,12 +238,9 @@ impl<F: FnOnce(DynNetMut) + Send + Sync + 'static> AsBoxDef for ReadbackDef<F> {
       Tag::Num => {
         unsafe { *(def.data.tree.0) = Tree::Num { val: port.num() } };
         net.link_port_port(def.data.out, port)
-      }
+      },
       Tag::Mat => {
-        unsafe {
-          *(def.data.tree.0) =
-            Tree::Mat { zero: Box::new(Tree::Era), succ: Box::new(Tree::Era), out: Box::new(Tree::Era) }
-        };
+        unsafe { *(def.data.tree.0) = Tree::Mat { zero: Box::new(Tree::Era), succ: Box::new(Tree::Era), out: Box::new(Tree::Era) } };
         let Tree::Mat { zero, succ, out } = (unsafe { &mut *(def.data.tree.0) }) else { unreachable!() };
         let old = port.clone().consume_node();
         let new = net.create_node(Tag::Mat, old.lab);
@@ -265,18 +262,20 @@ impl<F: FnOnce(DynNetMut) + Send + Sync + 'static> AsBoxDef for ReadbackDef<F> {
               *(def.data.tree.0) = Tree::Op { op: port.op(), rhs: Box::new(Tree::Era), out: Box::new(Tree::Era) }
             };
             let Tree::Op { rhs, out, .. } = (unsafe { &mut *(def.data.tree.0) }) else { unreachable!() };
-            (out.as_mut(), rhs.as_mut())
+            (rhs.as_mut(), out.as_mut())
           }
           Tag::Ctr => {
-            unsafe { *(def.data.tree.0) = Tree::Ctr { lab: port.lab(), ports: vec![Tree::Era, Tree::Era] } };
+            unsafe {
+              *(def.data.tree.0) = Tree::Ctr { lab: port.lab(), ports: vec![Tree::Era, Tree::Era] }
+            };
             let Tree::Ctr { ports, .. } = (unsafe { &mut *(def.data.tree.0) }) else { unreachable!() };
             (&mut ports[0], &mut ports[1])
           }
           _ => unreachable!(),
         };
         net.link_port_port(def.data.out.clone(), new.p0);
-        net.link_wire_port(old.p1, def.data.with(rhs, new.p1));
-        net.link_wire_port(old.p2, def.data.with(lhs, new.p2));
+        net.link_wire_port(old.p1, def.data.with(lhs, new.p1));
+        net.link_wire_port(old.p2, def.data.with(rhs, new.p2));
       }
     }
     Self::maybe_finish(DynNetMut::from(net), def.data.root);
