@@ -414,7 +414,7 @@ checksum = "379dada1584ad501b383485dd706b8afb7a70fcbc7f4da7d780638a5a6124a60"
 
 [[package]]
 name = "hvm-core"
-version = "0.2.19"
+version = "0.2.20"
 dependencies = [
  "arrayvec",
  "clap",
