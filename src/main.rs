@@ -33,8 +33,9 @@ fn main() {
         compile_executable(output, &host.lock().unwrap()).unwrap();
       }
       CliMode::Run { run_opts, mut transform_opts, file, args } => {
-        // Don't pre-reduce the entry point
+        // Don't pre-reduce or prune the entry point
         transform_opts.pre_reduce_skip.push(args.entry_point.clone());
+        transform_opts.prune_entrypoints.push(args.entry_point.clone());
         let host = create_host(&load_book(&[file], &transform_opts));
         run(&host.lock().unwrap(), run_opts, args);
       }
@@ -170,6 +171,9 @@ struct TransformOpts {
   ///
   /// Supports abbreviations such as '4G' or '400M'.
   pre_reduce_rewrites: u64,
+  /// Names of the definitions that should not get pruned.
+  #[arg(long = "prune-entrypoints", default_value = "main")]
+  prune_entrypoints: Vec<String>,
 }
 
 #[derive(Args, Clone, Debug)]
@@ -193,6 +197,7 @@ struct RuntimeOpts {
   /// Supports abbreviations such as '4G' or '400M'.
   memory: Option<usize>,
 }
+
 #[derive(Args, Clone, Debug)]
 struct RunArgs {
   #[arg(short = 'e', default_value = "main")]
@@ -207,67 +212,71 @@ struct RunArgs {
   args: Vec<String>,
 }
 
-#[derive(clap::ValueEnum, Clone, Debug)]
-pub enum TransformPass {
-  #[value(alias = "all")]
-  All,
-  #[value(alias = "no-all")]
-  NoAll,
-  #[value(alias = "pre")]
-  PreReduce,
-  #[value(alias = "no-pre")]
-  NoPreReduce,
-  #[value(alias = "coalesce")]
-  CoalesceCtrs,
-  #[value(alias = "no-coalesce")]
-  NoCoalesceCtrs,
-  #[value(alias = "adts")]
-  EncodeAdts,
-  #[value(alias = "no-adts")]
-  NoEncodeAdts,
-  #[value(alias = "eta")]
-  EtaReduce,
-  #[value(alias = "no-eta")]
-  NoEtaReduce,
-}
+macro_rules! transform_passes {
+  ($($pass:ident: $name:literal $(| $alias:literal)*),* $(,)?) => {
+    #[derive(Clone, Debug)]
+    #[allow(non_camel_case_types)]
+    pub enum TransformPass {
+      all(bool),
+      $($pass(bool),)*
+    }
 
-#[derive(Default)]
-pub struct TransformPasses {
-  pre_reduce: bool,
-  coalesce_ctrs: bool,
-  encode_adts: bool,
-  eta_reduce: bool,
-}
+    #[derive(Default)]
+    struct TransformPasses {
+      $($pass: bool),*
+    }
 
-impl TransformPasses {
-  fn set_all(&mut self) {
-    self.pre_reduce = true;
-    self.coalesce_ctrs = true;
-    self.encode_adts = true;
-    self.eta_reduce = true;
-  }
-}
-
-impl TransformPass {
-  fn passes_from_cli(args: &Vec<Self>) -> TransformPasses {
-    use TransformPass::*;
-    let mut opts = TransformPasses::default();
-    for arg in args {
-      match arg {
-        All => opts.set_all(),
-        NoAll => opts = Default::default(),
-        PreReduce => opts.pre_reduce = true,
-        NoPreReduce => opts.pre_reduce = false,
-        CoalesceCtrs => opts.coalesce_ctrs = true,
-        NoCoalesceCtrs => opts.coalesce_ctrs = false,
-        EncodeAdts => opts.encode_adts = true,
-        NoEncodeAdts => opts.encode_adts = false,
-        EtaReduce => opts.eta_reduce = true,
-        NoEtaReduce => opts.eta_reduce = false,
+    impl TransformPasses {
+      fn set_all(&mut self) {
+        $(self.$pass = true;)*
       }
     }
-    opts
-  }
+
+    impl clap::ValueEnum for TransformPass {
+      fn value_variants<'a>() -> &'a [Self] {
+        &[
+          Self::all(true), Self::all(false),
+          $(Self::$pass(true), Self::$pass(false),)*
+        ]
+      }
+
+      fn to_possible_value(&self) -> Option<clap::builder::PossibleValue> {
+        use TransformPass::*;
+        Some(match self {
+          all(true) => clap::builder::PossibleValue::new("all"),
+          all(false) => clap::builder::PossibleValue::new("no-all"),
+          $(
+            $pass(true) => clap::builder::PossibleValue::new($name)$(.alias($alias))*,
+            $pass(false) => clap::builder::PossibleValue::new(concat!("no-", $name))$(.alias(concat!("no-", $alias)))*,
+          )*
+        })
+      }
+    }
+
+    impl TransformPass {
+      fn passes_from_cli(args: &Vec<Self>) -> TransformPasses {
+        use TransformPass::*;
+        let mut opts = TransformPasses::default();
+        for arg in args {
+          match arg {
+            all(true) => opts.set_all(),
+            all(false) => opts = TransformPasses::default(),
+            $(&$pass(b) => opts.$pass = b,)*
+          }
+        }
+        opts
+      }
+    }
+  };
+}
+
+transform_passes! {
+  pre_reduce: "pre-reduce" | "pre",
+  coalesce_ctrs: "coalesce-ctrs" | "coalesce",
+  encode_adts: "encode-adts" | "adts",
+  eta_reduce: "eta-reduce" | "eta",
+  inline: "inline",
+  prune: "prune",
 }
 
 fn run(host: &Host, opts: RuntimeOpts, args: RunArgs) {
@@ -321,6 +330,11 @@ fn load_book(files: &[String], transform_opts: &TransformOpts) -> Book {
   let transform_passes = TransformPass::passes_from_cli(&transform_opts.transform_passes);
 
   if transform_passes.pre_reduce {
+    if transform_passes.eta_reduce {
+      for (_, def) in &mut book.nets {
+        def.eta_reduce();
+      }
+    }
     book.pre_reduce(
       &|x| transform_opts.pre_reduce_skip.iter().any(|y| x == y),
       transform_opts.pre_reduce_memory,
@@ -339,6 +353,31 @@ fn load_book(files: &[String], transform_opts: &TransformOpts) -> Book {
         tree.encode_scott_adts();
       }
     }
+  }
+  if transform_passes.inline {
+    loop {
+      let inline_changed = book.inline();
+      if inline_changed.is_empty() {
+        break;
+      }
+      if !(transform_passes.eta_reduce || transform_passes.encode_adts) {
+        break;
+      }
+      for name in inline_changed {
+        let def = book.get_mut(&name).unwrap();
+        if transform_passes.eta_reduce {
+          def.eta_reduce();
+        }
+        if transform_passes.encode_adts {
+          for tree in def.trees_mut() {
+            tree.encode_scott_adts();
+          }
+        }
+      }
+    }
+  }
+  if transform_passes.prune {
+    book.prune(&transform_opts.prune_entrypoints);
   }
   book
 }
@@ -446,7 +485,9 @@ fn compile_executable(target: &str, host: &host::Host) -> Result<(), io::Error> 
       coalesce_ctrs
       encode_adts
       eta_reduce
+      inline
       pre_reduce
+      prune
     }
     util {
       apply_tree
