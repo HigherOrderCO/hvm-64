@@ -14,7 +14,8 @@ pub(super) struct Node(pub AtomicU64, pub AtomicU64);
 pub struct Heap(pub(super) [Node]);
 
 impl Heap {
-  /// Allocates a new heap with at most the given size in bytes.
+  /// Allocates a new heap with the given size in bytes, defaulting to the
+  /// largest power-of-two allocation the system will allow.
   pub fn new(bytes: Option<usize>) -> Option<Box<Self>> {
     if let Some(bytes) = bytes {
       return Self::new_exact(bytes / 8);
