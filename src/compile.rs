@@ -74,8 +74,8 @@ fn compile_def(code: &mut String, host: &Host, name: &str, instr: &[Instruction]
       Instruction::OpNum { op, trg, rhs, out } => {
         writeln!(code, "let {out} = net.do_op_num({op:?}, {trg}, {rhs});")
       }
-      Instruction::Mat { trg, lft, rgt } => {
-        writeln!(code, "let ({lft}, {rgt}) = net.do_mat({trg});")
+      Instruction::Mat { trg, zero, succ, out } => {
+        writeln!(code, "let ({zero}, {succ}, {out}) = net.do_mat({trg});")
       }
       Instruction::Wires { av, aw, bv, bw } => {
         writeln!(code, "let ({av}, {aw}, {bv}, {bw}) = net.do_wires();")

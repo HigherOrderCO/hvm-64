@@ -171,56 +171,48 @@ impl<'a, M: Mode> Net<'a, M> {
   /// Interacts a number and a numeric match node.
   ///
   /// ```text
-  ///                             |
-  ///         b   (0)             |         b  (n+1)
-  ///              |              |              |
-  ///              |              |              |
-  ///             / \             |             / \
-  ///         a  /mat\            |         a  /mat\
-  ///           /_____\           |           /_____\
-  ///            |   |            |            |   |
-  ///         a1 |   | a2         |         a1 |   | a2
-  ///                             |
-  /// --------------------------- | --------------------------- mat_num
-  ///                             |          _ _ _ _ _
-  ///                             |        /           \
-  ///                             |    y2 |  (n) y1     |
-  ///                             |      _|___|_        |
-  ///                             |      \     /        |
-  ///               _             |    y  \   /         |
-  ///             /   \           |        \ /          |
-  ///    x2 (*)  | x1  |          |      x2 |  (*) x1   |
-  ///       _|___|_    |          |        _|___|_      |
-  ///       \     /    |          |        \     /      |
-  ///     x  \   /     |          |      x  \   /       |
-  ///         \ /      |          |          \ /        |
-  ///          |       |          |           |         |
-  ///       a1 |       | a2       |        a1 |         | a2
-  ///                             |
+  ///                               |
+  ///          b   (0)              |          b  (n+1)
+  ///               |               |               |
+  ///               |               |               |
+  ///              / \              |              / \
+  ///             /   \             |             /   \
+  ///         a  / mat \            |         a  / mat \
+  ///           /_______\           |           /_______\
+  ///           /   |   \           |           /   |   \
+  ///       a1 /    | a2 \ a3       |       a1 /    | a2 \ a3
+  ///                               |
+  /// ----------------------------- | ----------------------------- mat_num
+  ///                               |                _ _ _        
+  ///                               |              /       \
+  ///                               |          x2 |  (n) x1 |
+  ///                               |            _|___|_    |
+  ///                               |            \     /    |
+  ///             _ _ _             |          x  \   /     |
+  ///           /       \           |              \ /     /
+  ///          |   (*)   |          |         (*)   |     /
+  ///       a1 |    | a2 | a3       |       a1 |    | a2 | a3       
+  ///                               |
   /// ```
   #[inline(never)]
   pub fn mat_num(&mut self, a: Port, b: Port) {
-    todo!()
-    // trace!(self, a, b);
-    // self.rwts.oper += 1;
-    // let a = a.consume_node();
-    // let b = b.num();
-    // if b == 0 {
-    //   let x = self.create_node(Ctr, 0);
-    //   trace!(self, x.p0);
-    //   self.link_port_port(x.p2, Port::ERA);
-    //   self.link_wire_port(a.p2, x.p1);
-    //   self.link_wire_port(a.p1, x.p0);
-    // } else {
-    //   let x = self.create_node(Tag::Ctr, 0);
-    //   let y = self.create_node(Tag::Ctr, 0);
-    //   trace!(self, x.p0, y.p0);
-    //   self.link_port_port(x.p1, Port::ERA);
-    //   self.link_port_port(x.p2, y.p0);
-    //   self.link_port_port(y.p1, Port::new_num(b - 1));
-    //   self.link_wire_port(a.p2, y.p2);
-    //   self.link_wire_port(a.p1, x.p0);
-    // }
+    trace!(self, a, b);
+    self.rwts.oper += 1;
+    let a1 = a.aux_port(0).wire();
+    let a2 = a.aux_port(1).wire();
+    let a3 = a.aux_port(2).wire();
+    let b = b.num();
+    if b == 0 {
+      self.link_wire_wire(a1, a3);
+      self.link_wire_port(a2, Port::ERA);
+    } else {
+      let x = self.create_node(Tag::Ctr2, 0);
+      trace!(self, x.p0);
+      self.link_port_port(x.p1, Port::new_num(b - 1));
+      self.link_wire_port(a1, Port::ERA);
+      self.link_wire_port(a2, x.p0);
+      self.link_wire_port(a3, x.p2);
+    }
   }
 
   /// Interacts a number and a binary numeric operation node.

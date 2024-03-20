@@ -253,6 +253,20 @@ impl AsDef for InterpretedDef {
             trgs.set_trg(lft, l);
             trgs.set_trg(rgt, r);
           }
+          Instruction::CtrN { lab, trg, ref ports } => {
+            for (i, t) in net.do_ctrn(lab, trgs.get_trg(trg), ports.len() as u8).into_iter().enumerate() {
+              trgs.set_trg(ports[i], t);
+            }
+          }
+          Instruction::AdtN { lab, trg, variant_index, variant_count, ref fields } => {
+            for (i, t) in net
+              .do_adtn(lab, trgs.get_trg(trg), variant_index, variant_count, fields.len() as u8)
+              .into_iter()
+              .enumerate()
+            {
+              trgs.set_trg(fields[i], t);
+            }
+          }
           Instruction::Op { op, trg, rhs, out } => {
             let (r, o) = net.do_op(op, trgs.get_trg(trg));
             trgs.set_trg(rhs, r);
@@ -262,11 +276,11 @@ impl AsDef for InterpretedDef {
             let o = net.do_op_num(op, trgs.get_trg(trg), lhs);
             trgs.set_trg(out, o);
           }
-          #[cfg(todo)]
-          Instruction::Mat { trg, lft, rgt } => {
-            let (l, r) = net.do_mat(trgs.get_trg(trg));
-            trgs.set_trg(lft, l);
-            trgs.set_trg(rgt, r);
+          Instruction::Mat { trg, zero, succ, out } => {
+            let (z, s, o) = net.do_mat(trgs.get_trg(trg));
+            trgs.set_trg(zero, z);
+            trgs.set_trg(succ, s);
+            trgs.set_trg(out, o);
           }
           Instruction::Wires { av, aw, bv, bw } => {
             let (avt, awt, bvt, bwt) = net.do_wires();
@@ -275,7 +289,6 @@ impl AsDef for InterpretedDef {
             trgs.set_trg(bv, bvt);
             trgs.set_trg(bw, bwt);
           }
-          _ => todo!(),
         }
       }
     }

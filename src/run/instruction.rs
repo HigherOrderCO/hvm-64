@@ -77,9 +77,9 @@ pub enum Instruction {
   OpNum { op: Op, trg: TrgId, rhs: u64, out: TrgId },
   /// See [`Net::do_mat`].
   /// ```rust,ignore
-  /// let (lft, rgt) = net.do_mat(trg);
+  /// let (zero, succ, out) = net.do_mat(trg);
   /// ```
-  Mat { trg: TrgId, lft: TrgId, rgt: TrgId },
+  Mat { trg: TrgId, zero: TrgId, succ: TrgId, out: TrgId },
   /// See [`Net::do_wires`].
   /// ```rust,ignore
   /// let (av, aw, bv, bw) = net.do_wires();
@@ -224,34 +224,47 @@ impl<'a, M: Mode> Net<'a, M> {
     }
   }
 
-  #[cfg(todo)]
-  /// `trg ~ ?<x y>`
+  /// `trg ~ ?<x y z>`
   #[inline(always)]
-  pub(crate) fn do_mat(&mut self, trg: Trg) -> (Trg, Trg) {
+  pub(crate) fn do_mat(&mut self, trg: Trg) -> (Trg, Trg, Trg) {
+    let m = self.alloc(Align4);
+    let m0 = Port::new(Mat, 0, m);
+    let m1 = m0.aux_port(0);
+    let m2 = m0.aux_port(1);
+    let m3 = m0.aux_port(2);
+    self.link_trg_port(trg, m0);
+    (Trg::port(m1), Trg::port(m2), Trg::port(m3))
+  }
+
+  #[cfg(todo)]
+  /// `trg ~ ?<x y out>`
+  #[inline(always)]
+  pub(crate) fn do_mat(&mut self, trg: Trg, out: Trg) -> (Trg, Trg) {
     let port = trg.target();
-    if !M::LAZY && port.is(Tag::Num) {
+    if trg.target().is(Tag::Num) {
       self.rwts.oper += 1;
       self.free_trg(trg);
       let num = port.num();
-      let c1 = self.create_node(Ctr, 0);
       if num == 0 {
-        self.link_port_port(c1.p2, Port::ERA);
-        (Trg::port(c1.p0), Trg::wire(self.create_wire_to(c1.p1)))
+        (out, Trg::port(Port::ERA))
       } else {
-        let c2 = self.create_node(Ctr, 0);
-        self.link_port_port(c1.p1, Port::ERA);
-        self.link_port_port(c1.p2, c2.p0);
-        self.link_port_port(c2.p1, Port::new_num(num - 1));
-        (Trg::port(c1.p0), Trg::wire(self.create_wire_to(c2.p2)))
+        let c2 = self.create_node(Ctr2, 0);
+        c2.p1.wire().set_target(Port::new_num(num - 1));
+        self.link_trg_port(out, c2.p2);
+        (Trg::port(Port::ERA), Trg::port(c2.p0))
       }
-    } else if !M::LAZY && port == Port::ERA {
-      self.rwts.eras += 1;
-      self.free_trg(trg);
+    } else if port == Port::ERA {
+      self.link_trg_port(out, Port::ERA);
       (Trg::port(Port::ERA), Trg::port(Port::ERA))
     } else {
-      let m = self.create_node(Mat, 0);
-      self.link_trg_port(trg, m.p0);
-      (Trg::port(m.p1), Trg::port(m.p2))
+      let m = self.alloc(Align4);
+      let m0 = Port::new(Mat, 0, m);
+      let m1 = m0.aux_port(0);
+      let m2 = m0.aux_port(1);
+      let m3 = m0.aux_port(2);
+      self.link_trg_port(out, m3);
+      self.link_trg_port(trg, m0);
+      (Trg::port(m1), Trg::port(m2))
     }
   }
 
@@ -293,37 +306,6 @@ impl<'a, M: Mode> Net<'a, M> {
       self.link_port_port(c1.p2, c2.p0);
       self.link_trg_port(out, m.p2);
       (Trg::port(c1.p1), Trg::port(c2.p1), Trg::port(c2.p2))
-    }
-  }
-
-  #[cfg(todo)]
-  /// `trg ~ ?<(x y) out>`
-  #[inline(always)]
-  #[allow(unused)] // TODO: emit this instruction
-  pub(crate) fn do_mat_con(&mut self, trg: Trg, out: Trg) -> (Trg, Trg) {
-    let port = trg.target();
-    if trg.target().is(Tag::Num) {
-      self.rwts.oper += 1;
-      self.free_trg(trg);
-      let num = port.num();
-      if num == 0 {
-        (out, Trg::port(Port::ERA))
-      } else {
-        let c2 = self.create_node(Ctr, 0);
-        c2.p1.wire().set_target(Port::new_num(num - 1));
-        self.link_trg_port(out, c2.p2);
-        (Trg::port(Port::ERA), Trg::port(c2.p0))
-      }
-    } else if port == Port::ERA {
-      self.link_trg_port(out, Port::ERA);
-      (Trg::port(Port::ERA), Trg::port(Port::ERA))
-    } else {
-      let m = self.create_node(Mat, 0);
-      let c1 = self.create_node(Ctr, 0);
-      self.link_port_port(m.p1, c1.p0);
-      self.link_trg_port(out, m.p2);
-      self.link_trg_port(trg, m.p0);
-      (Trg::port(c1.p1), Trg::port(c1.p2))
     }
   }
 }

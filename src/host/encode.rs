@@ -94,8 +94,7 @@ impl<'a, E: Encoder> State<'a, E> {
         self.visit_tree(rgt, r);
       }
       Tree::Mat { zero, succ, out } => {
-        let (a, o) = self.encoder.mat(trg);
-        let (z, s) = self.encoder.ctr2(0, a);
+        let (z, s, o) = self.encoder.mat(trg);
         self.visit_tree(zero, z);
         self.visit_tree(succ, s);
         self.visit_tree(out, o);
@@ -127,7 +126,7 @@ trait Encoder {
   ) -> ArrayVec<Self::Trg, 7>;
   fn op(&mut self, op: Op, trg: Self::Trg) -> (Self::Trg, Self::Trg);
   fn op_num(&mut self, op: Op, trg: Self::Trg, rhs: u64) -> Self::Trg;
-  fn mat(&mut self, trg: Self::Trg) -> (Self::Trg, Self::Trg);
+  fn mat(&mut self, trg: Self::Trg) -> (Self::Trg, Self::Trg, Self::Trg);
   fn wires(&mut self) -> (Self::Trg, Self::Trg, Self::Trg, Self::Trg);
 }
 
@@ -192,11 +191,12 @@ impl Encoder for InterpretedDef {
     self.instr.push(Instruction::OpNum { op, trg, rhs, out });
     out
   }
-  fn mat(&mut self, trg: Self::Trg) -> (Self::Trg, Self::Trg) {
-    let lft = self.new_trg_id();
-    let rgt = self.new_trg_id();
-    self.instr.push(Instruction::Mat { trg, lft, rgt });
-    (lft, rgt)
+  fn mat(&mut self, trg: Self::Trg) -> (Self::Trg, Self::Trg, Self::Trg) {
+    let zero = self.new_trg_id();
+    let succ = self.new_trg_id();
+    let out = self.new_trg_id();
+    self.instr.push(Instruction::Mat { trg, zero, succ, out });
+    (zero, succ, out)
   }
   fn wires(&mut self) -> (Self::Trg, Self::Trg, Self::Trg, Self::Trg) {
     let av = self.new_trg_id();
@@ -241,10 +241,8 @@ impl<'a, M: Mode> Encoder for run::Net<'a, M> {
   fn op_num(&mut self, op: Op, trg: Self::Trg, rhs: u64) -> Self::Trg {
     self.do_op_num(op, trg, rhs)
   }
-  fn mat(&mut self, trg: Self::Trg) -> (Self::Trg, Self::Trg) {
-    #[cfg(todo)]
-    self.do_mat(trg);
-    todo!();
+  fn mat(&mut self, trg: Self::Trg) -> (Self::Trg, Self::Trg, Self::Trg) {
+    self.do_mat(trg)
   }
   fn wires(&mut self) -> (Self::Trg, Self::Trg, Self::Trg, Self::Trg) {
     self.do_wires()
