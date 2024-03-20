@@ -259,6 +259,7 @@ impl<'a, M: Mode> Net<'a, M> {
     let a1 = a.p1.load_target();
     if a1.tag() == Num {
       self.rwts.oper += 1;
+      self.half_free(a.p1.addr());
       let out = op.op(b.num(), a1.num());
       self.link_wire_port(a.p2, Port::new_num(out));
     } else {

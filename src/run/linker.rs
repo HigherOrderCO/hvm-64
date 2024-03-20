@@ -1,3 +1,5 @@
+use std::collections::VecDeque;
+
 use super::*;
 
 /// Stores extra data needed about the nodes when in lazy mode. (In strict mode,
@@ -18,7 +20,7 @@ pub(super) struct Header {
 /// non-atomically (because they must be locked).
 pub struct Linker<'h, M: Mode> {
   pub(super) allocator: Allocator<'h>,
-  pub redexes: Vec<(Port, Port)>,
+  pub redexes: VecDeque<(Port, Port)>,
   pub rwts: Rewrites,
   headers: IntMap<Addr, Header>,
   _mode: PhantomData<M>,
@@ -30,7 +32,7 @@ impl<'h, M: Mode> Linker<'h, M> {
   pub fn new(heap: &'h Heap) -> Self {
     Linker {
       allocator: Allocator::new(heap),
-      redexes: Vec::new(),
+      redexes: VecDeque::new(),
       rwts: Default::default(),
       headers: Default::default(),
       _mode: PhantomData,
@@ -89,7 +91,7 @@ impl<'h, M: Mode> Linker<'h, M> {
     if a.is_skippable() && b.is_skippable() {
       self.rwts.eras += 1;
     } else if !M::LAZY {
-      self.redexes.push((a, b));
+      self.redexes.push_back((a, b));
     } else {
       self.set_header(a.clone(), b.clone());
       self.set_header(b.clone(), a.clone());

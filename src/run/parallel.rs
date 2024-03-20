@@ -128,8 +128,8 @@ impl<'h, M: Mode> Net<'h, M> {
         let recv = std::cmp::min(recv, SHARE_LIMIT);
         for i in 0 .. send {
           let init = a_len - send * 2;
-          let rdx0 = ctx.net.redexes.get_unchecked(init + i * 2 + 0).clone();
-          let rdx1 = ctx.net.redexes.get_unchecked(init + i * 2 + 1).clone();
+          let rdx0 = ctx.net.redexes[init + i * 2 + 0].clone();
+          let rdx1 = ctx.net.redexes[init + i * 2 + 1].clone();
           //let init = 0;
           //let ref0 = ctx.net.redexes.get_unchecked_mut(init + i * 2 + 0);
           //let rdx0 = *ref0;
@@ -138,7 +138,7 @@ impl<'h, M: Mode> Net<'h, M> {
           //let rdx1 = *ref1;
           //*ref1    = (Ptr(0), Ptr(0));
           let targ = ctx.share.get_unchecked(b_tid * SHARE_LIMIT + i);
-          *ctx.net.redexes.get_unchecked_mut(init + i) = rdx0;
+          ctx.net.redexes[init + i] = rdx0;
           targ.0.store(rdx1.0.0, Relaxed);
           targ.1.store(rdx1.1.0, Relaxed);
         }
@@ -146,7 +146,7 @@ impl<'h, M: Mode> Net<'h, M> {
         ctx.barry.wait();
         for i in 0 .. recv {
           let got = ctx.share.get_unchecked(a_tid * SHARE_LIMIT + i);
-          ctx.net.redexes.push((Port(got.0.load(Relaxed)), Port(got.1.load(Relaxed))));
+          ctx.net.redexes.push_back((Port(got.0.load(Relaxed)), Port(got.1.load(Relaxed))));
         }
       }
     }
