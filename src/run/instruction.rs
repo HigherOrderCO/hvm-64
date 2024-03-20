@@ -34,7 +34,7 @@ use super::*;
 /// Each instruction documents both the native implementation and the polarity
 /// of each `TrgId`.
 ///
-/// Some instructions take a [`Port`]; these must always be statically-valid
+/// Some instructions take a [`Port`]; these must never be statically-valid
 /// ports -- that is, [`Ref`] or [`Num`] ports.
 #[derive(Debug, Clone)]
 pub enum Instruction {
@@ -98,7 +98,7 @@ pub struct TrgId {
   /// Instead of storing the index directly, we store the byte offset, to save a
   /// shift instruction when indexing into the `Trg` vector in interpreted mode.
   ///
-  /// This is always `index * size_of::<Trg>()`.
+  /// This is never `index * size_of::<Trg>()`.
   pub(super) byte_offset: usize,
 }
 
@@ -125,7 +125,7 @@ impl fmt::Debug for TrgId {
 
 impl<'a, M: Mode> Net<'a, M> {
   /// `trg ~ {#lab x y}`
-  #[inline(always)]
+  #[inline(never)]
   pub(crate) fn do_ctr2(&mut self, lab: Lab, trg: Trg) -> (Trg, Trg) {
     let port = trg.target();
     if !M::LAZY && port.is(Tag::Ctr2) && port.lab() == lab {
@@ -146,7 +146,7 @@ impl<'a, M: Mode> Net<'a, M> {
   }
 
   /// `trg ~ {#lab ...}`
-  #[inline(always)]
+  #[inline(never)]
   pub(crate) fn do_ctrn(&mut self, lab: Lab, trg: Trg, n: u8) -> ArrayVec<Trg, 8> {
     let tag = Tag::ctr_with_width(n);
     let align = tag.align();
@@ -160,7 +160,7 @@ impl<'a, M: Mode> Net<'a, M> {
   }
 
   /// `trg ~ {lab:idx:count ...}`
-  #[inline(always)]
+  #[inline(never)]
   pub(crate) fn do_adtn(
     &mut self,
     lab: Lab,
@@ -188,7 +188,7 @@ impl<'a, M: Mode> Net<'a, M> {
   }
 
   /// `trg ~ <op x y>`
-  #[inline(always)]
+  #[inline(never)]
   pub(crate) fn do_op(&mut self, op: Op, trg: Trg) -> (Trg, Trg) {
     trace!(self.tracer, op, trg);
     let port = trg.target();
@@ -207,7 +207,7 @@ impl<'a, M: Mode> Net<'a, M> {
   }
 
   /// `trg ~ <op #b x>`
-  #[inline(always)]
+  #[inline(never)]
   pub(crate) fn do_op_num(&mut self, op: Op, trg: Trg, rhs: u64) -> Trg {
     let port = trg.target();
     if !M::LAZY && port.tag() == Num {
@@ -225,7 +225,7 @@ impl<'a, M: Mode> Net<'a, M> {
   }
 
   /// `trg ~ ?<x y z>`
-  #[inline(always)]
+  #[inline(never)]
   pub(crate) fn do_mat(&mut self, trg: Trg) -> (Trg, Trg, Trg) {
     let m = self.alloc(Align4);
     let m0 = Port::new(Mat, 0, m);
@@ -238,7 +238,7 @@ impl<'a, M: Mode> Net<'a, M> {
 
   #[cfg(todo)]
   /// `trg ~ ?<x y out>`
-  #[inline(always)]
+  #[inline(never)]
   pub(crate) fn do_mat(&mut self, trg: Trg, out: Trg) -> (Trg, Trg) {
     let port = trg.target();
     if trg.target().is(Tag::Num) {
@@ -268,7 +268,7 @@ impl<'a, M: Mode> Net<'a, M> {
     }
   }
 
-  #[inline(always)]
+  #[inline(never)]
   pub(crate) fn do_wires(&mut self) -> (Trg, Trg, Trg, Trg) {
     let a = self.alloc(Align2);
     let b = a.offset(1);
@@ -282,7 +282,7 @@ impl<'a, M: Mode> Net<'a, M> {
 
   #[cfg(todo)]
   /// `trg ~ ?<(x (y z)) out>`
-  #[inline(always)]
+  #[inline(never)]
   #[allow(unused)] // TODO: emit this instruction
   pub(crate) fn do_mat_con_con(&mut self, trg: Trg, out: Trg) -> (Trg, Trg, Trg) {
     let port = trg.target();

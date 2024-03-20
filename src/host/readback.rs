@@ -70,10 +70,10 @@ impl<'a> ReadbackState<'a> {
       //   Tree::Ctr { lab: node.lab, ports: vec![self.read_wire(node.p1), self.read_wire(node.p2)] }
       // }
       Tag::Mat => {
-        let node = port.traverse_node();
-        let arms = self.read_wire(node.p1);
-        let out = self.read_wire(node.p2);
-        Tree::legacy_mat(arms, out).expect("invalid mat node")
+        let zero = Box::new(self.read_wire(port.aux_port(0).wire()));
+        let succ = Box::new(self.read_wire(port.aux_port(1).wire()));
+        let out = Box::new(self.read_wire(port.aux_port(2).wire()));
+        Tree::Mat { zero, succ, out }
       }
       CtrN!() => Tree::Ctr {
         lab: port.lab(),

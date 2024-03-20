@@ -225,12 +225,12 @@ impl AsDef for InterpretedDef {
     struct Trgs(*mut Trg);
 
     impl Trgs {
-      #[inline(always)]
+      #[inline(never)]
       fn get_trg(&self, i: TrgId) -> Trg {
         unsafe { (*self.0.byte_offset(i.byte_offset as _)).clone() }
       }
 
-      #[inline(always)]
+      #[inline(never)]
       fn set_trg(&mut self, i: TrgId, trg: Trg) {
         unsafe { *self.0.byte_offset(i.byte_offset as _) = trg }
       }

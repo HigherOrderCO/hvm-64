@@ -300,7 +300,7 @@ impl Trg {
 impl<'h, M: Mode> Linker<'h, M> {
   /// Links a `Trg` to a port, delegating to the appropriate method based on the
   /// type of `a`.
-  #[inline(always)]
+  #[inline(never)]
   pub fn link_trg_port(&mut self, a: Trg, b: Port) {
     match a.is_wire() {
       true => self.link_wire_port(a.as_wire(), b),
@@ -310,7 +310,7 @@ impl<'h, M: Mode> Linker<'h, M> {
 
   /// Links two `Trg`s, delegating to the appropriate method based on the types
   /// of `a` and `b`.
-  #[inline(always)]
+  #[inline(never)]
   pub fn link_trg(&mut self, a: Trg, b: Trg) {
     match (a.is_wire(), b.is_wire()) {
       (true, true) => self.link_wire_wire(a.as_wire(), b.as_wire()),

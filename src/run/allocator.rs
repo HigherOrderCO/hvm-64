@@ -109,8 +109,10 @@ impl<'h> Allocator<'h> {
       *head = next;
       addr
     } else {
-      let index = self.next;
-      self.next += 8;
+      let w = align.width() as usize;
+      let x = w - 1;
+      let index = (self.next + x) & !x;
+      self.next = index + w;
       trace!(self, index);
       Addr(self.heap.0.get(index).expect("OOM") as *const AtomicU64 as usize)
     };

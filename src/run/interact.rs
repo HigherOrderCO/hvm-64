@@ -282,6 +282,9 @@ impl<'a, M: Mode> Net<'a, M> {
   }
 
   fn anni(&mut self, a: Port, b: Port) {
+    // if a.tag().width() == 2 && b.tag().width() == 2 {
+    //   return self.anni2(a, b);
+    // }
     self.rwts.anni += 1;
     if a.tag() == b.tag() {
       for i in 0 .. a.tag().arity() {
