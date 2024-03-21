@@ -61,7 +61,7 @@ fn full_main(args: &[String]) {
 
 fn run(opts: &[String], host: Arc<Mutex<host::Host>>) {
   let opts = opts.iter().map(|x| &**x).collect::<HashSet<_>>();
-  let data = run::Net::<run::Strict>::init_heap(1 << 32);
+  let data = run::Net::<run::Strict>::init_heap(1 << 28);
   let lazy = opts.contains("-L");
   let net = run::DynNet::new(&data, lazy);
   dispatch_dyn_net! { mut net => {
