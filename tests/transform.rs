@@ -62,6 +62,9 @@ pub fn test_adt_encoding() {
   assert_display_snapshot!(parse_and_encode("{4 * {4 {4 a {4 b {4 c R}}} R}}"), @"{4:1:2 a b c}");
   assert_display_snapshot!(parse_and_encode("(* x x)"), @"(:1:2)");
   assert_display_snapshot!(parse_and_encode("(((((* x x) x) * x) x) * x)"), @"(:0:2 (:0:2 (:1:2)))");
+  assert_display_snapshot!(parse_and_encode("(a b * (a b c) * c)"), @"(a b (:1:3 a b))");
+  assert_display_snapshot!(parse_and_encode("(* (:0:1))"), @"(:1:2)");
+  assert_display_snapshot!(parse_and_encode("(a * (:0:1))"), @"(a (:1:2))");
 }
 
 #[test]
@@ -85,4 +88,77 @@ pub fn test_eta() {
   assert_display_snapshot!(parse_and_reduce("([(a b) (c d)] [(a b) (c d)])"), @"(a a)");
   assert_display_snapshot!(parse_and_reduce("(* *)"), @"*");
   assert_display_snapshot!(parse_and_reduce("([(#0 #0) (#12345 #12345)] [(* *) (a a)])"), @"([#0 #12345] [* (a a)])");
+}
+
+#[test]
+pub fn test_inline() {
+  use hvmc::ast::Book;
+  use std::str::FromStr;
+  pub fn parse_and_inline(net: &str) -> String {
+    let mut net = Book::from_str(net).unwrap();
+    net.inline();
+    format!("{net}")
+  }
+  assert_display_snapshot!(parse_and_inline("
+    @era = *
+    @num = #123
+    @abab = (a b a b)
+    @ref = @abab
+    @def = @ref
+    @eff = @def
+    @I = (:0:1)
+    @K = (:0:2)
+    @1234 = (:1:2 (:3:4))
+    @into = ((@era @num @abab @ref @def @eff @I @K) (@into @1234))
+  "), @r###"
+  @1234 = (:1:2 (:3:4))
+
+  @I = (:0:1)
+
+  @K = (:0:2)
+
+  @abab = (a b a b)
+
+  @def = @abab
+
+  @eff = @abab
+
+  @era = *
+
+  @into = ((* #123 @abab @abab @abab @abab (:0:1) (:0:2)) (@into @1234))
+
+  @num = #123
+
+  @ref = @abab
+  "###);
+}
+
+#[test]
+pub fn test_prune() {
+  use hvmc::ast::Book;
+  use std::str::FromStr;
+  pub fn parse_and_prune(net: &str) -> String {
+    let mut net = Book::from_str(net).unwrap();
+    net.prune(&["main".to_owned()]);
+    format!("{net}")
+  }
+  assert_display_snapshot!(parse_and_prune("
+    @self = (* @self)
+    @main = (@main @a @b)
+    @a = (@b @c @d)
+    @b = (@c @c)
+    @c = @d
+    @d = @at
+    @idk = (@e @f)
+  "), @r###"
+  @a = (@b @c @d)
+
+  @b = (@c @c)
+
+  @c = @d
+
+  @d = @at
+
+  @main = (@main @a @b)
+  "###);
 }

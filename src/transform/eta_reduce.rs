@@ -139,22 +139,14 @@ impl Phase2 {
     let a = self.reduce_tree(&mut ports[skip]);
     let b = self.reduce_ctr(lab, ports, skip + 1);
     if a == b {
-      match a {
-        NodeType::Var(delta) => {
-          if self.nodes[head_index.wrapping_add_signed(delta)] == NodeType::Ctr(lab) {
-            ports.pop();
-            return NodeType::Var(delta);
-          }
-        }
-        NodeType::Era => {
-          ports.pop();
-          return NodeType::Era;
-        }
-        NodeType::Num(val) => {
-          ports.pop();
-          return NodeType::Num(val);
-        }
-        _ => {}
+      let reducible = match a {
+        NodeType::Var(delta) => self.nodes[head_index.wrapping_add_signed(delta)] == NodeType::Ctr(lab),
+        NodeType::Era | NodeType::Num(_) => true,
+        _ => false,
+      };
+      if reducible {
+        ports.pop();
+        return a;
       }
     }
     NodeType::Ctr(lab)
