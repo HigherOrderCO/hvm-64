@@ -296,6 +296,7 @@ where
     Some('k') => (&arg[0 .. arg.len() - 1], 1u64 << 10),
     Some('m') => (&arg[0 .. arg.len() - 1], 1u64 << 20),
     Some('g') => (&arg[0 .. arg.len() - 1], 1u64 << 30),
+    Some('t') => (&arg[0 .. arg.len() - 1], 1u64 << 40),
     Some(_) => (arg, 1),
   };
   let base = base.parse::<u64>().map_err(|e| e.to_string())?;
