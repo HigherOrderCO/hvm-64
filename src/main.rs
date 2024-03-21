@@ -19,7 +19,7 @@ fn main() {
   let args: Vec<String> = env::args().collect();
   let opts = args.iter().skip(3).map(|s| s.as_str()).collect::<HashSet<_>>();
   let book = run::Book::new();
-  let data = run::Heap::init(1 << 28);
+  let data = run::Heap::init(1 << 27);
   let mut net = run::Net::new(&data);
   net.boot(ast::name_to_val("main") as run::Loc);
   let start_time = std::time::Instant::now();
@@ -34,7 +34,7 @@ fn main() {
 
 #[cfg(feature = "hvm_cli_options")]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-  let data = run::Heap::init(1 << 28);
+  let data = run::Heap::init(1 << 27);
   let args: Vec<String> = env::args().collect();
   let help = "help".to_string();
   let opts = args.iter().skip(3).map(|s| s.as_str()).collect::<HashSet<_>>();
