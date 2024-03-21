@@ -161,11 +161,11 @@ struct TransformOpts {
   /// and don't have side effects this is usually the entry point of the
   /// program (otherwise, the whole program will get reduced to normal form).
   pre_reduce_skip: Vec<String>,
-  #[arg(long = "pre-reduce-memory", default_value = "500M", value_parser = parse_abbrev_number::<usize>)]
+  #[arg(long = "pre-reduce-memory", value_parser = parse_abbrev_number::<usize>)]
   /// How much memory to allocate when pre-reducing.
   ///
   /// Supports abbreviations such as '4G' or '400M'.
-  pre_reduce_memory: usize,
+  pre_reduce_memory: Option<usize>,
   #[arg(long = "pre-reduce-rewrites", default_value = "100M", value_parser = parse_abbrev_number::<u64>)]
   /// Maximum amount of rewrites to do when pre-reducing.
   ///
@@ -188,11 +188,11 @@ struct RuntimeOpts {
   /// by a walk from the root of the net. This leads to a dramatic slowdown,
   /// but allows running programs that would expand indefinitely otherwise.
   lazy_mode: bool,
-  #[arg(short = 'm', long = "memory", default_value = "1G", value_parser = parse_abbrev_number::<usize>)]
+  #[arg(short = 'm', long = "memory", value_parser = parse_abbrev_number::<usize>)]
   /// How much memory to allocate on startup.
   ///
   /// Supports abbreviations such as '4G' or '400M'.
-  memory: usize,
+  memory: Option<usize>,
 }
 #[derive(Args, Clone, Debug)]
 struct RunArgs {
@@ -345,7 +345,7 @@ fn load_book(files: &[String], transform_opts: &TransformOpts) -> Book {
 }
 
 fn reduce_exprs(host: Arc<Mutex<Host>>, exprs: &[Net], opts: &RuntimeOpts) {
-  let heap = run::Heap::new_bytes(opts.memory);
+  let heap = run::Heap::new(opts.memory).expect("memory allocation failed");
   for expr in exprs {
     let mut net = DynNet::new(&heap, opts.lazy_mode);
     dispatch_dyn_net!(&mut net => {

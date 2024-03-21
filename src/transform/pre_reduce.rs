@@ -34,14 +34,19 @@ impl Book {
   /// Defs that are not in the book are treated as inert defs.
   ///
   /// `max_memory` is measured in words.
-  pub fn pre_reduce(&mut self, skip: &dyn Fn(&str) -> bool, max_memory: usize, max_rwts: u64) -> PreReduceStats {
+  pub fn pre_reduce(
+    &mut self,
+    skip: &dyn Fn(&str) -> bool,
+    max_memory: Option<usize>,
+    max_rwts: u64,
+  ) -> PreReduceStats {
     let mut host = Host::default();
     let captured_redexes = Arc::new(Mutex::new(Vec::new()));
     // When a ref is not found in the `Host`, put an inert def in its place.
     host.insert_book_with_default(self, &mut |_| unsafe {
       HostedDef::new_hosted(LabSet::ALL, InertDef(captured_redexes.clone()))
     });
-    let area = run::Heap::new_words(max_memory);
+    let area = run::Heap::new(max_memory).expect("pre-reduce memory allocation failed");
 
     let mut state = State {
       book: self,

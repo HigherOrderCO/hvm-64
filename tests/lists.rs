@@ -30,7 +30,7 @@ fn test_list_got() {
 
   for index in [0, 1, 3, 7, 15, 31] {
     let book = list_got(index);
-    let (rwts, _) = normal(book, 2048);
+    let (rwts, _) = normal(book, None);
     rwts_list.push(rwts.total())
   }
 
@@ -55,7 +55,7 @@ fn test_list_put() {
 
   for (index, value) in [(0, 2), (1, 4), (3, 8), (7, 16), (15, 32), (31, 0)] {
     let book = list_put(index, value);
-    let (rwts, _) = normal(book, 2048);
+    let (rwts, _) = normal(book, None);
     rwts_list.push(rwts.total())
   }
 

@@ -126,12 +126,16 @@ fn test_cli_transform() {
     ]).unwrap().1,
     @r###"
   @add = (<+ a b> (a b))
-  @div = (</ a b> (a b))
-  @main = ({3 </ a b> <% c d>} ({5 a c} [b d]))
-  @mod = (<% a b> (a b))
-  @mul = (<* a b> (a b))
-  @sub = (<- a b> (a b))
 
+  @div = (</ a b> (a b))
+
+  @main = ({3 </ a b> <% c d>} ({5 a c} [b d]))
+
+  @mod = (<% a b> (a b))
+
+  @mul = (<* a b> (a b))
+
+  @sub = (<- a b> (a b))
   "###
   );
 
@@ -144,14 +148,18 @@ fn test_cli_transform() {
     ]).unwrap().1,
     @r###"
   @add = (<+ a b> (a b))
-  @div = (</ a b> (a b))
-  @main = ({3 a b} ({5 c d} [e f]))
-  & @mod ~ (b (d f))
-  & @div ~ (a (c e))
-  @mod = (<% a b> (a b))
-  @mul = (<* a b> (a b))
-  @sub = (<- a b> (a b))
 
+  @div = (</ a b> (a b))
+
+  @main = ({3 a b} ({5 c d} [e f]))
+    & @mod ~ (b (d f))
+    & @div ~ (a (c e))
+
+  @mod = (<% a b> (a b))
+
+  @mul = (<* a b> (a b))
+
+  @sub = (<- a b> (a b))
   "###
   );
 
@@ -165,8 +173,7 @@ fn test_cli_transform() {
     ]).unwrap().1,
     @r###"
   @main = a
-  & @HVM.log ~ (#1 (#2 a))
-
+    & @HVM.log ~ (#1 (#2 a))
   "###
   );
 }
@@ -196,7 +203,7 @@ fn test_cli_errors() {
 fn test_apply_tree() {
   use hvmc::run;
   fn eval_with_args(fun: &str, args: &[&str]) -> Net {
-    let area = run::Heap::new_words(16);
+    let area = run::Heap::new_exact(16).unwrap();
 
     let mut fun: Net = fun.parse().unwrap();
     for arg in args {
