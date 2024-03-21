@@ -5,16 +5,16 @@ input_file: tests/programs/stress_tests/apelacion.hvmc
 ---
 #31999968000000
 pre-reduce:
-RWTS   :      33_000_671
-- ANNI :      13_000_210
-- COMM :       6_000_063
-- ERAS :       3_000_130
-- DREF :       5_000_075
-- OPER :       6_000_193
+RWTS   :      33_000_035
+- ANNI :      13_000_019
+- COMM :       6_000_000
+- ERAS :       3_000_003
+- DREF :       5_000_010
+- OPER :       6_000_003
 run:
-RWTS   :               0
-- ANNI :               0
-- COMM :               0
-- ERAS :               0
+RWTS   :             571
+- ANNI :             191
+- COMM :              63
+- ERAS :             127
 - DREF :               0
-- OPER :               0
+- OPER :             190

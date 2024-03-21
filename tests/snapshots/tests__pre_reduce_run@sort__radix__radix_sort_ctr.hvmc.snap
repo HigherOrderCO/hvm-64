@@ -5,16 +5,16 @@ input_file: examples/sort/radix/radix_sort_ctr.hvmc
 ---
 #549755289600
 pre-reduce:
-RWTS   :     988_283_046
-- ANNI :     549_453_877
-- COMM :      53_477_380
-- ERAS :     203_423_749
-- DREF :     123_207_775
-- OPER :      58_720_265
-run:
-RWTS   :               0
-- ANNI :               0
+RWTS   :             150
+- ANNI :              63
 - COMM :               0
 - ERAS :               0
-- DREF :               0
+- DREF :              87
 - OPER :               0
+run:
+RWTS   :     865_075_208
+- ANNI :     549_453_814
+- COMM :      53_477_380
+- ERAS :     203_423_749
+- DREF :               0
+- OPER :      58_720_265

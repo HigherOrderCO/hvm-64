@@ -5,16 +5,16 @@ input_file: tests/programs/chained_ops.hvmc
 ---
 #7184190578800
 pre-reduce:
-RWTS   :              27
-- ANNI :               2
-- COMM :               4
-- ERAS :               0
-- DREF :               1
-- OPER :              20
-run:
 RWTS   :               0
 - ANNI :               0
 - COMM :               0
 - ERAS :               0
 - DREF :               0
 - OPER :               0
+run:
+RWTS   :              26
+- ANNI :               2
+- COMM :               4
+- ERAS :               0
+- DREF :               0
+- OPER :              20

@@ -5,16 +5,16 @@ input_file: tests/programs/stress_tests/fib_rec.hvmc
 ---
 #1346269
 pre-reduce:
-RWTS   :      29_028_667
-- ANNI :      10_573_736
-- COMM :       2_178_308
-- ERAS :       5_702_885
-- DREF :       4_356_625
-- OPER :       6_217_113
-run:
-RWTS   :               0
-- ANNI :               0
+RWTS   :              13
+- ANNI :               6
 - COMM :               0
 - ERAS :               0
-- DREF :               0
+- DREF :               7
 - OPER :               0
+run:
+RWTS   :      24_672_036
+- ANNI :      10_573_730
+- COMM :       2_178_308
+- ERAS :       5_702_885
+- DREF :               0
+- OPER :       6_217_113

@@ -5,16 +5,16 @@ input_file: tests/programs/stress_tests/sum_tree.hvmc
 ---
 #16777216
 pre-reduce:
-RWTS   :     436_207_632
-- ANNI :     167_772_170
-- COMM :      83_886_075
-- ERAS :     100_663_292
-- DREF :      33_554_449
-- OPER :      50_331_646
-run:
-RWTS   :               0
-- ANNI :               0
+RWTS   :              30
+- ANNI :              14
 - COMM :               0
 - ERAS :               0
-- DREF :               0
+- DREF :              16
 - OPER :               0
+run:
+RWTS   :     402_653_169
+- ANNI :     167_772_156
+- COMM :      83_886_075
+- ERAS :     100_663_292
+- DREF :               0
+- OPER :      50_331_646
