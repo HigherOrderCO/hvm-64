@@ -38,7 +38,7 @@ fn run_without_cli(args: Args) {
   let seq     = lazy || args.opts.contains("-1");
   let file    = args.argm;
   let book    = run::Book::new();
-  let mut net = run::Net::new(1 << 28, false);
+  let mut net = run::Net::new(1 << 27, false);
   let begin   = std::time::Instant::now();
   if lazy { todo!() }
   if seq {
@@ -58,7 +58,7 @@ fn run_with_cli(args: Args) -> Result<(), Box<dyn std::error::Error>> {
       if args.argm.len() > 0 {
         let file    = args.argm;
         let book    = load_book(&file);
-        let mut net = run::Net::new(1 << 28, lazy);
+        let mut net = run::Net::new(1 << 27, lazy);
         let begin   = std::time::Instant::now();
         if seq {
           net.normal(&book);
@@ -79,7 +79,7 @@ fn run_with_cli(args: Args) -> Result<(), Box<dyn std::error::Error>> {
       if args.argm.len() > 0 {
         let file  = args.argm;
         let book  = load_book(&file);
-        let net   = run::Net::new(1 << 28, lazy);
+        let net   = run::Net::new(1 << 27, lazy);
         let begin = std::time::Instant::now();
         compile_book_to_rust_crate(&file, &book)?;
         compile_rust_crate_to_executable(&file)?;
@@ -92,7 +92,7 @@ fn run_with_cli(args: Args) -> Result<(), Box<dyn std::error::Error>> {
       if args.argm.len() > 0 {
         let file  = args.argm;
         let book  = load_book(&file);
-        let net   = run::Net::new(1 << 28, lazy);
+        let net   = run::Net::new(1 << 27, lazy);
         let begin = std::time::Instant::now();
         println!("{}", gen_cuda_book(&book));
       } else {
