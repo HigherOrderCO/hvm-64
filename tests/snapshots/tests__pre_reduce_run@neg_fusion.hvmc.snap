@@ -5,16 +5,16 @@ input_file: tests/programs/neg_fusion.hvmc
 ---
 (a (* a))
 pre-reduce:
-RWTS   :             160
-- ANNI :              85
-- COMM :              36
+RWTS   :              83
+- ANNI :              42
+- COMM :               7
 - ERAS :               0
-- DREF :              39
+- DREF :              34
 - OPER :               0
 run:
-RWTS   :               0
-- ANNI :               0
-- COMM :               0
+RWTS   :              72
+- ANNI :              43
+- COMM :              29
 - ERAS :               0
 - DREF :               0
 - OPER :               0

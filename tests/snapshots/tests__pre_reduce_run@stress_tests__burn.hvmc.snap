@@ -5,16 +5,16 @@ input_file: tests/programs/stress_tests/burn.hvmc
 ---
 ((((* (* (* (a a)))) (* (* (* (b b))))) ((* (* (* (c c)))) (* (* (* (d d)))))) (((* (* (* (e e)))) (* (* (* (f f))))) ((* (* (* (g g)))) (* (* (* (h h)))))))
 pre-reduce:
-RWTS   :      18_350_176
-- ANNI :      10_485_759
-- COMM :              44
-- ERAS :       5_242_861
-- DREF :       2_621_512
+RWTS   :      18_350_068
+- ANNI :      10_485_712
+- COMM :              19
+- ERAS :       5_242_846
+- DREF :       2_621_491
 - OPER :               0
 run:
-RWTS   :               0
-- ANNI :               0
-- COMM :               0
-- ERAS :               0
+RWTS   :              87
+- ANNI :              47
+- COMM :              25
+- ERAS :              15
 - DREF :               0
 - OPER :               0
