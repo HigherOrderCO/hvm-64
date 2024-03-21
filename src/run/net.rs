@@ -29,6 +29,13 @@ impl<'h, M: Mode> Net<'h, M> {
   pub fn boot(&mut self, def: &Def) {
     self.call(Port::new_ref(def), self.root.as_var());
   }
+
+  pub fn match_laziness_mut(&mut self) -> Result<&mut Net<'h, Lazy>, &mut Net<'h, Strict>> {
+    if M::LAZY { Ok(unsafe { core::mem::transmute(self) }) } else { Err(unsafe { core::mem::transmute(self) }) }
+  }
+  pub fn match_laziness(self) -> Result<Net<'h, Lazy>, Net<'h, Strict>> {
+    if M::LAZY { Ok(unsafe { core::mem::transmute(self) }) } else { Err(unsafe { core::mem::transmute(self) }) }
+  }
 }
 
 impl<'a, M: Mode> Net<'a, M> {
