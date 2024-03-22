@@ -1,5 +1,3 @@
-use std::collections::VecDeque;
-
 use super::*;
 
 /// Stores extra data needed about the nodes when in lazy mode. (In strict mode,
@@ -20,8 +18,8 @@ pub(super) struct Header {
 /// non-atomically (because they must be locked).
 pub struct Linker<'h, M: Mode> {
   pub(super) allocator: Allocator<'h>,
-  pub redexes: VecDeque<(Port, Port)>,
   pub rwts: Rewrites,
+  pub redexes: RedexQueue,
   headers: IntMap<Addr, Header>,
   _mode: PhantomData<M>,
 }
@@ -32,7 +30,7 @@ impl<'h, M: Mode> Linker<'h, M> {
   pub fn new(heap: &'h Heap) -> Self {
     Linker {
       allocator: Allocator::new(heap),
-      redexes: VecDeque::new(),
+      redexes: RedexQueue::default(),
       rwts: Default::default(),
       headers: Default::default(),
       _mode: PhantomData,
@@ -86,12 +84,20 @@ impl<'h, M: Mode> Linker<'h, M> {
   /// Pushes an active pair to the redex queue; `a` and `b` must both be
   /// principal ports.
   #[inline(always)]
-  fn redux(&mut self, a: Port, b: Port) {
+  pub fn redux(&mut self, a: Port, b: Port) {
     trace!(self, a, b);
+    debug_assert!(!(a.is(Tag::Var) || a.is(Tag::Red) || b.is(Tag::Var) || b.is(Tag::Red)));
     if a.is_skippable() && b.is_skippable() {
       self.rwts.eras += 1;
     } else if !M::LAZY {
-      self.redexes.push_back((a, b));
+      // Prioritize redexes that do not allocate memory,
+      // to prevent OOM errors that can be avoided
+      // by reducing redexes in a different order (see #91)
+      if redex_would_shrink(&a, &b) {
+        self.redexes.fast.push((a, b));
+      } else {
+        self.redexes.slow.push((a, b));
+      }
     } else {
       self.set_header(a.clone(), b.clone());
       self.set_header(b.clone(), a.clone());
@@ -342,4 +348,51 @@ impl<'h, M: Mode> Linker<'h, M> {
     }
     self.headers[&port.addr()].targ.clone()
   }
+}
+
+#[derive(Debug, Default)]
+pub struct RedexQueue {
+  pub(super) fast: Vec<(Port, Port)>,
+  pub(super) slow: Vec<(Port, Port)>,
+}
+
+impl RedexQueue {
+  /// Returns the highest-priority redex in the queue, if any
+  #[inline(always)]
+  pub fn pop(&mut self) -> Option<(Port, Port)> {
+    self.fast.pop().or_else(|| self.slow.pop())
+  }
+  #[inline(always)]
+  pub fn len(&self) -> usize {
+    self.fast.len() + self.slow.len()
+  }
+  #[inline(always)]
+  pub fn is_empty(&self) -> bool {
+    self.fast.is_empty() && self.slow.is_empty()
+  }
+  #[inline(always)]
+  pub fn take(&mut self) -> impl Iterator<Item = (Port, Port)> {
+    std::mem::take(&mut self.fast).into_iter().chain(std::mem::take(&mut self.slow))
+  }
+  #[inline(always)]
+  pub fn iter(&self) -> impl Iterator<Item = &(Port, Port)> {
+    self.fast.iter().chain(self.slow.iter())
+  }
+  #[inline(always)]
+  pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut (Port, Port)> {
+    self.fast.iter_mut().chain(self.slow.iter_mut())
+  }
+  #[inline(always)]
+  pub fn clear(&mut self) {
+    self.fast.clear();
+    self.slow.clear();
+  }
+}
+
+// Returns whether a redex does not allocate memory
+fn redex_would_shrink(a: &Port, b: &Port) -> bool {
+  (*a == Port::ERA || *b == Port::ERA)
+    || (!(a.tag() == Tag::Ref || b.tag() == Tag::Ref)
+      && (((a.tag() == Tag::Ctr && b.tag() == Tag::Ctr) || a.lab() == b.lab())
+        || (a.tag() == Tag::Num || b.tag() == Tag::Num)))
 }

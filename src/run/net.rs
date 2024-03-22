@@ -44,7 +44,8 @@ impl<'a, M: Mode> Net<'a, M> {
   pub fn reduce(&mut self, limit: usize) -> usize {
     assert!(!M::LAZY);
     let mut count = 0;
-    while let Some((a, b)) = self.redexes.pop_front() {
+
+    while let Some((a, b)) = self.redexes.pop() {
       self.interact(a, b);
       count += 1;
       if count >= limit {

@@ -3,7 +3,8 @@ use super::*;
 impl<'h, M: Mode> Net<'h, M> {
   /// Forks the net into `tids` child nets, for parallel operation.
   pub fn fork(&mut self, tids: usize) -> impl Iterator<Item = Self> + '_ {
-    let mut redexes = std::mem::take(&mut self.redexes).into_iter();
+    let redexes_len = self.redexes.len();
+    let mut redexes = self.redexes.take();
     (0 .. tids).map(move |tid| {
       let heap_size = (self.heap.0.len() / tids) & !63; // round down to needed alignment
       let heap_start = heap_size * tid;
@@ -14,8 +15,8 @@ impl<'h, M: Mode> Net<'h, M> {
       net.tid = tid;
       net.tids = tids;
       net.tracer.set_tid(tid);
-      let count = redexes.len() / (tids - tid);
-      net.redexes.extend((&mut redexes).take(count));
+      let count = redexes_len / (tids - tid);
+      (&mut redexes).take(count).for_each(|i| net.redux(i.0, i.1));
       net
     })
   }
@@ -37,7 +38,7 @@ impl<'h, M: Mode> Net<'h, M> {
       net: Net<'a, M>,                        // thread's own net object
       delta: &'a AtomicRewrites,              // global delta rewrites
       share: &'a Vec<(AtomicU64, AtomicU64)>, // global share buffer
-      rlens: &'a Vec<AtomicUsize>,            // global redex lengths
+      rlens: &'a Vec<AtomicUsize>,            // global redex lengths (only counting shareable ones)
       total: &'a AtomicUsize,                 // total redex length
       barry: Arc<Barrier>,                    // synchronization barrier
     }
@@ -71,7 +72,6 @@ impl<'h, M: Mode> Net<'h, M> {
     });
 
     // Clear redexes and sum stats
-    self.redexes.clear();
     delta.add_to(&mut self.rwts);
 
     // Main reduction loop
@@ -106,7 +106,7 @@ impl<'h, M: Mode> Net<'h, M> {
       ctx.barry.wait();
       ctx.total.store(0, Relaxed);
       ctx.barry.wait();
-      ctx.rlens[ctx.tid].store(ctx.net.redexes.len(), Relaxed);
+      ctx.rlens[ctx.tid].store(ctx.net.redexes.slow.len(), Relaxed);
       ctx.total.fetch_add(ctx.net.redexes.len(), Relaxed);
       ctx.barry.wait();
       ctx.total.load(Relaxed)
@@ -120,7 +120,7 @@ impl<'h, M: Mode> Net<'h, M> {
         let shift = (1 << (plog2 - 1)) >> (ctx.tick % plog2);
         let a_tid = ctx.tid;
         let b_tid = if side == 1 { a_tid - shift } else { a_tid + shift };
-        let a_len = ctx.net.redexes.len();
+        let a_len = ctx.net.redexes.slow.len();
         let b_len = ctx.rlens[b_tid].load(Relaxed);
         let send = if a_len > b_len { (a_len - b_len) / 2 } else { 0 };
         let recv = if b_len > a_len { (b_len - a_len) / 2 } else { 0 };
@@ -128,8 +128,8 @@ impl<'h, M: Mode> Net<'h, M> {
         let recv = std::cmp::min(recv, SHARE_LIMIT);
         for i in 0 .. send {
           let init = a_len - send * 2;
-          let rdx0 = ctx.net.redexes[init + i * 2 + 0].clone();
-          let rdx1 = ctx.net.redexes[init + i * 2 + 1].clone();
+          let rdx0 = ctx.net.redexes.slow[init + i * 2 + 0].clone();
+          let rdx1 = ctx.net.redexes.slow[init + i * 2 + 1].clone();
           //let init = 0;
           //let ref0 = ctx.net.redexes.get_unchecked_mut(init + i * 2 + 0);
           //let rdx0 = *ref0;
@@ -138,15 +138,15 @@ impl<'h, M: Mode> Net<'h, M> {
           //let rdx1 = *ref1;
           //*ref1    = (Ptr(0), Ptr(0));
           let targ = ctx.share.get_unchecked(b_tid * SHARE_LIMIT + i);
-          ctx.net.redexes[init + i] = rdx0;
+          ctx.net.redexes.slow[init + i] = rdx0;
           targ.0.store(rdx1.0.0, Relaxed);
           targ.1.store(rdx1.1.0, Relaxed);
         }
-        ctx.net.redexes.truncate(a_len - send);
+        ctx.net.redexes.slow.truncate(a_len - send);
         ctx.barry.wait();
         for i in 0 .. recv {
           let got = ctx.share.get_unchecked(a_tid * SHARE_LIMIT + i);
-          ctx.net.redexes.push_back((Port(got.0.load(Relaxed)), Port(got.1.load(Relaxed))));
+          ctx.net.redexes.slow.push((Port(got.0.load(Relaxed)), Port(got.1.load(Relaxed))));
         }
       }
     }
