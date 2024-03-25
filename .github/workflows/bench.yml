@@ -10,9 +10,6 @@ concurrency:
 jobs:
   bench:
     runs-on: ubuntu-latest
-    permissions:
-      actions: write
-      pull-requests: write
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v3
@@ -38,9 +35,47 @@ jobs:
       - name: post comment
         run: gh pr comment ${{ github.event.number }} -F comment
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.PAT }}
+      - name: hide old comment
+        env:
+          GH_TOKEN: ${{ secrets.PAT }}
+        run: |
+          COMMENT_ID=$(
+            gh api graphql -F pr=${{ github.event.number }} -f query='
+              query($pr: Int!) {
+                organization(login: "higherorderco") {
+                  repository(name: "hvm-core") {
+                    pullRequest(number: $pr) {
+                      comments(last: 100) {
+                        nodes { id author { login } }
+                      }
+                    }
+                  }
+                }
+            }
+            ' \
+            | jq -r '
+              [
+                .data.organization.repository.pullRequest.comments.nodes | .[]
+                | select(.author.login == "HigherOrderBot")
+                | .id
+              ] | .[-2]
+            '
+          )
+
+          if [ $COMMENT_ID != null ]
+          then
+            gh api graphql -F id=$COMMENT_ID -f query='
+              mutation($id: ID!) {
+                minimizeComment(input: {
+                  subjectId: $id,
+                  classifier: OUTDATED,
+                }) { minimizedComment { ...on Comment { id } } }
+              }
+            '
+          fi
       - name: delete on cancel
         if: ${{ cancelled() }}
         run: gh api "repos/higherorderco/hvm-core/actions/runs/${{ github.run_id }}" -X DELETE
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.PAT }}
