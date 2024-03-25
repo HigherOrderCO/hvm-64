@@ -4,7 +4,7 @@ use super::*;
 
 /// An interaction combinator net.
 pub struct Net<'a, M: Mode> {
-  linker: Linker<'a, M>,
+  pub(super) linker: Linker<'a, M>,
   pub tid: usize,  // thread id
   pub tids: usize, // thread count
   pub trgs: Box<[MaybeUninit<Trg>]>,

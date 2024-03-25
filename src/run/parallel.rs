@@ -3,14 +3,17 @@ use super::*;
 impl<'h, M: Mode> Net<'h, M> {
   /// Forks the net into `tids` child nets, for parallel operation.
   pub fn fork(&mut self, tids: usize) -> impl Iterator<Item = Self> + '_ {
-    let redexes_len = self.redexes.len();
-    let mut redexes = self.redexes.take();
+    let redexes_len = self.linker.redexes.len();
+    let mut redexes = self.linker.redexes.drain();
+    let heap = &self.linker.allocator.heap;
+    let next = &self.linker.allocator.next;
+    let root = &self.root;
     (0 .. tids).map(move |tid| {
-      let heap_size = (self.heap.0.len() / tids) & !63; // round down to needed alignment
+      let heap_size = (heap.0.len() / tids) & !63; // round down to needed alignment
       let heap_start = heap_size * tid;
-      let area = unsafe { std::mem::transmute(&self.heap.0[heap_start .. heap_start + heap_size]) };
-      let mut net = Net::new_with_root(area, self.root.clone());
-      net.next = self.next.saturating_sub(heap_start);
+      let area = unsafe { std::mem::transmute(&heap.0[heap_start .. heap_start + heap_size]) };
+      let mut net = Net::new_with_root(area, root.clone());
+      net.next = next.saturating_sub(heap_start);
       net.head = if tid == 0 { net.head } else { Addr::NULL };
       net.tid = tid;
       net.tids = tids;
@@ -71,7 +74,6 @@ impl<'h, M: Mode> Net<'h, M> {
       }
     });
 
-    // Clear redexes and sum stats
     delta.add_to(&mut self.rwts);
 
     // Main reduction loop

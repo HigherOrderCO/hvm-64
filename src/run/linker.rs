@@ -371,8 +371,8 @@ impl RedexQueue {
     self.fast.is_empty() && self.slow.is_empty()
   }
   #[inline(always)]
-  pub fn take(&mut self) -> impl Iterator<Item = (Port, Port)> {
-    std::mem::take(&mut self.fast).into_iter().chain(std::mem::take(&mut self.slow))
+  pub fn drain(&mut self) -> impl Iterator<Item = (Port, Port)> + '_ {
+    self.fast.drain(..).chain(self.slow.drain(..))
   }
   #[inline(always)]
   pub fn iter(&self) -> impl Iterator<Item = &(Port, Port)> {
@@ -392,7 +392,6 @@ impl RedexQueue {
 // Returns whether a redex does not allocate memory
 fn redex_would_shrink(a: &Port, b: &Port) -> bool {
   (*a == Port::ERA || *b == Port::ERA)
-    || (!(a.tag() == Tag::Ref || b.tag() == Tag::Ref)
-      && (((a.tag() == Tag::Ctr && b.tag() == Tag::Ctr) || a.lab() == b.lab())
-        || (a.tag() == Tag::Num || b.tag() == Tag::Num)))
+    || (a.tag() == Tag::Ctr && b.tag() == Tag::Ctr && a.lab() == b.lab())
+    || (!(a.tag() == Tag::Ref || b.tag() == Tag::Ref) && (a.tag() == Tag::Num || b.tag() == Tag::Num))
 }
