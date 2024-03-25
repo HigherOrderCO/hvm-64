@@ -11,6 +11,7 @@ jobs:
   bench:
     runs-on: ubuntu-latest
     permissions:
+      actions: write
       pull-requests: write
     timeout-minutes: 10
     steps:
@@ -36,5 +37,10 @@ jobs:
           echo '```' >> comment
       - name: post comment
         run: gh pr comment ${{ github.event.number }} -F comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: delete on cancel
+        if: ${{ cancelled() }}
+        run: gh api "repos/higherorderco/hvm-core/actions/runs/${{ github.run_id }}" -X DELETE
         env:
           GH_TOKEN: ${{ github.token }}
