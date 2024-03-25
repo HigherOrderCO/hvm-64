@@ -91,9 +91,14 @@ fn test_run(name: &str, host: Arc<Mutex<Host>>) {
 fn test_pre_reduce_run(path: &str, mut book: Book) {
   print!("{path}...");
   print!(" pre-reduce");
-  let pre_stats = book.pre_reduce(&|x| x == "main", None, u64::MAX);
-  let host = hvmc::stdlib::create_host(&book);
+  io::stdout().flush().unwrap();
 
+  let start = Instant::now();
+  let pre_stats = book.pre_reduce(&|x| x == "main", None, u64::MAX);
+  print!(" {:.3?}...", start.elapsed());
+  io::stdout().flush().unwrap();
+
+  let host = hvmc::stdlib::create_host(&book);
   let Some((mut rwts, net)) = execute_host(host) else {
     assert_snapshot!(show_rewrites(&pre_stats.rewrites));
     return;

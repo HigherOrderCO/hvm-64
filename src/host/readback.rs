@@ -18,8 +18,7 @@ impl Host {
     let mut net = Net::default();
 
     net.root = state.read_wire(rt_net.root.clone());
-
-    for (a, b) in &rt_net.redexes {
+    for (a, b) in rt_net.redexes.iter() {
       net.redexes.push((state.read_port(a.clone(), None), state.read_port(b.clone(), None)))
     }
 

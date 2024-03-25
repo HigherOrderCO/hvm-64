@@ -143,7 +143,7 @@ impl<'a> State<'a> {
     self.rewrites += rt.rwts;
 
     // Move interactions with inert defs back into the net redexes array
-    rt.redexes.extend(self.captured_redexes.lock().unwrap().drain(..));
+    self.captured_redexes.lock().unwrap().drain(..).for_each(|r| rt.redux(r.0, r.1));
 
     let net = self.host.readback(&mut rt);
 

@@ -4,7 +4,7 @@ use super::*;
 
 /// An interaction combinator net.
 pub struct Net<'a, M: Mode> {
-  linker: Linker<'a, M>,
+  pub(super) linker: Linker<'a, M>,
   pub tid: usize,  // thread id
   pub tids: usize, // thread count
   pub trgs: Box<[MaybeUninit<Trg>]>,
@@ -44,6 +44,7 @@ impl<'a, M: Mode> Net<'a, M> {
   pub fn reduce(&mut self, limit: usize) -> usize {
     assert!(!M::LAZY);
     let mut count = 0;
+
     while let Some((a, b)) = self.redexes.pop() {
       self.interact(a, b);
       count += 1;
