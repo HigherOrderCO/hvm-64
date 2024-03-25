@@ -1,10 +1,11 @@
-name: Bench
+name: Delete Cancelled Benchmarks
 
 on:
   workflow_dispatch:
     inputs:
       run_id:
         type: string
+        description: "" 
 
 jobs:
   delete:
