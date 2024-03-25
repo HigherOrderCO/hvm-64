@@ -1,0 +1,15 @@
+name: Bench
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        type: string
+
+jobs:
+  delete:
+    runs-on: ubuntu-latest
+    steps:
+      - run: gh api "repos/higherorderco/hvm-core/actions/runs/${{ inputs.run_id }}" -X DELETE
+        env:
+          GH_TOKEN: ${{ secrets.PAT }}

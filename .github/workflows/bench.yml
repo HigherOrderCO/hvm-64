@@ -76,6 +76,6 @@ jobs:
           fi
       - name: delete on cancel
         if: ${{ cancelled() }}
-        run: gh api "repos/higherorderco/hvm-core/actions/runs/${{ github.run_id }}" -X DELETE
+        run: gh workflow run delete-cancelled.yml --ref ${{ github.ref }} -f run_id=${{ github.run_id }}
         env:
           GH_TOKEN: ${{ secrets.PAT }}
