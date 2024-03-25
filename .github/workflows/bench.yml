@@ -25,7 +25,7 @@ jobs:
         run: |
           git clone https://github.com/higherorderco/hvm-compare-perf
           cd hvm-compare-perf
-          NO_COLOR=1 cargo run bench -r main -r ${{ github.sha }} > ../table
+          NO_COLOR=1 cargo run bench -r main -r ${{ github.sha }} -m intr-singl -m intr-multi > ../table
       - name: write comment
         run: |
           echo 'Perf run for [`'`git rev-parse --short ${{ github.sha }}`'`](https://github.com/higherorderco/hvm-core/commit/${{ github.sha }}):' >> comment
