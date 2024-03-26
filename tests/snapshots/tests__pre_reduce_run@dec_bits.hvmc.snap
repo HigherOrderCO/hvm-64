@@ -5,16 +5,16 @@ input_file: tests/programs/dec_bits.hvmc
 ---
 (* (* (a a)))
 pre-reduce:
-RWTS   :          71_716
-- ANNI :          40_942
-- COMM :              11
-- ERAS :          20_462
-- DREF :          10_301
+RWTS   :              99
+- ANNI :              32
+- COMM :               0
+- ERAS :               8
+- DREF :              59
 - OPER :               0
 run:
-RWTS   :               0
-- ANNI :               0
-- COMM :               0
-- ERAS :               0
+RWTS   :          61_375
+- ANNI :          40_910
+- COMM :              11
+- ERAS :          20_454
 - DREF :               0
 - OPER :               0

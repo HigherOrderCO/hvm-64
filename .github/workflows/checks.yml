@@ -10,6 +10,7 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v3
       - uses: dsherret/rust-toolchain-file@v1
@@ -25,6 +26,7 @@ jobs:
       - run: RUSTFLAGS="-D warnings" cargo check --all-targets --features _fuzz
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v3
       - uses: dsherret/rust-toolchain-file@v1
@@ -39,27 +41,16 @@ jobs:
       - run: cargo test --release --features _fuzz --test fuzz
   fmt:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v3
       - uses: dsherret/rust-toolchain-file@v1
         with:
           components: rustfmt
       - run: cargo fmt --check
-  bench:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - uses: dsherret/rust-toolchain-file@v1
-      - uses: actions/cache@v2
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-bench-${{ hashFiles('**/Cargo.lock') }}
-      - run: cargo bench
   cspell:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v3
       - uses: streetsidesoftware/cspell-action@v5

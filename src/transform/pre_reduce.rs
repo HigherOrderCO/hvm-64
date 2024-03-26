@@ -23,6 +23,7 @@ use crate::{
   ast::{Book, Net, Tree},
   host::{DefRef, Host},
   run::{self, Def, Heap, InterpretedDef, LabSet, Rewrites},
+  stdlib::{AsHostedDef, HostedDef},
   util::maybe_grow,
 };
 
@@ -33,14 +34,19 @@ impl Book {
   /// Defs that are not in the book are treated as inert defs.
   ///
   /// `max_memory` is measured in words.
-  pub fn pre_reduce(&mut self, skip: &dyn Fn(&str) -> bool, max_memory: usize, max_rwts: u64) -> PreReduceStats {
+  pub fn pre_reduce(
+    &mut self,
+    skip: &dyn Fn(&str) -> bool,
+    max_memory: Option<usize>,
+    max_rwts: u64,
+  ) -> PreReduceStats {
     let mut host = Host::default();
     let captured_redexes = Arc::new(Mutex::new(Vec::new()));
     // When a ref is not found in the `Host`, put an inert def in its place.
-    host.insert_book_with_default(self, &mut |_| {
-      DefRef::Owned(Box::new(Def::new(LabSet::ALL, InertDef(captured_redexes.clone()))))
+    host.insert_book_with_default(self, &mut |_| unsafe {
+      HostedDef::new_hosted(LabSet::ALL, InertDef(captured_redexes.clone()))
     });
-    let area = run::Heap::new_words(max_memory);
+    let area = run::Heap::new(max_memory).expect("pre-reduce memory allocation failed");
 
     let mut state = State {
       book: self,
@@ -83,9 +89,8 @@ enum SeenState {
 #[derive(Default)]
 struct InertDef(Arc<Mutex<Vec<(run::Port, run::Port)>>>);
 
-impl run::AsDef for InertDef {
-  unsafe fn call<M: run::Mode>(def: *const run::Def<Self>, _: &mut run::Net<M>, port: run::Port) {
-    let def = unsafe { &*def };
+impl AsHostedDef for InertDef {
+  fn call<M: run::Mode>(def: &run::Def<Self>, _: &mut run::Net<M>, port: run::Port) {
     def.data.0.lock().unwrap().push((run::Port::new_ref(def), port));
   }
 }
@@ -138,15 +143,15 @@ impl<'a> State<'a> {
     self.rewrites += rt.rwts;
 
     // Move interactions with inert defs back into the net redexes array
-    rt.redexes.extend(self.captured_redexes.lock().unwrap().drain(..));
+    self.captured_redexes.lock().unwrap().drain(..).for_each(|r| rt.redux(r.0, r.1));
 
     let net = self.host.readback(&mut rt);
 
     // Mutate the host in-place with the pre-reduced net.
     let instr = self.host.encode_def(&net);
     if let DefRef::Owned(def_box) = self.host.defs.get_mut(nam).unwrap() {
-      let interpreted_def: &mut crate::run::Def<InterpretedDef> = def_box.downcast_mut().unwrap();
-      interpreted_def.data = instr;
+      let interpreted_def: &mut Def<HostedDef<InterpretedDef>> = def_box.downcast_mut().unwrap();
+      interpreted_def.data.0 = instr;
     };
 
     // Replace the "Cycled" state with the "Reduced" state

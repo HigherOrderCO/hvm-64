@@ -5,16 +5,16 @@ input_file: examples/lambda_calculus/hoas.hvmc
 ---
 (((a (((* a) b) (* (* b)))) c) (* (* c)))
 pre-reduce:
-RWTS   :             805
-- ANNI :             440
-- COMM :              11
-- ERAS :             141
-- DREF :             213
-- OPER :               0
-run:
-RWTS   :               0
-- ANNI :               0
+RWTS   :             225
+- ANNI :             109
 - COMM :               0
 - ERAS :               0
+- DREF :             116
+- OPER :               0
+run:
+RWTS   :             483
+- ANNI :             331
+- COMM :              11
+- ERAS :             141
 - DREF :               0
 - OPER :               0

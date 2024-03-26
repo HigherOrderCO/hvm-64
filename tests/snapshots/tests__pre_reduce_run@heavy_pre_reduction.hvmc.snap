@@ -5,11 +5,11 @@ input_file: tests/programs/heavy_pre_reduction.hvmc
 ---
 *
 pre-reduce:
-RWTS   :          53_148
+RWTS   :          53_147
 - ANNI :          13_124
 - COMM :          35_175
 - ERAS :           4_794
-- DREF :              55
+- DREF :              54
 - OPER :               0
 run:
 RWTS   :               0

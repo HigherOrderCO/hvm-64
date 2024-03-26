@@ -55,6 +55,7 @@ use Tag::*;
 mod addr;
 mod allocator;
 mod def;
+mod dyn_net;
 mod instruction;
 mod interact;
 mod linker;
@@ -68,6 +69,7 @@ mod wire;
 pub use addr::*;
 pub use allocator::*;
 pub use def::*;
+pub use dyn_net::*;
 pub use instruction::*;
 pub use linker::*;
 pub use net::*;
@@ -159,40 +161,4 @@ impl<T: AddAssign> AddAssign for Rewrites<T> {
     self.dref += rhs.dref;
     self.oper += rhs.oper;
   }
-}
-
-/// A [`Net`] whose mode is determined dynamically, at runtime.
-///
-/// Use [`dispatch_dyn_net!`] to wrap operations on the inner net.
-pub enum DynNet<'a> {
-  Lazy(Net<'a, Lazy>),
-  Strict(Net<'a, Strict>),
-}
-
-impl<'h> DynNet<'h> {
-  pub fn new(heap: &'h Heap, lazy: bool) -> Self {
-    if lazy { DynNet::Lazy(Net::new(heap)) } else { DynNet::Strict(Net::new(heap)) }
-  }
-}
-
-#[macro_export]
-macro_rules! dispatch_dyn_net {
-  ($pat:pat = $expr:expr => $body:expr) => {
-    match $expr {
-      $crate::run::DynNet::Lazy($pat) => $body,
-      $crate::run::DynNet::Strict($pat) => $body,
-    }
-  };
-  ($net:ident => $body:expr) => {
-    dispatch_dyn_net! { $net = $net => $body }
-  };
-  (mut $net:ident => $body:expr) => {
-    dispatch_dyn_net! { mut $net = $net => $body }
-  };
-  (&$net:ident => $body:expr) => {
-    dispatch_dyn_net! { $net = &$net => $body }
-  };
-  (&mut $net:ident => $body:expr) => {
-    dispatch_dyn_net! { $net = &mut $net => $body }
-  };
 }

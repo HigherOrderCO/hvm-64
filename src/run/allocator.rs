@@ -5,20 +5,38 @@ use super::*;
 pub struct Heap(pub(super) [AtomicU64]);
 
 impl Heap {
-  #[inline]
-  /// Allocate a new heap with a given size in words.
-  pub fn new_words(words: usize) -> Box<Self> {
-    unsafe {
-      Box::from_raw(core::ptr::slice_from_raw_parts_mut(
-        alloc::alloc(Layout::array::<AtomicU64>(words).unwrap().align_to(64).unwrap()) as *mut _,
-        words,
-      ) as *mut _)
+  /// Allocates a new heap with the given size in bytes, defaulting to the
+  /// largest power-of-two allocation the system will allow.
+  pub fn new(bytes: Option<usize>) -> Option<Box<Self>> {
+    if let Some(bytes) = bytes {
+      return Self::new_exact(bytes / 8);
     }
+    let mut size = if cfg!(target_pointer_width = "64") {
+      1 << 40 // 1 TiB
+    } else {
+      1 << 30 // 1 GiB
+    } / 8;
+    while size != 0 {
+      if let Some(heap) = Self::new_exact(size) {
+        return Some(heap);
+      }
+      size /= 2;
+    }
+    None
   }
-  #[inline(always)]
-  /// Allocate a new heap with a given size in bytes.
-  pub fn new_bytes(bytes: usize) -> Box<Self> {
-    Heap::new_words(bytes / 8)
+  /// Allocates a new heap with exactly the given size in words.
+  #[inline]
+  pub fn new_exact(words: usize) -> Option<Box<Self>> {
+    if words == 0 {
+      return None;
+    }
+    unsafe {
+      let ptr = alloc::alloc(Layout::array::<AtomicU64>(words).unwrap().align_to(64).unwrap()) as *mut AtomicU64;
+      if ptr.is_null() {
+        return None;
+      }
+      Some(Box::from_raw(core::ptr::slice_from_raw_parts_mut(ptr, words) as *mut _))
+    }
   }
 }
 

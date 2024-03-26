@@ -4,6 +4,7 @@
 use crate::{
   ast::{Book, Net, Tree},
   run::{self, Addr, Def, Instruction, InterpretedDef, LabSet, Mode, Port, Tag, TrgId, Wire},
+  stdlib::HostedDef,
   util::create_var,
 };
 use std::{
@@ -79,7 +80,7 @@ impl Host {
     })
     .into_iter()
     {
-      let def = DefRef::Owned(Box::new(Def::new(labs, InterpretedDef::default())));
+      let def = unsafe { HostedDef::new_hosted(labs, InterpretedDef::default()) };
       self.insert_def(name, def);
     }
 
@@ -88,7 +89,7 @@ impl Host {
     for (nam, net) in book.iter() {
       let data = self.encode_def(net);
       match self.defs.get_mut(nam).unwrap() {
-        DefRef::Owned(def) => def.downcast_mut::<InterpretedDef>().unwrap().data = data,
+        DefRef::Owned(def) => def.downcast_mut::<HostedDef<InterpretedDef>>().unwrap().data.0 = data,
         DefRef::Static(_) => unreachable!(),
       }
     }

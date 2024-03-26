@@ -22,8 +22,8 @@ pub fn replace_template(mut code: String, map: &[(&str, &str)]) -> String {
   code
 }
 
-pub fn normal_with(book: Book, words: usize, entry_point: &str) -> (hvmc::run::Rewrites, Net) {
-  let area = run::Heap::new_words(words);
+pub fn normal_with(book: Book, mem: Option<usize>, entry_point: &str) -> (hvmc::run::Rewrites, Net) {
+  let area = run::Heap::new(mem).unwrap();
   let host = create_host(&book);
 
   let mut rnet = run::Net::<run::Strict>::new(&area);
@@ -34,6 +34,6 @@ pub fn normal_with(book: Book, words: usize, entry_point: &str) -> (hvmc::run::R
   (rnet.rwts, net)
 }
 
-pub fn normal(book: Book, words: usize) -> (hvmc::run::Rewrites, Net) {
-  normal_with(book, words, "main")
+pub fn normal(book: Book, mem: Option<usize>) -> (hvmc::run::Rewrites, Net) {
+  normal_with(book, mem, "main")
 }

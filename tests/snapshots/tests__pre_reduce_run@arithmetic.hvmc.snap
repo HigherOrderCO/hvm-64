@@ -5,15 +5,15 @@ input_file: examples/arithmetic.hvmc
 ---
 ({3 </ a b> <% c d>} ({5 a c} [b d]))
 pre-reduce:
-RWTS   :              12
-- ANNI :               4
+RWTS   :               5
+- ANNI :               0
 - COMM :               0
 - ERAS :               0
-- DREF :               8
+- DREF :               5
 - OPER :               0
 run:
-RWTS   :               0
-- ANNI :               0
+RWTS   :               4
+- ANNI :               4
 - COMM :               0
 - ERAS :               0
 - DREF :               0

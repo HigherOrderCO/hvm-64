@@ -4,7 +4,7 @@ use super::*;
 
 /// An interaction combinator net.
 pub struct Net<'a, M: Mode> {
-  linker: Linker<'a, M>,
+  pub(super) linker: Linker<'a, M>,
   pub tid: usize,  // thread id
   pub tids: usize, // thread count
   pub trgs: Box<[MaybeUninit<Trg>]>,
@@ -29,6 +29,13 @@ impl<'h, M: Mode> Net<'h, M> {
   pub fn boot(&mut self, def: &Def) {
     self.call(Port::new_ref(def), self.root.as_var());
   }
+
+  pub fn match_laziness_mut(&mut self) -> Result<&mut Net<'h, Lazy>, &mut Net<'h, Strict>> {
+    if M::LAZY { Ok(unsafe { core::mem::transmute(self) }) } else { Err(unsafe { core::mem::transmute(self) }) }
+  }
+  pub fn match_laziness(self) -> Result<Net<'h, Lazy>, Net<'h, Strict>> {
+    if M::LAZY { Ok(unsafe { core::mem::transmute(self) }) } else { Err(unsafe { core::mem::transmute(self) }) }
+  }
 }
 
 impl<'a, M: Mode> Net<'a, M> {
@@ -37,6 +44,7 @@ impl<'a, M: Mode> Net<'a, M> {
   pub fn reduce(&mut self, limit: usize) -> usize {
     assert!(!M::LAZY);
     let mut count = 0;
+
     while let Some((a, b)) = self.redexes.pop() {
       self.interact(a, b);
       count += 1;

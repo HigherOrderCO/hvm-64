@@ -23,7 +23,7 @@ use serial_test::serial;
 #[test]
 fn test_era_era() {
   let net = parse_core("@main = * & * ~ *");
-  let (rwts, net) = normal(net, 16);
+  let (rwts, net) = normal(net, Some(128));
   assert_snapshot!(Net::to_string(&net), @"*");
   assert_debug_snapshot!(rwts.total(), @"3");
 }
@@ -31,7 +31,7 @@ fn test_era_era() {
 #[test]
 fn test_era_era2() {
   let net = parse_core("@main = (* *) & * ~ *");
-  let (rwts, net) = normal(net, 16);
+  let (rwts, net) = normal(net, Some(128));
   assert_snapshot!(Net::to_string(&net), @"(* *)");
   assert_debug_snapshot!(rwts.total(), @"5");
 }
@@ -39,7 +39,7 @@ fn test_era_era2() {
 #[test]
 fn test_commutation() {
   let net = parse_core("@main = root & (x x) ~ [* root]");
-  let (rwts, net) = normal(net, 16);
+  let (rwts, net) = normal(net, Some(128));
   assert_snapshot!(Net::to_string(&net), @"(a a)");
   assert_debug_snapshot!(rwts.total(), @"7");
 }
@@ -54,14 +54,14 @@ fn test_bool_and() {
     @main = root & @and ~ (@true (@false root))
   ",
   );
-  let (rwts, net) = normal(book, 64);
+  let (rwts, net) = normal(book, Some(128));
 
   assert_snapshot!(Net::to_string(&net), @"(* (a a))");
   assert_debug_snapshot!(rwts.total(), @"14");
 }
 
 fn execute_host(host: Arc<Mutex<Host>>) -> Option<(run::Rewrites, Net)> {
-  let heap = run::Heap::new_words(1 << 29);
+  let heap = run::Heap::new(None).unwrap();
   let mut net = run::Net::<Strict>::new(&heap);
   // The host is locked inside this block.
   {
@@ -91,9 +91,14 @@ fn test_run(name: &str, host: Arc<Mutex<Host>>) {
 fn test_pre_reduce_run(path: &str, mut book: Book) {
   print!("{path}...");
   print!(" pre-reduce");
-  let pre_stats = book.pre_reduce(&|_| false, 1 << 29, u64::MAX);
-  let host = hvmc::stdlib::create_host(&book);
+  io::stdout().flush().unwrap();
 
+  let start = Instant::now();
+  let pre_stats = book.pre_reduce(&|x| x == "main", None, u64::MAX);
+  print!(" {:.3?}...", start.elapsed());
+  io::stdout().flush().unwrap();
+
+  let host = hvmc::stdlib::create_host(&book);
   let Some((mut rwts, net)) = execute_host(host) else {
     assert_snapshot!(show_rewrites(&pre_stats.rewrites));
     return;

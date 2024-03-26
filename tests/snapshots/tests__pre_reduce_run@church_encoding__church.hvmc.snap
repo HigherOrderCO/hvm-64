@@ -5,16 +5,16 @@ input_file: examples/church_encoding/church.hvmc
 ---
 ({9 {7 (a {5 b c}) {7 (d a) ({5 c e} d)}} {3 (f e) {3 (g f) {3 (h g) {3 (i h) *}}}}} (i b))
 pre-reduce:
-RWTS   :              44
-- ANNI :              25
-- COMM :               1
+RWTS   :              24
+- ANNI :              12
+- COMM :               0
 - ERAS :               0
-- DREF :              18
+- DREF :              12
 - OPER :               0
 run:
-RWTS   :               0
-- ANNI :               0
-- COMM :               0
+RWTS   :              14
+- ANNI :              13
+- COMM :               1
 - ERAS :               0
 - DREF :               0
 - OPER :               0

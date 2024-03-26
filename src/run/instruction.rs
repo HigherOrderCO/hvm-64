@@ -137,6 +137,7 @@ impl<'a, M: Mode> Net<'a, M> {
     // TODO: fast copy?
     } else if false && !M::LAZY && port.is(Tag::Num) || port.is(Tag::Ref) && lab >= port.lab() {
       self.rwts.comm += 1;
+      self.free_trg(trg);
       (Trg::port(port.clone()), Trg::port(port))
     } else {
       let n = self.create_node(Ctr2, lab);
@@ -198,6 +199,7 @@ impl<'a, M: Mode> Net<'a, M> {
       n.p1.wire().set_target(Port::new_num(port.num()));
       (Trg::port(n.p0), Trg::port(n.p2))
     } else if !M::LAZY && port == Port::ERA {
+      self.free_trg(trg);
       (Trg::port(Port::ERA), Trg::port(Port::ERA))
     } else {
       let n = self.create_node(Op, op as Lab);
@@ -215,6 +217,7 @@ impl<'a, M: Mode> Net<'a, M> {
       self.free_trg(trg);
       Trg::port(Port::new_num(op.op(port.num(), rhs)))
     } else if !M::LAZY && port == Port::ERA {
+      self.free_trg(trg);
       Trg::port(Port::ERA)
     } else {
       let n = self.create_node(Op, op as Lab);

@@ -1,6 +1,7 @@
 use crate::{
   host::Host,
   run::{Instruction, InterpretedDef, LabSet, Port, Tag},
+  stdlib::HostedDef,
 };
 use std::{
   fmt::{self, Write},
@@ -18,7 +19,7 @@ fn _compile_host(host: &Host) -> Result<String, fmt::Error> {
   let defs = host
     .defs
     .iter()
-    .filter_map(|(name, def)| Some((name, def.downcast_ref::<InterpretedDef>()?)))
+    .filter_map(|(name, def)| Some((name, def.downcast_ref::<HostedDef<InterpretedDef>>()?)))
     .map(|(raw_name, def)| (raw_name, sanitize_name(raw_name), def));
 
   writeln!(code, "#![allow(non_upper_case_globals, unused_imports)]")?;
@@ -44,7 +45,7 @@ fn _compile_host(host: &Host) -> Result<String, fmt::Error> {
   writeln!(code)?;
 
   for (_, name, def) in defs {
-    compile_def(&mut code, host, &name, &def.data.instr)?;
+    compile_def(&mut code, host, &name, &def.data.0.instr)?;
   }
 
   Ok(code)
