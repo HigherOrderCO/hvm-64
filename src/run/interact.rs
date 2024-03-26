@@ -296,7 +296,20 @@ impl<'a, M: Mode> Net<'a, M> {
         self.free_wire(b.aux_port(i).wire());
       }
     } else {
-      todo!()
+      let aw = a.tag().width();
+      let bw = b.tag().width();
+      let (a, b, aw, bw) = if aw > bw { (b, a, bw, aw) } else { (a, b, aw, bw) };
+      let aws = aw - 1;
+      let cw = bw - aws;
+      let ct = Tag::ctr_with_width(cw);
+      let c = Port::new(ct, a.lab(), self.alloc(ct.align()));
+      for i in 0 .. aws {
+        self.link_wire_wire(a.aux_port(i).wire(), b.aux_port(i).wire());
+      }
+      for i in 0 .. cw {
+        self.link_wire_port(b.aux_port(aws + i).wire(), c.aux_port(i))
+      }
+      self.link_wire_port(a.aux_port(aws).wire(), c);
     }
   }
 
