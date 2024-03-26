@@ -265,13 +265,41 @@ impl<'a, M: Mode> Net<'a, M> {
     self.rwts.anni += 1;
     let ctr_arity = ctr.tag().arity();
     let adtz = if adt.is(AdtZ) { adt.clone() } else { adt.aux_port(adt.tag().arity()).wire().swap_target(Port::LOCK) };
-    if ctr_arity != adtz.variant_count() + 1 {
+    if ctr_arity < adtz.variant_count() + 1 {
+      if ctr_arity <= adtz.variant_index() + 1 {
+        for i in 0 .. (ctr_arity - 1) {
+          self.link_wire_port(ctr.aux_port(i).wire(), Port::ERA);
+        }
+        let new_adtz = Port::new_adtz(adtz.variant_index() - (ctr_arity - 1), adtz.variant_count() - (ctr_arity - 1));
+        self.link_wire_port(
+          ctr.aux_port(ctr_arity - 1).wire(),
+          if adt.is(AdtZ) {
+            new_adtz
+          } else {
+            adt.aux_port(adt.tag().arity()).wire().set_target(new_adtz);
+            adt
+          },
+        );
+        return;
+      }
+      dbg!(ctr_arity, adtz.variant_count(), adtz.variant_index());
       todo!();
     }
-    if adt.is(AdtZ) {
-      self.link_wire_wire(ctr.aux_port(adtz.variant_index()).wire(), ctr.aux_port(ctr_arity - 1).wire());
+    let out = if ctr_arity == adtz.variant_count() + 1 {
+      Trg::wire(ctr.aux_port(ctr_arity - 1).wire())
     } else {
-      self.link_wire_port(ctr.aux_port(ctr_arity - 1).wire(), adt.aux_port(adt.tag().arity()));
+      let w = ctr_arity - adtz.variant_count();
+      let t = Tag::ctr_with_width(w);
+      let port = Port::new(t, ctr.lab(), self.alloc(t.align()));
+      for i in 0 .. w {
+        self.link_wire_port(ctr.aux_port(adtz.variant_count() + i).wire(), port.aux_port(i));
+      }
+      Trg::port(port)
+    };
+    if adt.is(AdtZ) {
+      self.link_trg(out, Trg::wire(ctr.aux_port(adtz.variant_index()).wire()));
+    } else {
+      self.link_trg_port(out, adt.aux_port(adt.tag().arity()));
       self.link_wire_port(ctr.aux_port(adtz.variant_index()).wire(), Port(adt.0 ^ 0b1000));
     }
     for i in 0 .. adtz.variant_index() {
