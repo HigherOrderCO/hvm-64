@@ -99,14 +99,10 @@ fn test_pre_reduce_run(path: &str, mut book: Book) {
   io::stdout().flush().unwrap();
 
   let host = hvmc::stdlib::create_host(&book);
-  let Some((mut rwts, net)) = execute_host(host) else {
+  let Some((rwts, net)) = execute_host(host) else {
     assert_snapshot!(show_rewrites(&pre_stats.rewrites));
     return;
   };
-  // Don't take into account deref rewrites
-  // because expand() is terrible.
-  // Remove when #73 is merged.
-  rwts.dref = 0;
 
   let output = format!("{}\npre-reduce:\n{}run:\n{}", net, show_rewrites(&pre_stats.rewrites), show_rewrites(&rwts));
   assert_snapshot!(output);
