@@ -12,7 +12,7 @@ impl Host {
     let mut state = State { host: self, encoder: &mut def, scope: Default::default() };
     state.visit_net(net, TrgId::new(0));
     state.finish();
-    def
+    dbg!(def)
   }
 
   /// Encode `tree` directly into `trg`, skipping the intermediate `Def`

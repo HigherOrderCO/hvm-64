@@ -1,13 +1,17 @@
-// Atomic Swapper (HVM builtin)
-//(U60.swap 0 a b) = (Both a b)
-//(U60.swap n a b) = (Both b a)
+
+data Tree = (Leaf a) | (Both a b)
+
+(U60.swap 0 a b) = (Both a b)
+(U60.swap n a b) = (Both b a)
 
 // Swaps distant values in parallel; corresponds to a Red Box
 (Warp s (Leaf a)   (Leaf b))   = (U60.swap (^ (> a b) s) (Leaf a) (Leaf b))
 (Warp s (Both a b) (Both c d)) = (Join (Warp s a c) (Warp s b d))
+(Warp s * *) = *
 
 // Rebuilds the warped tree in the original order
 (Join (Both a b) (Both c d)) = (Both (Both a c) (Both b d))
+(Join * *) = *
 
 // Recursively warps each sub-tree; corresponds to a Blue/Green Box
 (Flow s (Leaf a))   = (Leaf a)
@@ -33,4 +37,4 @@
 (Sum (Leaf x))   = x
 (Sum (Both a b)) = (+ (Sum a) (Sum b))
 
-Main = (Sum (Sort 0 (Rev (Gen 19 0))))
+Main = (Sum (Sort 0 (Rev (Gen 20 0))))

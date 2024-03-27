@@ -36,7 +36,7 @@
 & @sum ~ (b a)
 & @sort ~ (c (#0 b))
 & @rev ~ (d c)
-& @gen ~ (#10 (#0 d))
+& @gen ~ (#16 (#0 d))
 @rev = ((@rev$S0 (@rev$S1 a)) a)
 @rev$S0 = (a b)
 & @Leaf ~ (a b)
