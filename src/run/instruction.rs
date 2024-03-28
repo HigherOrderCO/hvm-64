@@ -125,7 +125,7 @@ impl fmt::Debug for TrgId {
 
 impl<'a, M: Mode> Net<'a, M> {
   /// `trg ~ {#lab x y}`
-  #[inline(never)]
+  #[inline(always)]
   pub(crate) fn do_ctr2(&mut self, lab: Lab, trg: Trg) -> (Trg, Trg) {
     let port = trg.target();
     if !M::LAZY && port.is(Tag::Ctr2) && port.lab() == lab {
@@ -147,7 +147,7 @@ impl<'a, M: Mode> Net<'a, M> {
   }
 
   /// `trg ~ {#lab ...}`
-  #[inline(never)]
+  #[inline(always)]
   pub(crate) fn do_ctrn(&mut self, lab: Lab, trg: Trg, n: u8) -> ArrayVec<Trg, 8> {
     let tag = Tag::ctr_with_width(n);
     let align = tag.align();
@@ -161,7 +161,7 @@ impl<'a, M: Mode> Net<'a, M> {
   }
 
   /// `trg ~ {lab:idx:count ...}`
-  #[inline(never)]
+  #[inline(always)]
   pub(crate) fn do_adtn(
     &mut self,
     lab: Lab,
@@ -189,7 +189,7 @@ impl<'a, M: Mode> Net<'a, M> {
   }
 
   /// `trg ~ <op x y>`
-  #[inline(never)]
+  #[inline(always)]
   pub(crate) fn do_op(&mut self, op: Op, trg: Trg) -> (Trg, Trg) {
     trace!(self.tracer, op, trg);
     let port = trg.target();
@@ -209,7 +209,7 @@ impl<'a, M: Mode> Net<'a, M> {
   }
 
   /// `trg ~ <op #b x>`
-  #[inline(never)]
+  #[inline(always)]
   pub(crate) fn do_op_num(&mut self, op: Op, trg: Trg, rhs: u64) -> Trg {
     let port = trg.target();
     if !M::LAZY && port.tag() == Num {
@@ -228,7 +228,7 @@ impl<'a, M: Mode> Net<'a, M> {
   }
 
   /// `trg ~ ?<x y z>`
-  #[inline(never)]
+  #[inline(always)]
   pub(crate) fn do_mat(&mut self, trg: Trg) -> (Trg, Trg, Trg) {
     let m = self.alloc(Align4);
     let m0 = Port::new(Mat, 0, m);
@@ -241,7 +241,7 @@ impl<'a, M: Mode> Net<'a, M> {
 
   #[cfg(todo)]
   /// `trg ~ ?<x y out>`
-  #[inline(never)]
+  #[inline(always)]
   pub(crate) fn do_mat(&mut self, trg: Trg, out: Trg) -> (Trg, Trg) {
     let port = trg.target();
     if trg.target().is(Tag::Num) {
@@ -271,7 +271,7 @@ impl<'a, M: Mode> Net<'a, M> {
     }
   }
 
-  #[inline(never)]
+  #[inline(always)]
   pub(crate) fn do_wires(&mut self) -> (Trg, Trg, Trg, Trg) {
     let a = self.alloc(Align2);
     let b = a.offset(1);
@@ -285,7 +285,7 @@ impl<'a, M: Mode> Net<'a, M> {
 
   #[cfg(todo)]
   /// `trg ~ ?<(x (y z)) out>`
-  #[inline(never)]
+  #[inline(always)]
   #[allow(unused)] // TODO: emit this instruction
   pub(crate) fn do_mat_con_con(&mut self, trg: Trg, out: Trg) -> (Trg, Trg, Trg) {
     let port = trg.target();

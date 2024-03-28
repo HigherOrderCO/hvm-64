@@ -118,7 +118,7 @@ impl<'h> Allocator<'h> {
   }
 
   /// Allocates a node, with a size specified by `align`.
-  #[inline(never)]
+  #[inline(always)]
   pub fn alloc(&mut self, align: Align) -> Addr {
     let head = self.head(align);
     let addr = if *head != Addr::NULL {

@@ -66,7 +66,7 @@ impl<'a, M: Mode> Net<'a, M> {
   ///         b1 |   | b2
   ///  
   /// ```
-  #[inline(never)]
+  #[inline(always)]
   pub fn anni2(&mut self, a: Port, b: Port) {
     trace!(self, a, b);
     self.rwts.anni += 1;
@@ -113,7 +113,7 @@ impl<'a, M: Mode> Net<'a, M> {
   ///     b1 |         | b2
   ///  
   /// ```
-  #[inline(never)]
+  #[inline(always)]
   pub fn comm22(&mut self, a: Port, b: Port) {
     trace!(self, a, b);
     self.rwts.comm += 1;
@@ -159,7 +159,7 @@ impl<'a, M: Mode> Net<'a, M> {
   ///      b1 |       | b2
   ///  
   /// ```
-  #[inline(never)]
+  #[inline(always)]
   pub fn comm02(&mut self, a: Port, b: Port) {
     trace!(self, a, b);
     self.rwts.comm += 1;
@@ -194,7 +194,7 @@ impl<'a, M: Mode> Net<'a, M> {
   ///       a1 |    | a2 | a3       |       a1 |    | a2 | a3       
   ///                               |
   /// ```
-  #[inline(never)]
+  #[inline(always)]
   pub fn mat_num(&mut self, a: Port, b: Port) {
     trace!(self, a, b);
     self.rwts.oper += 1;
@@ -240,7 +240,7 @@ impl<'a, M: Mode> Net<'a, M> {
   ///                | a2         |       a1 |       | a2  
   ///                             |  
   /// ```
-  #[inline(never)]
+  #[inline(always)]
   pub fn op_num(&mut self, a: Port, b: Port) {
     trace!(self, a, b);
     let a = a.consume_node();
