@@ -44,8 +44,11 @@ impl Heap {
 pub struct Allocator<'h> {
   pub(super) tracer: Tracer,
   pub(super) heap: &'h Heap,
-  pub(super) next: usize,
+  pub next: usize,
   pub(super) heads: [Addr; 4],
+  pub reuse: usize,
+  pub fresh: usize,
+  pub pad: usize,
 }
 
 deref!({<'h>} Allocator<'h> => self.tracer: Tracer);
@@ -67,7 +70,7 @@ impl Port {
 
 impl<'h> Allocator<'h> {
   pub fn new(heap: &'h Heap) -> Self {
-    Allocator { tracer: Tracer::default(), heap, next: 0, heads: [Addr::NULL; 4] }
+    Allocator { tracer: Tracer::default(), heap, next: 0, heads: [Addr::NULL; 4], reuse: 0, fresh: 0, pad: 0 }
   }
 
   fn head(&mut self, align: Align) -> &mut Addr {
@@ -111,7 +114,7 @@ impl<'h> Allocator<'h> {
         let old_head = next_value;
         let new_head = addr;
         trace!(self.tracer, "appended", old_head, new_head);
-        return *self.head(align) = addr;
+        return *self.head(alloc_align) = addr;
       }
       align = next_align;
     }
@@ -125,11 +128,14 @@ impl<'h> Allocator<'h> {
       let addr = *head;
       let next = Addr(head.val().load(Relaxed) as usize);
       *head = next;
+      self.reuse += 1;
       addr
     } else {
+      self.fresh += 1;
       let w = align.width() as usize;
       let x = w - 1;
       let index = (self.next + x) & !x;
+      self.pad += index - self.next;
       self.next = index + w;
       trace!(self, index);
       Addr(self.heap.0.get(index).expect("OOM") as *const AtomicU64 as usize)

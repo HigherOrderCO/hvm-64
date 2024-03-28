@@ -401,6 +401,10 @@ fn reduce_exprs(host: Arc<Mutex<Host>>, exprs: &[Net], opts: &RuntimeOpts) {
       if opts.show_stats {
         print_stats(net, elapsed);
       }
+      dbg!(net.next);
+      dbg!(net.reuse);
+      dbg!(net.fresh);
+      dbg!(net.pad);
     });
   }
 }
