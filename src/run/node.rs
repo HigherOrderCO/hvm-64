@@ -35,7 +35,7 @@ impl<'a, M: Mode> Net<'a, M> {
   #[inline(always)]
   pub fn create_node(&mut self, tag: Tag, lab: Lab) -> CreatedNode {
     assert_eq!(tag.width(), 2);
-    let addr = self.alloc(tag.align());
+    let addr = self.alloc(tag);
     CreatedNode {
       p0: Port::new(tag, lab, addr.clone()),
       p1: Port::new_var(Align2, addr),
@@ -46,7 +46,7 @@ impl<'a, M: Mode> Net<'a, M> {
   /// Creates a wire an aux port pair.
   #[inline(always)]
   pub fn create_wire(&mut self) -> (Wire, Port) {
-    let addr = self.alloc(Align2);
+    let addr = self.alloc(Ctr2);
     (Wire::new(Align1, addr), Port::new_var(Align1, addr))
   }
 
@@ -54,7 +54,7 @@ impl<'a, M: Mode> Net<'a, M> {
   /// deadlock.
   #[inline(always)]
   pub fn create_wire_to(&mut self, port: Port) -> Wire {
-    let addr = self.alloc(Align1);
+    let addr = self.alloc(Var);
     let wire = Wire::new(Align1, addr);
     self.link_port_port(port, wire.as_var());
     wire

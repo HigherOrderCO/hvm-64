@@ -290,7 +290,7 @@ impl<'a, M: Mode> Net<'a, M> {
     } else {
       let w = ctr_arity - adtz.variant_count();
       let t = Tag::ctr_with_width(w);
-      let port = Port::new(t, ctr.lab(), self.alloc(t.align()));
+      let port = Port::new(t, ctr.lab(), self.alloc(t));
       for i in 0 .. w {
         self.link_wire_port(ctr.aux_port(adtz.variant_count() + i).wire(), port.aux_port(i));
       }
@@ -311,9 +311,9 @@ impl<'a, M: Mode> Net<'a, M> {
   }
 
   fn anni(&mut self, a: Port, b: Port) {
-    // if a.tag().width() == 2 && b.tag().width() == 2 {
-    //   return self.anni2(a, b);
-    // }
+    if a.tag().width() == 2 && b.tag().width() == 2 {
+      return self.anni2(a, b);
+    }
     self.rwts.anni += 1;
     if a.tag() == b.tag() {
       for i in 0 .. a.tag().arity() {
@@ -330,7 +330,7 @@ impl<'a, M: Mode> Net<'a, M> {
       let aws = aw - 1;
       let cw = bw - aws;
       let ct = Tag::ctr_with_width(cw);
-      let c = Port::new(ct, a.lab(), self.alloc(ct.align()));
+      let c = Port::new(ct, a.lab(), self.alloc(ct));
       for i in 0 .. aws {
         self.link_wire_wire(a.aux_port(i).wire(), b.aux_port(i).wire());
       }
@@ -342,6 +342,13 @@ impl<'a, M: Mode> Net<'a, M> {
   }
 
   fn comm(&mut self, a: Port, b: Port) {
+    if a.tag().width() == 2 && b.tag().width() == 2 {
+      return self.comm22(a, b);
+    } else if a.tag().width() == 0 && b.tag().width() == 2 {
+      return self.comm02(a, b);
+    } else if b.tag().width() == 0 && a.tag().width() == 2 {
+      return self.comm02(b, a);
+    }
     if a == Port::ERA || b == Port::ERA {
       self.rwts.eras += 1;
     } else {
@@ -358,7 +365,7 @@ impl<'a, M: Mode> Net<'a, M> {
     let As = &mut As[0 .. ba as usize];
     if ba != 0 {
       for B in &mut *Bs {
-        let addr = self.alloc(b.align());
+        let addr = self.alloc(b.tag());
         *B = MaybeUninit::new(b.with_addr(addr));
       }
     } else {
@@ -366,7 +373,7 @@ impl<'a, M: Mode> Net<'a, M> {
     }
     if aa != 0 {
       for A in &mut *As {
-        let addr = self.alloc(a.align());
+        let addr = self.alloc(a.tag());
         *A = MaybeUninit::new(a.with_addr(addr));
       }
     } else {

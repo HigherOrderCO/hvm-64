@@ -151,7 +151,7 @@ impl<'a, M: Mode> Net<'a, M> {
   pub(crate) fn do_ctrn(&mut self, lab: Lab, trg: Trg, n: u8) -> ArrayVec<Trg, 8> {
     let tag = Tag::ctr_with_width(n);
     let align = tag.align();
-    let addr = self.alloc(align);
+    let addr = self.alloc(tag);
     let mut out = ArrayVec::new();
     self.link_trg_port(trg, Port::new(tag, lab, addr));
     for i in 0 .. n {
@@ -178,7 +178,7 @@ impl<'a, M: Mode> Net<'a, M> {
       let width = arity + 1;
       let tag = Tag::adt_with_width(width);
       let align = tag.align();
-      let addr = self.alloc(align);
+      let addr = self.alloc(tag);
       self.link_trg_port(trg, Port::new(tag, lab, addr));
       for i in 0 .. arity {
         unsafe { out.push_unchecked(Trg::port(Port::new_var(align, addr.offset(i as usize)))) }
@@ -230,7 +230,7 @@ impl<'a, M: Mode> Net<'a, M> {
   /// `trg ~ ?<x y z>`
   #[inline(always)]
   pub(crate) fn do_mat(&mut self, trg: Trg) -> (Trg, Trg, Trg) {
-    let m = self.alloc(Align4);
+    let m = self.alloc(Mat);
     let m0 = Port::new(Mat, 0, m);
     let m1 = m0.aux_port(0);
     let m2 = m0.aux_port(1);
@@ -273,7 +273,7 @@ impl<'a, M: Mode> Net<'a, M> {
 
   #[inline(always)]
   pub(crate) fn do_wires(&mut self) -> (Trg, Trg, Trg, Trg) {
-    let a = self.alloc(Align2);
+    let a = self.alloc(Ctr2);
     let b = a.offset(1);
     (
       Trg::port(Port::new_var(Align2, a.clone())),

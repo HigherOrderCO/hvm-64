@@ -122,7 +122,7 @@ impl<'h> Allocator<'h> {
 
   /// Allocates a node, with a size specified by `align`.
   #[inline(always)]
-  pub fn alloc(&mut self, align: Align) -> Addr {
+  pub fn _alloc(&mut self, align: Align) -> Addr {
     let head = self.head(align);
     let addr = if *head != Addr::NULL {
       let addr = *head;
@@ -143,6 +143,16 @@ impl<'h> Allocator<'h> {
     trace!(self, align, addr);
     for i in 0 .. align.width() {
       addr.offset(i as usize).val().store(Port::LOCK.0, Relaxed);
+    }
+    addr
+  }
+
+  pub fn alloc(&mut self, tag: Tag) -> Addr {
+    let align = tag.align();
+    // let align = Align4;
+    let addr = self._alloc(align);
+    for i in tag.width() .. align.width() {
+      self.free_word(addr.offset(i as usize), align);
     }
     addr
   }

@@ -17,7 +17,7 @@ impl<'h, M: Mode> Net<'h, M> {
   /// Creates an empty net with a given heap.
   pub fn new(heap: &'h Heap) -> Self {
     let mut net = Net::new_with_root(heap, Wire(0));
-    net.root = Wire::new(Align2, net.alloc(Align2));
+    net.root = Wire::new(Align2, net.alloc(Ctr2));
     net
   }
 
