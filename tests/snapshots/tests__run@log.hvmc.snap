@@ -4,9 +4,9 @@ expression: output
 input_file: tests/programs/log.hvmc
 ---
 #2
-RWTS   :               8
+RWTS   :               7
 - ANNI :               2
 - COMM :               0
-- ERAS :               1
+- ERAS :               0
 - DREF :               5
 - OPER :               0
