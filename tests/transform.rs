@@ -132,7 +132,7 @@ pub fn test_inline() {
   "###);
 
   for net in ["@a = @a", "@a = @b  @b = @c  @c = @d  @d = @e  @e = @f  @f = @c"] {
-    assert_eq!(parse_and_inline(net), Err(TransformError::InfiniteRefCycle));
+    assert!(matches!(parse_and_inline(net), Err(TransformError::InfiniteRefCycle(_))));
   }
 }
 

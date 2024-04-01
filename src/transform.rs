@@ -10,6 +10,6 @@ pub mod prune;
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum TransformError {
-  #[error("infinite reference cycle")]
-  InfiniteRefCycle,
+  #[error("infinite reference cycle in `@{0}`")]
+  InfiniteRefCycle(String),
 }

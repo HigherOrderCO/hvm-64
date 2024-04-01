@@ -52,7 +52,7 @@ impl InlineState {
           if parity {
             let Tree::Ref { nam: tortoise_nam } = tortoise else { unreachable!() };
             if tortoise_nam == nam {
-              Err(TransformError::InfiniteRefCycle)?;
+              Err(TransformError::InfiniteRefCycle(nam.to_owned()))?;
             }
             tortoise = &book.nets[tortoise_nam].root;
           }
