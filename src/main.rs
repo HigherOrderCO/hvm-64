@@ -358,7 +358,7 @@ fn load_book(files: &[String], transform_opts: &TransformOpts) -> Book {
   }
   if transform_passes.inline {
     loop {
-      let inline_changed = book.inline();
+      let inline_changed = book.inline().unwrap();
       if inline_changed.is_empty() {
         break;
       }
