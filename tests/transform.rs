@@ -2,7 +2,7 @@
 
 pub mod loaders;
 
-use hvmc::util::show_rewrites;
+use hvmc::{transform::TransformError, util::show_rewrites};
 use insta::{assert_display_snapshot, assert_snapshot};
 use loaders::*;
 
@@ -94,10 +94,9 @@ pub fn test_eta() {
 pub fn test_inline() {
   use hvmc::ast::Book;
   use std::str::FromStr;
-  pub fn parse_and_inline(net: &str) -> String {
+  pub fn parse_and_inline(net: &str) -> Result<String, TransformError> {
     let mut net = Book::from_str(net).unwrap();
-    net.inline();
-    format!("{net}")
+    net.inline().map(|_| format!("{net}"))
   }
   assert_display_snapshot!(parse_and_inline("
     @era = *
@@ -110,7 +109,7 @@ pub fn test_inline() {
     @K = (:0:2)
     @1234 = (:1:2 (:3:4))
     @into = ((@era @num @abab @ref @def @eff @I @K) (@into @1234))
-  "), @r###"
+  ").unwrap(), @r###"
   @1234 = (:1:2 (:3:4))
 
   @I = (:0:1)
@@ -131,6 +130,10 @@ pub fn test_inline() {
 
   @ref = @abab
   "###);
+
+  for net in ["@a = @a", "@a = @b  @b = @c  @c = @d  @d = @e  @e = @f  @f = @c"] {
+    assert_eq!(parse_and_inline(net), Err(TransformError::InfiniteRefCycle));
+  }
 }
 
 #[test]

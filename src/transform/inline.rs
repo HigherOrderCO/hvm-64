@@ -8,10 +8,12 @@ use crate::{
   util::maybe_grow,
 };
 
+use super::TransformError;
+
 impl Book {
-  pub fn inline(&mut self) -> HashSet<String> {
+  pub fn inline(&mut self) -> Result<HashSet<String>, TransformError> {
     let mut state = InlineState::default();
-    state.populate_inlinees(self);
+    state.populate_inlinees(self)?;
     let mut all_changed = HashSet::new();
     for (name, net) in &mut self.nets {
       let mut inlined = false;
@@ -22,7 +24,7 @@ impl Book {
         all_changed.insert(name.to_owned());
       }
     }
-    all_changed
+    Ok(all_changed)
   }
 }
 
@@ -32,21 +34,34 @@ struct InlineState {
 }
 
 impl InlineState {
-  fn populate_inlinees(&mut self, book: &Book) {
+  fn populate_inlinees(&mut self, book: &Book) -> Result<(), TransformError> {
     for (name, net) in &book.nets {
       if net.should_inline() {
-        let mut node = &net.root;
-        while let Tree::Ref { nam } = node {
+        // Detect cycles with tortoise and hare algorithm
+        let mut hare = &net.root;
+        let mut tortoise = &net.root;
+        // Whether or not the tortoise should take a step
+        let mut parity = false;
+        while let Tree::Ref { nam } = hare {
           let net = &book.nets[nam];
           if net.should_inline() {
-            node = &net.root;
+            hare = &net.root;
           } else {
             break;
           }
+          if parity {
+            let Tree::Ref { nam: tortoise_nam } = tortoise else { unreachable!() };
+            if tortoise_nam == nam {
+              Err(TransformError::InfiniteRefCycle)?;
+            }
+            tortoise = &book.nets[tortoise_nam].root;
+          }
+          parity = !parity;
         }
-        self.inlinees.insert(name.to_owned(), node.clone());
+        self.inlinees.insert(name.to_owned(), hare.clone());
       }
     }
+    Ok(())
   }
   fn inline_into(&self, tree: &mut Tree) -> bool {
     maybe_grow(|| {
