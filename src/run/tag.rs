@@ -44,15 +44,46 @@ bi_enum! {
   }
 }
 
+#[rustfmt::skip]
+macro_rules! specialize_tag {
+  ($CONST:ident = $tag:expr => $body:expr) => {
+    match $tag {
+      Tag::Red  => { const $CONST: Tag = Tag::Red;  $body }
+      Tag::Var  => { const $CONST: Tag = Tag::Var;  $body }
+      Tag::Ctr2 => { const $CONST: Tag = Tag::Ctr2; $body }
+      Tag::Adt2 => { const $CONST: Tag = Tag::Adt2; $body }
+      Tag::Num  => { const $CONST: Tag = Tag::Num;  $body }
+      Tag::Op   => { const $CONST: Tag = Tag::Op;   $body }
+      Tag::Ctr3 => { const $CONST: Tag = Tag::Ctr3; $body }
+      Tag::Ctr4 => { const $CONST: Tag = Tag::Ctr4; $body }
+      Tag::Adt3 => { const $CONST: Tag = Tag::Adt3; $body }
+      Tag::Adt4 => { const $CONST: Tag = Tag::Adt4; $body }
+      Tag::Ref  => { const $CONST: Tag = Tag::Ref;  $body }
+      Tag::Mat  => { const $CONST: Tag = Tag::Mat;  $body }
+      Tag::AdtZ => { const $CONST: Tag = Tag::AdtZ; $body }
+      Tag::Ctr5 => { const $CONST: Tag = Tag::Ctr5; $body }
+      Tag::Ctr6 => { const $CONST: Tag = Tag::Ctr6; $body }
+      Tag::Ctr7 => { const $CONST: Tag = Tag::Ctr7; $body }
+      Tag::Ctr8 => { const $CONST: Tag = Tag::Ctr8; $body }
+      Tag::Adt5 => { const $CONST: Tag = Tag::Adt5; $body }
+      Tag::Adt6 => { const $CONST: Tag = Tag::Adt6; $body }
+      Tag::Adt7 => { const $CONST: Tag = Tag::Adt7; $body }
+      Tag::Adt8 => { const $CONST: Tag = Tag::Adt8; $body }
+    }
+  };
+}
+
+pub(super) use specialize_tag;
+
 impl Tag {
   #[inline(always)]
-  pub(super) fn align(self) -> Align {
+  pub(super) const fn align(self) -> Align {
     unsafe { Align::from_unchecked(self as u8 & 0b11) }
   }
 
   /// Returns the width -- the size of the allocation -- of nodes of this tag.
   #[inline]
-  pub(crate) fn width(self) -> u8 {
+  pub(crate) const fn width(self) -> u8 {
     match self {
       Tag::Num | Tag::Ref | Tag::AdtZ => 0,
       Tag::Red | Tag::Var => 1,
@@ -65,7 +96,7 @@ impl Tag {
   /// Returns the arity -- the number of auxiliary ports -- of nodes of this
   /// tag.
   #[inline]
-  pub(crate) fn arity(self) -> u8 {
+  pub(crate) const fn arity(self) -> u8 {
     match self {
       AdtN!() => self.width() - 1,
       _ => self.width(),

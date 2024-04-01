@@ -74,12 +74,12 @@ impl<'a, E: Encoder> State<'a, E> {
         if ports.len() == 1 {
           return self.visit_tree(&ports[0], trg);
         }
-        if ports.len() == 2 {
-          let (a, b) = self.encoder.ctr2(*lab, trg);
-          self.visit_tree(&ports[0], a);
-          self.visit_tree(&ports[1], b);
-          return;
-        }
+        // if ports.len() == 2 {
+        //   let (a, b) = self.encoder.ctr2(*lab, trg);
+        //   self.visit_tree(&ports[0], a);
+        //   self.visit_tree(&ports[1], b);
+        //   return;
+        // }
         for (i, t) in self.encoder.ctrn(*lab, trg, ports.len() as u8).into_iter().enumerate() {
           self.visit_tree(&ports[i], t);
         }

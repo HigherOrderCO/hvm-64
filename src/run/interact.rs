@@ -2,6 +2,8 @@ use std::mem::MaybeUninit;
 
 use super::*;
 
+// type _Tag<const T: u8> = [(); width(T) as usize];
+
 impl<'a, M: Mode> Net<'a, M> {
   /// Performs an interaction between two connected principal ports.
   #[inline(always)]
@@ -310,22 +312,47 @@ impl<'a, M: Mode> Net<'a, M> {
     }
   }
 
+  fn _anni2(&mut self, a: Port, b: Port) {
+    self._anni(2, 2, 2, a, b);
+  }
+
+  #[inline(always)]
   fn anni(&mut self, a: Port, b: Port) {
-    if a.tag().width() == 2 && b.tag().width() == 2 {
-      return self.anni2(a, b);
-    }
+    specialize_tag!(A = a.tag() =>
+      specialize_tag!(B = b.tag() =>
+        self.__anni::<{A.arity()}, {A.width()}, {A.width()}>(a, b)
+      )
+    )
+    // if a.tag().width() == 2 && b.tag().width() == 2 {
+    // return self._anni2(a, b);
+    // }
+    // self._foo(a, b);
+    // self._anni(a.tag().arity(), a.tag().width(), b.tag().width(), a, b);
+  }
+
+  fn _foo(&mut self, a: Port, b: Port) {
+    self._anni(a.tag().arity(), a.tag().width(), b.tag().width(), a, b);
+  }
+
+  fn __anni<const AA: u8, const AW: u8, const BW: u8>(&mut self, a: Port, b: Port) {
+    self._anni(AA, AW, BW, a, b)
+  }
+
+  #[inline(always)]
+  fn _anni(&mut self, aa: u8, aw: u8, bw: u8, a: Port, b: Port) {
+    // if a.tag().width() == 2 && b.tag().width() == 2 {
+    //   return self.anni2(a, b);
+    // }
     self.rwts.anni += 1;
-    if a.tag() == b.tag() {
-      for i in 0 .. a.tag().arity() {
+    if aw == bw {
+      for i in 0 .. aa {
         self.link_wire_wire(a.aux_port(i).wire(), b.aux_port(i).wire());
       }
-      for i in a.tag().arity() .. a.tag().width() {
+      for i in aa .. aw {
         self.free_wire(a.aux_port(i).wire());
         self.free_wire(b.aux_port(i).wire());
       }
     } else {
-      let aw = a.tag().width();
-      let bw = b.tag().width();
       let (a, b, aw, bw) = if aw > bw { (b, a, bw, aw) } else { (a, b, aw, bw) };
       let aws = aw - 1;
       let cw = bw - aws;
@@ -342,13 +369,13 @@ impl<'a, M: Mode> Net<'a, M> {
   }
 
   fn comm(&mut self, a: Port, b: Port) {
-    if a.tag().width() == 2 && b.tag().width() == 2 {
-      return self.comm22(a, b);
-    } else if a.tag().width() == 0 && b.tag().width() == 2 {
-      return self.comm02(a, b);
-    } else if b.tag().width() == 0 && a.tag().width() == 2 {
-      return self.comm02(b, a);
-    }
+    // if a.tag().width() == 2 && b.tag().width() == 2 {
+    //   return self.comm22(a, b);
+    // } else if a.tag().width() == 0 && b.tag().width() == 2 {
+    //   return self.comm02(a, b);
+    // } else if b.tag().width() == 0 && a.tag().width() == 2 {
+    //   return self.comm02(b, a);
+    // }
     if a == Port::ERA || b == Port::ERA {
       self.rwts.eras += 1;
     } else {
@@ -417,3 +444,19 @@ impl<'a, M: Mode> Net<'a, M> {
     }
   }
 }
+
+const fn width(t: u8) -> u8 {
+  unsafe { Tag::from_unchecked(t) }.width()
+}
+
+const fn arity(t: u8) -> u8 {
+  unsafe { Tag::from_unchecked(t) }.arity()
+}
+
+macro_rules! IsTag {
+  ($T:ident) => {
+    ([(); arity($T) as usize], [(); width($T) as usize])
+  };
+}
+
+use IsTag;

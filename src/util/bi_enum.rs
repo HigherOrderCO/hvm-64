@@ -18,8 +18,8 @@ macro_rules! bi_enum {
 
     impl $Ty {
       #[allow(unused)]
-      pub unsafe fn from_unchecked(value: $uN) -> $Ty {
-        Self::try_from(value).unwrap_unchecked()
+      pub const unsafe fn from_unchecked(value: $uN) -> $Ty {
+        match value { $($value => $Ty::$Variant,)* _ => std::hint::unreachable_unchecked(), }
       }
     }
 

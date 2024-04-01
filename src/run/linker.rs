@@ -50,7 +50,7 @@ impl<'h, M: Mode> Linker<'h, M> {
   }
 
   /// Links two wires.
-  #[inline(always)]
+  #[inline(never)]
   pub fn link_wire_wire(&mut self, a_wire: Wire, b_wire: Wire) {
     trace!(self, a_wire, b_wire);
     let a_port = a_wire.lock_target();
