@@ -108,7 +108,10 @@ pub fn test_inline() {
     @I = (:0:1)
     @K = (:0:2)
     @1234 = (:1:2 (:3:4))
-    @into = ((@era @num @abab @ref @def @eff @I @K) (@into @1234))
+    @foo = @bar
+    @bar = @baz
+    @baz = @unbound
+    @into = ((@era @num @abab @ref @def @eff @I @K) (@into @1234 @foo @bar @baz @unbound))
   ").unwrap(), @r###"
   @1234 = (:1:2 (:3:4))
 
@@ -118,13 +121,19 @@ pub fn test_inline() {
 
   @abab = (a b a b)
 
+  @bar = @unbound
+
+  @baz = @unbound
+
   @def = @abab
 
   @eff = @abab
 
   @era = *
 
-  @into = ((* #123 @abab @abab @abab @abab (:0:1) (:0:2)) (@into @1234))
+  @foo = @unbound
+
+  @into = ((* #123 @abab @abab @abab @abab (:0:1) (:0:2)) (@into @1234 @unbound @unbound @unbound @unbound))
 
   @num = #123
 
