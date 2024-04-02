@@ -60,4 +60,11 @@ impl<'a, M: Mode> Net<'a, M> {
     self.link_port_port(port, Port::new_var(wire.addr()));
     wire
   }
+
+  /// Creates a wire pointing to a trg (this is a no-op if it is already a
+  /// wire); sometimes necessary to avoid deadlock.
+  #[inline(always)]
+  pub fn wire_to_trg(&mut self, trg: Trg) -> Wire {
+    if trg.is_wire() { trg.as_wire() } else { self.create_wire_to(trg.as_port()) }
+  }
 }
