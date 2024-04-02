@@ -43,7 +43,7 @@ impl InlineState {
         // Whether or not the tortoise should take a step
         let mut parity = false;
         while let Tree::Ref { nam } = hare {
-          let net = &book.nets[nam];
+          let Some(net) = &book.nets.get(nam) else { break };
           if net.should_inline() {
             hare = &net.root;
           } else {
