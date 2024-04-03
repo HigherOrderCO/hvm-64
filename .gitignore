@@ -12,3 +12,7 @@ tmp/
 
 flamegraph.svg
 .vscode/
+
+# nix
+.envrc
+/.direnv/
