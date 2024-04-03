@@ -46,7 +46,7 @@ impl<'a, M: Mode> Net<'a, M> {
   /// Annihilates two binary agents.
   ///
   /// ```text
-  ///  
+  ///
   ///         a2 |   | a1
   ///           _|___|_
   ///           \     /
@@ -68,7 +68,7 @@ impl<'a, M: Mode> Net<'a, M> {
   ///             / \
   ///            |   |
   ///         b1 |   | b2
-  ///  
+  ///
   /// ```
   #[inline(never)]
   pub fn anni2(&mut self, a: Port, b: Port) {
@@ -83,7 +83,7 @@ impl<'a, M: Mode> Net<'a, M> {
   /// Commutes two binary agents.
   ///
   /// ```text
-  ///  
+  ///
   ///         a2 |   | a1
   ///           _|___|_
   ///           \     /
@@ -115,7 +115,7 @@ impl<'a, M: Mode> Net<'a, M> {
   ///       \ /       \ /
   ///        |         |
   ///     b1 |         | b2
-  ///  
+  ///
   /// ```
   #[inline(never)]
   pub fn comm22(&mut self, a: Port, b: Port) {
@@ -146,7 +146,7 @@ impl<'a, M: Mode> Net<'a, M> {
   /// Commutes a nilary agent and a binary agent.
   ///
   /// ```text
-  ///  
+  ///
   ///         a  (---)
   ///              |
   ///              |
@@ -161,7 +161,7 @@ impl<'a, M: Mode> Net<'a, M> {
   ///     a (---)   (---) a
   ///         |       |
   ///      b1 |       | b2
-  ///  
+  ///
   /// ```
   #[inline(never)]
   pub fn comm02(&mut self, a: Port, b: Port) {
@@ -229,27 +229,27 @@ impl<'a, M: Mode> Net<'a, M> {
   /// Interacts a number and a binary numeric operation node.
   ///
   /// ```text
-  ///                             |  
-  ///         b   (n)             |         b   (n)    
-  ///              |              |              |      
-  ///              |              |              |       
-  ///             / \             |             / \       
-  ///         a  /op \            |         a  /op \       
-  ///           /_____\           |           /_____\       
-  ///            |   |            |            |   |         
-  ///           (m)  | a2         |         a1 |   | a2       
-  ///                             |                            
+  ///                             |
+  ///         b   (n)             |         b   (n)
+  ///              |              |              |
+  ///              |              |              |
+  ///             / \             |             / \
+  ///         a  /op \            |         a  /op \
+  ///           /_____\           |           /_____\
+  ///            |   |            |            |   |
+  ///           (m)  | a2         |         a1 |   | a2
+  ///                             |
   /// --------------------------- | --------------------------- op_num
   ///                             |           _ _ _
   ///                             |         /       \
-  ///                             |        |  (n)    |   
-  ///                             |       _|___|_    |   
-  ///                             |       \     /    |   
-  ///                             |     x  \op$/     |   
-  ///            (n op m)         |         \ /      |   
-  ///                |            |          |       |   
-  ///                | a2         |       a1 |       | a2  
-  ///                             |  
+  ///                             |        |  (n)    |
+  ///                             |       _|___|_    |
+  ///                             |       \     /    |
+  ///                             |     x  \op$/     |
+  ///            (n op m)         |         \ /      |
+  ///                |            |          |       |
+  ///                | a2         |       a1 |       | a2
+  ///                             |
   /// ```
   #[inline(never)]
   pub fn op_num(&mut self, a: Port, b: Port) {
