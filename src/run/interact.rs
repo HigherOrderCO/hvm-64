@@ -46,7 +46,6 @@ impl<'a, M: Mode> Net<'a, M> {
   /// Annihilates two binary agents.
   ///
   /// ```text
-  /// 
   ///         a2 |   | a1
   ///           _|___|_
   ///           \     /
@@ -82,7 +81,6 @@ impl<'a, M: Mode> Net<'a, M> {
   /// Commutes two binary agents.
   ///
   /// ```text
-  /// 
   ///         a2 |   | a1
   ///           _|___|_
   ///           \     /
@@ -144,7 +142,6 @@ impl<'a, M: Mode> Net<'a, M> {
   /// Commutes a nilary agent and a binary agent.
   ///
   /// ```text
-  /// 
   ///         a  (---)
   ///              |
   ///              |
