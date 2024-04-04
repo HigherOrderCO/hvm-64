@@ -130,8 +130,8 @@ impl Port {
 
   /// Creates a new [`Num`] port with a given 60-bit numeric value.
   #[inline(always)]
-  pub const fn new_num(val: u64) -> Self {
-    Port((val << 4) | (Num as u64))
+  pub const fn new_num(val: i64) -> Self {
+    Port((val << 4) as u64 | (Num as u64))
   }
 
   /// Creates a new [`Ref`] port corresponding to a given definition.
@@ -167,13 +167,13 @@ impl Port {
   /// ports.
   #[inline(always)]
   pub fn op(&self) -> Op {
-    unsafe { Op::from_unchecked(self.lab()) }
+    self.lab().into()
   }
 
   /// Accesses the numeric value of this port; this is valid for [`Num`] ports.
   #[inline(always)]
-  pub const fn num(&self) -> u64 {
-    self.0 >> 4
+  pub const fn num(&self) -> i64 {
+    (self.0 >> 4) as i64
   }
 
   /// Accesses the wire leaving this port; this is valid for [`Var`] ports and

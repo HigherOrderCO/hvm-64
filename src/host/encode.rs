@@ -126,7 +126,7 @@ trait Encoder {
   fn make_const(&mut self, port: Port) -> Self::Trg;
   fn ctr(&mut self, lab: Lab, trg: Self::Trg) -> (Self::Trg, Self::Trg);
   fn op(&mut self, op: Op, trg: Self::Trg) -> (Self::Trg, Self::Trg);
-  fn op_num(&mut self, op: Op, trg: Self::Trg, rhs: u64) -> Self::Trg;
+  fn op_num(&mut self, op: Op, trg: Self::Trg, rhs: i64) -> Self::Trg;
   fn mat(&mut self, trg: Self::Trg) -> (Self::Trg, Self::Trg);
   fn wires(&mut self) -> (Self::Trg, Self::Trg, Self::Trg, Self::Trg);
 }
@@ -164,7 +164,7 @@ impl Encoder for InterpretedDef {
     self.instr.push(Instruction::Op { op, trg, rhs, out });
     (rhs, out)
   }
-  fn op_num(&mut self, op: Op, trg: Self::Trg, rhs: u64) -> Self::Trg {
+  fn op_num(&mut self, op: Op, trg: Self::Trg, rhs: i64) -> Self::Trg {
     let out = self.new_trg_id();
     self.instr.push(Instruction::OpNum { op, trg, rhs, out });
     out
@@ -202,7 +202,7 @@ impl<'a, M: Mode> Encoder for run::Net<'a, M> {
   fn op(&mut self, op: Op, trg: Self::Trg) -> (Self::Trg, Self::Trg) {
     self.do_op(op, trg)
   }
-  fn op_num(&mut self, op: Op, trg: Self::Trg, rhs: u64) -> Self::Trg {
+  fn op_num(&mut self, op: Op, trg: Self::Trg, rhs: i64) -> Self::Trg {
     self.do_op_num(op, trg, rhs)
   }
   fn mat(&mut self, trg: Self::Trg) -> (Self::Trg, Self::Trg) {

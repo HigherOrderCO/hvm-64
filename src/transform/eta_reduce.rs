@@ -75,7 +75,7 @@ impl Net {
 enum NodeType {
   Ctr(u16),
   Var(isize),
-  Num(u64),
+  Num(i64),
   Era,
   Other,
   Hole,
