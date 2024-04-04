@@ -40,8 +40,11 @@ impl<'h, M: Mode> Net<'h, M> {
 
 impl<'a, M: Mode> Net<'a, M> {
   /// Reduces at most `limit` redexes.
+  ///
+  /// If normalized, returns Some(num redexes).
+  /// If stopped because the limit was reached, returns None.
   #[inline(always)]
-  pub fn reduce(&mut self, limit: usize) -> usize {
+  pub fn reduce(&mut self, limit: usize) -> Option<usize> {
     assert!(!M::LAZY);
     let mut count = 0;
 
@@ -49,10 +52,10 @@ impl<'a, M: Mode> Net<'a, M> {
       self.interact(a, b);
       count += 1;
       if count >= limit {
-        break;
+        return None;
       }
     }
-    count
+    Some(count)
   }
 
   // Lazy mode weak head normalizer

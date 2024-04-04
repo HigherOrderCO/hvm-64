@@ -33,7 +33,7 @@ impl Book {
   ///
   /// Defs that are not in the book are treated as inert defs.
   ///
-  /// `max_memory` is measured in words.
+  /// `max_memory` is measured in bytes.
   pub fn pre_reduce(
     &mut self,
     skip: &dyn Fn(&str) -> bool,
@@ -65,24 +65,32 @@ impl Book {
 
     let State { seen, rewrites, .. } = state;
 
+    let mut not_normal = vec![];
     for (nam, state) in seen {
-      if let SeenState::Reduced(net) = state {
-        self.nets.insert(nam, net);
+      match state {
+        SeenState::Reduced { net, normal } => {
+          if !normal {
+            not_normal.push(nam.clone());
+          }
+          self.nets.insert(nam, net);
+        }
+        _ => {}
       }
     }
 
-    PreReduceStats { rewrites, errors: vec![] }
+    PreReduceStats { rewrites, not_normal, errors: vec![] }
   }
 }
 
 pub struct PreReduceStats {
   pub rewrites: Rewrites,
+  pub not_normal: Vec<String>,
   pub errors: Vec<String>,
 }
 
 enum SeenState {
   Cycled,
-  Reduced(Net),
+  Reduced { net: Net, normal: bool },
 }
 
 /// A Def that pushes all interactions to its inner Vec.
@@ -138,7 +146,7 @@ impl<'a> State<'a> {
 
     let mut rt = run::Net::<run::Strict>::new(self.area);
     rt.boot(self.host.defs.get(nam).expect("No function."));
-    rt.reduce(self.max_rwts as usize);
+    let n_reduced = rt.reduce(self.max_rwts as usize);
 
     self.rewrites += rt.rwts;
 
@@ -155,6 +163,6 @@ impl<'a> State<'a> {
     };
 
     // Replace the "Cycled" state with the "Reduced" state
-    *self.seen.get_mut(nam).unwrap() = SeenState::Reduced(net);
+    *self.seen.get_mut(nam).unwrap() = SeenState::Reduced { net, normal: n_reduced.is_some() };
   }
 }
