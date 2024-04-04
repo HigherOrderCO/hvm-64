@@ -67,14 +67,11 @@ impl Book {
 
     let mut not_normal = vec![];
     for (nam, state) in seen {
-      match state {
-        SeenState::Reduced { net, normal } => {
-          if !normal {
-            not_normal.push(nam.clone());
-          }
-          self.nets.insert(nam, net);
+      if let SeenState::Reduced { net, normal } = state {
+        if !normal {
+          not_normal.push(nam.clone());
         }
-        _ => {}
+        self.nets.insert(nam, net);
       }
     }
 

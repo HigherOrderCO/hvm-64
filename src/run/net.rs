@@ -41,8 +41,8 @@ impl<'h, M: Mode> Net<'h, M> {
 impl<'a, M: Mode> Net<'a, M> {
   /// Reduces at most `limit` redexes.
   ///
-  /// If normalized, returns Some(num redexes).
-  /// If stopped because the limit was reached, returns None.
+  /// If normalized, returns `Some(num_redexes)`.
+  /// If stopped because the limit was reached, returns `None`.
   #[inline(always)]
   pub fn reduce(&mut self, limit: usize) -> Option<usize> {
     assert!(!M::LAZY);
