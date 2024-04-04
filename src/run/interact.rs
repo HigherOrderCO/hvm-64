@@ -46,7 +46,7 @@ impl<'a, M: Mode> Net<'a, M> {
   /// Annihilates two binary agents.
   ///
   /// ```text
-  ///
+  /// 
   ///         a2 |   | a1
   ///           _|___|_
   ///           \     /
@@ -68,7 +68,6 @@ impl<'a, M: Mode> Net<'a, M> {
   ///             / \
   ///            |   |
   ///         b1 |   | b2
-  ///
   /// ```
   #[inline(never)]
   pub fn anni2(&mut self, a: Port, b: Port) {
@@ -83,7 +82,7 @@ impl<'a, M: Mode> Net<'a, M> {
   /// Commutes two binary agents.
   ///
   /// ```text
-  ///
+  /// 
   ///         a2 |   | a1
   ///           _|___|_
   ///           \     /
@@ -115,7 +114,6 @@ impl<'a, M: Mode> Net<'a, M> {
   ///       \ /       \ /
   ///        |         |
   ///     b1 |         | b2
-  ///
   /// ```
   #[inline(never)]
   pub fn comm22(&mut self, a: Port, b: Port) {
@@ -146,7 +144,7 @@ impl<'a, M: Mode> Net<'a, M> {
   /// Commutes a nilary agent and a binary agent.
   ///
   /// ```text
-  ///
+  /// 
   ///         a  (---)
   ///              |
   ///              |
@@ -161,7 +159,6 @@ impl<'a, M: Mode> Net<'a, M> {
   ///     a (---)   (---) a
   ///         |       |
   ///      b1 |       | b2
-  ///
   /// ```
   #[inline(never)]
   pub fn comm02(&mut self, a: Port, b: Port) {
@@ -201,7 +198,6 @@ impl<'a, M: Mode> Net<'a, M> {
   ///          |       |          |           |         |
   ///       a1 |       | a2       |        a1 |         | a2
   ///                             |
-  ///
   /// ```
   #[inline(never)]
   pub fn mat_num(&mut self, a: Port, b: Port) {
@@ -251,13 +247,12 @@ impl<'a, M: Mode> Net<'a, M> {
   ///                |            |          |       |
   ///                | a2         |       a1 |       | a2
   ///                             |
-  ///
   /// ```
   #[inline(never)]
   pub fn op_num(&mut self, a: Port, b: Port) {
     trace!(self.tracer, a, b);
     let a = a.consume_node();
-    let op = Op::from(a.lab);
+    let op = Op::try_from(a.lab).unwrap();
     let a1 = a.p1.load_target();
     if a1.tag() == Num {
       self.rwts.oper += 1;

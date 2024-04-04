@@ -167,7 +167,7 @@ impl Port {
   /// ports.
   #[inline(always)]
   pub fn op(&self) -> Op {
-    self.lab().into()
+    self.lab().try_into().unwrap()
   }
 
   /// Accesses the numeric value of this port; this is valid for [`Num`] ports.

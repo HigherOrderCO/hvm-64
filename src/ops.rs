@@ -163,24 +163,28 @@ pub struct Op {
   pub op: IntOp,
 }
 
-impl From<u16> for Op {
-  fn from(value: u16) -> Self {
-    unsafe { std::mem::transmute(value) }
-  }
-}
-
-impl From<Op> for u16 {
-  fn from(op: Op) -> Self {
-    unsafe { std::mem::transmute(op) }
-  }
-}
-
 impl Display for Op {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     match self.ty {
       Ty::U60 => write!(f, "{}", self.op),
       _ => write!(f, "{}.{}", self.ty, self.op),
     }
+  }
+}
+
+impl TryFrom<u16> for Op {
+  type Error = ();
+
+  fn try_from(value: u16) -> Result<Self, Self::Error> {
+    let [ty, op] = value.to_be_bytes();
+
+    Ok(Self { ty: Ty::try_from(ty)?, op: IntOp::try_from(op)? })
+  }
+}
+
+impl From<Op> for u16 {
+  fn from(op: Op) -> Self {
+    (op.ty as u16) << 8 | op.op as u16
   }
 }
 
