@@ -46,7 +46,7 @@ impl<'a, M: Mode> Net<'a, M> {
   /// Annihilates two binary agents.
   ///
   /// ```text
-  /// 
+  ///
   ///         a2 |   | a1
   ///           _|___|_
   ///           \     /
@@ -68,6 +68,7 @@ impl<'a, M: Mode> Net<'a, M> {
   ///             / \
   ///            |   |
   ///         b1 |   | b2
+  ///
   /// ```
   #[inline(never)]
   pub fn anni2(&mut self, a: Port, b: Port) {
@@ -82,7 +83,7 @@ impl<'a, M: Mode> Net<'a, M> {
   /// Commutes two binary agents.
   ///
   /// ```text
-  /// 
+  ///
   ///         a2 |   | a1
   ///           _|___|_
   ///           \     /
@@ -114,6 +115,7 @@ impl<'a, M: Mode> Net<'a, M> {
   ///       \ /       \ /
   ///        |         |
   ///     b1 |         | b2
+  ///
   /// ```
   #[inline(never)]
   pub fn comm22(&mut self, a: Port, b: Port) {
@@ -144,7 +146,7 @@ impl<'a, M: Mode> Net<'a, M> {
   /// Commutes a nilary agent and a binary agent.
   ///
   /// ```text
-  /// 
+  ///
   ///         a  (---)
   ///              |
   ///              |
@@ -159,6 +161,7 @@ impl<'a, M: Mode> Net<'a, M> {
   ///     a (---)   (---) a
   ///         |       |
   ///      b1 |       | b2
+  ///
   /// ```
   #[inline(never)]
   pub fn comm02(&mut self, a: Port, b: Port) {
@@ -198,6 +201,7 @@ impl<'a, M: Mode> Net<'a, M> {
   ///          |       |          |           |         |
   ///       a1 |       | a2       |        a1 |         | a2
   ///                             |
+  ///
   /// ```
   #[inline(never)]
   pub fn mat_num(&mut self, a: Port, b: Port) {
@@ -247,6 +251,7 @@ impl<'a, M: Mode> Net<'a, M> {
   ///                |            |          |       |
   ///                | a2         |       a1 |       | a2
   ///                             |
+  ///
   /// ```
   #[inline(never)]
   pub fn op_num(&mut self, a: Port, b: Port) {
