@@ -252,7 +252,7 @@ impl<'a, M: Mode> Net<'a, M> {
   pub fn op_num(&mut self, a: Port, b: Port) {
     trace!(self.tracer, a, b);
     let a = a.consume_node();
-    let op = Op::try_from(a.lab).unwrap();
+    let op = unsafe { Op::try_from(a.lab).unwrap_unchecked() };
     let a1 = a.p1.load_target();
     if a1.tag() == Num {
       self.rwts.oper += 1;
