@@ -60,7 +60,7 @@ impl<'a, M: Mode> Net<'a, M> {
 
   // Lazy mode weak head normalizer
   #[inline(always)]
-  fn weak_normal(&mut self, mut prev: Port, root: Wire) -> Port {
+  pub fn weak_normal(&mut self, mut prev: Port, root: Wire) -> Port {
     assert!(M::LAZY);
 
     let mut path: Vec<Port> = vec![];
