@@ -173,7 +173,7 @@ impl Port {
   /// Accesses the numeric value of this port; this is valid for [`Num`] ports.
   #[inline(always)]
   pub const fn num(&self) -> i64 {
-    (self.0 >> 4) as i64
+    self.0 as i64 >> 4
   }
 
   /// Accesses the wire leaving this port; this is valid for [`Var`] ports and
