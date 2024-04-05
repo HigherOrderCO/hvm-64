@@ -51,7 +51,7 @@ impl_num! { u8, u16, u32, u64, i8, i16, i32 }
 
 bi_enum! {
   #[repr(u8)]
-  /// Native operations on variable-width integers.
+  /// Native operations on mixed-width integers (u8, u16, u32, u60, i8, i16, i32).
   ///
   /// Each operation has a swapped counterpart (accessible with `.swap()`),
   /// where the order of the operands is swapped.
