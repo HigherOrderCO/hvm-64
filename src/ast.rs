@@ -17,7 +17,7 @@ use crate::{
   run::Lab,
   util::{array_vec, deref, maybe_grow},
 };
-use std::{collections::BTreeMap, fmt, str::FromStr};
+use std::{collections::BTreeMap, fmt, mem, str::FromStr};
 
 /// The top level AST node, representing a collection of named nets.
 ///
@@ -155,7 +155,7 @@ impl Net {
 
 impl Tree {
   #[inline(always)]
-  pub fn children(&self) -> impl Iterator<Item = &Tree> {
+  pub fn children(&self) -> impl Iterator<Item = &Tree> + ExactSizeIterator + DoubleEndedIterator {
     ArrayVec::<_, MAX_ARITY>::into_iter(match self {
       Tree::Era | Tree::Num { .. } | Tree::Ref { .. } | Tree::Var { .. } => array_vec::from_array([]),
       Tree::Ctr { ports, .. } => array_vec::from_iter(ports),
@@ -166,7 +166,7 @@ impl Tree {
   }
 
   #[inline(always)]
-  pub fn children_mut(&mut self) -> impl Iterator<Item = &mut Tree> {
+  pub fn children_mut(&mut self) -> impl Iterator<Item = &mut Tree> + ExactSizeIterator + DoubleEndedIterator {
     ArrayVec::<_, MAX_ARITY>::into_iter(match self {
       Tree::Era | Tree::Num { .. } | Tree::Ref { .. } | Tree::Var { .. } => array_vec::from_array([]),
       Tree::Ctr { ports, .. } => array_vec::from_iter(ports),
@@ -184,8 +184,9 @@ impl Tree {
     }
   }
 
-  pub fn legacy_mat(arms: Tree, out: Tree) -> Option<Tree> {
-    let Tree::Ctr { lab: 0, ports } = arms else { None? };
+  pub fn legacy_mat(mut arms: Tree, out: Tree) -> Option<Tree> {
+    let Tree::Ctr { lab: 0, ports } = &mut arms else { None? };
+    let ports = std::mem::take(ports);
     let Ok([zero, succ]) = <[_; 2]>::try_from(ports) else { None? };
     let zero = Box::new(zero);
     let succ = Box::new(succ);
@@ -529,6 +530,8 @@ impl fmt::Display for Tree {
     })
   }
 }
+
+// Manually implemented to avoid stack overflows.
 impl Clone for Tree {
   fn clone(&self) -> Tree {
     maybe_grow(|| match self {
@@ -547,4 +550,51 @@ impl Clone for Tree {
       Tree::Var { nam } => Tree::Var { nam: nam.clone() },
     })
   }
+}
+
+// Drops non-recursively to avoid stack overflows.
+impl Drop for Tree {
+  fn drop(&mut self) {
+    loop {
+      let mut i = self.children_mut().filter(|x| x.children().len() != 0);
+      let Some(x) = i.next() else { break };
+      if { i }.next().is_none() {
+        // There's only one child; move it up to be the new root.
+        *self = mem::take(x);
+        continue;
+      }
+      // Rotate the tree right:
+      // ```text
+      //     a            b
+      //    / \          / \
+      //   b   e   ->   c   a
+      //  / \              / \
+      // c   d            d   e
+      // ```
+      let d = mem::take(x.children_mut().next_back().unwrap());
+      let b = mem::replace(x, d);
+      let a = mem::replace(self, b);
+      mem::forget(mem::replace(self.children_mut().next_back().unwrap(), a));
+    }
+  }
+}
+
+#[test]
+fn test_tree_drop() {
+  drop(Tree::from_str("((* (* *)) (* *))"));
+
+  let mut long_tree = Tree::Era;
+  let mut cursor = &mut long_tree;
+  for _ in 0 .. 100_000 {
+    *cursor = Tree::Ctr { lab: 0, ports: vec![Tree::Era, Tree::Era] };
+    let Tree::Ctr { ports, .. } = cursor else { unreachable!() };
+    cursor = &mut ports[0];
+  }
+  drop(long_tree);
+
+  let mut big_tree = Tree::Era;
+  for _ in 0 .. 16 {
+    big_tree = Tree::Ctr { lab: 0, ports: vec![big_tree.clone(), big_tree] };
+  }
+  drop(big_tree);
 }

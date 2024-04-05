@@ -35,10 +35,10 @@ impl Tree {
         }
 
         if let Some((start, idx)) = get_adt_info(lab, ports) {
-          let fields = match ports.swap_remove(idx) {
-            Tree::Ctr { ports: mut fields, .. } => {
+          let fields = match &mut ports.swap_remove(idx) {
+            Tree::Ctr { ports: fields, .. } => {
               fields.pop();
-              fields
+              std::mem::take(fields)
             }
             Tree::Var { .. } => vec![],
             _ => unreachable!(),

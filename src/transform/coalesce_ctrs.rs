@@ -10,13 +10,13 @@ impl Tree {
     maybe_grow(|| match self {
       Tree::Ctr { lab, ports } => {
         ports.iter_mut().for_each(Tree::coalesce_constructors);
-        match ports.pop() {
-          Some(Tree::Ctr { lab: inner_lab, ports: mut inner_ports })
-            if inner_lab == *lab && ports.len() + inner_ports.len() < MAX_ARITY =>
+        match &mut ports.pop() {
+          Some(Tree::Ctr { lab: inner_lab, ports: inner_ports })
+            if inner_lab == lab && ports.len() + inner_ports.len() < MAX_ARITY =>
           {
             ports.extend(inner_ports.drain(..));
           }
-          Some(other) => ports.push(other),
+          Some(other) => ports.push(std::mem::take(other)),
           None => (),
         }
       }
