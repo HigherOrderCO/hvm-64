@@ -61,13 +61,14 @@ impl<'a, E: Encoder> State<'a, E> {
     self.visit_tree(tree, trg);
   }
   fn visit_tree(&mut self, tree: &'a Tree, trg: E::Trg) {
+    static ERA: Tree = Tree::Era;
     maybe_grow(move || match tree {
       Tree::Era => self.encoder.link_const(trg, Port::ERA),
       Tree::Num { val } => self.encoder.link_const(trg, Port::new_num(*val)),
       Tree::Ref { nam } => self.encoder.link_const(trg, Port::new_ref(&self.host.defs[nam])),
       Tree::Ctr { lab, ports } => {
         if ports.is_empty() {
-          return self.visit_tree(&Tree::Era, trg);
+          return self.visit_tree(&ERA, trg);
         }
         let mut trg = trg;
         for port in &ports[0 .. ports.len() - 1] {
@@ -81,7 +82,7 @@ impl<'a, E: Encoder> State<'a, E> {
         let mut trg = trg;
         for _ in 0 .. *variant_index {
           let (l, r) = self.encoder.ctr(*lab, trg);
-          self.visit_tree(&Tree::Era, l);
+          self.visit_tree(&ERA, l);
           trg = r;
         }
         let (mut l, mut r) = self.encoder.ctr(*lab, trg);
@@ -92,7 +93,7 @@ impl<'a, E: Encoder> State<'a, E> {
         }
         for _ in 0 .. (*variant_count - *variant_index - 1) {
           let (x, y) = self.encoder.ctr(*lab, r);
-          self.visit_tree(&Tree::Era, x);
+          self.visit_tree(&ERA, x);
           r = y;
         }
         self.encoder.link(l, r);
