@@ -184,8 +184,12 @@ impl Tree {
     }
   }
 
-  pub fn legacy_mat(arms: Tree, out: Tree) -> Option<Tree> {
-    let Tree::Ctr { lab: 0, ports } = arms else { None? };
+  pub fn legacy_mat(mut arms: Tree, out: Tree) -> Option<Tree> {
+    let ports = if let Tree::Ctr { lab: 0, ports } = &mut arms {
+      std::mem::take(ports)
+    } else {
+      return None;
+    };
     let Ok([zero, succ]) = <[_; 2]>::try_from(ports) else { None? };
     let zero = Box::new(zero);
     let succ = Box::new(succ);
@@ -529,6 +533,7 @@ impl fmt::Display for Tree {
     })
   }
 }
+
 impl Clone for Tree {
   fn clone(&self) -> Tree {
     maybe_grow(|| match self {
@@ -546,5 +551,38 @@ impl Clone for Tree {
       },
       Tree::Var { nam } => Tree::Var { nam: nam.clone() },
     })
+  }
+}
+
+impl Drop for Tree {
+  fn drop(&mut self) {
+    fn take_children(tree: &mut Tree, stack: &mut Vec<Tree>) {
+      match tree {
+        Tree::Ctr { ports, .. } => stack.append(ports),
+        Tree::Op { rhs, out, .. } => {
+          stack.push(std::mem::take(rhs.as_mut()));
+          stack.push(std::mem::take(out.as_mut()));
+        }
+        Tree::Mat { zero, succ, out } => {
+          stack.push(std::mem::take(zero.as_mut()));
+          stack.push(std::mem::take(succ.as_mut()));
+          stack.push(std::mem::take(out.as_mut()));
+        }
+        Tree::Adt { fields, .. } => stack.append(fields),
+        Tree::Era | Tree::Num { .. } | Tree::Ref { .. } | Tree::Var { .. } => {}
+      }
+    }
+
+    // Shortcut if we know it has no children
+    if matches!(self, Tree::Era | Tree::Num { .. } | Tree::Ref { .. } | Tree::Var { .. }) {
+      return;
+    }
+
+    let mut stack = vec![];
+    take_children(self, &mut stack);
+
+    while let Some(mut term) = stack.pop() {
+      take_children(&mut term, &mut stack);
+    }
   }
 }
