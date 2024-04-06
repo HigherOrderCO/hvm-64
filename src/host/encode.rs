@@ -99,9 +99,14 @@ impl<'a, E: Encoder> State<'a, E> {
         self.encoder.link(l, r);
       }
       Tree::Op { op, rhs: lft, out: rgt } => {
-        let (l, r) = self.encoder.op(*op, trg);
-        self.visit_tree(lft, l);
-        self.visit_tree(rgt, r);
+        if let Tree::Num { val } = &**lft {
+          let o = self.encoder.op_num(*op, trg, *val);
+          self.visit_tree(rgt, o);
+        } else {
+          let (l, r) = self.encoder.op(*op, trg);
+          self.visit_tree(lft, l);
+          self.visit_tree(rgt, r);
+        }
       }
       Tree::Mat { zero, succ, out } => {
         let (a, o) = self.encoder.mat(trg);
