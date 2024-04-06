@@ -46,7 +46,6 @@ impl<'a, M: Mode> Net<'a, M> {
   /// Annihilates two binary agents.
   ///
   /// ```text
-  ///  
   ///         a2 |   | a1
   ///           _|___|_
   ///           \     /
@@ -68,7 +67,6 @@ impl<'a, M: Mode> Net<'a, M> {
   ///             / \
   ///            |   |
   ///         b1 |   | b2
-  ///  
   /// ```
   #[inline(never)]
   pub fn anni2(&mut self, a: Port, b: Port) {
@@ -83,7 +81,6 @@ impl<'a, M: Mode> Net<'a, M> {
   /// Commutes two binary agents.
   ///
   /// ```text
-  ///  
   ///         a2 |   | a1
   ///           _|___|_
   ///           \     /
@@ -115,7 +112,6 @@ impl<'a, M: Mode> Net<'a, M> {
   ///       \ /       \ /
   ///        |         |
   ///     b1 |         | b2
-  ///  
   /// ```
   #[inline(never)]
   pub fn comm22(&mut self, a: Port, b: Port) {
@@ -146,7 +142,6 @@ impl<'a, M: Mode> Net<'a, M> {
   /// Commutes a nilary agent and a binary agent.
   ///
   /// ```text
-  ///  
   ///         a  (---)
   ///              |
   ///              |
@@ -161,7 +156,6 @@ impl<'a, M: Mode> Net<'a, M> {
   ///     a (---)   (---) a
   ///         |       |
   ///      b1 |       | b2
-  ///  
   /// ```
   #[inline(never)]
   pub fn comm02(&mut self, a: Port, b: Port) {
@@ -229,33 +223,33 @@ impl<'a, M: Mode> Net<'a, M> {
   /// Interacts a number and a binary numeric operation node.
   ///
   /// ```text
-  ///                             |  
-  ///         b   (n)             |         b   (n)    
-  ///              |              |              |      
-  ///              |              |              |       
-  ///             / \             |             / \       
-  ///         a  /op \            |         a  /op \       
-  ///           /_____\           |           /_____\       
-  ///            |   |            |            |   |         
-  ///           (m)  | a2         |         a1 |   | a2       
-  ///                             |                            
+  ///                             |
+  ///         b   (n)             |         b   (n)
+  ///              |              |              |
+  ///              |              |              |
+  ///             / \             |             / \
+  ///         a  /op \            |         a  /op \
+  ///           /_____\           |           /_____\
+  ///            |   |            |            |   |
+  ///           (m)  | a2         |         a1 |   | a2
+  ///                             |
   /// --------------------------- | --------------------------- op_num
   ///                             |           _ _ _
   ///                             |         /       \
-  ///                             |        |  (n)    |   
-  ///                             |       _|___|_    |   
-  ///                             |       \     /    |   
-  ///                             |     x  \op$/     |   
-  ///            (n op m)         |         \ /      |   
-  ///                |            |          |       |   
-  ///                | a2         |       a1 |       | a2  
-  ///                             |  
+  ///                             |        |  (n)    |
+  ///                             |       _|___|_    |
+  ///                             |       \     /    |
+  ///                             |     x  \op$/     |
+  ///            (n op m)         |         \ /      |
+  ///                |            |          |       |
+  ///                | a2         |       a1 |       | a2
+  ///                             |
   /// ```
   #[inline(never)]
   pub fn op_num(&mut self, a: Port, b: Port) {
     trace!(self.tracer, a, b);
     let a = a.consume_node();
-    let op = unsafe { Op::from_unchecked(a.lab) };
+    let op = unsafe { Op::try_from(a.lab).unwrap_unchecked() };
     let a1 = a.p1.load_target();
     if a1.tag() == Num {
       self.rwts.oper += 1;
@@ -264,7 +258,7 @@ impl<'a, M: Mode> Net<'a, M> {
       self.link_wire_port(a.p2, Port::new_num(out));
     } else {
       let op = op.swap();
-      let x = self.create_node(Op, op as u16);
+      let x = self.create_node(Op, op.into());
       trace!(self.tracer, x.p0);
       self.link_port_port(x.p1, b);
       self.link_wire_port(a.p2, x.p2);

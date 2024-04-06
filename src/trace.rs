@@ -362,7 +362,7 @@ impl TraceArg for Trg {
 
 impl TraceArg for Op {
   fn to_word(&self) -> u64 {
-    *self as u64
+    u16::from(*self) as u64
   }
   fn from_word(word: u64) -> impl Debug {
     unsafe { Op::try_from(word as u16).unwrap_unchecked() }

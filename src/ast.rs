@@ -57,7 +57,7 @@ pub enum Tree {
   /// A nilary eraser node.
   Era,
   /// A native 60-bit integer.
-  Num { val: u64 },
+  Num { val: i64 },
   /// A nilary node, referencing a named net.
   Ref { nam: String },
   /// A n-ary interaction combinator.
@@ -304,9 +304,15 @@ impl<'i> Parser<'i> {
         // Num = "#" Int
         Some('#') => {
           self.advance_char();
-          Ok(Tree::Num { val: self.parse_int()? })
+          match self.peek_char() {
+            Some('-') => {
+              self.advance_char();
+              Ok(Tree::Num { val: -(self.parse_int()? as i64) })
+            }
+            _ => Ok(Tree::Num { val: self.parse_int()? as i64 }),
+          }
         }
-        // Op = "<" Op Tree Tree ">" | "<" Int Op Tree ">"
+        // Op = "<" Op Tree Tree ">"
         Some('<') => {
           self.advance_char();
           let op = self.parse_op()?;
@@ -373,7 +379,7 @@ impl<'i> Parser<'i> {
 
   /// See `ops.rs` for the available operators.
   fn parse_op(&mut self) -> Result<Op, String> {
-    let op = self.take_while(|c| "+-=*/%<>|&^!?$".contains(c));
+    let op = self.take_while(|c| "ui0123456789.+-=*/%<>|&^!?$".contains(c));
     op.parse().map_err(|_| format!("Unknown operator: {op:?}"))
   }
 
