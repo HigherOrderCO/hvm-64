@@ -95,8 +95,8 @@ fn compile_port(host: &Host, port: &Port) -> String {
   } else if port.tag() == Tag::Ref {
     let name = sanitize_name(&host.back[&port.addr()]);
     format!("Port::new_ref(unsafe {{ &*DEF_{name} }})")
-  } else if port.tag() == Tag::Num {
-    format!("Port::new_num({})", port.num())
+  } else if port.tag() == Tag::Int {
+    format!("Port::new_num({})", port.int())
   } else {
     unreachable!()
   }

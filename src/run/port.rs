@@ -5,7 +5,7 @@ use super::*;
 /// The type of a port is determined by its *tag*, which is stored in the bottom
 /// three bits.
 ///
-/// All tags other than [`Num`] divide the bits of the port as follows:
+/// All tags other than [`Int`] divide the bits of the port as follows:
 /// - the top 16 bits are the *label*, accessible with [`Port::lab`]
 /// - the middle 45 bits are the non-alignment bits of the *address*, an
 ///   8-byte-aligned pointer accessible with [`Port::addr`]
@@ -49,13 +49,14 @@ bi_enum! {
     /// Eraser nodes are represented by a null-pointer `Ref`, available as the
     /// constant [`Port::ERA`].
     Ref = 2,
-    /// A `Num` port represents the principal port of a U60 node.
+    /// A `Int` port represents the principal port of an integer node.
     ///
-    /// The top 60 bits of the port are the value of this node, and are
-    /// accessible with [`Port::num`].
+    /// The top 60 bits of the port are the value of this node, which
+    /// may be one of i8, i16, i32, u8, u16, u32, or u60, and are
+    /// accessible with [`Port::int`].
     ///
     /// The 4th bit from the bottom is currently unused in this port.
-    Num = 3,
+    Int = 3,
     /// An `Op` port represents the principal port of an Op node.
     ///
     /// The label of this port is the corresponding operation, which can be
@@ -95,7 +96,7 @@ impl fmt::Debug for Port {
       Port::GONE => write!(f, "[GONE]"),
       Port::LOCK => write!(f, "[LOCK]"),
       _ => match self.tag() {
-        Num => write!(f, "[Num {}]", self.num()),
+        Int => write!(f, "[Int {}]", self.int()),
         Var | Red | Mat => write!(f, "[{:?} {:?}]", self.tag(), self.addr()),
         Op | Ctr | Ref => write!(f, "[{:?} {:?} {:?}]", self.tag(), self.lab(), self.addr()),
       },
@@ -128,10 +129,10 @@ impl Port {
     Port::new(Var, 0, addr)
   }
 
-  /// Creates a new [`Num`] port with a given 60-bit numeric value.
+  /// Creates a new [`Int`] port with a given 60-bit numeric value.
   #[inline(always)]
   pub const fn new_num(val: i64) -> Self {
-    Port((val << 4) as u64 | (Num as u64))
+    Port((val << 4) as u64 | (Int as u64))
   }
 
   /// Creates a new [`Ref`] port corresponding to a given definition.
@@ -151,13 +152,13 @@ impl Port {
     self.tag() == tag
   }
 
-  /// Accesses the label of this port; this is valid for all non-`Num` ports.
+  /// Accesses the label of this port; this is valid for all non-`Int` ports.
   #[inline(always)]
   pub const fn lab(&self) -> Lab {
     (self.0 >> 48) as Lab
   }
 
-  /// Accesses the addr of this port; this is valid for all non-`Num` ports.
+  /// Accesses the addr of this port; this is valid for all non-`Int` ports.
   #[inline(always)]
   pub const fn addr(&self) -> Addr {
     Addr((self.0 & 0x0000_FFFF_FFFF_FFF8) as usize as _)
@@ -170,9 +171,9 @@ impl Port {
     unsafe { self.lab().try_into().unwrap_unchecked() }
   }
 
-  /// Accesses the numeric value of this port; this is valid for [`Num`] ports.
+  /// Accesses the integer value of this port; this is valid for [`Int`] ports.
   #[inline(always)]
-  pub const fn num(&self) -> i64 {
+  pub const fn int(&self) -> i64 {
     self.0 as i64 >> 4
   }
 
@@ -193,7 +194,7 @@ impl Port {
   /// need to be added to the redex list.
   #[inline(always)]
   pub fn is_skippable(&self) -> bool {
-    self.tag() == Num || self.tag() == Ref && self.lab() != u16::MAX
+    self.tag() == Int || self.tag() == Ref && self.lab() != u16::MAX
   }
 
   /// Converts a [`Var`] port into a [`Red`] port with the same address.
@@ -209,6 +210,6 @@ impl Port {
   }
 
   pub(super) fn is_full_node(&self) -> bool {
-    self.tag() > Num
+    self.tag() > Int
   }
 }

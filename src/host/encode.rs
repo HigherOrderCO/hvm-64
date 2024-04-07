@@ -48,7 +48,7 @@ impl<'a, E: Encoder> State<'a, E> {
     let (port, tree) = match (a, b) {
       (Tree::Era, t) | (t, Tree::Era) => (Port::ERA, t),
       (Tree::Ref { nam }, t) | (t, Tree::Ref { nam }) => (Port::new_ref(&self.host.defs[nam]), t),
-      (Tree::Num { val }, t) | (t, Tree::Num { val }) => (Port::new_num(*val), t),
+      (Tree::Int { val }, t) | (t, Tree::Int { val }) => (Port::new_num(*val), t),
       (t, u) => {
         let (av, aw, bv, bw) = self.encoder.wires();
         self.visit_tree(t, av);
@@ -64,7 +64,7 @@ impl<'a, E: Encoder> State<'a, E> {
     static ERA: Tree = Tree::Era;
     maybe_grow(move || match tree {
       Tree::Era => self.encoder.link_const(trg, Port::ERA),
-      Tree::Num { val } => self.encoder.link_const(trg, Port::new_num(*val)),
+      Tree::Int { val } => self.encoder.link_const(trg, Port::new_num(*val)),
       Tree::Ref { nam } => self.encoder.link_const(trg, Port::new_ref(&self.host.defs[nam])),
       Tree::Ctr { lab, ports } => {
         if ports.is_empty() {
@@ -99,7 +99,7 @@ impl<'a, E: Encoder> State<'a, E> {
         self.encoder.link(l, r);
       }
       Tree::Op { op, rhs: lft, out: rgt } => {
-        if let Tree::Num { val } = &**lft {
+        if let Tree::Int { val } = &**lft {
           let o = self.encoder.op_num(*op, trg, *val);
           self.visit_tree(rgt, o);
         } else {

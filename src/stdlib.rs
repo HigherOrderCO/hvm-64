@@ -219,8 +219,8 @@ impl<F: FnOnce(DynNetMut) + Send + Sync + 'static> AsBoxDef for ReadbackDef<F> {
       Tag::Ref => {
         unsafe { *(def.data.tree.0) = Tree::Era };
       }
-      Tag::Num => {
-        unsafe { *(def.data.tree.0) = Tree::Num { val: port.num() } };
+      Tag::Int => {
+        unsafe { *(def.data.tree.0) = Tree::Int { val: port.int() } };
       }
       Tag::Mat => {
         unsafe {

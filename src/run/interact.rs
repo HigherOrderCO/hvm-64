@@ -10,9 +10,9 @@ impl<'a, M: Mode> Net<'a, M> {
       // not actually an active pair
       (Var | Red, _) | (_, Var | Red) => unreachable!(),
       // nil-nil
-      (Ref, Ref | Num) if !a.is_skippable() => self.call(a, b),
-      (Ref | Num, Ref) if !b.is_skippable() => self.call(b, a),
-      (Num | Ref, Num | Ref) => self.rwts.eras += 1,
+      (Ref, Ref | Int) if !a.is_skippable() => self.call(a, b),
+      (Ref | Int, Ref) if !b.is_skippable() => self.call(b, a),
+      (Int | Ref, Int | Ref) => self.rwts.eras += 1,
       // comm 2/2
       (Ctr, Mat) if a.lab() != 0 => self.comm22(a, b),
       (Mat, Ctr) if b.lab() != 0 => self.comm22(a, b),
@@ -23,18 +23,18 @@ impl<'a, M: Mode> Net<'a, M> {
       // comm 2/0
       (Ref, Ctr) if b.lab() >= a.lab() => self.comm02(a, b),
       (Ctr, Ref) if a.lab() >= b.lab() => self.comm02(b, a),
-      (Num, Ctr) => self.comm02(a, b),
-      (Ctr, Num) => self.comm02(b, a),
+      (Int, Ctr) => self.comm02(a, b),
+      (Ctr, Int) => self.comm02(b, a),
       (Ref, _) if a == Port::ERA => self.comm02(a, b),
       (_, Ref) if b == Port::ERA => self.comm02(b, a),
       // deref
       (Ref, _) => self.call(a, b),
       (_, Ref) => self.call(b, a),
       // native ops
-      (Op, Num) => self.op_num(a, b),
-      (Num, Op) => self.op_num(b, a),
-      (Mat, Num) => self.mat_num(a, b),
-      (Num, Mat) => self.mat_num(b, a),
+      (Op, Int) => self.op_num(a, b),
+      (Int, Op) => self.op_num(b, a),
+      (Mat, Int) => self.mat_num(a, b),
+      (Int, Mat) => self.mat_num(b, a),
       // todo: what should the semantics of these be?
       (Mat, Ctr) // b.lab() == 0
       | (Ctr, Mat) // a.lab() == 0
@@ -201,7 +201,7 @@ impl<'a, M: Mode> Net<'a, M> {
     trace!(self.tracer, a, b);
     self.rwts.oper += 1;
     let a = a.consume_node();
-    let b = b.num();
+    let b = b.int();
     if b == 0 {
       let x = self.create_node(Ctr, 0);
       trace!(self.tracer, x.p0);
@@ -251,10 +251,10 @@ impl<'a, M: Mode> Net<'a, M> {
     let a = a.consume_node();
     let op = unsafe { Op::try_from(a.lab).unwrap_unchecked() };
     let a1 = a.p1.load_target();
-    if a1.tag() == Num {
+    if a1.tag() == Int {
       self.rwts.oper += 1;
       self.half_free(a.p1.addr());
-      let out = op.op(b.num(), a1.num());
+      let out = op.op(b.int(), a1.int());
       self.link_wire_port(a.p2, Port::new_num(out));
     } else {
       let op = op.swap();

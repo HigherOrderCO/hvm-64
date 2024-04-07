@@ -111,7 +111,7 @@ impl<'a> Phase1<'a> {
         }
       }
       Tree::Era => self.nodes.push(NodeType::Era),
-      Tree::Num { val } => self.nodes.push(NodeType::Num(*val)),
+      Tree::Int { val } => self.nodes.push(NodeType::Num(*val)),
       _ => {
         self.nodes.push(NodeType::Other);
         for i in tree.children() {
