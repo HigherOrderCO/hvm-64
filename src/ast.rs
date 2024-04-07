@@ -11,6 +11,7 @@
 //! [interaction calculus]: https://en.wikipedia.org/wiki/Interaction_nets#Interaction_calculus
 
 use arrayvec::ArrayVec;
+use ordered_float::OrderedFloat;
 
 use crate::{
   ops::Op,
@@ -58,6 +59,8 @@ pub enum Tree {
   Era,
   /// A native 60-bit integer.
   Int { val: i64 },
+  /// A native 32-bit float.
+  F32 { val: OrderedFloat<f32> },
   /// A nilary node, referencing a named net.
   Ref { nam: String },
   /// A n-ary interaction combinator.
@@ -157,7 +160,9 @@ impl Tree {
   #[inline(always)]
   pub fn children(&self) -> impl Iterator<Item = &Tree> + ExactSizeIterator + DoubleEndedIterator {
     ArrayVec::<_, MAX_ARITY>::into_iter(match self {
-      Tree::Era | Tree::Int { .. } | Tree::Ref { .. } | Tree::Var { .. } => array_vec::from_array([]),
+      Tree::Era | Tree::Int { .. } | Tree::F32 { .. } | Tree::Ref { .. } | Tree::Var { .. } => {
+        array_vec::from_array([])
+      }
       Tree::Ctr { ports, .. } => array_vec::from_iter(ports),
       Tree::Op { rhs, out, .. } => array_vec::from_array([rhs, out]),
       Tree::Mat { zero, succ, out } => array_vec::from_array([zero, succ, out]),
@@ -168,7 +173,9 @@ impl Tree {
   #[inline(always)]
   pub fn children_mut(&mut self) -> impl Iterator<Item = &mut Tree> + ExactSizeIterator + DoubleEndedIterator {
     ArrayVec::<_, MAX_ARITY>::into_iter(match self {
-      Tree::Era | Tree::Int { .. } | Tree::Ref { .. } | Tree::Var { .. } => array_vec::from_array([]),
+      Tree::Era | Tree::Int { .. } | Tree::F32 { .. } | Tree::Ref { .. } | Tree::Var { .. } => {
+        array_vec::from_array([])
+      }
       Tree::Ctr { ports, .. } => array_vec::from_iter(ports),
       Tree::Op { rhs, out, .. } => array_vec::from_array([rhs, out]),
       Tree::Mat { zero, succ, out } => array_vec::from_array([zero, succ, out]),
@@ -531,6 +538,7 @@ impl fmt::Display for Tree {
       Tree::Var { nam } => write!(f, "{nam}"),
       Tree::Ref { nam } => write!(f, "@{nam}"),
       Tree::Int { val } => write!(f, "#{val}"),
+      Tree::F32 { val } => write!(f, "#{val}"),
       Tree::Op { op, rhs, out } => write!(f, "<{op} {rhs} {out}>"),
       Tree::Mat { zero, succ, out } => write!(f, "?<{zero} {succ} {out}>"),
     })
@@ -543,6 +551,7 @@ impl Clone for Tree {
     maybe_grow(|| match self {
       Tree::Era => Tree::Era,
       Tree::Int { val } => Tree::Int { val: val.clone() },
+      Tree::F32 { val } => Tree::F32 { val: val.clone() },
       Tree::Ref { nam } => Tree::Ref { nam: nam.clone() },
       Tree::Ctr { lab, ports } => Tree::Ctr { lab: lab.clone(), ports: ports.clone() },
       Tree::Op { op, rhs, out } => Tree::Op { op: op.clone(), rhs: rhs.clone(), out: out.clone() },

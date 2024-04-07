@@ -222,6 +222,9 @@ impl<F: FnOnce(DynNetMut) + Send + Sync + 'static> AsBoxDef for ReadbackDef<F> {
       Tag::Int => {
         unsafe { *(def.data.tree.0) = Tree::Int { val: port.int() } };
       }
+      Tag::F32 => {
+        unsafe { *(def.data.tree.0) = Tree::F32 { val: port.float().into() } };
+      }
       Tag::Mat => {
         unsafe {
           *(def.data.tree.0) =

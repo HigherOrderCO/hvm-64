@@ -10,9 +10,9 @@ impl<'a, M: Mode> Net<'a, M> {
       // not actually an active pair
       (Var | Red, _) | (_, Var | Red) => unreachable!(),
       // nil-nil
-      (Ref, Ref | Int) if !a.is_skippable() => self.call(a, b),
-      (Ref | Int, Ref) if !b.is_skippable() => self.call(b, a),
-      (Int | Ref, Int | Ref) => self.rwts.eras += 1,
+      (Ref, Ref | Int | F32) if !a.is_skippable() => self.call(a, b),
+      (Ref | Int | F32, Ref) if !b.is_skippable() => self.call(b, a),
+      (Int | F32 | Ref, Int | F32 | Ref) => self.rwts.eras += 1,
       // comm 2/2
       (Ctr, Mat) if a.lab() != 0 => self.comm22(a, b),
       (Mat, Ctr) if b.lab() != 0 => self.comm22(a, b),
@@ -23,8 +23,8 @@ impl<'a, M: Mode> Net<'a, M> {
       // comm 2/0
       (Ref, Ctr) if b.lab() >= a.lab() => self.comm02(a, b),
       (Ctr, Ref) if a.lab() >= b.lab() => self.comm02(b, a),
-      (Int, Ctr) => self.comm02(a, b),
-      (Ctr, Int) => self.comm02(b, a),
+      (Int | F32, Ctr) => self.comm02(a, b),
+      (Ctr, Int | F32) => self.comm02(b, a),
       (Ref, _) if a == Port::ERA => self.comm02(a, b),
       (_, Ref) if b == Port::ERA => self.comm02(b, a),
       // deref
@@ -33,10 +33,14 @@ impl<'a, M: Mode> Net<'a, M> {
       // native ops
       (Op, Int) => self.op_int(a, b),
       (Int, Op) => self.op_int(b, a),
-      (Mat, Int) => self.mat_num(a, b),
-      (Int, Mat) => self.mat_num(b, a),
+      (Mat, Int) => self.mat_int(a, b),
+      (Int, Mat) => self.mat_int(b, a),
       // todo: what should the semantics of these be?
-      (Mat, Ctr) // b.lab() == 0
+      (Op, F32)
+      | (F32, Op)
+      | (Mat, F32)
+      | (F32, Mat)
+      | (Mat, Ctr) // b.lab() == 0
       | (Ctr, Mat) // a.lab() == 0
       | (Op, Mat)
       | (Mat, Op) => unimplemented!("{:?}-{:?}", a.tag(), b.tag()),
@@ -179,7 +183,7 @@ impl<'a, M: Mode> Net<'a, M> {
   ///            |   |            |            |   |
   ///         a1 |   | a2         |         a1 |   | a2
   ///                             |
-  /// --------------------------- | --------------------------- mat_num
+  /// --------------------------- | --------------------------- mat_int
   ///                             |          _ _ _ _ _
   ///                             |        /           \
   ///                             |    y2 |  (n) y1     |
@@ -197,7 +201,7 @@ impl<'a, M: Mode> Net<'a, M> {
   ///                             |
   /// ```
   #[inline(never)]
-  pub fn mat_num(&mut self, a: Port, b: Port) {
+  pub fn mat_int(&mut self, a: Port, b: Port) {
     trace!(self.tracer, a, b);
     self.rwts.oper += 1;
     let a = a.consume_node();

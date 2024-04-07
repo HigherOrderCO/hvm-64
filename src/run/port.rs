@@ -51,9 +51,9 @@ bi_enum! {
     Ref = 2,
     /// A `Int` port represents the principal port of an integer node.
     ///
-    /// The top 60 bits of the port are the value of this node, which
-    /// may be one of i8, i16, i32, u8, u16, u32, or u60, and are
-    /// accessible with [`Port::int`].
+    /// The top 60 bits of the port are the value of this node is
+    /// accessible with [`Port::int`]. The type of the value may be one of
+    /// i8, i16, i32, u8, u16, u32, or u60.
     ///
     /// The 4th bit from the bottom is currently unused in this port.
     Int = 3,
@@ -66,6 +66,14 @@ bi_enum! {
     /// storing the targets of the wires connected to the two auxiliary ports of
     /// this node.
     Op = 4,
+    /// An `F32` port represents the principal port of an 32-bit floating
+    /// point node.
+    ///
+    /// The top 32 bits of the port are the value of this node and is
+    /// accessible with [`Port::float`].
+    ///
+    /// The 4th bit from the bottom is currently unused in this port.
+    F32 = 5,
     /// A `Mat` port represents the principal port of a Mat node.
     ///
     /// The address of this port is the address of a two-word allocation,
@@ -97,6 +105,7 @@ impl fmt::Debug for Port {
       Port::LOCK => write!(f, "[LOCK]"),
       _ => match self.tag() {
         Int => write!(f, "[Int {}]", self.int()),
+        F32 => write!(f, "[F32 {}]", self.float()),
         Var | Red | Mat => write!(f, "[{:?} {:?}]", self.tag(), self.addr()),
         Op | Ctr | Ref => write!(f, "[{:?} {:?} {:?}]", self.tag(), self.lab(), self.addr()),
       },
@@ -133,6 +142,12 @@ impl Port {
   #[inline(always)]
   pub const fn new_int(val: i64) -> Self {
     Port((val << 4) as u64 | (Int as u64))
+  }
+
+  /// Creates a new [`F32`] port with a given 60-bit numeric value.
+  #[inline(always)]
+  pub const fn new_float(val: f32) -> Self {
+    Port((unsafe { std::mem::transmute::<_, u32>(val) as u64 } << 32) | (F32 as u64))
   }
 
   /// Creates a new [`Ref`] port corresponding to a given definition.
@@ -175,6 +190,12 @@ impl Port {
   #[inline(always)]
   pub const fn int(&self) -> i64 {
     self.0 as i64 >> 4
+  }
+
+  /// Accesses the float value of this port; this is valid for [`F32`] ports.
+  #[inline(always)]
+  pub const fn float(&self) -> f32 {
+    unsafe { std::mem::transmute((self.0 >> 32) as u32) }
   }
 
   /// Accesses the wire leaving this port; this is valid for [`Var`] ports and

@@ -65,6 +65,7 @@ impl<'a, E: Encoder> State<'a, E> {
     maybe_grow(move || match tree {
       Tree::Era => self.encoder.link_const(trg, Port::ERA),
       Tree::Int { val } => self.encoder.link_const(trg, Port::new_int(*val)),
+      Tree::F32 { val } => self.encoder.link_const(trg, Port::new_float(val.0)),
       Tree::Ref { nam } => self.encoder.link_const(trg, Port::new_ref(&self.host.defs[nam])),
       Tree::Ctr { lab, ports } => {
         if ports.is_empty() {
