@@ -23,7 +23,7 @@ fn _compile_host(host: &Host) -> Result<String, fmt::Error> {
     .map(|(raw_name, def)| (raw_name, sanitize_name(raw_name), def));
 
   writeln!(code, "#![allow(non_upper_case_globals, unused_imports)]")?;
-  writeln!(code, "use crate::{{host::{{Host, DefRef}}, run::*, ops::{{Op, Ty::*, IntOp::*}}}};")?;
+  writeln!(code, "use crate::{{host::{{Host, DefRef}}, run::*, ops::{{Op, Ty::*, BinOp::*}}}};")?;
   writeln!(code)?;
 
   writeln!(code, "pub fn host() -> Host {{")?;
