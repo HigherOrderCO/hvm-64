@@ -75,7 +75,7 @@ impl Net {
 enum NodeType {
   Ctr(u16),
   Var(isize),
-  Num(i64),
+  Int(i64),
   Era,
   Other,
   Hole,
@@ -111,7 +111,7 @@ impl<'a> Phase1<'a> {
         }
       }
       Tree::Era => self.nodes.push(NodeType::Era),
-      Tree::Int { val } => self.nodes.push(NodeType::Num(*val)),
+      Tree::Int { val } => self.nodes.push(NodeType::Int(*val)),
       _ => {
         self.nodes.push(NodeType::Other);
         for i in tree.children() {
@@ -141,7 +141,7 @@ impl Phase2 {
     if a == b {
       let reducible = match a {
         NodeType::Var(delta) => self.nodes[head_index.wrapping_add_signed(delta)] == NodeType::Ctr(lab),
-        NodeType::Era | NodeType::Num(_) => true,
+        NodeType::Era | NodeType::Int(_) => true,
         _ => false,
       };
       if reducible {
