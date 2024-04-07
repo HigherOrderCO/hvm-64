@@ -131,7 +131,7 @@ impl Port {
 
   /// Creates a new [`Int`] port with a given 60-bit numeric value.
   #[inline(always)]
-  pub const fn new_num(val: i64) -> Self {
+  pub const fn new_int(val: i64) -> Self {
     Port((val << 4) as u64 | (Int as u64))
   }
 

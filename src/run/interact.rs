@@ -214,7 +214,7 @@ impl<'a, M: Mode> Net<'a, M> {
       trace!(self.tracer, x.p0, y.p0);
       self.link_port_port(x.p1, Port::ERA);
       self.link_port_port(x.p2, y.p0);
-      self.link_port_port(y.p1, Port::new_num(b - 1));
+      self.link_port_port(y.p1, Port::new_int(b - 1));
       self.link_wire_port(a.p2, y.p2);
       self.link_wire_port(a.p1, x.p0);
     }
@@ -255,7 +255,7 @@ impl<'a, M: Mode> Net<'a, M> {
       self.rwts.oper += 1;
       self.half_free(a.p1.addr());
       let out = op.op(b.int(), a1.int());
-      self.link_wire_port(a.p2, Port::new_num(out));
+      self.link_wire_port(a.p2, Port::new_int(out));
     } else {
       let op = op.swap();
       let x = self.create_node(Op, op.into());

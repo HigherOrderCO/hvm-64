@@ -138,7 +138,7 @@ impl<'a, M: Mode> Net<'a, M> {
     if !M::LAZY && port.tag() == Int {
       self.free_trg(trg);
       let n = self.create_node(Op, op.swap().into());
-      n.p1.wire().set_target(Port::new_num(port.int()));
+      n.p1.wire().set_target(Port::new_int(port.int()));
       (Trg::port(n.p0), Trg::port(n.p2))
     } else if !M::LAZY && port == Port::ERA {
       self.free_trg(trg);
@@ -157,14 +157,14 @@ impl<'a, M: Mode> Net<'a, M> {
     if !M::LAZY && port.tag() == Int {
       self.rwts.oper += 1;
       self.free_trg(trg);
-      Trg::port(Port::new_num(op.op(port.int(), rhs)))
+      Trg::port(Port::new_int(op.op(port.int(), rhs)))
     } else if !M::LAZY && port == Port::ERA {
       self.free_trg(trg);
       Trg::port(Port::ERA)
     } else {
       let n = self.create_node(Op, op.into());
       self.link_trg_port(trg, n.p0);
-      n.p1.wire().set_target(Port::new_num(rhs));
+      n.p1.wire().set_target(Port::new_int(rhs));
       Trg::port(n.p2)
     }
   }
@@ -185,7 +185,7 @@ impl<'a, M: Mode> Net<'a, M> {
         let c2 = self.create_node(Ctr, 0);
         self.link_port_port(c1.p1, Port::ERA);
         self.link_port_port(c1.p2, c2.p0);
-        self.link_port_port(c2.p1, Port::new_num(num - 1));
+        self.link_port_port(c2.p1, Port::new_int(num - 1));
         (Trg::port(c1.p0), Trg::wire(self.create_wire_to(c2.p2)))
       }
     } else if !M::LAZY && port == Port::ERA {
@@ -223,7 +223,7 @@ impl<'a, M: Mode> Net<'a, M> {
       if num == 0 {
         (out, Trg::port(Port::ERA), Trg::port(Port::ERA))
       } else {
-        (Trg::port(Port::ERA), Trg::port(Port::new_num(num - 1)), out)
+        (Trg::port(Port::ERA), Trg::port(Port::new_int(num - 1)), out)
       }
     } else if !M::LAZY && port == Port::ERA {
       self.link_trg_port(out, Port::ERA);
@@ -252,7 +252,7 @@ impl<'a, M: Mode> Net<'a, M> {
         (out, Trg::port(Port::ERA))
       } else {
         let c2 = self.create_node(Ctr, 0);
-        c2.p1.wire().set_target(Port::new_num(num - 1));
+        c2.p1.wire().set_target(Port::new_int(num - 1));
         self.link_trg_port(out, c2.p2);
         (Trg::port(Port::ERA), Trg::port(c2.p0))
       }
