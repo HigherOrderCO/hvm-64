@@ -32,16 +32,16 @@ macro_rules! impl_num {
       const ZERO: $ty = 0;
       const ONE: $ty = 1;
 
-      fn add(a: $ty, b: $ty) -> $ty { a.wrapping_add(b) }
-      fn sub(a: $ty, b: $ty) -> $ty { a.wrapping_sub(b) }
-      fn mul(a: $ty, b: $ty) -> $ty { a.wrapping_mul(b) }
-      fn div(a: $ty, b: $ty) -> $ty { a.checked_div(b).unwrap_or(0) }
-      fn rem(a: $ty, b: $ty) -> $ty { a.checked_rem(b).unwrap_or(0) }
-      fn and(a: $ty, b: $ty) -> $ty { a & b }
-      fn or(a: $ty, b: $ty) -> $ty { a | b }
-      fn xor(a: $ty, b: $ty) -> $ty { a ^ b }
-      fn shl(a: $ty, b: $ty) -> $ty { a.wrapping_shl(b as u32) }
-      fn shr(a: $ty, b: $ty) -> $ty { a.wrapping_shr(b as u32) }
+      fn add(a: Self, b: Self) -> Self { a.wrapping_add(b) }
+      fn sub(a: Self, b: Self) -> Self { a.wrapping_sub(b) }
+      fn mul(a: Self, b: Self) -> Self { a.wrapping_mul(b) }
+      fn div(a: Self, b: Self) -> Self { a.checked_div(b).unwrap_or(0) }
+      fn rem(a: Self, b: Self) -> Self { a.checked_rem(b).unwrap_or(0) }
+      fn and(a: Self, b: Self) -> Self { a & b }
+      fn or(a: Self, b: Self) -> Self { a | b }
+      fn xor(a: Self, b: Self) -> Self { a ^ b }
+      fn shl(a: Self, b: Self) -> Self { a.wrapping_shl(b as u32) }
+      fn shr(a: Self, b: Self) -> Self { a.wrapping_shr(b as u32) }
     }
     )*
   }
