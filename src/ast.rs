@@ -309,15 +309,15 @@ impl<'i> Parser<'i> {
           Ok(Tree::Ref { nam })
         }
         // Int = "#" Int
+        // TODO: accept fractional and exponential inputs eg 1.5, 1.5e32
+        // F32 = "#f" Int
         Some('#') => {
           self.advance_char();
-          match self.peek_char() {
-            Some('-') => {
-              self.advance_char();
-              Ok(Tree::Int { val: -(self.parse_int()? as i64) })
-            }
-            _ => Ok(Tree::Int { val: self.parse_int()? as i64 }),
-          }
+          let is_float = self.consume("f").is_ok();
+          let is_neg = self.consume("-").is_ok();
+          let int_val = if is_neg { -(self.parse_int()? as i64) } else { self.parse_int()? as i64 };
+
+          if is_float { Ok(Tree::F32 { val: (int_val as f32).into() }) } else { Ok(Tree::Int { val: int_val }) }
         }
         // Op = "<" Op Tree Tree ">"
         Some('<') => {

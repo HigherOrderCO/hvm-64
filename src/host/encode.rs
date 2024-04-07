@@ -134,6 +134,7 @@ trait Encoder {
   fn ctr(&mut self, lab: Lab, trg: Self::Trg) -> (Self::Trg, Self::Trg);
   fn op(&mut self, op: Op, trg: Self::Trg) -> (Self::Trg, Self::Trg);
   fn op_int(&mut self, op: Op, trg: Self::Trg, rhs: i64) -> Self::Trg;
+  fn op_float(&mut self, op: Op, trg: Self::Trg, rhs: f32) -> Self::Trg;
   fn mat(&mut self, trg: Self::Trg) -> (Self::Trg, Self::Trg);
   fn wires(&mut self) -> (Self::Trg, Self::Trg, Self::Trg, Self::Trg);
 }
@@ -173,7 +174,12 @@ impl Encoder for InterpretedDef {
   }
   fn op_int(&mut self, op: Op, trg: Self::Trg, rhs: i64) -> Self::Trg {
     let out = self.new_trg_id();
-    self.instr.push(Instruction::OpNum { op, trg, rhs, out });
+    self.instr.push(Instruction::OpInt { op, trg, rhs, out });
+    out
+  }
+  fn op_float(&mut self, op: Op, trg: Self::Trg, rhs: f32) -> Self::Trg {
+    let out = self.new_trg_id();
+    self.instr.push(Instruction::OpF32 { op, trg, rhs, out });
     out
   }
   fn mat(&mut self, trg: Self::Trg) -> (Self::Trg, Self::Trg) {
@@ -211,6 +217,9 @@ impl<'a, M: Mode> Encoder for run::Net<'a, M> {
   }
   fn op_int(&mut self, op: Op, trg: Self::Trg, rhs: i64) -> Self::Trg {
     self.do_op_int(op, trg, rhs)
+  }
+  fn op_float(&mut self, op: Op, trg: Self::Trg, rhs: f32) -> Self::Trg {
+    self.do_op_float(op, trg, rhs)
   }
   fn mat(&mut self, trg: Self::Trg) -> (Self::Trg, Self::Trg) {
     self.do_mat(trg)

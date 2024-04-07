@@ -258,8 +258,12 @@ impl AsHostedDef for InterpretedDef {
             trgs.set_trg(rhs, r);
             trgs.set_trg(out, o);
           }
-          Instruction::OpNum { op, trg, rhs: lhs, out } => {
+          Instruction::OpInt { op, trg, rhs: lhs, out } => {
             let o = net.do_op_int(op, trgs.get_trg(trg), lhs);
+            trgs.set_trg(out, o);
+          }
+          Instruction::OpF32 { op, trg, rhs: lhs, out } => {
+            let o = net.do_op_float(op, trgs.get_trg(trg), lhs);
             trgs.set_trg(out, o);
           }
           Instruction::Mat { trg, lft, rgt } => {

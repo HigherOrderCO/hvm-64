@@ -1,3 +1,5 @@
+use ordered_float::OrderedFloat;
+
 use crate::util::bi_enum;
 use std::{
   cmp::{Eq, Ord},
@@ -29,8 +31,8 @@ macro_rules! impl_num {
   ( $($ty:ty),+ ) => {
     $(
     impl Num for $ty {
-      const ZERO: $ty = 0;
-      const ONE: $ty = 1;
+      const ZERO: Self = 0;
+      const ONE: Self = 1;
 
       fn add(a: Self, b: Self) -> Self { a.wrapping_add(b) }
       fn sub(a: Self, b: Self) -> Self { a.wrapping_sub(b) }
@@ -49,6 +51,42 @@ macro_rules! impl_num {
 
 impl_num! { u8, u16, u32, u64, i8, i16, i32 }
 
+impl Num for OrderedFloat<f32> {
+  const ZERO: Self = OrderedFloat(0f32);
+  const ONE: Self = OrderedFloat(1f32);
+
+  fn add(a: Self, b: Self) -> Self {
+    a + b
+  }
+  fn sub(a: Self, b: Self) -> Self {
+    a - b
+  }
+  fn mul(a: Self, b: Self) -> Self {
+    a * b
+  }
+  fn div(a: Self, b: Self) -> Self {
+    a / b
+  }
+  fn rem(a: Self, b: Self) -> Self {
+    a % b
+  }
+  fn and(_: Self, _: Self) -> Self {
+    unimplemented!("f32 & f32 unsupported")
+  }
+  fn or(_: Self, _: Self) -> Self {
+    unimplemented!("f32 | f32 unsupported")
+  }
+  fn xor(_: Self, _: Self) -> Self {
+    unimplemented!("f32 ^ f32 unsupported")
+  }
+  fn shl(_: Self, _: Self) -> Self {
+    unimplemented!("f32 << f32 unsupported")
+  }
+  fn shr(_: Self, _: Self) -> Self {
+    unimplemented!("f32 >> f32 unsupported")
+  }
+}
+
 bi_enum! {
   #[repr(u8)]
   /// Native operations on mixed-width integers (u8, u16, u32, u60, i8, i16, i32).
@@ -59,7 +97,7 @@ bi_enum! {
   /// Operations without an already-named counterpart (e.g. `Add <-> Add` and
   /// `Lt <-> Gt`) are suffixed with `$`/`S`: `(-$ 1 2) = (- 2 1) = 1`.
   #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-  pub enum IntOp {
+  pub enum BinOp {
     "+":   Add  = 0,
     "-":   Sub  = 1,
     "-$":  SubS = 2,
@@ -84,7 +122,7 @@ bi_enum! {
   }
 }
 
-impl IntOp {
+impl BinOp {
   /// Returns this operation's swapped counterpart.
   ///
   /// For all `op, a, b`, `op.swap().op(a, b) == op.op(b, a)`.
@@ -160,7 +198,7 @@ bi_enum! {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Op {
   pub ty: Ty,
-  pub op: IntOp,
+  pub op: BinOp,
 }
 
 impl Display for Op {
@@ -178,7 +216,7 @@ impl TryFrom<u16> for Op {
   fn try_from(value: u16) -> Result<Self, Self::Error> {
     let [ty, op] = value.to_be_bytes();
 
-    Ok(Self { ty: Ty::try_from(ty)?, op: IntOp::try_from(op)? })
+    Ok(Self { ty: Ty::try_from(ty)?, op: BinOp::try_from(op)? })
   }
 }
 
@@ -193,8 +231,8 @@ impl FromStr for Op {
 
   fn from_str(s: &str) -> Result<Self, Self::Err> {
     match s.split('.').collect::<Vec<_>>().as_slice() {
-      [ty, op] => Ok(Self { ty: Ty::from_str(ty)?, op: IntOp::from_str(op)? }),
-      [op] => Ok(Self { ty: Ty::U60, op: IntOp::from_str(op)? }),
+      [ty, op] => Ok(Self { ty: Ty::from_str(ty)?, op: BinOp::from_str(op)? }),
+      [op] => Ok(Self { ty: Ty::U60, op: BinOp::from_str(op)? }),
 
       _ => Err(()),
     }
@@ -207,7 +245,7 @@ impl Op {
   }
 
   #[inline]
-  pub fn op(self, a: i64, b: i64) -> i64 {
+  pub fn op_int(self, a: i64, b: i64) -> i64 {
     const U60: i64 = 0xFFF_FFFF_FFFF_FFFF;
 
     match self.ty {
@@ -219,5 +257,10 @@ impl Op {
       Ty::I16 => self.op.op(a as i16, b as i16) as i64,
       Ty::I32 => self.op.op(a as i32, b as i32) as i64,
     }
+  }
+
+  #[inline]
+  pub fn op_float(self, a: f32, b: f32) -> f32 {
+    self.op.op(OrderedFloat(a), OrderedFloat(b)).into()
   }
 }

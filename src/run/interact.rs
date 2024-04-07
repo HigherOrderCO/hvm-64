@@ -33,12 +33,12 @@ impl<'a, M: Mode> Net<'a, M> {
       // native ops
       (Op, Int) => self.op_int(a, b),
       (Int, Op) => self.op_int(b, a),
+      (Op, F32) => self.op_float(a, b),
+      (F32, Op) => self.op_float(b, a),
       (Mat, Int) => self.mat_int(a, b),
       (Int, Mat) => self.mat_int(b, a),
       // todo: what should the semantics of these be?
-      (Op, F32)
-      | (F32, Op)
-      | (Mat, F32)
+      (Mat, F32)
       | (F32, Mat)
       | (Mat, Ctr) // b.lab() == 0
       | (Ctr, Mat) // a.lab() == 0
@@ -224,7 +224,7 @@ impl<'a, M: Mode> Net<'a, M> {
     }
   }
 
-  /// Interacts a number and a binary numeric operation node.
+  /// Interacts an int and a binary numeric operation node.
   ///
   /// ```text
   ///                             |
@@ -258,7 +258,7 @@ impl<'a, M: Mode> Net<'a, M> {
     if a1.tag() == Int {
       self.rwts.oper += 1;
       self.half_free(a.p1.addr());
-      let out = op.op(b.int(), a1.int());
+      let out = op.op_int(b.int(), a1.int());
       self.link_wire_port(a.p2, Port::new_int(out));
     } else {
       let op = op.swap();
@@ -267,6 +267,64 @@ impl<'a, M: Mode> Net<'a, M> {
       self.link_port_port(x.p1, b);
       self.link_wire_port(a.p2, x.p2);
       self.link_wire_port(a.p1, x.p0);
+    }
+  }
+
+  /// Interacts a float and a binary numeric operation node.
+  ///
+  /// ```text
+  ///                             |
+  ///         b   (n)             |         b   (n)
+  ///              |              |              |
+  ///              |              |              |
+  ///             / \             |             / \
+  ///         a  /op \            |         a  /op \
+  ///           /_____\           |           /_____\
+  ///            |   |            |            |   |
+  ///           (m)  | a2         |         a1 |   | a2
+  ///                             |
+  /// --------------------------- | --------------------------- op_float
+  ///                             |           _ _ _
+  ///                             |         /       \
+  ///                             |        |  (n)    |
+  ///                             |       _|___|_    |
+  ///                             |       \     /    |
+  ///                             |     x  \op$/     |
+  ///            (n op m)         |         \ /      |
+  ///                |            |          |       |
+  ///                | a2         |       a1 |       | a2
+  ///                             |
+  /// ```
+  #[inline(never)]
+  pub fn op_float(&mut self, a: Port, b: Port) {
+    trace!(self.tracer, a, b);
+    let a = a.consume_node();
+    let op = unsafe { Op::try_from(a.lab).unwrap_unchecked() };
+    let a1 = a.p1.load_target();
+
+    match a1.tag() {
+      Int => {
+        self.rwts.oper += 1;
+        self.half_free(a.p1.addr());
+        let out = op.op_float(b.float(), a1.int() as f32);
+        self.link_wire_port(a.p2, Port::new_float(out));
+      }
+
+      F32 => {
+        self.rwts.oper += 1;
+        self.half_free(a.p1.addr());
+        let out = op.op_float(b.float(), a1.float());
+        self.link_wire_port(a.p2, Port::new_float(out));
+      }
+
+      _ => {
+        let op = op.swap();
+        let x = self.create_node(Op, op.into());
+        trace!(self.tracer, x.p0);
+        self.link_port_port(x.p1, b);
+        self.link_wire_port(a.p2, x.p2);
+        self.link_wire_port(a.p1, x.p0);
+      }
     }
   }
 }
