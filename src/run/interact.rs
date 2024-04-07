@@ -31,8 +31,8 @@ impl<'a, M: Mode> Net<'a, M> {
       (Ref, _) => self.call(a, b),
       (_, Ref) => self.call(b, a),
       // native ops
-      (Op, Int) => self.op_num(a, b),
-      (Int, Op) => self.op_num(b, a),
+      (Op, Int) => self.op_int(a, b),
+      (Int, Op) => self.op_int(b, a),
       (Mat, Int) => self.mat_num(a, b),
       (Int, Mat) => self.mat_num(b, a),
       // todo: what should the semantics of these be?
@@ -233,7 +233,7 @@ impl<'a, M: Mode> Net<'a, M> {
   ///            |   |            |            |   |
   ///           (m)  | a2         |         a1 |   | a2
   ///                             |
-  /// --------------------------- | --------------------------- op_num
+  /// --------------------------- | --------------------------- op_int
   ///                             |           _ _ _
   ///                             |         /       \
   ///                             |        |  (n)    |
@@ -246,7 +246,7 @@ impl<'a, M: Mode> Net<'a, M> {
   ///                             |
   /// ```
   #[inline(never)]
-  pub fn op_num(&mut self, a: Port, b: Port) {
+  pub fn op_int(&mut self, a: Port, b: Port) {
     trace!(self.tracer, a, b);
     let a = a.consume_node();
     let op = unsafe { Op::try_from(a.lab).unwrap_unchecked() };

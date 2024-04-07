@@ -73,7 +73,7 @@ fn compile_def(code: &mut String, host: &Host, name: &str, instr: &[Instruction]
         writeln!(code, "let ({rhs}, {out}) = net.do_op({op:?}, {trg});")
       }
       Instruction::OpNum { op, trg, rhs, out } => {
-        writeln!(code, "let {out} = net.do_op_num({op:?}, {trg}, {rhs});")
+        writeln!(code, "let {out} = net.do_op_int({op:?}, {trg}, {rhs});")
       }
       Instruction::Mat { trg, lft, rgt } => {
         writeln!(code, "let ({lft}, {rgt}) = net.do_mat({trg});")

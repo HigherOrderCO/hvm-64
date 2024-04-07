@@ -259,7 +259,7 @@ impl AsHostedDef for InterpretedDef {
             trgs.set_trg(out, o);
           }
           Instruction::OpNum { op, trg, rhs: lhs, out } => {
-            let o = net.do_op_num(op, trgs.get_trg(trg), lhs);
+            let o = net.do_op_int(op, trgs.get_trg(trg), lhs);
             trgs.set_trg(out, o);
           }
           Instruction::Mat { trg, lft, rgt } => {

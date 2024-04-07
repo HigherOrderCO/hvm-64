@@ -54,9 +54,9 @@ pub enum Instruction {
   /// let (rhs, out) = net.do_op(lab, trg);
   /// ```
   Op { op: Op, trg: TrgId, rhs: TrgId, out: TrgId },
-  /// See [`Net::do_op_num`].
+  /// See [`Net::do_op_int`].
   /// ```rust,ignore
-  /// let out = net.do_op_num(lab, trg, rhs);
+  /// let out = net.do_op_int(lab, trg, rhs);
   /// ```
   OpNum { op: Op, trg: TrgId, rhs: i64, out: TrgId },
   /// See [`Net::do_mat`].
@@ -152,7 +152,7 @@ impl<'a, M: Mode> Net<'a, M> {
 
   /// `trg ~ <op #b x>`
   #[inline(always)]
-  pub(crate) fn do_op_num(&mut self, op: Op, trg: Trg, rhs: i64) -> Trg {
+  pub(crate) fn do_op_int(&mut self, op: Op, trg: Trg, rhs: i64) -> Trg {
     let port = trg.target();
     if !M::LAZY && port.tag() == Int {
       self.rwts.oper += 1;
