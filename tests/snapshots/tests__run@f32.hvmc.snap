@@ -1,0 +1,12 @@
+---
+source: tests/tests.rs
+expression: output
+input_file: tests/programs/f32.hvmc
+---
+[#finf [#f-inf [#fNaN [#f2.5 [#f-1.5 [#f1 [#f0.25 [#f0.5 [#f0 [#f1 [#f1 [#f0 [#f2.5 [#f-1.5 [#f1 [#f0.25 [#f0.5 [#f0 [#f1 [#f1 [#f0 *]]]]]]]]]]]]]]]]]]]]]
+RWTS   :             101
+- ANNI :               0
+- COMM :               0
+- ERAS :               0
+- DREF :              62
+- OPER :              39

@@ -1,0 +1,31 @@
+@half = x & #f1 ~ </ #f2 x>
+
+@main = x
+  // nan and inf divisions
+  & x ~ [n x] & #f1  ~ </ #f0 n> // inf
+  & x ~ [n x] & #f-1 ~ </ #f0 n> // -inf
+  & x ~ [n x] & #f0  ~ </ #f0 n> // NaN
+
+  // f32 <op> int
+  & x ~ [n x] & @half ~ <+ #2 n>  // 2.5
+  & x ~ [n x] & @half ~ <- #2 n>  // -1.5
+  & x ~ [n x] & @half ~ <* #2 n>  // 1
+  & x ~ [n x] & @half ~ </ #2 n>  // 0.25
+  & x ~ [n x] & @half ~ <% #2 n>  // 0.5
+  & x ~ [n x] & @half ~ <== #2 n> // 0
+  & x ~ [n x] & @half ~ <!= #2 n> // 1
+  & x ~ [n x] & @half ~ << #2 n>  // 1
+  & x ~ [n x] & @half ~ <> #2 n>  // 1
+
+  // f32 <op> f32
+  & x ~ [n x] & @half ~ <+ #f2 n>  // 2.5
+  & x ~ [n x] & @half ~ <- #f2 n>  // -1.5
+  & x ~ [n x] & @half ~ <* #f2 n>  // 1
+  & x ~ [n x] & @half ~ </ #f2 n>  // 0.25
+  & x ~ [n x] & @half ~ <% #f2 n>  // 0.5
+  & x ~ [n x] & @half ~ <== #f2 n> // 0
+  & x ~ [n x] & @half ~ <!= #f2 n> // 1
+  & x ~ [n x] & @half ~ << #f2 n>  // 0
+  & x ~ [n x] & @half ~ <> #f2 n>  // 1
+
+  & x ~ *
