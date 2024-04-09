@@ -18,6 +18,7 @@ use crate::{
   util::{array_vec, deref, maybe_grow},
 };
 use std::{collections::BTreeMap, fmt, mem, str::FromStr};
+use TSPL::{new_parser, Parser};
 
 /// The top level AST node, representing a collection of named nets.
 ///
@@ -194,13 +195,9 @@ impl Tree {
   }
 }
 
-/// The state of the HVMC parser.
-struct Parser<'i> {
-  /// The remaining characters in the input. An empty string indicates EOF.
-  input: &'i str,
-}
+new_parser!(HvmcParser);
 
-impl<'i> Parser<'i> {
+impl<'i> HvmcParser<'i> {
   /// Book = ("@" Name "=" Net)*
   fn parse_book(&mut self) -> Result<Book, String> {
     maybe_grow(move || {
@@ -231,19 +228,19 @@ impl<'i> Parser<'i> {
   fn parse_tree(&mut self) -> Result<Tree, String> {
     maybe_grow(move || {
       self.skip_trivia();
-      match self.peek_char() {
+      match self.peek_one() {
         // Era = "*"
         Some('*') => {
-          self.advance_char();
+          self.advance_one();
           Ok(Tree::Era)
         }
         // Ctr = "(" Tree Tree ")" | "[" Tree Tree "]" | "{" Int Tree Tree "}"
         Some(char @ ('(' | '[' | '{')) => {
-          self.advance_char();
+          self.advance_one();
           let lab = match char {
             '(' => 0,
             '[' => 1,
-            '{' => self.parse_int()? as Lab,
+            '{' => self.parse_u64()? as Lab,
             _ => unreachable!(),
           };
           let close = match char {
@@ -253,18 +250,18 @@ impl<'i> Parser<'i> {
             _ => unreachable!(),
           };
           self.skip_trivia();
-          if self.peek_char().is_some_and(|x| x == ':') {
-            self.advance_char();
-            let variant_index = self.parse_int()?;
+          if self.peek_one().is_some_and(|x| x == ':') {
+            self.advance_one();
+            let variant_index = self.parse_u64()?;
             self.consume(":")?;
-            let variant_count = self.parse_int()?;
+            let variant_count = self.parse_u64()?;
             let mut fields = Vec::new();
             self.skip_trivia();
-            while self.peek_char() != Some(close) {
+            while self.peek_one() != Some(close) {
               fields.push(self.parse_tree()?);
               self.skip_trivia();
             }
-            self.advance_char();
+            self.advance_one();
             if variant_count == 0 {
               Err("variant count cannot be zero".to_owned())?;
             }
@@ -283,11 +280,11 @@ impl<'i> Parser<'i> {
           } else {
             let mut ports = Vec::new();
             self.skip_trivia();
-            while self.peek_char() != Some(close) {
+            while self.peek_one() != Some(close) {
               ports.push(self.parse_tree()?);
               self.skip_trivia();
             }
-            self.advance_char();
+            self.advance_one();
             if ports.len() > MAX_ARITY {
               Err("ctr has too many ports".to_owned())?;
             }
@@ -296,25 +293,25 @@ impl<'i> Parser<'i> {
         }
         // Ref = "@" Name
         Some('@') => {
-          self.advance_char();
+          self.advance_one();
           self.skip_trivia();
           let nam = self.parse_name()?;
           Ok(Tree::Ref { nam })
         }
         // Num = "#" Int
         Some('#') => {
-          self.advance_char();
-          match self.peek_char() {
+          self.advance_one();
+          match self.peek_one() {
             Some('-') => {
-              self.advance_char();
-              Ok(Tree::Num { val: -(self.parse_int()? as i64) })
+              self.advance_one();
+              Ok(Tree::Num { val: -(self.parse_u64()? as i64) })
             }
-            _ => Ok(Tree::Num { val: self.parse_int()? as i64 }),
+            _ => Ok(Tree::Num { val: self.parse_u64()? as i64 }),
           }
         }
         // Op = "<" Op Tree Tree ">"
         Some('<') => {
-          self.advance_char();
+          self.advance_one();
           let op = self.parse_op()?;
           let rhs = Box::new(self.parse_tree()?);
           let out = Box::new(self.parse_tree()?);
@@ -323,13 +320,13 @@ impl<'i> Parser<'i> {
         }
         // Mat = "?<" Tree Tree ">"
         Some('?') => {
-          self.advance_char();
+          self.advance_one();
           self.consume("<")?;
           let zero = self.parse_tree()?;
           let succ = self.parse_tree()?;
           self.skip_trivia();
-          if self.peek_char() == Some('>') {
-            self.advance_char();
+          if self.peek_one() == Some('>') {
+            self.advance_one();
             Tree::legacy_mat(zero, succ).ok_or_else(|| "invalid legacy match".to_owned())
           } else {
             let zero = Box::new(zero);
@@ -349,32 +346,9 @@ impl<'i> Parser<'i> {
   fn parse_name(&mut self) -> Result<String, String> {
     let name = self.take_while(|c| c.is_alphanumeric() || c == '_' || c == '.' || c == '$');
     if name.is_empty() {
-      return Err(format!("Expected a name character, found {:?}", self.peek_char()));
+      return self.expected("name");
     }
     Ok(name.to_owned())
-  }
-
-  /// Int = /[0-9]+/ | /0x[0-9a-fA-F]+/ | /0b[01]+/
-  fn parse_int(&mut self) -> Result<u64, String> {
-    self.skip_trivia();
-    let radix = if let Some(rest) = self.input.strip_prefix("0x") {
-      self.input = rest;
-      16
-    } else if let Some(rest) = self.input.strip_prefix("0b") {
-      self.input = rest;
-      2
-    } else {
-      10
-    };
-    let mut num: u64 = 0;
-    if !self.peek_char().map_or(false, |c| c.is_digit(radix)) {
-      return Err(format!("Expected a digit, found {:?}", self.peek_char()));
-    }
-    while let Some(digit) = self.peek_char().and_then(|c| c.to_digit(radix)) {
-      self.advance_char();
-      num = num * (radix as u64) + (digit as u64);
-    }
-    Ok(num)
   }
 
   /// See `ops.rs` for the available operators.
@@ -382,62 +356,14 @@ impl<'i> Parser<'i> {
     let op = self.take_while(|c| "ui0123456789.+-=*/%<>|&^!?$".contains(c));
     op.parse().map_err(|_| format!("Unknown operator: {op:?}"))
   }
-
-  /// Inspects the next character in the input without consuming it.
-  fn peek_char(&self) -> Option<char> {
-    self.input.chars().next()
-  }
-
-  /// Consumes the next character in the input.
-  fn advance_char(&mut self) -> Option<char> {
-    let char = self.input.chars().next()?;
-    self.input = &self.input[char.len_utf8() ..];
-    Some(char)
-  }
-
-  /// Skips whitespace & comments in the input.
-  fn skip_trivia(&mut self) {
-    while let Some(c) = self.peek_char() {
-      if c.is_ascii_whitespace() {
-        self.advance_char();
-        continue;
-      }
-      if c == '/' && self.input.starts_with("//") {
-        while self.peek_char() != Some('\n') {
-          self.advance_char();
-        }
-        continue;
-      }
-      break;
-    }
-  }
-
-  /// Consumes an instance of the given string, erroring if it is not found.
-  fn consume(&mut self, text: &str) -> Result<(), String> {
-    self.skip_trivia();
-    let Some(rest) = self.input.strip_prefix(text) else {
-      return Err(format!("Expected {:?}, found {:?}", text, self.input.split_ascii_whitespace().next().unwrap_or("")));
-    };
-    self.input = rest;
-    Ok(())
-  }
-
-  /// Consumes all of the contiguous next characters in the input matching a
-  /// given predicate.
-  fn take_while(&mut self, mut f: impl FnMut(char) -> bool) -> &'i str {
-    let len = self.input.chars().take_while(|&c| f(c)).map(char::len_utf8).sum();
-    let (name, rest) = self.input.split_at(len);
-    self.input = rest;
-    name
-  }
 }
 
 /// Parses the input with the callback, ensuring that the whole input is
 /// consumed.
-fn parse_eof<'i, T>(input: &'i str, parse_fn: impl Fn(&mut Parser<'i>) -> Result<T, String>) -> Result<T, String> {
-  let mut parser = Parser { input };
+fn parse_eof<'i, T>(input: &'i str, parse_fn: impl Fn(&mut HvmcParser<'i>) -> Result<T, String>) -> Result<T, String> {
+  let mut parser = HvmcParser::new(input);
   let out = parse_fn(&mut parser)?;
-  if !parser.input.is_empty() {
+  if parser.index != parser.input.len() {
     return Err("Unable to parse the whole input. Is this not an hvmc file?".to_owned());
   }
   Ok(out)
@@ -446,21 +372,21 @@ fn parse_eof<'i, T>(input: &'i str, parse_fn: impl Fn(&mut Parser<'i>) -> Result
 impl FromStr for Book {
   type Err = String;
   fn from_str(str: &str) -> Result<Self, Self::Err> {
-    parse_eof(str, Parser::parse_book)
+    parse_eof(str, HvmcParser::parse_book)
   }
 }
 
 impl FromStr for Net {
   type Err = String;
   fn from_str(str: &str) -> Result<Self, Self::Err> {
-    parse_eof(str, Parser::parse_net)
+    parse_eof(str, HvmcParser::parse_net)
   }
 }
 
 impl FromStr for Tree {
   type Err = String;
   fn from_str(str: &str) -> Result<Self, Self::Err> {
-    parse_eof(str, Parser::parse_tree)
+    parse_eof(str, HvmcParser::parse_tree)
   }
 }
 
