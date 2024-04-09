@@ -309,15 +309,20 @@ impl<'i> Parser<'i> {
           Ok(Tree::Ref { nam })
         }
         // Int = "#" Int
-        // TODO: accept fractional and exponential inputs eg 1.5, 1.5e32
-        // F32 = "#f" Int
+        // F32 = "#" Int "." Int
         Some('#') => {
           self.advance_char();
-          let is_float = self.consume("f").is_ok();
           let is_neg = self.consume("-").is_ok();
           let int_val = if is_neg { -(self.parse_int()? as i64) } else { self.parse_int()? as i64 };
 
-          if is_float { Ok(Tree::F32 { val: (int_val as f32).into() }) } else { Ok(Tree::Int { val: int_val }) }
+          if self.consume(".").is_ok() {
+            let frac_val = self.parse_int()?;
+            let frac_len = frac_val.checked_ilog10().unwrap_or(0) + 1;
+
+            Ok(Tree::F32 { val: (int_val as f32 + frac_val as f32 / 10f32.powi(frac_len as i32)).into() })
+          } else {
+            Ok(Tree::Int { val: int_val })
+          }
         }
         // Op = "<" Op Tree Tree ">"
         Some('<') => {
@@ -386,7 +391,7 @@ impl<'i> Parser<'i> {
 
   /// See `ops.rs` for the available operators.
   fn parse_op(&mut self) -> Result<Op, String> {
-    let op = self.take_while(|c| "ui0123456789.+-=*/%<>|&^!?$".contains(c));
+    let op = self.take_while(|c| "fui0123456789.+-=*/%<>|&^!?$".contains(c));
     op.parse().map_err(|_| format!("Unknown operator: {op:?}"))
   }
 
@@ -538,7 +543,7 @@ impl fmt::Display for Tree {
       Tree::Var { nam } => write!(f, "{nam}"),
       Tree::Ref { nam } => write!(f, "@{nam}"),
       Tree::Int { val } => write!(f, "#{val}"),
-      Tree::F32 { val } => write!(f, "#f{val}"),
+      Tree::F32 { val } => write!(f, "#{val}"),
       Tree::Op { op, rhs, out } => write!(f, "<{op} {rhs} {out}>"),
       Tree::Mat { zero, succ, out } => write!(f, "?<{zero} {succ} {out}>"),
     })

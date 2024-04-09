@@ -31,10 +31,8 @@ impl<'a, M: Mode> Net<'a, M> {
       (Ref, _) => self.call(a, b),
       (_, Ref) => self.call(b, a),
       // native ops
-      (Op, Int) => self.op_int(a, b),
-      (Int, Op) => self.op_int(b, a),
-      (Op, F32) => self.op_float(a, b),
-      (F32, Op) => self.op_float(b, a),
+      (Op, Int | F32) => self.op_num(a, b),
+      (Int | F32, Op) => self.op_num(b, a),
       (Mat, Int) => self.mat_int(a, b),
       (Int, Mat) => self.mat_int(b, a),
       // todo: what should the semantics of these be?
@@ -237,7 +235,7 @@ impl<'a, M: Mode> Net<'a, M> {
   ///            |   |            |            |   |
   ///           (m)  | a2         |         a1 |   | a2
   ///                             |
-  /// --------------------------- | --------------------------- op_int
+  /// --------------------------- | --------------------------- op_num
   ///                             |           _ _ _
   ///                             |         /       \
   ///                             |        |  (n)    |
@@ -250,16 +248,21 @@ impl<'a, M: Mode> Net<'a, M> {
   ///                             |
   /// ```
   #[inline(never)]
-  pub fn op_int(&mut self, a: Port, b: Port) {
+  pub fn op_num(&mut self, a: Port, b: Port) {
     trace!(self.tracer, a, b);
     let a = a.consume_node();
     let op = unsafe { Op::try_from(a.lab).unwrap_unchecked() };
     let a1 = a.p1.load_target();
-    if a1.tag() == Int {
+    if a1.tag() == Int || a1.tag() == F32 {
       self.rwts.oper += 1;
       self.half_free(a.p1.addr());
-      let out = op.op_int(b.int(), a1.int());
-      self.link_wire_port(a.p2, Port::new_int(out));
+
+      let out = match op {
+        Op::Int(_) => Port::new_num(Tag::Int, op.op(b.num(), a1.num())),
+        Op::Float(_) => Port::new_num(Tag::F32, op.op(b.num(), a1.num())),
+      };
+
+      self.link_wire_port(a.p2, out);
     } else {
       let op = op.swap();
       let x = self.create_node(Op, op.into());
@@ -267,64 +270,6 @@ impl<'a, M: Mode> Net<'a, M> {
       self.link_port_port(x.p1, b);
       self.link_wire_port(a.p2, x.p2);
       self.link_wire_port(a.p1, x.p0);
-    }
-  }
-
-  /// Interacts a float and a binary numeric operation node.
-  ///
-  /// ```text
-  ///                             |
-  ///         b   (n)             |         b   (n)
-  ///              |              |              |
-  ///              |              |              |
-  ///             / \             |             / \
-  ///         a  /op \            |         a  /op \
-  ///           /_____\           |           /_____\
-  ///            |   |            |            |   |
-  ///           (m)  | a2         |         a1 |   | a2
-  ///                             |
-  /// --------------------------- | --------------------------- op_float
-  ///                             |           _ _ _
-  ///                             |         /       \
-  ///                             |        |  (n)    |
-  ///                             |       _|___|_    |
-  ///                             |       \     /    |
-  ///                             |     x  \op$/     |
-  ///            (n op m)         |         \ /      |
-  ///                |            |          |       |
-  ///                | a2         |       a1 |       | a2
-  ///                             |
-  /// ```
-  #[inline(never)]
-  pub fn op_float(&mut self, a: Port, b: Port) {
-    trace!(self.tracer, a, b);
-    let a = a.consume_node();
-    let op = unsafe { Op::try_from(a.lab).unwrap_unchecked() };
-    let a1 = a.p1.load_target();
-
-    match a1.tag() {
-      Int => {
-        self.rwts.oper += 1;
-        self.half_free(a.p1.addr());
-        let out = op.op_float(b.float(), a1.int() as f32);
-        self.link_wire_port(a.p2, Port::new_float(out));
-      }
-
-      F32 => {
-        self.rwts.oper += 1;
-        self.half_free(a.p1.addr());
-        let out = op.op_float(b.float(), a1.float());
-        self.link_wire_port(a.p2, Port::new_float(out));
-      }
-
-      _ => {
-        let op = op.swap();
-        let x = self.create_node(Op, op.into());
-        trace!(self.tracer, x.p0);
-        self.link_port_port(x.p1, b);
-        self.link_wire_port(a.p2, x.p2);
-        self.link_wire_port(a.p1, x.p0);
-      }
     }
   }
 }

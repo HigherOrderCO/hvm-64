@@ -1,3 +1,5 @@
+use crate::ops::Num;
+
 use super::*;
 
 /// A port in the interaction net.
@@ -13,7 +15,7 @@ use super::*;
 ///
 /// The semantics of these fields depend upon the tag; see the documentation for
 /// each [`Tag`] variant.
-#[derive(Clone, Eq, PartialEq, PartialOrd, Hash, Default)]
+#[derive(Clone, Copy, Eq, PartialEq, PartialOrd, Hash, Default)]
 #[repr(transparent)]
 #[must_use]
 pub struct Port(pub u64);
@@ -147,7 +149,13 @@ impl Port {
   /// Creates a new [`F32`] port with a given 60-bit numeric value.
   #[inline(always)]
   pub const fn new_float(val: f32) -> Self {
-    Port((unsafe { std::mem::transmute::<_, u32>(val) as u64 } << 32) | (F32 as u64))
+    Port((unsafe { std::mem::transmute::<_, u32>(val) as u64 } << 4) | (F32 as u64))
+  }
+
+  /// Creates a new [`Int` | `F32`] port with a given 60-bit numeric value.
+  #[inline(always)]
+  pub const fn new_num(tag: Tag, bits: u64) -> Self {
+    Port((bits << 4) as u64 | (tag as u64))
   }
 
   /// Creates a new [`Ref`] port corresponding to a given definition.
@@ -195,7 +203,15 @@ impl Port {
   /// Accesses the float value of this port; this is valid for [`F32`] ports.
   #[inline(always)]
   pub const fn float(&self) -> f32 {
-    unsafe { std::mem::transmute((self.0 >> 32) as u32) }
+    unsafe { std::mem::transmute((self.0 >> 4) as u32) }
+  }
+
+  /// Accesses the numeric value of this port; this is valid for [`Int` | `F32`]
+  /// ports. This is meant for numeric operations to defer interpreting this
+  /// port as an integer or as a float until the operation type is known.
+  #[inline(always)]
+  pub const fn num(&self) -> u64 {
+    self.0 >> 4
   }
 
   /// Accesses the wire leaving this port; this is valid for [`Var`] ports and
@@ -232,5 +248,14 @@ impl Port {
 
   pub(super) fn is_full_node(&self) -> bool {
     self.tag() > Int
+  }
+}
+
+impl From<Num> for Port {
+  fn from(num: Num) -> Self {
+    match num {
+      Num::Int(int) => Self::new_int(int),
+      Num::Float(float) => Self::new_float(float),
+    }
   }
 }

@@ -1,3 +1,5 @@
+use crate::ops::Num;
+
 use super::*;
 
 /// Each instruction corresponds to a fragment of a net that has a native
@@ -54,16 +56,11 @@ pub enum Instruction {
   /// let (rhs, out) = net.do_op(lab, trg);
   /// ```
   Op { op: Op, trg: TrgId, rhs: TrgId, out: TrgId },
-  /// See [`Net::do_op_int`].
+  /// See [`Net::do_op_num`].
   /// ```rust,ignore
-  /// let out = net.do_op_int(lab, trg, rhs);
+  /// let out = net.do_op_num(lab, trg, rhs);
   /// ```
-  OpInt { op: Op, trg: TrgId, rhs: i64, out: TrgId },
-  /// See [`Net::do_op_float`].
-  /// ```rust,ignore
-  /// let out = net.do_op_float(lab, trg, rhs);
-  /// ```
-  OpF32 { op: Op, trg: TrgId, rhs: f32, out: TrgId },
+  OpNum { op: Op, trg: TrgId, rhs: Num, out: TrgId },
   /// See [`Net::do_mat`].
   /// ```rust,ignore
   /// let (lft, rgt) = net.do_mat(trg);
@@ -140,10 +137,10 @@ impl<'a, M: Mode> Net<'a, M> {
   pub(crate) fn do_op(&mut self, op: Op, trg: Trg) -> (Trg, Trg) {
     trace!(self.tracer, op, trg);
     let port = trg.target();
-    if !M::LAZY && port.tag() == Int {
+    if !M::LAZY && (port.tag() == Int || port.tag() == F32) {
       self.free_trg(trg);
       let n = self.create_node(Op, op.swap().into());
-      n.p1.wire().set_target(Port::new_int(port.int()));
+      n.p1.wire().set_target(port);
       (Trg::port(n.p0), Trg::port(n.p2))
     } else if !M::LAZY && port == Port::ERA {
       self.free_trg(trg);
@@ -157,46 +154,24 @@ impl<'a, M: Mode> Net<'a, M> {
 
   /// `trg ~ <op #b x>`
   #[inline(always)]
-  pub(crate) fn do_op_int(&mut self, op: Op, trg: Trg, rhs: i64) -> Trg {
+  pub(crate) fn do_op_num(&mut self, op: Op, trg: Trg, rhs: Num) -> Trg {
     let port = trg.target();
-    if !M::LAZY && port.tag() == Int {
+    if !M::LAZY && (port.tag() == Int || port.tag() == F32) {
       self.rwts.oper += 1;
       self.free_trg(trg);
-      Trg::port(Port::new_int(op.op_int(port.int(), rhs)))
-    } else if !M::LAZY && port.tag() == F32 {
-      self.rwts.oper += 1;
-      self.free_trg(trg);
-      Trg::port(Port::new_float(op.op_float(port.float(), rhs as f32)))
-    } else if !M::LAZY && port == Port::ERA {
-      self.free_trg(trg);
-      Trg::port(Port::ERA)
-    } else {
-      let n = self.create_node(Op, op.into());
-      self.link_trg_port(trg, n.p0);
-      n.p1.wire().set_target(Port::new_int(rhs));
-      Trg::port(n.p2)
-    }
-  }
 
-  /// `trg ~ <op #b x>`
-  #[inline(always)]
-  pub(crate) fn do_op_float(&mut self, op: Op, trg: Trg, rhs: f32) -> Trg {
-    let port = trg.target();
-    if !M::LAZY && port.tag() == Int {
-      self.rwts.oper += 1;
-      self.free_trg(trg);
-      Trg::port(Port::new_float(op.op_float(port.int() as f32, rhs)))
-    } else if !M::LAZY && port.tag() == F32 {
-      self.rwts.oper += 1;
-      self.free_trg(trg);
-      Trg::port(Port::new_float(op.op_float(port.float(), rhs)))
+      let res = op.op(port.num(), u64::from(rhs));
+      match op {
+        Op::Int(_) => Trg::port(Port::new_num(Tag::Int, res)),
+        Op::Float(_) => Trg::port(Port::new_num(Tag::F32, res)),
+      }
     } else if !M::LAZY && port == Port::ERA {
       self.free_trg(trg);
       Trg::port(Port::ERA)
     } else {
       let n = self.create_node(Op, op.into());
       self.link_trg_port(trg, n.p0);
-      n.p1.wire().set_target(Port::new_float(rhs));
+      n.p1.wire().set_target(Port::from(rhs));
       Trg::port(n.p2)
     }
   }
