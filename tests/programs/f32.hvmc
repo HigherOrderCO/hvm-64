@@ -6,10 +6,10 @@
   & x ~ [n x] & #-1.0 ~ <f32./ #0.0 n> // -inf
   & x ~ [n x] & #0.0  ~ <f32./ #0.0 n> // NaN
 
-  // f32 <op> int
+  // general operators
   & x ~ [n x] & @half ~ <f32.+ #2.0 n>  // 2.5
   & x ~ [n x] & @half ~ <f32.- #2.0 n>  // -1.5
-  & x ~ [n x] & @half ~ <f32.* #2.0 n>  // 1
+  & x ~ [n x] & @half ~ <f32.* #2.3 n>  // 1.15
   & x ~ [n x] & @half ~ <f32./ #2.0 n>  // 0.25
   & x ~ [n x] & @half ~ <f32.% #2.0 n>  // 0.5
   & x ~ [n x] & @half ~ <f32.== #2.0 n> // 0
