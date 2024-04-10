@@ -283,7 +283,7 @@ fn compile_executable(target: &str, host: Arc<Mutex<host::Host>>) -> Result<(), 
   }
   let cargo_toml = include_str!("../Cargo.toml");
   let mut cargo_toml = cargo_toml.split_once("##--COMPILER-CUTOFF--##").unwrap().0.to_owned();
-  cargo_toml.push_str("[features]\ndefault = ['cli']\ncli = ['dep:clap']");
+  cargo_toml.push_str("[features]\ndefault = ['cli']\ncli = ['std', 'dep:clap']\nstd = []");
 
   macro_rules! include_files {
     ($([$($prefix:ident)*])? $mod:ident {$($sub:tt)*} $($rest:tt)*) => {
