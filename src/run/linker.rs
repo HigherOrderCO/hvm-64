@@ -111,10 +111,8 @@ impl<'h, M: Mode> Linker<'h, M> {
     trace!(self, a_port, b_port);
     if a_port.is(Tag::Var) {
       a_port.wire().set_target(b_port);
-    } else {
-      if M::LAZY {
-        self.set_header(a_port, b_port);
-      }
+    } else if M::LAZY {
+      self.set_header(a_port, b_port);
     }
   }
 

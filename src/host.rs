@@ -77,7 +77,7 @@ impl Host {
     for (name, labs) in calculate_label_sets(book, |nam| match self.defs.get(nam) {
       Some(x) => x.labs.clone(),
       None => {
-        self.insert_def(&nam, default_def(nam));
+        self.insert_def(nam, default_def(nam));
         self.defs[nam].labs.clone()
       }
     })

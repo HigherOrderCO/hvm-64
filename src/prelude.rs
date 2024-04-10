@@ -6,7 +6,7 @@ pub use alloc::{
   vec,
   vec::Vec,
 };
-pub use core::{fmt, iter, mem, ptr};
+pub use core::{fmt, hint, iter, mem, ptr};
 
 #[cfg(feature = "std")]
 pub use std::collections::{hash_map::Entry, HashMap as Map, HashSet as Set};

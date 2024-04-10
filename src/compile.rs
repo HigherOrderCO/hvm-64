@@ -7,8 +7,8 @@ use crate::{
   run::{Instruction, InterpretedDef, LabSet, Port, Tag},
   stdlib::HostedDef,
 };
-use core::hash::Hasher;
-use std::{fmt::Write, hash::DefaultHasher};
+use core::{fmt::Write, hash::Hasher};
+use std::hash::DefaultHasher;
 
 /// Compiles a [`Host`] to Rust, returning a file to replace `gen.rs`.
 pub fn compile_host(host: &Host) -> String {

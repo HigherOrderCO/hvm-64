@@ -1,5 +1,7 @@
 use super::{Heap, Lazy, Mode, Net, Strict};
 
+use crate::prelude::*;
+
 /// A [`Net`] whose mode is determined dynamically, at runtime.
 ///
 /// Use [`dispatch_dyn_net!`] to wrap operations on the inner net.
@@ -24,12 +26,28 @@ impl<'h> DynNet<'h> {
 
 impl<'r, 'h, M: Mode> From<&'r mut Net<'h, M>> for DynNetMut<'r, 'h> {
   fn from(value: &'r mut Net<'h, M>) -> Self {
-    match value.match_laziness_mut() {
-      Ok(net) => DynNetMut::Lazy(net),
-      Err(net) => DynNetMut::Strict(net),
+    value.as_dyn_mut()
+  }
+}
+
+impl<'h, M: Mode> Net<'h, M> {
+  pub fn as_dyn_mut(&mut self) -> DynNetMut<'_, 'h> {
+    if M::LAZY {
+      DynNetMut::Lazy(unsafe { mem::transmute(self) })
+    } else {
+      DynNetMut::Strict(unsafe { mem::transmute(self) })
+    }
+  }
+
+  pub fn into_dyn(self) -> DynNet<'h> {
+    if M::LAZY {
+      DynNet::Lazy(unsafe { mem::transmute(self) })
+    } else {
+      DynNet::Strict(unsafe { mem::transmute(self) })
     }
   }
 }
+
 #[macro_export]
 macro_rules! dispatch_dyn_net {
   ($pat:pat = $expr:expr => $body:expr) => {

@@ -101,8 +101,7 @@ impl<'a> Phase1<'a> {
         }
       }
       Tree::Var { nam } => {
-        let nam: &str = &*nam;
-        if let Some(i) = self.vars.get(nam) {
+        if let Some(i) = self.vars.get(&**nam) {
           let j = self.nodes.len() as isize;
           self.nodes.push(NodeType::Var(*i as isize - j));
           self.nodes[*i] = NodeType::Var(j - *i as isize);

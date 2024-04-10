@@ -59,7 +59,7 @@ impl Book {
     };
 
     for nam in self.nets.keys() {
-      state.pre_reduce(&nam)
+      state.pre_reduce(nam)
     }
 
     let State { seen, rewrites, .. } = state;
@@ -149,7 +149,7 @@ impl<'a> State<'a> {
     // Move interactions with inert defs back into the net redexes array
     self.captured_redexes.lock().drain(..).for_each(|r| rt.redux(r.0, r.1));
 
-    let net = self.host.readback(&mut rt);
+    let net = self.host.readback(&rt);
 
     // Mutate the host in-place with the pre-reduced net.
     let instr = self.host.encode_def(&net);

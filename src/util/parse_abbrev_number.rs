@@ -15,5 +15,5 @@ where
     Some(_) => (arg, 1),
   };
   let base = base.parse::<u64>().map_err(|e| e.to_string())?;
-  Ok((base * scale).try_into().map_err(|e| format!("{:?}", e))?)
+  (base * scale).try_into().map_err(|e| format!("{:?}", e))
 }

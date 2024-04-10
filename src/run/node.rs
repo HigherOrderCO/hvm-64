@@ -35,11 +35,7 @@ impl<'a, M: Mode> Net<'a, M> {
   #[inline(always)]
   pub fn create_node(&mut self, tag: Tag, lab: Lab) -> CreatedNode {
     let addr = self.alloc();
-    CreatedNode {
-      p0: Port::new(tag, lab, addr.clone()),
-      p1: Port::new_var(addr.clone()),
-      p2: Port::new_var(addr.other_half()),
-    }
+    CreatedNode { p0: Port::new(tag, lab, addr), p1: Port::new_var(addr), p2: Port::new_var(addr.other_half()) }
   }
 
   /// Creates a wire an aux port pair.
@@ -47,7 +43,7 @@ impl<'a, M: Mode> Net<'a, M> {
   pub fn create_wire(&mut self) -> (Wire, Port) {
     let addr = self.alloc();
     self.half_free(addr.other_half());
-    (Wire::new(addr.clone()), Port::new_var(addr))
+    (Wire::new(addr), Port::new_var(addr))
   }
 
   /// Creates a wire pointing to a given port; sometimes necessary to avoid

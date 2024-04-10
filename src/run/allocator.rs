@@ -1,5 +1,8 @@
 use super::*;
 
+// Really, rust?
+use alloc::alloc::alloc;
+
 /// The memory behind a two-word allocation.
 ///
 /// This must be aligned to 16 bytes so that the left word's address always ends
@@ -41,7 +44,7 @@ impl Heap {
       return None;
     }
     unsafe {
-      let ptr = alloc::alloc::alloc(Layout::array::<Node>(nodes).unwrap()) as *mut Node;
+      let ptr = alloc(Layout::array::<Node>(nodes).unwrap()) as *mut Node;
       if ptr.is_null() {
         return None;
       }
@@ -96,7 +99,7 @@ impl<'h> Allocator<'h> {
   pub fn alloc(&mut self) -> Addr {
     trace!(self.tracer, self.head);
     let addr = if self.head != Addr::NULL {
-      let addr = self.head.clone();
+      let addr = self.head;
       let next = Addr(self.head.val().load(Relaxed) as usize);
       trace!(self.tracer, next);
       self.head = next;

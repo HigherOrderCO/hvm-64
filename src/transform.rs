@@ -24,7 +24,7 @@ impl Book {
     }
     if passes.pre_reduce {
       if passes.eta_reduce {
-        for (_, def) in &mut self.nets {
+        for def in self.nets.values_mut() {
           def.eta_reduce();
         }
       }
@@ -34,7 +34,7 @@ impl Book {
         opts.pre_reduce_rewrites,
       );
     }
-    for (_, def) in &mut self.nets {
+    for def in &mut self.nets.values_mut() {
       if passes.eta_reduce {
         def.eta_reduce();
       }

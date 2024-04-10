@@ -112,6 +112,7 @@ impl<'a, M: Mode> Net<'a, M> {
   #[inline(always)]
   pub(crate) fn do_ctr(&mut self, lab: Lab, trg: Trg) -> (Trg, Trg) {
     let port = trg.target();
+    #[allow(clippy::overly_complex_bool_expr)]
     if !M::LAZY && port.tag() == Ctr && port.lab() == lab {
       trace!(self.tracer, "fast");
       self.free_trg(trg);
@@ -119,7 +120,7 @@ impl<'a, M: Mode> Net<'a, M> {
       self.rwts.anni += 1;
       (Trg::wire(node.p1), Trg::wire(node.p2))
     // TODO: fast copy?
-    } else if false && !M::LAZY && port.tag() == Num || port.tag() == Ref && lab >= port.lab() {
+    } else if false && !M::LAZY && (port.tag() == Num || port.tag() == Ref && lab >= port.lab()) {
       self.rwts.comm += 1;
       self.free_trg(trg);
       (Trg::port(port.clone()), Trg::port(port))
@@ -203,12 +204,7 @@ impl<'a, M: Mode> Net<'a, M> {
   pub(crate) fn do_wires(&mut self) -> (Trg, Trg, Trg, Trg) {
     let a = self.alloc();
     let b = a.other_half();
-    (
-      Trg::port(Port::new_var(a.clone())),
-      Trg::wire(Wire::new(a)),
-      Trg::port(Port::new_var(b.clone())),
-      Trg::wire(Wire::new(b)),
-    )
+    (Trg::port(Port::new_var(a)), Trg::wire(Wire::new(a)), Trg::port(Port::new_var(b)), Trg::wire(Wire::new(b)))
   }
 
   /// `trg ~ ?<(x (y z)) out>`

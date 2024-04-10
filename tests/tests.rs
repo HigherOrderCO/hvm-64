@@ -112,7 +112,7 @@ fn test_pre_reduce_run(path: &str, mut book: Book) {
 }
 
 fn test_path(path: &Path) {
-  let code = fs::read_to_string(&path).unwrap();
+  let code = fs::read_to_string(path).unwrap();
   let book = ast::Book::from_str(&code).unwrap();
   let host = hvmc::stdlib::create_host(&book);
 
