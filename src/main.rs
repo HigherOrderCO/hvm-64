@@ -468,6 +468,7 @@ fn compile_executable(target: &str, host: Arc<Mutex<host::Host>>) -> Result<(), 
     lib
     main
     ops {
+      num
       word
     }
     run {
