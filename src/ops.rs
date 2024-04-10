@@ -1,8 +1,6 @@
 mod num;
 pub mod word;
 
-use ordered_float::OrderedFloat;
-
 use crate::util::bi_enum;
 
 pub use self::num::Num;
@@ -101,7 +99,7 @@ impl Op {
     }
   }
 
-  fn op<T: Numeric>(self, a: T, b: T) -> T {
+  fn op<T: Numeric + PartialEq + PartialOrd>(self, a: T, b: T) -> T {
     match self {
       Self::Add => T::add(a, b),
       Self::Sub => T::sub(a, b),
@@ -127,7 +125,7 @@ impl Op {
     }
   }
 
-  fn op_word<T: Numeric + FromWord + ToWord>(self, a: u64, b: u64) -> u64 {
+  fn op_word<T: Numeric + PartialOrd + PartialEq + FromWord + ToWord>(self, a: u64, b: u64) -> u64 {
     self.op(T::from_word(a), T::from_word(b)).to_word()
   }
 }
@@ -169,7 +167,7 @@ impl TypedOp {
       Ty::U32 => self.op.op_word::<u32>(a, b),
       Ty::U60 => self.op.op_word::<u64>(a, b) & U60,
 
-      Ty::F32 => self.op.op_word::<OrderedFloat<f32>>(a, b),
+      Ty::F32 => self.op.op_word::<f32>(a, b),
     }
   }
 }

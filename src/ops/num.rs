@@ -1,5 +1,3 @@
-use ordered_float::OrderedFloat;
-
 use super::word::ToWord;
 
 #[derive(Clone, Copy, Debug)]
@@ -17,7 +15,7 @@ impl ToWord for Num {
   }
 }
 
-pub trait Numeric: Eq + Ord + Sized {
+pub trait Numeric: Sized {
   const ZERO: Self;
   const ONE: Self;
 
@@ -80,9 +78,9 @@ macro_rules! impl_numeric {
 
 impl_numeric! { u8, u16, u32, u64, i8, i16, i32 }
 
-impl Numeric for OrderedFloat<f32> {
-  const ZERO: Self = OrderedFloat(0f32);
-  const ONE: Self = OrderedFloat(1f32);
+impl Numeric for f32 {
+  const ZERO: Self = 0.0;
+  const ONE: Self = 1.0;
 
   fn add(a: Self, b: Self) -> Self {
     a + b

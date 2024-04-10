@@ -1,5 +1,3 @@
-use ordered_float::OrderedFloat;
-
 pub trait FromWord {
   fn from_word(bits: u64) -> Self;
 }
@@ -51,14 +49,14 @@ macro_rules! impl_unsigned {
 impl_signed! { i8, i16, i32 }
 impl_unsigned! { u8, u16, u32, u64 }
 
-impl FromWord for OrderedFloat<f32> {
+impl FromWord for f32 {
   #[inline(always)]
   fn from_word(bits: u64) -> Self {
     unsafe { std::mem::transmute(bits as u32) }
   }
 }
 
-impl ToWord for OrderedFloat<f32> {
+impl ToWord for f32 {
   #[inline(always)]
   fn to_word(self) -> u64 {
     unsafe { std::mem::transmute::<_, u32>(self) as u64 }
