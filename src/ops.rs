@@ -1,114 +1,20 @@
+mod num;
 pub mod word;
 
 use ordered_float::OrderedFloat;
 
 use crate::util::bi_enum;
 
-use self::word::{FromWord, ToWord};
+pub use self::num::Num;
+use self::{
+  num::Numeric,
+  word::{FromWord, ToWord},
+};
 use std::{
   cmp::{Eq, Ord},
   fmt::Display,
   str::FromStr,
 };
-
-#[derive(Clone, Copy, Debug)]
-pub enum Num {
-  Int(i64),
-  Float(f32),
-}
-
-impl ToWord for Num {
-  fn to_word(self) -> u64 {
-    match self {
-      Self::Int(int) => int as u64,
-      Self::Float(float) => unsafe { std::mem::transmute::<_, u32>(float) as u64 },
-    }
-  }
-}
-
-trait Numeric: Eq + Ord + Sized {
-  const ZERO: Self;
-  const ONE: Self;
-
-  fn add(_: Self, _: Self) -> Self {
-    return Self::ZERO;
-  }
-  fn sub(_: Self, _: Self) -> Self {
-    return Self::ZERO;
-  }
-  fn mul(_: Self, _: Self) -> Self {
-    return Self::ZERO;
-  }
-  fn div(_: Self, _: Self) -> Self {
-    return Self::ZERO;
-  }
-  fn rem(_: Self, _: Self) -> Self {
-    return Self::ZERO;
-  }
-  fn and(_: Self, _: Self) -> Self {
-    return Self::ZERO;
-  }
-  fn or(_: Self, _: Self) -> Self {
-    return Self::ZERO;
-  }
-  fn xor(_: Self, _: Self) -> Self {
-    return Self::ZERO;
-  }
-  fn shl(_: Self, _: Self) -> Self {
-    return Self::ZERO;
-  }
-  fn shr(_: Self, _: Self) -> Self {
-    return Self::ZERO;
-  }
-  fn from_bool(b: bool) -> Self {
-    if b { Self::ONE } else { Self::ZERO }
-  }
-}
-
-macro_rules! impl_numeric {
-  ( $($ty:ty),+ ) => {
-    $(
-    impl Numeric for $ty {
-      const ZERO: Self = 0;
-      const ONE: Self = 1;
-
-      fn add(a: Self, b: Self) -> Self { a.wrapping_add(b) }
-      fn sub(a: Self, b: Self) -> Self { a.wrapping_sub(b) }
-      fn mul(a: Self, b: Self) -> Self { a.wrapping_mul(b) }
-      fn div(a: Self, b: Self) -> Self { a.checked_div(b).unwrap_or(0) }
-      fn rem(a: Self, b: Self) -> Self { a.checked_rem(b).unwrap_or(0) }
-      fn and(a: Self, b: Self) -> Self { a & b }
-      fn or(a: Self, b: Self) -> Self { a | b }
-      fn xor(a: Self, b: Self) -> Self { a ^ b }
-      fn shl(a: Self, b: Self) -> Self { a.wrapping_shl(b as u32) }
-      fn shr(a: Self, b: Self) -> Self { a.wrapping_shr(b as u32) }
-    }
-    )*
-  }
-}
-
-impl_numeric! { u8, u16, u32, u64, i8, i16, i32 }
-
-impl Numeric for OrderedFloat<f32> {
-  const ZERO: Self = OrderedFloat(0f32);
-  const ONE: Self = OrderedFloat(1f32);
-
-  fn add(a: Self, b: Self) -> Self {
-    a + b
-  }
-  fn sub(a: Self, b: Self) -> Self {
-    a - b
-  }
-  fn mul(a: Self, b: Self) -> Self {
-    a * b
-  }
-  fn div(a: Self, b: Self) -> Self {
-    a / b
-  }
-  fn rem(a: Self, b: Self) -> Self {
-    a % b
-  }
-}
 
 bi_enum! {
   #[repr(u8)]
@@ -247,6 +153,8 @@ impl TypedOp {
 
   #[inline]
   pub fn op(self, a: u64, b: u64) -> u64 {
+    const U60: i64 = 0xFFF_FFFF_FFFF_FFFF;
+
     match self.ty {
       Ty::I8 => self.op.op(i8::from_word(a), i8::from_word(b)).to_word(),
       Ty::I16 => self.op.op(i16::from_word(a), i16::from_word(b)).to_word(),
@@ -255,7 +163,7 @@ impl TypedOp {
       Ty::U8 => self.op.op(u8::from_word(a), u8::from_word(b)).to_word(),
       Ty::U16 => self.op.op(u16::from_word(a), u16::from_word(b)).to_word(),
       Ty::U32 => self.op.op(u32::from_word(a), u32::from_word(b)).to_word(),
-      Ty::U60 => self.op.op(u64::from_word(a), u64::from_word(b)).to_word(),
+      Ty::U60 => self.op.op(u64::from_word(a), u64::from_word(b)).to_word() & U60,
 
       Ty::F32 => self.op.op(OrderedFloat::<f32>::from_word(a), OrderedFloat::<f32>::from_word(b)).to_word(),
     }
