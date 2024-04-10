@@ -23,7 +23,10 @@ fn _compile_host(host: &Host) -> Result<String, fmt::Error> {
     .map(|(raw_name, def)| (raw_name, sanitize_name(raw_name), def));
 
   writeln!(code, "#![allow(non_upper_case_globals, unused_imports)]")?;
-  writeln!(code, "use crate::{{host::{{Host, DefRef}}, run::*, ops::{{Num::*, Op, Ty::*, BinOp::*}}}};")?;
+  writeln!(
+    code,
+    "use crate::{{host::{{Host, DefRef}}, run::*, ops::{{TypedOp, Ty::*, Op::*}}}};"
+  )?;
   writeln!(code)?;
 
   writeln!(code, "pub fn host() -> Host {{")?;
@@ -97,6 +100,8 @@ fn compile_port(host: &Host, port: &Port) -> String {
     format!("Port::new_ref(unsafe {{ &*DEF_{name} }})")
   } else if port.tag() == Tag::Int {
     format!("Port::new_int({})", port.int())
+  } else if port.tag() == Tag::F32 {
+    format!("Port::new_float({})", port.float())
   } else {
     unreachable!()
   }

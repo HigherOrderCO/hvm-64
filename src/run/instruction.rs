@@ -1,4 +1,4 @@
-use crate::ops::Num;
+use crate::ops::{word::ToWord, Num};
 
 use super::*;
 
@@ -160,11 +160,9 @@ impl<'a, M: Mode> Net<'a, M> {
       self.rwts.oper += 1;
       self.free_trg(trg);
 
-      let res = op.op(port.num(), u64::from(rhs));
-      match op {
-        Op::Int(_) => Trg::port(Port::new_num(Tag::Int, res)),
-        Op::Float(_) => Trg::port(Port::new_num(Tag::F32, res)),
-      }
+      let res = op.op(port.num(), rhs.to_word());
+
+      if op.is_int() { Trg::port(Port::new_num(Tag::Int, res)) } else { Trg::port(Port::new_num(Tag::F32, res)) }
     } else if !M::LAZY && port == Port::ERA {
       self.free_trg(trg);
       Trg::port(Port::ERA)

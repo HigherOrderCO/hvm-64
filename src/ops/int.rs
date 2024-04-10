@@ -100,7 +100,7 @@ impl Op {
   ///
   /// For all `op, a, b`, `op.swap().op(a, b) == op.op(b, a)`.
   #[inline]
-  fn swap(self) -> Self {
+  pub fn swap(self) -> Self {
     match self {
       Self::Add => Self::Add,
       Self::Sub => Self::SubS,
@@ -156,8 +156,8 @@ impl Op {
 /// A typed integer operator.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TypedOp {
-  ty: Ty,
-  op: Op,
+  pub ty: Ty,
+  pub op: Op,
 }
 
 impl TypedOp {

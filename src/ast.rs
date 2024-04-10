@@ -14,7 +14,7 @@ use arrayvec::ArrayVec;
 use ordered_float::OrderedFloat;
 
 use crate::{
-  ops::Op,
+  ops::TypedOp as Op,
   run::Lab,
   util::{array_vec, deref, maybe_grow},
 };

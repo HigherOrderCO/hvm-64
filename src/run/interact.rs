@@ -257,9 +257,10 @@ impl<'a, M: Mode> Net<'a, M> {
       self.rwts.oper += 1;
       self.half_free(a.p1.addr());
 
-      let out = match op {
-        Op::Int(_) => Port::new_num(Tag::Int, op.op(b.num(), a1.num())),
-        Op::Float(_) => Port::new_num(Tag::F32, op.op(b.num(), a1.num())),
+      let out = if op.is_int() {
+        Port::new_num(Tag::Int, op.op(b.num(), a1.num()))
+      } else {
+        Port::new_num(Tag::F32, op.op(b.num(), a1.num()))
       };
 
       self.link_wire_port(a.p2, out);

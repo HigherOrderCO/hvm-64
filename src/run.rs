@@ -19,7 +19,7 @@
 //! - active pairs are thus stored in a dedicated vector, `net.redexes`
 
 use crate::{
-  ops::Op,
+  ops::TypedOp as Op,
   trace,
   trace::Tracer,
   util::{bi_enum, deref},

@@ -1,6 +1,6 @@
 use super::*;
 use crate::{
-  ops::{Num, Op},
+  ops::{Num, TypedOp as Op},
   run::Lab,
   util::maybe_grow,
 };
