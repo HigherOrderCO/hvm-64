@@ -54,7 +54,7 @@ impl<'h, M: Mode> Net<'h, M> {
     }
 
     // Initialize global objects
-    let cores = thread::available_parallelism().unwrap().get() as usize;
+    let cores = thread::available_parallelism().unwrap().get();
     let tlog2 = cores.ilog2() as usize;
     let tids = 1 << tlog2;
     let delta = AtomicRewrites::default(); // delta rewrite counter
