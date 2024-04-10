@@ -133,8 +133,8 @@ impl Op {
 }
 
 /// A numeric operator.
-#[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[repr(C, align(2))]
 pub struct TypedOp {
   /// The type of the operands.
   pub ty: Ty,
@@ -195,7 +195,7 @@ impl TryFrom<u16> for TypedOp {
   type Error = ();
 
   fn try_from(value: u16) -> Result<Self, Self::Error> {
-    let [ty, op] = value.to_be_bytes();
+    let [ty, op] = value.to_ne_bytes();
 
     Ok(Self { ty: Ty::try_from(ty)?, op: Op::try_from(op)? })
   }
@@ -203,7 +203,7 @@ impl TryFrom<u16> for TypedOp {
 
 impl From<TypedOp> for u16 {
   fn from(TypedOp { ty, op }: TypedOp) -> Self {
-    ((ty as u16) << 8) | (op as u16)
+    u16::from_ne_bytes([ty as u8, op as u8])
   }
 }
 
