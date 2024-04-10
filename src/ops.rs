@@ -126,6 +126,10 @@ impl Op {
       Self::ShrS => T::shr(b, a),
     }
   }
+
+  fn op_word<T: Numeric + FromWord + ToWord>(self, a: u64, b: u64) -> u64 {
+    self.op(T::from_word(a), T::from_word(b)).to_word()
+  }
 }
 
 /// A numeric operator.
@@ -153,19 +157,19 @@ impl TypedOp {
 
   #[inline]
   pub fn op(self, a: u64, b: u64) -> u64 {
-    const U60: i64 = 0xFFF_FFFF_FFFF_FFFF;
+    const U60: u64 = 0xFFF_FFFF_FFFF_FFFF;
 
     match self.ty {
-      Ty::I8 => self.op.op(i8::from_word(a), i8::from_word(b)).to_word(),
-      Ty::I16 => self.op.op(i16::from_word(a), i16::from_word(b)).to_word(),
-      Ty::I32 => self.op.op(i32::from_word(a), i32::from_word(b)).to_word(),
+      Ty::I8 => self.op.op_word::<i8>(a, b),
+      Ty::I16 => self.op.op_word::<i16>(a, b),
+      Ty::I32 => self.op.op_word::<i32>(a, b),
 
-      Ty::U8 => self.op.op(u8::from_word(a), u8::from_word(b)).to_word(),
-      Ty::U16 => self.op.op(u16::from_word(a), u16::from_word(b)).to_word(),
-      Ty::U32 => self.op.op(u32::from_word(a), u32::from_word(b)).to_word(),
-      Ty::U60 => self.op.op(u64::from_word(a), u64::from_word(b)).to_word() & U60,
+      Ty::U8 => self.op.op_word::<u8>(a, b),
+      Ty::U16 => self.op.op_word::<u16>(a, b),
+      Ty::U32 => self.op.op_word::<u32>(a, b),
+      Ty::U60 => self.op.op_word::<u64>(a, b) & U60,
 
-      Ty::F32 => self.op.op(OrderedFloat::<f32>::from_word(a), OrderedFloat::<f32>::from_word(b)).to_word(),
+      Ty::F32 => self.op.op_word::<OrderedFloat<f32>>(a, b),
     }
   }
 }
