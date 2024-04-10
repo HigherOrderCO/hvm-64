@@ -1,12 +1,14 @@
+#![cfg(feature = "std")]
+
+use crate::prelude::*;
+
 use crate::{
   host::Host,
   run::{Instruction, InterpretedDef, LabSet, Port, Tag},
   stdlib::HostedDef,
 };
-use std::{
-  fmt::{self, Write},
-  hash::{DefaultHasher, Hasher},
-};
+use core::hash::Hasher;
+use std::{fmt::Write, hash::DefaultHasher};
 
 /// Compiles a [`Host`] to Rust, returning a file to replace `gen.rs`.
 pub fn compile_host(host: &Host) -> String {

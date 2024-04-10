@@ -1,16 +1,15 @@
 //! The runtime's host, which acts as a translation layer between the AST and
 //! the runtime.
 
+use crate::prelude::*;
+
 use crate::{
   ast::{Book, Net, Tree},
   run::{self, Addr, Def, Instruction, InterpretedDef, LabSet, Mode, Port, Tag, TrgId, Wire},
   stdlib::HostedDef,
   util::create_var,
 };
-use std::{
-  collections::{hash_map::Entry, HashMap},
-  ops::{Deref, DerefMut, RangeFrom},
-};
+use core::ops::{Deref, DerefMut, RangeFrom};
 
 mod calc_labels;
 mod encode;
@@ -22,9 +21,9 @@ use calc_labels::calculate_label_sets;
 #[derive(Default)]
 pub struct Host {
   /// the forward mapping, from a name to the runtime def
-  pub defs: HashMap<String, DefRef>,
+  pub defs: Map<String, DefRef>,
   /// the backward mapping, from the address of a runtime def to the name
-  pub back: HashMap<Addr, String>,
+  pub back: Map<Addr, String>,
 }
 
 /// A potentially-owned reference to a [`Def`]. Vitally, the address of the
@@ -63,8 +62,12 @@ impl Host {
   /// will be run when the name of a definition is not found in the book.
   /// The return value of the function will be inserted into the host.
   pub fn insert_book_with_default(&mut self, book: &Book, default_def: &mut dyn FnMut(&str) -> DefRef) {
-    self.defs.reserve(book.len());
-    self.back.reserve(book.len());
+    #[cfg(feature = "std")]
+    {
+      self.defs.reserve(book.len());
+      self.back.reserve(book.len());
+    }
+
     // Because there may be circular dependencies, inserting the definitions
     // must be done in two phases:
 

@@ -1,6 +1,11 @@
 #![feature(const_type_id, extern_types, inline_const, generic_const_exprs, new_uninit)]
 #![cfg_attr(feature = "trace", feature(const_type_name))]
 #![allow(non_snake_case, incomplete_features)]
+#![cfg_attr(not(feature = "std"), no_std)]
+
+extern crate alloc;
+
+mod prelude;
 
 pub mod ast;
 pub mod compile;

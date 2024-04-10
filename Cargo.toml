@@ -28,6 +28,7 @@ TSPL = "0.0.9"
 arrayvec = "0.7.4"
 clap = { version = "4.5.1", features = ["derive"], optional = true }
 nohash-hasher = { version = "0.2.0" }
+parking_lot = "0.12.1"
 stacker = "0.1.15"
 thiserror = "1.0.58"
 
@@ -35,10 +36,11 @@ thiserror = "1.0.58"
 
 [features]
 default = ["cli", "_full_cli"]
-cli = ["dep:clap"]
+std = []
+cli = ["std", "dep:clap"]
 trace = []
 _full_cli = []
-_fuzz = []
+_fuzz = ["std"]
 _fuzz_no_free = ["_fuzz"]
 
 [dev-dependencies]

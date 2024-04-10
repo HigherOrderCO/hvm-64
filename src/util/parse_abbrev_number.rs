@@ -1,8 +1,10 @@
+use crate::prelude::*;
+
 /// Turn a string representation of a number, such as '1G' or '400K', into a
 /// number.
 pub fn parse_abbrev_number<T: TryFrom<u64>>(arg: &str) -> Result<T, String>
 where
-  <T as TryFrom<u64>>::Error: core::fmt::Debug,
+  <T as TryFrom<u64>>::Error: fmt::Debug,
 {
   let (base, scale) = match arg.to_lowercase().chars().last() {
     None => return Err("Mem size argument is empty".to_string()),

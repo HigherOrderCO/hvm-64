@@ -302,6 +302,7 @@ dependencies = [
  "clap",
  "insta",
  "nohash-hasher",
+ "parking_lot",
  "serial_test",
  "stacker",
  "thiserror",

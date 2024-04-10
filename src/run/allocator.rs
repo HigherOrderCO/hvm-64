@@ -41,11 +41,11 @@ impl Heap {
       return None;
     }
     unsafe {
-      let ptr = alloc::alloc(Layout::array::<Node>(nodes).unwrap()) as *mut Node;
+      let ptr = alloc::alloc::alloc(Layout::array::<Node>(nodes).unwrap()) as *mut Node;
       if ptr.is_null() {
         return None;
       }
-      Some(Box::from_raw(core::ptr::slice_from_raw_parts_mut(ptr, nodes) as *mut _))
+      Some(Box::from_raw(ptr::slice_from_raw_parts_mut(ptr, nodes) as *mut _))
     }
   }
 }

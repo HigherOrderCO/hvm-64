@@ -1,3 +1,5 @@
+#![cfg(feature = "std")]
+
 //! Tests for transformation passes
 
 pub mod loaders;

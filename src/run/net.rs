@@ -1,6 +1,6 @@
-use std::mem::MaybeUninit;
-
 use super::*;
+
+use mem::MaybeUninit;
 
 /// An interaction combinator net.
 pub struct Net<'a, M: Mode> {
@@ -16,7 +16,7 @@ deref!({<'a, M: Mode>} Net<'a, M> => self.linker: Linker<'a, M>);
 impl<'h, M: Mode> Net<'h, M> {
   /// Creates an empty net with a given heap.
   pub fn new(heap: &'h Heap) -> Self {
-    let mut net = Net::new_with_root(heap, Wire(std::ptr::null()));
+    let mut net = Net::new_with_root(heap, Wire(ptr::null()));
     net.root = Wire::new(net.alloc());
     net
   }
@@ -31,10 +31,10 @@ impl<'h, M: Mode> Net<'h, M> {
   }
 
   pub fn match_laziness_mut(&mut self) -> Result<&mut Net<'h, Lazy>, &mut Net<'h, Strict>> {
-    if M::LAZY { Ok(unsafe { core::mem::transmute(self) }) } else { Err(unsafe { core::mem::transmute(self) }) }
+    if M::LAZY { Ok(unsafe { mem::transmute(self) }) } else { Err(unsafe { mem::transmute(self) }) }
   }
   pub fn match_laziness(self) -> Result<Net<'h, Lazy>, Net<'h, Strict>> {
-    if M::LAZY { Ok(unsafe { core::mem::transmute(self) }) } else { Err(unsafe { core::mem::transmute(self) }) }
+    if M::LAZY { Ok(unsafe { mem::transmute(self) }) } else { Err(unsafe { mem::transmute(self) }) }
   }
 }
 
@@ -135,7 +135,7 @@ impl<'h, M: Mode> Net<'h, M> {
   pub fn expand(&mut self) {
     assert!(!M::LAZY);
     let (new_root, out_port) = self.create_wire();
-    let old_root = std::mem::replace(&mut self.root, new_root);
+    let old_root = mem::replace(&mut self.root, new_root);
     self.link_wire_port(old_root, ExpandDef::new(out_port));
   }
 }

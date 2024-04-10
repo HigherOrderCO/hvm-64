@@ -1,6 +1,6 @@
-use thiserror::Error;
+use crate::prelude::*;
 
-use crate::{ast::Book, util};
+use crate::ast::Book;
 
 pub mod coalesce_ctrs;
 pub mod encode_adts;
@@ -9,10 +9,11 @@ pub mod inline;
 pub mod pre_reduce;
 pub mod prune;
 
-#[derive(Debug, Error, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
+#[cfg_attr(feature = "std", derive(Error))]
 pub enum TransformError {
-  #[error("infinite reference cycle in `@{0}`")]
+  #[cfg_attr(feature = "std", error("infinite reference cycle in `@{0}`"))]
   InfiniteRefCycle(String),
 }
 
@@ -90,13 +91,13 @@ pub struct TransformOpts {
   /// How much memory to allocate when pre-reducing.
   ///
   /// Supports abbreviations such as '4G' or '400M'.
-  #[cfg_attr(feature = "cli", arg(long = "pre-reduce-memory", value_parser = util::parse_abbrev_number::<usize>))]
+  #[cfg_attr(feature = "cli", arg(long = "pre-reduce-memory", value_parser = crate::util::parse_abbrev_number::<usize>))]
   pub pre_reduce_memory: Option<usize>,
 
   /// Maximum amount of rewrites to do when pre-reducing.
   ///
   /// Supports abbreviations such as '4G' or '400M'.
-  #[cfg_attr(feature = "cli", arg(long = "pre-reduce-rewrites", default_value = "100M", value_parser = util::parse_abbrev_number::<u64>))]
+  #[cfg_attr(feature = "cli", arg(long = "pre-reduce-rewrites", default_value = "100M", value_parser = crate::util::parse_abbrev_number::<u64>))]
   pub pre_reduce_rewrites: u64,
 
   /// Names of the definitions that should not get pruned.

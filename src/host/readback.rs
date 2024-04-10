@@ -1,3 +1,5 @@
+use crate::prelude::*;
+
 use super::*;
 use crate::util::maybe_grow;
 
@@ -28,7 +30,7 @@ impl Host {
 /// See [`Host::readback`].
 struct ReadbackState<'a> {
   host: &'a Host,
-  vars: HashMap<Addr, usize>,
+  vars: Map<Addr, usize>,
   var_id: RangeFrom<usize>,
 }
 

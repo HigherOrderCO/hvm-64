@@ -1,7 +1,8 @@
+use crate::prelude::*;
+
 use crate::util::bi_enum;
-use std::{
+use core::{
   cmp::{Eq, Ord},
-  fmt::Display,
   str::FromStr,
 };
 
@@ -163,8 +164,8 @@ pub struct Op {
   pub op: IntOp,
 }
 
-impl Display for Op {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for Op {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     match self.ty {
       Ty::U60 => write!(f, "{}", self.op),
       _ => write!(f, "{}.{}", self.ty, self.op),
