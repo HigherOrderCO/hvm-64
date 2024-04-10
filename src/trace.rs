@@ -99,7 +99,7 @@ macro_rules! trace {
     impl $crate::trace::TraceSourceBearer for __ {
       const SOURCE: $crate::trace::TraceSource = $crate::trace::TraceSource {
         func: {
-          #[cfg(feature = "trace")] { std::any::type_name::<__>() }
+          #[cfg(feature = "trace")] { core::any::type_name::<__>() }
           #[cfg(not(feature = "trace"))] { "" }
         },
         file: file!(),
