@@ -1,3 +1,5 @@
+use crate::prelude::*;
+
 use super::*;
 use crate::{ops::Op, run::Lab, util::maybe_grow};
 
@@ -33,7 +35,7 @@ impl Host {
 struct State<'a, E: Encoder> {
   host: &'a Host,
   encoder: &'a mut E,
-  scope: HashMap<&'a str, E::Trg>,
+  scope: Map<&'a str, E::Trg>,
 }
 
 impl<'a, E: Encoder> State<'a, E> {

@@ -36,13 +36,13 @@ macro_rules! bi_enum {
   ) => {
     bi_enum! { #[repr($uN)] $(#$attr)* $vis enum $Ty { $($(#$var_addr)* $Variant = $value,)* } }
 
-    impl std::fmt::Display for $Ty {
-      fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    impl core::fmt::Display for $Ty {
+      fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_str(match self { $($Ty::$Variant => $str,)* })
       }
     }
 
-    impl std::str::FromStr for $Ty {
+    impl core::str::FromStr for $Ty {
       type Err = ();
       fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(match s { $($str => $Ty::$Variant,)* _ => Err(())?, })
@@ -55,7 +55,9 @@ pub(crate) use bi_enum;
 
 #[test]
 fn test_bi_enum() {
-  use std::str::FromStr;
+  use alloc::string::ToString;
+  use core::str::FromStr;
+
   bi_enum! {
     #[repr(u8)]
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]

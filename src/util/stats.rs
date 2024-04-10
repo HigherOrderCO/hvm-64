@@ -1,4 +1,6 @@
-use std::time::Duration;
+use crate::prelude::*;
+
+use core::time::Duration;
 
 use crate::run::Rewrites;
 
@@ -28,7 +30,7 @@ fn pretty_num(n: u64) -> String {
     .as_bytes()
     .rchunks(3)
     .rev()
-    .map(|x| std::str::from_utf8(x).unwrap())
+    .map(|x| core::str::from_utf8(x).unwrap())
     .flat_map(|x| ["_", x])
     .skip(1)
     .collect()

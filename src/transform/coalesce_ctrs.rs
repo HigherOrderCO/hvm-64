@@ -1,3 +1,5 @@
+use crate::prelude::*;
+
 use crate::{
   ast::{Tree, MAX_ARITY},
   util::maybe_grow,
@@ -16,7 +18,7 @@ impl Tree {
           {
             ports.extend(inner_ports.drain(..));
           }
-          Some(other) => ports.push(std::mem::take(other)),
+          Some(other) => ports.push(mem::take(other)),
           None => (),
         }
       }

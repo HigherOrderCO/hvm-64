@@ -53,9 +53,10 @@
 //!
 //! The pass also reduces subnets such as `(* *) -> *`
 
-use std::{collections::HashMap, ops::RangeFrom};
+use crate::prelude::*;
 
 use crate::ast::{Net, Tree};
+use core::ops::RangeFrom;
 
 impl Net {
   /// Carries out simple eta-reduction
@@ -83,7 +84,7 @@ enum NodeType {
 
 #[derive(Default)]
 struct Phase1<'a> {
-  vars: HashMap<&'a str, usize>,
+  vars: Map<&'a str, usize>,
   nodes: Vec<NodeType>,
 }
 

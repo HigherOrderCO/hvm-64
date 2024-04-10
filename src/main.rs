@@ -10,12 +10,13 @@ use hvmc::{
   *,
 };
 
+use parking_lot::Mutex;
 use std::{
   fs, io,
   path::Path,
   process::{self, Stdio},
   str::FromStr,
-  sync::{Arc, Mutex},
+  sync::Arc,
   time::{Duration, Instant},
 };
 
@@ -236,7 +237,7 @@ fn reduce_exprs(host: Arc<Mutex<Host>>, exprs: &[Net], opts: &RuntimeOpts) {
   for expr in exprs {
     let mut net = DynNet::new(&heap, opts.lazy_mode);
     dispatch_dyn_net!(&mut net => {
-      host.lock().unwrap().encode_net(net, Trg::port(run::Port::new_var(net.root.addr())), expr);
+      host.lock().encode_net(net, Trg::port(run::Port::new_var(net.root.addr())), expr);
       let start_time = Instant::now();
       if opts.single_core {
         net.normal();
@@ -244,7 +245,7 @@ fn reduce_exprs(host: Arc<Mutex<Host>>, exprs: &[Net], opts: &RuntimeOpts) {
         net.parallel_normal();
       }
       let elapsed = start_time.elapsed();
-      println!("{}", host.lock().unwrap().readback(net));
+      println!("{}", host.lock().readback(net));
       if opts.show_stats {
         print_stats(net, elapsed);
       }
@@ -275,7 +276,7 @@ fn pretty_num(n: u64) -> String {
 }
 
 fn compile_executable(target: &str, host: Arc<Mutex<host::Host>>) -> Result<(), io::Error> {
-  let gen = compile::compile_host(&host.lock().unwrap());
+  let gen = compile::compile_host(&host.lock());
   let outdir = ".hvm";
   if Path::new(&outdir).exists() {
     fs::remove_dir_all(outdir)?;

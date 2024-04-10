@@ -10,14 +10,16 @@
 //!
 //! [interaction calculus]: https://en.wikipedia.org/wiki/Interaction_nets#Interaction_calculus
 
-use arrayvec::ArrayVec;
+use crate::prelude::*;
 
 use crate::{
   ops::Op,
   run::Lab,
   util::{array_vec, deref, maybe_grow},
 };
-use std::{collections::BTreeMap, fmt, mem, str::FromStr};
+use alloc::collections::BTreeMap;
+use arrayvec::ArrayVec;
+use core::str::FromStr;
 use TSPL::{new_parser, Parser};
 
 /// The top level AST node, representing a collection of named nets.
@@ -147,10 +149,10 @@ pub const MAX_ADT_FIELDS: usize = MAX_ARITY - 1;
 
 impl Net {
   pub fn trees(&self) -> impl Iterator<Item = &Tree> {
-    std::iter::once(&self.root).chain(self.redexes.iter().map(|(x, y)| [x, y]).flatten())
+    iter::once(&self.root).chain(self.redexes.iter().map(|(x, y)| [x, y]).flatten())
   }
   pub fn trees_mut(&mut self) -> impl Iterator<Item = &mut Tree> {
-    std::iter::once(&mut self.root).chain(self.redexes.iter_mut().map(|(x, y)| [x, y]).flatten())
+    iter::once(&mut self.root).chain(self.redexes.iter_mut().map(|(x, y)| [x, y]).flatten())
   }
 }
 
@@ -187,7 +189,7 @@ impl Tree {
 
   pub fn legacy_mat(mut arms: Tree, out: Tree) -> Option<Tree> {
     let Tree::Ctr { lab: 0, ports } = &mut arms else { None? };
-    let ports = std::mem::take(ports);
+    let ports = mem::take(ports);
     let Ok([zero, succ]) = <[_; 2]>::try_from(ports) else { None? };
     let zero = Box::new(zero);
     let succ = Box::new(succ);
@@ -513,6 +515,8 @@ impl Drop for Tree {
 
 #[test]
 fn test_tree_drop() {
+  use alloc::vec;
+
   drop(Tree::from_str("((* (* *)) (* *))"));
 
   let mut long_tree = Tree::Era;

@@ -24,6 +24,7 @@ jobs:
       - run: RUSTFLAGS="-D warnings" cargo check --all-targets
       - run: RUSTFLAGS="-D warnings" cargo check --all-targets --features trace
       - run: RUSTFLAGS="-D warnings" cargo check --all-targets --features _fuzz
+      - run: RUSTFLAGS="-D warnings" cargo check --all-targets --no-default-features
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 10

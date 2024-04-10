@@ -1,13 +1,13 @@
-use std::{
+use crate::prelude::*;
+
+use alloc::sync::Arc;
+use core::{
   marker::PhantomData,
-  sync::{
-    atomic::{AtomicUsize, Ordering},
-    Arc, Mutex,
-  },
+  sync::atomic::{AtomicUsize, Ordering},
 };
+use parking_lot::Mutex;
 
 use crate::{
-  ast::Book,
   dispatch_dyn_net,
   host::{DefRef, Host},
   run::{AsDef, Def, DynNetMut, LabSet, Mode, Net, Port, Tag, Trg},
@@ -48,7 +48,7 @@ impl<F: Fn(Tree) + Clone + Send + Sync + 'static> AsHostedDef for LogDef<F> {
     // SAFETY: the function inside `readback` won't live longer than
     // the net, and thus won't live longer than the host, where the
     // `&Def<Self>` points to
-    let def: &'static Def<Self> = unsafe { core::mem::transmute(def) };
+    let def: &'static Def<Self> = unsafe { mem::transmute(def) };
     readback(net, def.data.0.clone(), arg, |net, tree| {
       (def.data.1)(tree);
       dispatch_dyn_net!(net => {
@@ -59,17 +59,18 @@ impl<F: Fn(Tree) + Clone + Send + Sync + 'static> AsHostedDef for LogDef<F> {
 }
 
 /// Create a `Host` from a `Book`, including `hvm-core`'s built-in definitions
-pub fn create_host(book: &Book) -> Arc<Mutex<Host>> {
+#[cfg(feature = "std")]
+pub fn create_host(book: &crate::ast::Book) -> Arc<Mutex<Host>> {
   let host = Arc::new(Mutex::new(Host::default()));
-  host.lock().unwrap().insert_def("HVM.log", unsafe {
+  host.lock().insert_def("HVM.log", unsafe {
     crate::stdlib::LogDef::new(host.clone(), {
       move |tree| {
         println!("{}", tree);
       }
     })
   });
-  host.lock().unwrap().insert_def("HVM.black_box", DefRef::Static(unsafe { &*IDENTITY }));
-  host.lock().unwrap().insert_book(&book);
+  host.lock().insert_def("HVM.black_box", DefRef::Static(unsafe { &*IDENTITY }));
+  host.lock().insert_book(&book);
   host
 }
 
@@ -210,7 +211,7 @@ impl<F: FnOnce(DynNetMut) + Send + Sync + 'static> AsBoxDef for ReadbackDef<F> {
             (*other.data.0.tree.0) = var;
           }
           Self::maybe_finish(DynNetMut::from(&mut *net), other.data.0.root);
-        } else if let Some(back) = def.data.host.lock().unwrap().back.get(&port.addr()) {
+        } else if let Some(back) = def.data.host.lock().back.get(&port.addr()) {
           unsafe { *(def.data.tree.0) = Tree::Ref { nam: back.clone() } };
         } else {
           unsafe { *(def.data.tree.0) = Tree::Era };
@@ -270,7 +271,7 @@ pub fn readback<M: Mode>(
   if M::LAZY {
     let from = net.wire_to_trg(from);
     net.normal_from(from.clone());
-    let tree = host.lock().unwrap().readback_tree(&from);
+    let tree = host.lock().readback_tree(&from);
     net.link_wire_port(from, Port::ERA);
     f(DynNetMut::from(net), tree);
   } else {

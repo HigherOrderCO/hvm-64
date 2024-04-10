@@ -1,3 +1,10 @@
+#![cfg(feature = "std")]
+
+use std::{sync::Barrier, thread};
+
+use ::alloc::sync::Arc;
+use atomic::AtomicUsize;
+
 use super::*;
 
 impl<'h, M: Mode> Net<'h, M> {

@@ -1,3 +1,5 @@
+#![cfg(feature = "std")]
+
 use crate::loaders::*;
 use hvmc::ast::Book;
 use insta::assert_debug_snapshot;
