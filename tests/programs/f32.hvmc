@@ -19,10 +19,10 @@
   & x ~ [n x] & @half ~ <f32.> #2.0 n>  // 0
 
   // ieee nan comparisons
-  & x ~ [n x] & @nan ~ <f32.== @nan n>  // 0
-  & x ~ [n x] & @nan ~ <f32.<= @nan n>  // 0
+  & x ~ [n x] & @nan ~ <f32.== @nan n> // 0
+  & x ~ [n x] & @nan ~ <f32.<= @nan n> // 0
   & x ~ [n x] & @nan ~ <f32.< @nan n>  // 0
-  & x ~ [n x] & @nan ~ <f32.>= @nan n>  // 0
+  & x ~ [n x] & @nan ~ <f32.>= @nan n> // 0
   & x ~ [n x] & @nan ~ <f32.> @nan n>  // 0
 
   & x ~ *
