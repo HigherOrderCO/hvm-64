@@ -1,8 +1,7 @@
 use crate::prelude::*;
 
-use core::time::Duration;
-
 use crate::run::Rewrites;
+use core::{str, time::Duration};
 
 pub fn show_rewrites(rwts: &Rewrites) -> String {
   format!(
@@ -25,12 +24,13 @@ pub fn show_stats(rwts: &Rewrites, elapsed: Duration) -> String {
   )
 }
 
+#[rustfmt::skip] // utterly unreadable on one line
 fn pretty_num(n: u64) -> String {
   n.to_string()
     .as_bytes()
     .rchunks(3)
     .rev()
-    .map(|x| core::str::from_utf8(x).unwrap())
+    .map(|x| str::from_utf8(x).unwrap())
     .flat_map(|x| ["_", x])
     .skip(1)
     .collect()

@@ -149,16 +149,16 @@ pub const MAX_ADT_FIELDS: usize = MAX_ARITY - 1;
 
 impl Net {
   pub fn trees(&self) -> impl Iterator<Item = &Tree> {
-    iter::once(&self.root).chain(self.redexes.iter().map(|(x, y)| [x, y]).flatten())
+    iter::once(&self.root).chain(self.redexes.iter().flat_map(|(x, y)| [x, y]))
   }
   pub fn trees_mut(&mut self) -> impl Iterator<Item = &mut Tree> {
-    iter::once(&mut self.root).chain(self.redexes.iter_mut().map(|(x, y)| [x, y]).flatten())
+    iter::once(&mut self.root).chain(self.redexes.iter_mut().flat_map(|(x, y)| [x, y]))
   }
 }
 
 impl Tree {
   #[inline(always)]
-  pub fn children(&self) -> impl Iterator<Item = &Tree> + ExactSizeIterator + DoubleEndedIterator {
+  pub fn children(&self) -> impl ExactSizeIterator + DoubleEndedIterator<Item = &Tree> {
     ArrayVec::<_, MAX_ARITY>::into_iter(match self {
       Tree::Era | Tree::Num { .. } | Tree::Ref { .. } | Tree::Var { .. } => array_vec::from_array([]),
       Tree::Ctr { ports, .. } => array_vec::from_iter(ports),
@@ -169,7 +169,7 @@ impl Tree {
   }
 
   #[inline(always)]
-  pub fn children_mut(&mut self) -> impl Iterator<Item = &mut Tree> + ExactSizeIterator + DoubleEndedIterator {
+  pub fn children_mut(&mut self) -> impl ExactSizeIterator + DoubleEndedIterator<Item = &mut Tree> {
     ArrayVec::<_, MAX_ARITY>::into_iter(match self {
       Tree::Era | Tree::Num { .. } | Tree::Ref { .. } | Tree::Var { .. } => array_vec::from_array([]),
       Tree::Ctr { ports, .. } => array_vec::from_iter(ports),
@@ -470,17 +470,14 @@ impl Clone for Tree {
   fn clone(&self) -> Tree {
     maybe_grow(|| match self {
       Tree::Era => Tree::Era,
-      Tree::Num { val } => Tree::Num { val: val.clone() },
+      Tree::Num { val } => Tree::Num { val: *val },
       Tree::Ref { nam } => Tree::Ref { nam: nam.clone() },
-      Tree::Ctr { lab, ports } => Tree::Ctr { lab: lab.clone(), ports: ports.clone() },
-      Tree::Op { op, rhs, out } => Tree::Op { op: op.clone(), rhs: rhs.clone(), out: out.clone() },
+      Tree::Ctr { lab, ports } => Tree::Ctr { lab: *lab, ports: ports.clone() },
+      Tree::Op { op, rhs, out } => Tree::Op { op: *op, rhs: rhs.clone(), out: out.clone() },
       Tree::Mat { zero, succ, out } => Tree::Mat { zero: zero.clone(), succ: succ.clone(), out: out.clone() },
-      Tree::Adt { lab, variant_index, variant_count, fields } => Tree::Adt {
-        lab: lab.clone(),
-        variant_index: variant_index.clone(),
-        variant_count: variant_count.clone(),
-        fields: fields.clone(),
-      },
+      Tree::Adt { lab, variant_index, variant_count, fields } => {
+        Tree::Adt { lab: *lab, variant_index: *variant_index, variant_count: *variant_count, fields: fields.clone() }
+      }
       Tree::Var { nam } => Tree::Var { nam: nam.clone() },
     })
   }

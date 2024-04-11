@@ -72,6 +72,7 @@
 
 use crate::prelude::*;
 
+use alloc::sync::Arc;
 use core::{
   any::Any,
   cell::{OnceCell, RefCell},
@@ -81,7 +82,7 @@ use core::{
   sync::atomic,
 };
 use std::{
-  sync::{Arc, Condvar, Mutex},
+  sync::{Condvar, Mutex},
   thread::{self, Scope, ThreadId},
   thread_local,
 };
@@ -460,7 +461,7 @@ impl<'s, 'p: 's, 'e: 's> FuzzScope<'s, 'p, 'e> {
       }
     });
     while !ready.load(atomic::Ordering::Relaxed) {
-      std::hint::spin_loop()
+      hint::spin_loop()
     }
   }
 }

@@ -60,6 +60,7 @@ impl<F: Fn(Tree) + Clone + Send + Sync + 'static> AsHostedDef for LogDef<F> {
 
 /// Create a `Host` from a `Book`, including `hvm-core`'s built-in definitions
 #[cfg(feature = "std")]
+#[allow(clippy::absolute_paths)]
 pub fn create_host(book: &crate::ast::Book) -> Arc<Mutex<Host>> {
   let host = Arc::new(Mutex::new(Host::default()));
   host.lock().insert_def("HVM.log", unsafe {
@@ -70,7 +71,7 @@ pub fn create_host(book: &crate::ast::Book) -> Arc<Mutex<Host>> {
     })
   });
   host.lock().insert_def("HVM.black_box", DefRef::Static(unsafe { &*IDENTITY }));
-  host.lock().insert_book(&book);
+  host.lock().insert_book(book);
   host
 }
 
@@ -84,11 +85,8 @@ impl<T: AsBoxDef> BoxDef<T> {
   /// SAFETY: if port is a ref, it must be a valid pointer.
   pub unsafe fn try_downcast_box(port: Port) -> Option<Box<Def<Self>>> {
     if port.is(Tag::Ref) {
-      if let Some(port) = unsafe { Def::downcast_ptr::<Self>(port.addr().0 as *const _) } {
-        Some(unsafe { Box::from_raw(port as *mut Def<Self>) })
-      } else {
-        None
-      }
+      unsafe { Def::downcast_ptr::<Self>(port.addr().0 as *const _) }
+        .map(|port| unsafe { Box::from_raw(port as *mut Def<Self>) })
     } else {
       None
     }
@@ -121,11 +119,8 @@ impl<T: AsArcDef> ArcDef<T> {
   /// SAFETY: if port is a ref, it must be a valid pointer.
   pub unsafe fn try_downcast_arc(port: Port) -> Option<Arc<Def<Self>>> {
     if port.is(Tag::Ref) && port != Port::ERA {
-      if let Some(port) = unsafe { Def::downcast_ptr::<Self>(port.addr().0 as *const _) } {
-        Some(unsafe { Arc::from_raw(port as *mut Def<Self>) })
-      } else {
-        None
-      }
+      unsafe { Def::downcast_ptr::<Self>(port.addr().0 as *const _) }
+        .map(|port| unsafe { Arc::from_raw(port as *mut Def<Self>) })
     } else {
       None
     }
@@ -182,7 +177,7 @@ pub struct ReadbackDef<F: FnOnce(DynNetMut) + Send + Sync + 'static> {
 }
 
 impl<F: FnOnce(DynNetMut) + Send + Sync + 'static> ReadbackDef<F> {
-  fn maybe_finish<'a, 'b>(net: DynNetMut<'a, 'b>, root: Arc<F>) {
+  fn maybe_finish(net: DynNetMut<'_, '_>, root: Arc<F>) {
     let Some(root) = Arc::into_inner(root) else { return };
     (root)(net)
   }
@@ -266,7 +261,7 @@ pub fn readback<M: Mode>(
   from: Trg,
   f: impl FnOnce(DynNetMut, Tree) + Send + Sync + 'static,
 ) {
-  let root = UniqueTreePtr(Box::leak(Box::new(Tree::default())));
+  let root = UniqueTreePtr(Box::leak(Box::default()));
 
   if M::LAZY {
     let from = net.wire_to_trg(from);

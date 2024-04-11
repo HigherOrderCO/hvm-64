@@ -14,7 +14,7 @@ use hvmc::{
 use insta::assert_display_snapshot;
 
 fn get_arithmetic_program_path() -> String {
-  return env!("CARGO_MANIFEST_DIR").to_owned() + "/examples/arithmetic.hvmc";
+  env!("CARGO_MANIFEST_DIR").to_owned() + "/examples/arithmetic.hvmc"
 }
 
 fn execute_hvmc(args: &[&str]) -> Result<(ExitStatus, String), Box<dyn Error>> {
@@ -216,35 +216,34 @@ fn test_apply_tree() {
     let root_port = run::Trg::port(run::Port::new_var(rnet.root.addr()));
     host.encode_net(&mut rnet, root_port, &fun);
     rnet.normal();
-    let got_result = host.readback(&rnet);
-    got_result
+    host.readback(&rnet)
   }
   assert_display_snapshot!(
-    eval_with_args("(a a)", &vec!["(a a)"]),
+    eval_with_args("(a a)", &["(a a)"]),
     @"(a a)"
   );
   assert_display_snapshot!(
-    eval_with_args("b & (a b) ~ a", &vec!["(a a)"]),
+    eval_with_args("b & (a b) ~ a", &["(a a)"]),
     @"a"
   );
   assert_display_snapshot!(
-    eval_with_args("(z0 z0)", &vec!["(z1 z1)"]),
+    eval_with_args("(z0 z0)", &["(z1 z1)"]),
     @"(a a)"
   );
   assert_display_snapshot!(
-    eval_with_args("(* #1)", &vec!["(a a)"]),
+    eval_with_args("(* #1)", &["(a a)"]),
     @"#1"
   );
   assert_display_snapshot!(
-    eval_with_args("(<+ a b> (a b))", &vec!["#1", "#2"]),
+    eval_with_args("(<+ a b> (a b))", &["#1", "#2"]),
     @"#3"
   );
   assert_display_snapshot!(
-    eval_with_args("(<* a b> (a b))", &vec!["#2", "#3"]),
+    eval_with_args("(<* a b> (a b))", &["#2", "#3"]),
     @"#6"
   );
   assert_display_snapshot!(
-    eval_with_args("(<* a b> (a b))", &vec!["#2"]),
+    eval_with_args("(<* a b> (a b))", &["#2"]),
     @"(<* #2 a> a)"
   );
 }
@@ -254,7 +253,7 @@ fn test_cli_compile() {
   // Test normal-form expressions
 
   if !Command::new(env!("CARGO_BIN_EXE_hvmc"))
-    .args(&["compile", &get_arithmetic_program_path()])
+    .args(["compile", &get_arithmetic_program_path()])
     .stdout(Stdio::inherit())
     .stderr(Stdio::inherit())
     .spawn()
@@ -268,7 +267,7 @@ fn test_cli_compile() {
 
   let mut output_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
   output_path.push("examples/arithmetic");
-  let mut child = Command::new(&output_path).args(&["#40", "#3"]).stdout(Stdio::piped()).spawn().unwrap();
+  let mut child = Command::new(&output_path).args(["#40", "#3"]).stdout(Stdio::piped()).spawn().unwrap();
 
   let mut stdout = child.stdout.take().ok_or("Couldn't capture stdout!").unwrap();
   child.wait().unwrap();

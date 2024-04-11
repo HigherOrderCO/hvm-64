@@ -99,7 +99,7 @@ macro_rules! trace {
     impl $crate::trace::TraceSourceBearer for __ {
       const SOURCE: $crate::trace::TraceSource = $crate::trace::TraceSource {
         func: {
-          #[cfg(feature = "trace")] { std::any::type_name::<__>() }
+          #[cfg(feature = "trace")] { core::any::type_name::<__>() }
           #[cfg(not(feature = "trace"))] { "" }
         },
         file: file!(),
@@ -179,6 +179,7 @@ impl TraceData {
   }
 }
 
+#[allow(clippy::vec_box)] // the address of `TraceLock` needs to remain stable
 static ACTIVE_TRACERS: Mutex<Vec<Box<TraceLock>>> = Mutex::new(Vec::new());
 
 struct TraceWriter {
@@ -207,7 +208,7 @@ impl TraceWriter {
   }
   fn acquire(&self, cb: impl FnOnce(&mut TraceData)) {
     while self.lock.locked.compare_exchange_weak(false, true, Ordering::Relaxed, Ordering::Relaxed).is_err() {
-      core::hint::spin_loop();
+      hint::spin_loop();
     }
     cb(unsafe { &mut *self.lock.data.get() });
     self.lock.locked.store(false, Ordering::Release);
@@ -299,7 +300,7 @@ pub fn _read_traces(limit: usize) {
     .enumerate()
     .map(|(i, t)| {
       while t.locked.compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed).is_err() {
-        core::hint::spin_loop();
+        hint::spin_loop();
       }
       TraceReader::new(unsafe { &*t.data.get() }, i)
     })
@@ -354,7 +355,7 @@ impl TraceArg for Wire {
 
 impl TraceArg for Trg {
   fn to_word(&self) -> u64 {
-    self.0.0 as u64
+    self.0.0
   }
   fn from_word(word: u64) -> impl Debug {
     Trg(Port(word))
@@ -465,8 +466,9 @@ pub fn set_hook() {
   if cfg!(feature = "trace") {
     #[cfg(feature = "std")]
     ONCE.call_once(|| {
-      let hook = std::panic::take_hook();
-      std::panic::set_hook(Box::new(move |info| {
+      use std::panic;
+      let hook = panic::take_hook();
+      panic::set_hook(Box::new(move |info| {
         hook(info);
         _read_traces(usize::MAX);
       }));
