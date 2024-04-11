@@ -52,13 +52,13 @@ impl_unsigned! { u8, u16, u32, u64 }
 impl FromWord for f32 {
   #[inline(always)]
   fn from_word(bits: u64) -> Self {
-    unsafe { std::mem::transmute(bits as u32) }
+    f32::from_bits(bits as u32)
   }
 }
 
 impl ToWord for f32 {
   #[inline(always)]
   fn to_word(self) -> u64 {
-    unsafe { std::mem::transmute::<_, u32>(self) as u64 }
+    self.to_bits() as u64
   }
 }

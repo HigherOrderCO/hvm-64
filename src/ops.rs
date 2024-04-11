@@ -1,9 +1,8 @@
 mod num;
-pub mod word;
+mod word;
 
 use crate::util::bi_enum;
 
-pub use self::num::Num;
 use self::{
   num::Numeric,
   word::{FromWord, ToWord},

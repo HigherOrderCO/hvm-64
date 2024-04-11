@@ -57,6 +57,8 @@ use std::{collections::HashMap, ops::RangeFrom};
 
 use crate::ast::{Net, Tree};
 
+use ordered_float::OrderedFloat;
+
 impl Net {
   /// Carries out simple eta-reduction
   pub fn eta_reduce(&mut self) {
@@ -76,6 +78,7 @@ enum NodeType {
   Ctr(u16),
   Var(isize),
   Int(i64),
+  F32(OrderedFloat<f32>),
   Era,
   Other,
   Hole,
@@ -112,6 +115,7 @@ impl<'a> Phase1<'a> {
       }
       Tree::Era => self.nodes.push(NodeType::Era),
       Tree::Int { val } => self.nodes.push(NodeType::Int(*val)),
+      Tree::F32 { val } => self.nodes.push(NodeType::F32(*val)),
       _ => {
         self.nodes.push(NodeType::Other);
         for i in tree.children() {

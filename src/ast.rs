@@ -379,7 +379,7 @@ impl<'i> Parser<'i> {
 
   /// See `ops.rs` for the available operators.
   fn parse_op(&mut self) -> Result<Op, String> {
-    let op = self.take_while(|c| "fui0123456789.+-=*/%<>|&^!?$".contains(c));
+    let op = self.take_while(|c| c.is_alphanumeric() || ".+-=*/%<>|&^!?$".contains(c));
     op.parse().map_err(|_| format!("Unknown operator: {op:?}"))
   }
 

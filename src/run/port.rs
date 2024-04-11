@@ -1,5 +1,3 @@
-use crate::ops::Num;
-
 use super::*;
 
 /// A port in the interaction net.
@@ -7,7 +5,8 @@ use super::*;
 /// The type of a port is determined by its *tag*, which is stored in the bottom
 /// three bits.
 ///
-/// All tags other than [`Int`] divide the bits of the port as follows:
+/// All tags other than [`Int`] and [`F32`] divide the bits of the port as
+/// follows:
 /// - the top 16 bits are the *label*, accessible with [`Port::lab`]
 /// - the middle 45 bits are the non-alignment bits of the *address*, an
 ///   8-byte-aligned pointer accessible with [`Port::addr`]
@@ -15,7 +14,7 @@ use super::*;
 ///
 /// The semantics of these fields depend upon the tag; see the documentation for
 /// each [`Tag`] variant.
-#[derive(Clone, Copy, Eq, PartialEq, PartialOrd, Hash, Default)]
+#[derive(Clone, Eq, PartialEq, PartialOrd, Hash, Default)]
 #[repr(transparent)]
 #[must_use]
 pub struct Port(pub u64);
@@ -59,6 +58,15 @@ bi_enum! {
     ///
     /// The 4th bit from the bottom is currently unused in this port.
     Int = 3,
+    /// An `F32` port represents the principal port of an 32-bit floating
+    /// point node.
+    ///
+    /// Similarly to the [`Int`] ports, the top 60 bits are the value of
+    /// this node. However, since we only need 32 bits to store this floating
+    /// point number, the bottom 32 bits of the 60-bit value are used.
+    ///
+    /// The 4th bit from the bottom is currently unused in this port.
+    F32 = 4,
     /// An `Op` port represents the principal port of an Op node.
     ///
     /// The label of this port is the corresponding operation, which can be
@@ -67,15 +75,7 @@ bi_enum! {
     /// The address of this port is the address of a two-word allocation,
     /// storing the targets of the wires connected to the two auxiliary ports of
     /// this node.
-    Op = 4,
-    /// An `F32` port represents the principal port of an 32-bit floating
-    /// point node.
-    ///
-    /// The top 32 bits of the port are the value of this node and is
-    /// accessible with [`Port::float`].
-    ///
-    /// The 4th bit from the bottom is currently unused in this port.
-    F32 = 5,
+    Op = 5,
     /// A `Mat` port represents the principal port of a Mat node.
     ///
     /// The address of this port is the address of a two-word allocation,
@@ -142,19 +142,19 @@ impl Port {
 
   /// Creates a new [`Int`] port with a given 60-bit numeric value.
   #[inline(always)]
-  pub const fn new_int(val: i64) -> Self {
-    Port((val << 4) as u64 | (Int as u64))
+  pub fn new_int(val: i64) -> Self {
+    Port::new_num(Int, val as u64)
   }
 
   /// Creates a new [`F32`] port with a given 60-bit numeric value.
   #[inline(always)]
-  pub const fn new_float(val: f32) -> Self {
-    Port((unsafe { std::mem::transmute::<_, u32>(val) as u64 } << 4) | (F32 as u64))
+  pub fn new_float(val: f32) -> Self {
+    Port::new_num(F32, val.to_bits() as u64)
   }
 
-  /// Creates a new [`Int` | `F32`] port with a given 60-bit numeric value.
+  /// Creates a new [`Int`] or [`F32`] port with a given 60-bit numeric value.
   #[inline(always)]
-  pub const fn new_num(tag: Tag, bits: u64) -> Self {
+  pub fn new_num(tag: Tag, bits: u64) -> Self {
     Port((bits << 4) as u64 | (tag as u64))
   }
 
@@ -175,13 +175,19 @@ impl Port {
     self.tag() == tag
   }
 
-  /// Accesses the label of this port; this is valid for all non-`Int` ports.
+  /// Whether this port is numeric, either [`Int`] or [`F32`].
+  #[inline(always)]
+  pub fn is_num(&self) -> bool {
+    self.tag() == Tag::Int || self.tag() == Tag::F32
+  }
+
+  /// Accesses the label of this port; this is valid for all non-numeric ports.
   #[inline(always)]
   pub const fn lab(&self) -> Lab {
     (self.0 >> 48) as Lab
   }
 
-  /// Accesses the addr of this port; this is valid for all non-`Int` ports.
+  /// Accesses the addr of this port; this is valid for all non-numeric ports.
   #[inline(always)]
   pub const fn addr(&self) -> Addr {
     Addr((self.0 & 0x0000_FFFF_FFFF_FFF8) as usize as _)
@@ -202,13 +208,14 @@ impl Port {
 
   /// Accesses the float value of this port; this is valid for [`F32`] ports.
   #[inline(always)]
-  pub const fn float(&self) -> f32 {
-    unsafe { std::mem::transmute((self.0 >> 4) as u32) }
+  pub fn float(&self) -> f32 {
+    f32::from_bits((self.0 >> 4) as u32)
   }
 
-  /// Accesses the numeric value of this port; this is valid for [`Int` | `F32`]
-  /// ports. This is meant for numeric operations to defer interpreting this
-  /// port as an integer or as a float until the operation type is known.
+  /// Accesses the numeric value of this port; this is valid for [`Int`] or
+  /// [`F32`] ports. This is meant for numeric operations to defer
+  /// interpreting this port as an integer or as a float until the operation
+  /// type is known.
   #[inline(always)]
   pub const fn num(&self) -> u64 {
     self.0 >> 4
@@ -231,7 +238,7 @@ impl Port {
   /// need to be added to the redex list.
   #[inline(always)]
   pub fn is_skippable(&self) -> bool {
-    self.tag() == Int || self.tag() == Ref && self.lab() != u16::MAX
+    self.is_num() || self.tag() == Ref && self.lab() != u16::MAX
   }
 
   /// Converts a [`Var`] port into a [`Red`] port with the same address.
@@ -247,15 +254,6 @@ impl Port {
   }
 
   pub(super) fn is_full_node(&self) -> bool {
-    self.tag() > Int
-  }
-}
-
-impl From<Num> for Port {
-  fn from(num: Num) -> Self {
-    match num {
-      Num::Int(int) => Self::new_int(int),
-      Num::Float(float) => Self::new_float(float),
-    }
+    self.tag() > F32
   }
 }

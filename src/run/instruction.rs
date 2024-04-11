@@ -1,5 +1,3 @@
-use crate::ops::{word::ToWord, Num};
-
 use super::*;
 
 /// Each instruction corresponds to a fragment of a net that has a native
@@ -31,7 +29,7 @@ use super::*;
 /// of each `TrgId`.
 ///
 /// Some instructions take a [`Port`]; these must always be statically-valid
-/// ports -- that is, [`Ref`] or [`Int`] ports.
+/// ports -- that is, [`Ref`], [`Int`], or [`F32`] ports.
 #[derive(Debug, Clone)]
 pub enum Instruction {
   /// ```rust,ignore
@@ -60,7 +58,7 @@ pub enum Instruction {
   /// ```rust,ignore
   /// let out = net.do_op_num(lab, trg, rhs);
   /// ```
-  OpNum { op: Op, trg: TrgId, rhs: Num, out: TrgId },
+  OpNum { op: Op, trg: TrgId, rhs: Port, out: TrgId },
   /// See [`Net::do_mat`].
   /// ```rust,ignore
   /// let (lft, rgt) = net.do_mat(trg);
@@ -154,13 +152,13 @@ impl<'a, M: Mode> Net<'a, M> {
 
   /// `trg ~ <op #b x>`
   #[inline(always)]
-  pub(crate) fn do_op_num(&mut self, op: Op, trg: Trg, rhs: Num) -> Trg {
+  pub(crate) fn do_op_num(&mut self, op: Op, trg: Trg, rhs: Port) -> Trg {
     let port = trg.target();
-    if !M::LAZY && (port.tag() == Int || port.tag() == F32) {
+    if !M::LAZY && port.is_num() {
       self.rwts.oper += 1;
       self.free_trg(trg);
 
-      let res = op.op(port.num(), rhs.to_word());
+      let res = op.op(port.num(), rhs.num());
 
       if op.is_int() { Trg::port(Port::new_num(Tag::Int, res)) } else { Trg::port(Port::new_num(Tag::F32, res)) }
     } else if !M::LAZY && port == Port::ERA {
@@ -169,7 +167,7 @@ impl<'a, M: Mode> Net<'a, M> {
     } else {
       let n = self.create_node(Op, op.into());
       self.link_trg_port(trg, n.p0);
-      n.p1.wire().set_target(Port::from(rhs));
+      n.p1.wire().set_target(rhs);
       Trg::port(n.p2)
     }
   }
