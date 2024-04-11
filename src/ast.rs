@@ -308,8 +308,8 @@ impl<'i> Parser<'i> {
           let nam = self.parse_name()?;
           Ok(Tree::Ref { nam })
         }
-        // Int = "#" Int
-        // F32 = "#" Int "." Int
+        // Int = "#" [-] Int
+        // F32 = "#" [-] ( Int "." Int | "NaN" | "inf" )
         Some('#') => {
           self.advance_char();
           let is_neg = self.consume("-").is_ok();
