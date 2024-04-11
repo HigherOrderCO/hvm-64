@@ -6,7 +6,6 @@
   incomplete_features,
   clippy::field_reassign_with_default,
   clippy::missing_safety_doc,
-  clippy::wrong_self_convention,
   clippy::new_ret_no_self
 )]
 #![warn(

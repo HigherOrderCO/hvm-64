@@ -282,11 +282,13 @@ impl Trg {
   }
 
   #[inline(always)]
+  #[allow(clippy::wrong_self_convention)]
   pub(super) fn as_wire(self) -> Wire {
     Wire(self.0.0 as _)
   }
 
   #[inline(always)]
+  #[allow(clippy::wrong_self_convention)]
   pub(super) fn as_port(self) -> Port {
     self.0
   }
