@@ -9,19 +9,19 @@ pub trait ToWord {
 macro_rules! impl_signed {
   ( $($ty:ty),+ ) => {
     $(
-    impl FromWord for $ty {
-      #[inline(always)]
-      fn from_word(bits: u64) -> Self {
-        unsafe { std::mem::transmute::<_, i64>(bits) as Self }
+      impl FromWord for $ty {
+        #[inline(always)]
+        fn from_word(bits: u64) -> Self {
+          unsafe { std::mem::transmute::<_, i64>(bits) as Self }
+        }
       }
-    }
 
-    impl ToWord for $ty {
-      #[inline(always)]
-      fn to_word(self) -> u64 {
-        unsafe { std::mem::transmute(self as i64) }
+      impl ToWord for $ty {
+        #[inline(always)]
+        fn to_word(self) -> u64 {
+          unsafe { std::mem::transmute(self as i64) }
+        }
       }
-    }
     )*
   };
 }
@@ -29,19 +29,19 @@ macro_rules! impl_signed {
 macro_rules! impl_unsigned {
   ( $($ty:ty),+ ) => {
     $(
-    impl FromWord for $ty {
-      #[inline(always)]
-      fn from_word(bits: u64) -> Self {
-        bits as $ty
+      impl FromWord for $ty {
+        #[inline(always)]
+        fn from_word(bits: u64) -> Self {
+          bits as Self
+        }
       }
-    }
 
-    impl ToWord for $ty {
-      #[inline(always)]
-      fn to_word(self) -> u64 {
-        self as u64
+      impl ToWord for $ty {
+        #[inline(always)]
+        fn to_word(self) -> u64 {
+          self as u64
+        }
       }
-    }
     )*
   };
 }
