@@ -25,4 +25,10 @@
   & x ~ [n x] & @nan ~ <f32.>= @nan n> // 0
   & x ~ [n x] & @nan ~ <f32.> @nan n>  // 0
 
+  // parsing
+  & x ~ [n x] & #NaN  ~ <f32.+ #0.0 n> // NaN
+  & x ~ [n x] & #inf  ~ <f32.+ #0.0 n> // inf
+  & x ~ [n x] & #-inf ~ <f32.+ #0.0 n> // -inf
+  & x ~ [n x] & #1.02 ~ <f32.+ #0.0 n> // 1.02
+
   & x ~ *

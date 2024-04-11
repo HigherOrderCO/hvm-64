@@ -313,15 +313,20 @@ impl<'i> Parser<'i> {
         Some('#') => {
           self.advance_char();
           let is_neg = self.consume("-").is_ok();
-          let int_val = if is_neg { -(self.parse_int()? as i64) } else { self.parse_int()? as i64 };
+          let num = self.take_while(|c| c.is_alphanumeric() || c == '.');
 
-          if self.consume(".").is_ok() {
-            let frac_val = self.parse_int()?;
-            let frac_len = frac_val.checked_ilog10().unwrap_or(0) + 1;
-
-            Ok(Tree::F32 { val: (int_val as f32 + frac_val as f32 / 10f32.powi(frac_len as i32)).into() })
+          if num.contains(".") || num.contains("NaN") || num.contains("inf") {
+            let mut val: f32 = num.parse().map_err(|err| format!("{err:?}"))?;
+            if is_neg {
+              val = -val;
+            }
+            Ok(Tree::F32 { val: val.into() })
           } else {
-            Ok(Tree::Int { val: int_val })
+            let mut val: i64 = parse_int(num)? as i64;
+            if is_neg {
+              val = -val;
+            }
+            Ok(Tree::Int { val })
           }
         }
         // Op = "<" Op Tree Tree ">"
@@ -369,24 +374,7 @@ impl<'i> Parser<'i> {
   /// Int = /[0-9]+/ | /0x[0-9a-fA-F]+/ | /0b[01]+/
   fn parse_int(&mut self) -> Result<u64, String> {
     self.skip_trivia();
-    let radix = if let Some(rest) = self.input.strip_prefix("0x") {
-      self.input = rest;
-      16
-    } else if let Some(rest) = self.input.strip_prefix("0b") {
-      self.input = rest;
-      2
-    } else {
-      10
-    };
-    let mut num: u64 = 0;
-    if !self.peek_char().map_or(false, |c| c.is_digit(radix)) {
-      return Err(format!("Expected a digit, found {:?}", self.peek_char()));
-    }
-    while let Some(digit) = self.peek_char().and_then(|c| c.to_digit(radix)) {
-      self.advance_char();
-      num = num * (radix as u64) + (digit as u64);
-    }
-    Ok(num)
+    parse_int(self.take_while(|c| c.is_alphanumeric()))
   }
 
   /// See `ops.rs` for the available operators.
@@ -441,6 +429,17 @@ impl<'i> Parser<'i> {
     let (name, rest) = self.input.split_at(len);
     self.input = rest;
     name
+  }
+}
+
+/// Parses an unsigned integer with an optional radix prefix.
+fn parse_int(input: &str) -> Result<u64, String> {
+  if let Some(rest) = input.strip_prefix("0x") {
+    u64::from_str_radix(rest, 16).map_err(|err| format!("{err:?}"))
+  } else if let Some(rest) = input.strip_prefix("0b") {
+    u64::from_str_radix(rest, 2).map_err(|err| format!("{err:?}"))
+  } else {
+    u64::from_str_radix(input, 10).map_err(|err| format!("{err:?}"))
   }
 }
 
@@ -543,7 +542,7 @@ impl fmt::Display for Tree {
       Tree::Var { nam } => write!(f, "{nam}"),
       Tree::Ref { nam } => write!(f, "@{nam}"),
       Tree::Int { val } => write!(f, "#{val}"),
-      Tree::F32 { val } => write!(f, "#{val}"),
+      Tree::F32 { val } => write!(f, "#{:?}", val.0),
       Tree::Op { op, rhs, out } => write!(f, "<{op} {rhs} {out}>"),
       Tree::Mat { zero, succ, out } => write!(f, "?<{zero} {succ} {out}>"),
     })
