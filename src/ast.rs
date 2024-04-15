@@ -370,12 +370,6 @@ impl<'i> HvmcParser<'i> {
     Ok(name.to_owned())
   }
 
-  /// Int = /[0-9]+/ | /0x[0-9a-fA-F]+/ | /0b[01]+/
-  fn parse_int(&mut self) -> Result<u64, String> {
-    self.skip_trivia();
-    parse_int(self.take_while(|c| c.is_alphanumeric()))
-  }
-
   /// See `ops.rs` for the available operators.
   fn parse_op(&mut self) -> Result<Op, String> {
     let op = self.take_while(|c| c.is_alphanumeric() || ".+-=*/%<>|&^!?$".contains(c));
