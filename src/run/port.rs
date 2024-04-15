@@ -155,7 +155,7 @@ impl Port {
   /// Creates a new [`Int`] or [`F32`] port with a given 60-bit numeric value.
   #[inline(always)]
   pub fn new_num(tag: Tag, bits: u64) -> Self {
-    Port((bits << 4) as u64 | (tag as u64))
+    Port((bits << 4) | (tag as u64))
   }
 
   /// Creates a new [`Ref`] port corresponding to a given definition.

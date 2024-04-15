@@ -314,7 +314,7 @@ impl<'i> HvmcParser<'i> {
           let is_neg = self.consume("-").is_ok();
           let num = self.take_while(|c| c.is_alphanumeric() || c == '.');
 
-          if num.contains(".") || num.contains("NaN") || num.contains("inf") {
+          if num.contains('.') || num.contains("NaN") || num.contains("inf") {
             let mut val: f32 = num.parse().map_err(|err| format!("{err:?}"))?;
             if is_neg {
               val = -val;
@@ -384,7 +384,7 @@ fn parse_int(input: &str) -> Result<u64, String> {
   } else if let Some(rest) = input.strip_prefix("0b") {
     u64::from_str_radix(rest, 2).map_err(|err| format!("{err:?}"))
   } else {
-    u64::from_str_radix(input, 10).map_err(|err| format!("{err:?}"))
+    input.parse::<u64>().map_err(|err| format!("{err:?}"))
   }
 }
 
@@ -499,8 +499,8 @@ impl Clone for Tree {
   fn clone(&self) -> Tree {
     maybe_grow(|| match self {
       Tree::Era => Tree::Era,
-      Tree::Int { val } => Tree::Int { val: val.clone() },
-      Tree::F32 { val } => Tree::F32 { val: val.clone() },
+      Tree::Int { val } => Tree::Int { val: *val },
+      Tree::F32 { val } => Tree::F32 { val: *val },
       Tree::Ref { nam } => Tree::Ref { nam: nam.clone() },
       Tree::Ctr { lab, ports } => Tree::Ctr { lab: *lab, ports: ports.clone() },
       Tree::Op { op, rhs, out } => Tree::Op { op: *op, rhs: rhs.clone(), out: out.clone() },

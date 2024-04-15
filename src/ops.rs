@@ -9,7 +9,6 @@ use self::{
 };
 use core::{
   cmp::{Eq, Ord},
-  fmt::Display,
   str::FromStr,
 };
 
@@ -160,7 +159,7 @@ pub struct TypedOp {
 
 impl TypedOp {
   pub unsafe fn from_unchecked(val: u16) -> Self {
-    std::mem::transmute(val)
+    mem::transmute(val)
   }
 
   /// Whether this operation returns an int.
@@ -192,21 +191,13 @@ impl TypedOp {
   }
 }
 
-impl Display for TypedOp {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for TypedOp {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     match self.ty {
       Ty::U60 => write!(f, "{}", self.op),
       _ => write!(f, "{}.{}", self.ty, self.op),
     }
   }
-}
-
-#[derive(thiserror::Error, Debug)]
-pub enum Error {
-  #[error("invalid type: {0}")]
-  Type(String),
-  #[error("invalid operator: {0}")]
-  Op(String),
 }
 
 impl TryFrom<u16> for TypedOp {
@@ -223,6 +214,15 @@ impl From<TypedOp> for u16 {
   fn from(TypedOp { ty, op }: TypedOp) -> Self {
     u16::from_ne_bytes([ty as u8, op as u8])
   }
+}
+
+#[cfg_attr(feature = "std", derive(Error))]
+#[derive(Debug)]
+pub enum Error {
+  #[cfg_attr(feature = "std", error("invalid type: {0}"))]
+  Type(String),
+  #[cfg_attr(feature = "std", error("invalid operator: {0}"))]
+  Op(String),
 }
 
 impl FromStr for TypedOp {
