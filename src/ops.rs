@@ -32,6 +32,13 @@ bi_enum! {
   }
 }
 
+impl Ty {
+  #[inline(always)]
+  fn is_int(&self) -> bool {
+    *self < Self::F32
+  }
+}
+
 bi_enum! {
   #[repr(u8)]
   /// Native operations on numerics (u8, u16, u32, u60, i8, i16, i32, f32).
@@ -123,6 +130,7 @@ impl Op {
 
   fn op_word<T: Numeric + FromWord + ToWord>(self, a: u64, b: u64) -> u64 {
     match self {
+      // comparison operators return an integer, which is not necessarily a `T`.
       Self::Eq => (T::from_word(a) == T::from_word(b)).into(),
       Self::Ne => (T::from_word(a) != T::from_word(b)).into(),
       Self::Lt => (T::from_word(a) < T::from_word(b)).into(),
@@ -135,8 +143,8 @@ impl Op {
   }
 
   #[inline(always)]
-  fn is_int(&self) -> bool {
-    self >= &Self::Eq
+  fn is_comparison(&self) -> bool {
+    *self >= Self::Eq
   }
 }
 
@@ -155,9 +163,10 @@ impl TypedOp {
     std::mem::transmute(val)
   }
 
+  /// Whether this operation returns an int.
   #[inline(always)]
   pub fn is_int(&self) -> bool {
-    (self.ty < Ty::F32) || self.op.is_int()
+    self.ty.is_int() || self.op.is_comparison()
   }
 
   pub fn swap(self) -> Self {
