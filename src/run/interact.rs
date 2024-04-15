@@ -222,7 +222,7 @@ impl<'a, M: Mode> Net<'a, M> {
     }
   }
 
-  /// Interacts an int and a binary numeric operation node.
+  /// Interacts a number and a binary numeric operation node.
   ///
   /// ```text
   ///                             |
@@ -253,7 +253,7 @@ impl<'a, M: Mode> Net<'a, M> {
     let a = a.consume_node();
     let op = unsafe { Op::try_from(a.lab).unwrap_unchecked() };
     let a1 = a.p1.load_target();
-    if a1.tag() == Int || a1.tag() == F32 {
+    if a1.is_num() {
       self.rwts.oper += 1;
       self.half_free(a.p1.addr());
 

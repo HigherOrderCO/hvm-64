@@ -51,19 +51,20 @@ bi_enum! {
     "/$":  DivS = 5,
     "%":   Rem  = 6,
     "%$":  RemS = 7,
-    "==":  Eq   = 8,
-    "!=":  Ne   = 9,
-    "<":   Lt   = 10,
-    ">":   Gt   = 11,
-    "<=":  Le   = 12,
-    ">=":  Ge   = 13,
-    "&":   And  = 14,
-    "|":   Or   = 15,
-    "^":   Xor  = 16,
-    "<<":  Shl  = 17,
-    "<<$": ShlS = 18,
-    ">>":  Shr  = 19,
-    ">>$": ShrS = 20,
+    "&":   And  = 8,
+    "|":   Or   = 9,
+    "^":   Xor  = 10,
+    "<<":  Shl  = 11,
+    "<<$": ShlS = 12,
+    ">>":  Shr  = 13,
+    ">>$": ShrS = 14,
+    // operators returning ints should go after `Eq`
+    "==":  Eq   = 15,
+    "!=":  Ne   = 16,
+    "<":   Lt   = 17,
+    ">":   Gt   = 18,
+    "<=":  Le   = 19,
+    ">=":  Ge   = 20,
   }
 }
 
@@ -82,12 +83,6 @@ impl Op {
       Self::DivS => Self::Div,
       Self::Rem => Self::RemS,
       Self::RemS => Self::Rem,
-      Self::Eq => Self::Eq,
-      Self::Ne => Self::Ne,
-      Self::Lt => Self::Gt,
-      Self::Gt => Self::Lt,
-      Self::Le => Self::Ge,
-      Self::Ge => Self::Le,
       Self::And => Self::And,
       Self::Or => Self::Or,
       Self::Xor => Self::Xor,
@@ -95,10 +90,16 @@ impl Op {
       Self::ShlS => Self::Shl,
       Self::Shr => Self::ShrS,
       Self::ShrS => Self::Shr,
+      Self::Eq => Self::Eq,
+      Self::Ne => Self::Ne,
+      Self::Lt => Self::Gt,
+      Self::Gt => Self::Lt,
+      Self::Le => Self::Ge,
+      Self::Ge => Self::Le,
     }
   }
 
-  fn op<T: Numeric + PartialEq + PartialOrd>(self, a: T, b: T) -> T {
+  fn op_monoid<T: Numeric>(self, a: T, b: T) -> T {
     match self {
       Self::Add => T::add(a, b),
       Self::Sub => T::sub(a, b),
@@ -108,12 +109,6 @@ impl Op {
       Self::DivS => T::div(b, a),
       Self::Rem => T::rem(a, b),
       Self::RemS => T::rem(b, a),
-      Self::Eq => T::from_bool(a == b),
-      Self::Ne => T::from_bool(a != b),
-      Self::Lt => T::from_bool(a < b),
-      Self::Le => T::from_bool(a <= b),
-      Self::Gt => T::from_bool(a > b),
-      Self::Ge => T::from_bool(a >= b),
       Self::And => T::and(a, b),
       Self::Or => T::or(a, b),
       Self::Xor => T::xor(a, b),
@@ -121,11 +116,27 @@ impl Op {
       Self::ShlS => T::shl(b, a),
       Self::Shr => T::shr(a, b),
       Self::ShrS => T::shr(b, a),
+
+      Self::Eq | Self::Ne | Self::Lt | Self::Le | Self::Gt | Self::Ge => unreachable!("non-monoid operation {self}"),
     }
   }
 
-  fn op_word<T: Numeric + PartialOrd + PartialEq + FromWord + ToWord>(self, a: u64, b: u64) -> u64 {
-    self.op(T::from_word(a), T::from_word(b)).to_word()
+  fn op_word<T: Numeric + FromWord + ToWord>(self, a: u64, b: u64) -> u64 {
+    match self {
+      Self::Eq => (T::from_word(a) == T::from_word(b)).into(),
+      Self::Ne => (T::from_word(a) != T::from_word(b)).into(),
+      Self::Lt => (T::from_word(a) < T::from_word(b)).into(),
+      Self::Le => (T::from_word(a) <= T::from_word(b)).into(),
+      Self::Gt => (T::from_word(a) > T::from_word(b)).into(),
+      Self::Ge => (T::from_word(a) >= T::from_word(b)).into(),
+
+      op => op.op_monoid(T::from_word(a), T::from_word(b)).to_word(),
+    }
+  }
+
+  #[inline(always)]
+  fn is_int(&self) -> bool {
+    self >= &Self::Eq
   }
 }
 
@@ -144,8 +155,9 @@ impl TypedOp {
     std::mem::transmute(val)
   }
 
+  #[inline(always)]
   pub fn is_int(&self) -> bool {
-    self.ty < Ty::F32
+    (self.ty < Ty::F32) || self.op.is_int()
   }
 
   pub fn swap(self) -> Self {

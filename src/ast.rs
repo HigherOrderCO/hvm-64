@@ -10,18 +10,17 @@
 //!
 //! [interaction calculus]: https://en.wikipedia.org/wiki/Interaction_nets#Interaction_calculus
 
-use crate::prelude::*;
-use arrayvec::ArrayVec;
-use ordered_float::OrderedFloat;
-
 use crate::{
   ops::TypedOp as Op,
+  prelude::*,
   run::Lab,
   util::{array_vec, deref, maybe_grow},
 };
+
 use alloc::collections::BTreeMap;
 use arrayvec::ArrayVec;
 use core::str::FromStr;
+use ordered_float::OrderedFloat;
 use TSPL::{new_parser, Parser};
 
 /// The top level AST node, representing a collection of named nets.
@@ -311,7 +310,7 @@ impl<'i> HvmcParser<'i> {
         // Int = "#" [-] Int
         // F32 = "#" [-] ( Int "." Int | "NaN" | "inf" )
         Some('#') => {
-          self.advance_char();
+          self.advance_one();
           let is_neg = self.consume("-").is_ok();
           let num = self.take_while(|c| c.is_alphanumeric() || c == '.');
 

@@ -120,7 +120,7 @@ impl<'a, M: Mode> Net<'a, M> {
       self.rwts.anni += 1;
       (Trg::wire(node.p1), Trg::wire(node.p2))
     // TODO: fast copy?
-    } else if false && !M::LAZY && (port.is_num() == Int || port.tag() == Ref && lab >= port.lab()) {
+    } else if false && !M::LAZY && (port.is_num() || port.tag() == Ref && lab >= port.lab()) {
       self.rwts.comm += 1;
       self.free_trg(trg);
       (Trg::port(port.clone()), Trg::port(port))
@@ -136,7 +136,7 @@ impl<'a, M: Mode> Net<'a, M> {
   pub(crate) fn do_op(&mut self, op: Op, trg: Trg) -> (Trg, Trg) {
     trace!(self.tracer, op, trg);
     let port = trg.target();
-    if !M::LAZY && (port.tag() == Int || port.tag() == F32) {
+    if !M::LAZY && port.is_num() {
       self.free_trg(trg);
       let n = self.create_node(Op, op.swap().into());
       n.p1.wire().set_target(port);

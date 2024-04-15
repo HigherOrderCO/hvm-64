@@ -145,7 +145,7 @@ impl Phase2 {
     if a == b {
       let reducible = match a {
         NodeType::Var(delta) => self.nodes[head_index.wrapping_add_signed(delta)] == NodeType::Ctr(lab),
-        NodeType::Era | NodeType::Int(_) => true,
+        NodeType::Era | NodeType::Int(_) | NodeType::F32(_) => true,
         _ => false,
       };
       if reducible {

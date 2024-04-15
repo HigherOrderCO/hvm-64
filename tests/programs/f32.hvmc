@@ -13,6 +13,8 @@
   & x ~ [n x] & @half ~ <f32.* #2.3 n>  // 1.15
   & x ~ [n x] & @half ~ <f32./ #2.0 n>  // 0.25
   & x ~ [n x] & @half ~ <f32.% #2.0 n>  // 0.5
+
+  // comparisons (returning ints)
   & x ~ [n x] & @half ~ <f32.== #2.0 n> // 0
   & x ~ [n x] & @half ~ <f32.!= #2.0 n> // 1
   & x ~ [n x] & @half ~ <f32.< #2.0 n>  // 1

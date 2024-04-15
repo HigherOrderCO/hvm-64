@@ -209,16 +209,18 @@ impl Port {
   /// Accesses the float value of this port; this is valid for [`F32`] ports.
   #[inline(always)]
   pub fn float(&self) -> f32 {
-    f32::from_bits((self.0 >> 4) as u32)
+    f32::from_bits(self.num() as u32)
   }
 
   /// Accesses the numeric value of this port; this is valid for [`Int`] or
   /// [`F32`] ports. This is meant for numeric operations to defer
   /// interpreting this port as an integer or as a float until the operation
   /// type is known.
+  ///
+  /// The intermediate cast to `i64` is to sign-extend during bit-shift.
   #[inline(always)]
   pub const fn num(&self) -> u64 {
-    self.0 >> 4
+    ((self.0 as i64) >> 4) as u64
   }
 
   /// Accesses the wire leaving this port; this is valid for [`Var`] ports and

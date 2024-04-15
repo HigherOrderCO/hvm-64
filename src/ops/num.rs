@@ -1,5 +1,5 @@
 #[rustfmt::skip]
-pub trait Numeric: Sized {
+pub trait Numeric: PartialEq + PartialOrd + Sized {
   const ZERO: Self;
   const ONE: Self;
 
