@@ -1,9 +1,12 @@
+#![cfg(feature = "std")]
+
+use parking_lot::Mutex;
 use std::{
   fs,
   io::{self, Write},
   path::{Path, PathBuf},
   str::FromStr,
-  sync::{Arc, Mutex},
+  sync::Arc,
   time::Instant,
 };
 
@@ -65,7 +68,7 @@ fn execute_host(host: Arc<Mutex<Host>>) -> Option<(run::Rewrites, Net)> {
   let mut net = run::Net::<Strict>::new(&heap);
   // The host is locked inside this block.
   {
-    let lock = host.lock().unwrap();
+    let lock = host.lock();
     let Some(entrypoint) = lock.defs.get("main") else {
       println!(" skipping");
       return None;
@@ -75,7 +78,7 @@ fn execute_host(host: Arc<Mutex<Host>>) -> Option<(run::Rewrites, Net)> {
   let start = Instant::now();
   net.parallel_normal();
   println!(" {:.3?}", start.elapsed());
-  Some((net.rwts, host.lock().unwrap().readback(&net)))
+  Some((net.rwts, host.lock().readback(&net)))
 }
 
 fn test_run(name: &str, host: Arc<Mutex<Host>>) {
@@ -109,7 +112,7 @@ fn test_pre_reduce_run(path: &str, mut book: Book) {
 }
 
 fn test_path(path: &Path) {
-  let code = fs::read_to_string(&path).unwrap();
+  let code = fs::read_to_string(path).unwrap();
   let book = ast::Book::from_str(&code).unwrap();
   let host = hvmc::stdlib::create_host(&book);
 

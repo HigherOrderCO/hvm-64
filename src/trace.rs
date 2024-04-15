@@ -63,14 +63,14 @@
 
 #![cfg_attr(not(feature = "trace"), allow(unused))]
 
-use std::{
+use crate::prelude::*;
+
+use core::{
   cell::UnsafeCell,
   fmt::{self, Debug, Formatter, Write},
-  sync::{
-    atomic::{AtomicBool, AtomicU64, Ordering},
-    Mutex, Once,
-  },
+  sync::atomic::{AtomicBool, AtomicU64, Ordering},
 };
+use parking_lot::{Mutex, Once};
 
 use crate::{
   ops::TypedOp as Op,
@@ -99,7 +99,7 @@ macro_rules! trace {
     impl $crate::trace::TraceSourceBearer for __ {
       const SOURCE: $crate::trace::TraceSource = $crate::trace::TraceSource {
         func: {
-          #[cfg(feature = "trace")] { std::any::type_name::<__>() }
+          #[cfg(feature = "trace")] { core::any::type_name::<__>() }
           #[cfg(not(feature = "trace"))] { "" }
         },
         file: file!(),
@@ -179,6 +179,7 @@ impl TraceData {
   }
 }
 
+#[allow(clippy::vec_box)] // the address of `TraceLock` needs to remain stable
 static ACTIVE_TRACERS: Mutex<Vec<Box<TraceLock>>> = Mutex::new(Vec::new());
 
 struct TraceWriter {
@@ -195,7 +196,7 @@ impl Default for TraceWriter {
       data: UnsafeCell::new(TraceData { tid: 0, cursor: 0, data: Box::new([0; TRACE_SIZE]) }),
     });
     let lock = unsafe { &*(&*boxed as *const _) };
-    let mut active_tracers = ACTIVE_TRACERS.lock().unwrap();
+    let mut active_tracers = ACTIVE_TRACERS.lock();
     active_tracers.push(boxed);
     TraceWriter { lock, nonce: TRACE_NONCE.fetch_add(1, Ordering::Relaxed) }
   }
@@ -207,7 +208,7 @@ impl TraceWriter {
   }
   fn acquire(&self, cb: impl FnOnce(&mut TraceData)) {
     while self.lock.locked.compare_exchange_weak(false, true, Ordering::Relaxed, Ordering::Relaxed).is_err() {
-      std::hint::spin_loop();
+      hint::spin_loop();
     }
     cb(unsafe { &mut *self.lock.data.get() });
     self.lock.locked.store(false, Ordering::Release);
@@ -291,14 +292,15 @@ impl<'a> TraceReader<'a> {
 }
 
 #[cfg_attr(feature = "trace", no_mangle)]
+#[cfg(feature = "std")]
 pub fn _read_traces(limit: usize) {
-  let active_tracers = &*ACTIVE_TRACERS.lock().unwrap();
+  let active_tracers = &*ACTIVE_TRACERS.lock();
   let mut readers = active_tracers
     .iter()
     .enumerate()
     .map(|(i, t)| {
       while t.locked.compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed).is_err() {
-        std::hint::spin_loop();
+        hint::spin_loop();
       }
       TraceReader::new(unsafe { &*t.data.get() }, i)
     })
@@ -314,7 +316,7 @@ pub fn _read_traces(limit: usize) {
 }
 
 pub unsafe fn _reset_traces() {
-  ACTIVE_TRACERS.lock().unwrap().clear();
+  ACTIVE_TRACERS.lock().clear();
   TRACE_NONCE.store(1, Ordering::Relaxed);
 }
 
@@ -353,7 +355,7 @@ impl TraceArg for Wire {
 
 impl TraceArg for Trg {
   fn to_word(&self) -> u64 {
-    self.0.0 as u64
+    self.0.0
   }
   fn from_word(word: u64) -> impl Debug {
     Trg(Port(word))
@@ -462,9 +464,11 @@ impl fmt::Debug for FmtWord {
 pub fn set_hook() {
   static ONCE: Once = Once::new();
   if cfg!(feature = "trace") {
+    #[cfg(feature = "std")]
     ONCE.call_once(|| {
-      let hook = std::panic::take_hook();
-      std::panic::set_hook(Box::new(move |info| {
+      use std::panic;
+      let hook = panic::take_hook();
+      panic::set_hook(Box::new(move |info| {
         hook(info);
         _read_traces(usize::MAX);
       }));

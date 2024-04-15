@@ -53,9 +53,10 @@
 //!
 //! The pass also reduces subnets such as `(* *) -> *`
 
-use std::{collections::HashMap, ops::RangeFrom};
+use crate::prelude::*;
 
 use crate::ast::{Net, Tree};
+use core::ops::RangeFrom;
 
 use ordered_float::OrderedFloat;
 
@@ -86,7 +87,7 @@ enum NodeType {
 
 #[derive(Default)]
 struct Phase1<'a> {
-  vars: HashMap<&'a str, usize>,
+  vars: Map<&'a str, usize>,
   nodes: Vec<NodeType>,
 }
 
@@ -103,8 +104,7 @@ impl<'a> Phase1<'a> {
         }
       }
       Tree::Var { nam } => {
-        let nam: &str = &*nam;
-        if let Some(i) = self.vars.get(nam) {
+        if let Some(i) = self.vars.get(&**nam) {
           let j = self.nodes.len() as isize;
           self.nodes.push(NodeType::Var(*i as isize - j));
           self.nodes[*i] = NodeType::Var(j - *i as isize);

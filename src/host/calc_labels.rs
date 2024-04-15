@@ -1,6 +1,7 @@
-use crate::util::maybe_grow;
+use crate::prelude::*;
 
 use super::*;
+use crate::util::maybe_grow;
 
 /// Calculates the labels used in each definition of a book.
 ///
@@ -76,7 +77,14 @@ use super::*;
 /// This algorithm runs in linear time (as refs are traversed at most twice),
 /// and requires no more space than the naive algorithm.
 pub(crate) fn calculate_label_sets<'b, 'l>(book: &'b Book, lookup: impl FnMut(&'b str) -> LabSet) -> LabelSets<'b> {
-  let mut state = State { book, lookup, labels: HashMap::with_capacity(book.len()) };
+  let mut state = State {
+    book,
+    lookup,
+    #[cfg(feature = "std")]
+    labels: Map::with_capacity(book.len()),
+    #[cfg(not(feature = "std"))]
+    labels: Map::new(),
+  };
 
   for name in book.keys() {
     state.visit_def(name, Some(0), None);
@@ -85,7 +93,7 @@ pub(crate) fn calculate_label_sets<'b, 'l>(book: &'b Book, lookup: impl FnMut(&'
   LabelSets(state.labels)
 }
 
-pub(crate) struct LabelSets<'b>(HashMap<&'b str, LabelState>);
+pub(crate) struct LabelSets<'b>(Map<&'b str, LabelState>);
 
 impl<'b> LabelSets<'b> {
   pub(crate) fn into_iter(self) -> impl Iterator<Item = (&'b str, LabSet)> {
@@ -99,7 +107,7 @@ impl<'b> LabelSets<'b> {
 struct State<'b, F> {
   book: &'b Book,
   lookup: F,
-  labels: HashMap<&'b str, LabelState>,
+  labels: Map<&'b str, LabelState>,
 }
 
 #[derive(Debug)]
@@ -188,7 +196,7 @@ impl<'b, F: FnMut(&'b str) -> LabSet> State<'b, F> {
 
 #[test]
 fn test_calculate_labels() {
-  use std::collections::BTreeMap;
+  use alloc::collections::BTreeMap;
   assert_eq!(
     calculate_label_sets(
       &"

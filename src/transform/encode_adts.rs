@@ -1,3 +1,5 @@
+use crate::prelude::*;
+
 use crate::{
   ast::{Tree, MAX_ADT_VARIANTS},
   util::maybe_grow,
@@ -38,7 +40,7 @@ impl Tree {
           let fields = match &mut ports.swap_remove(idx) {
             Tree::Ctr { ports: fields, .. } => {
               fields.pop();
-              std::mem::take(fields)
+              mem::take(fields)
             }
             Tree::Var { .. } => vec![],
             _ => unreachable!(),

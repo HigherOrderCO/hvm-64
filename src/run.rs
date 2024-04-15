@@ -18,37 +18,36 @@
 //!   the principal port is left implicit
 //! - active pairs are thus stored in a dedicated vector, `net.redexes`
 
+use crate::prelude::*;
+
 use crate::{
   ops::TypedOp as Op,
   trace,
   trace::Tracer,
   util::{bi_enum, deref},
 };
-use nohash_hasher::{IntMap, IsEnabled};
-use std::{
-  alloc::{self, Layout},
+use alloc::borrow::Cow;
+use core::{
+  alloc::Layout,
   any::{Any, TypeId},
-  borrow::Cow,
-  fmt,
   hint::unreachable_unchecked,
   marker::PhantomData,
   mem::size_of,
   ops::{Add, AddAssign, Deref, DerefMut},
-  sync::{Arc, Barrier},
-  thread,
 };
+use nohash_hasher::{IntMap, IsEnabled};
 
 #[cfg(feature = "_fuzz")]
 use crate::fuzz as atomic;
 #[cfg(not(feature = "_fuzz"))]
-use std::sync::atomic;
+use core::sync::atomic;
 
 #[cfg(feature = "_fuzz")]
 use crate::fuzz::spin_loop;
 #[cfg(not(feature = "_fuzz"))]
 fn spin_loop() {} // this could use `std::hint::spin_loop`, but in practice it hurts performance
 
-use atomic::{AtomicU64, AtomicUsize, Ordering::Relaxed};
+use atomic::{AtomicU64, Ordering::Relaxed};
 
 use Tag::*;
 

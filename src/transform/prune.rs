@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use crate::prelude::*;
 
 use crate::{
   ast::{Book, Tree},
@@ -21,7 +21,7 @@ impl Book {
 #[derive(Debug)]
 struct PruneState<'a> {
   book: &'a Book,
-  unvisited: HashSet<String>,
+  unvisited: Set<String>,
 }
 
 impl<'a> PruneState<'a> {

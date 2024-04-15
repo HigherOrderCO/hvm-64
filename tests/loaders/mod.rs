@@ -27,10 +27,10 @@ pub fn normal_with(book: Book, mem: Option<usize>, entry_point: &str) -> (hvmc::
   let host = create_host(&book);
 
   let mut rnet = run::Net::<run::Strict>::new(&area);
-  rnet.boot(&host.lock().unwrap().defs[entry_point]);
+  rnet.boot(&host.lock().defs[entry_point]);
   rnet.normal();
 
-  let net = host.lock().unwrap().readback(&rnet);
+  let net = host.lock().readback(&rnet);
   (rnet.rwts, net)
 }
 

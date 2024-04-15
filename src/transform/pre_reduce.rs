@@ -14,10 +14,7 @@
 //! At the end, each mutated [`ast::Net`] is placed into the [`Book`],
 //! overriding the previous one.
 
-use std::{
-  collections::HashMap,
-  sync::{Arc, Mutex},
-};
+use crate::prelude::*;
 
 use crate::{
   ast::{Book, Net, Tree},
@@ -26,6 +23,8 @@ use crate::{
   stdlib::{AsHostedDef, HostedDef},
   util::maybe_grow,
 };
+use alloc::sync::Arc;
+use parking_lot::Mutex;
 
 impl Book {
   /// Reduces the definitions in the book individually, except for the skipped
@@ -55,12 +54,12 @@ impl Book {
       max_rwts,
       host,
       area: &area,
-      seen: HashMap::new(),
+      seen: Map::new(),
       rewrites: Rewrites::default(),
     };
 
     for nam in self.nets.keys() {
-      state.pre_reduce(&nam)
+      state.pre_reduce(nam)
     }
 
     let State { seen, rewrites, .. } = state;
@@ -96,7 +95,7 @@ struct InertDef(Arc<Mutex<Vec<(run::Port, run::Port)>>>);
 
 impl AsHostedDef for InertDef {
   fn call<M: run::Mode>(def: &run::Def<Self>, _: &mut run::Net<M>, port: run::Port) {
-    def.data.0.lock().unwrap().push((run::Port::new_ref(def), port));
+    def.data.0.lock().push((run::Port::new_ref(def), port));
   }
 }
 
@@ -111,7 +110,7 @@ struct State<'a> {
   captured_redexes: Arc<Mutex<Vec<(run::Port, run::Port)>>>,
 
   skip: &'a dyn Fn(&str) -> bool,
-  seen: HashMap<String, SeenState>,
+  seen: Map<String, SeenState>,
 
   rewrites: Rewrites<u64>,
 }
@@ -148,9 +147,9 @@ impl<'a> State<'a> {
     self.rewrites += rt.rwts;
 
     // Move interactions with inert defs back into the net redexes array
-    self.captured_redexes.lock().unwrap().drain(..).for_each(|r| rt.redux(r.0, r.1));
+    self.captured_redexes.lock().drain(..).for_each(|r| rt.redux(r.0, r.1));
 
-    let net = self.host.readback(&mut rt);
+    let net = self.host.readback(&rt);
 
     // Mutate the host in-place with the pre-reduced net.
     let instr = self.host.encode_def(&net);

@@ -253,7 +253,7 @@ impl Port {
     Port::new(Var, 0, self.addr())
   }
 
-  pub(super) fn is_full_node(&self) -> bool {
+  pub fn is_full_node(&self) -> bool {
     self.tag() > F32
   }
 }

@@ -6,15 +6,17 @@ use hvmc::{
   host::Host,
   run::{DynNet, Mode, Trg},
   stdlib::create_host,
+  transform::{TransformOpts, TransformPass, TransformPasses},
   *,
 };
 
+use parking_lot::Mutex;
 use std::{
   fs, io,
   path::Path,
   process::{self, Stdio},
   str::FromStr,
-  sync::{Arc, Mutex},
+  sync::Arc,
   time::{Duration, Instant},
 };
 
@@ -25,28 +27,28 @@ fn main() {
   if cfg!(feature = "_full_cli") {
     let cli = FullCli::parse();
     match cli.mode {
-      CliMode::Compile { file, transform_opts, output } => {
+      CliMode::Compile { file, transform_args, output } => {
         let output = output.as_deref().or_else(|| file.strip_suffix(".hvmc")).unwrap_or_else(|| {
           eprintln!("file missing `.hvmc` extension; explicitly specify an output path with `--output`.");
           process::exit(1);
         });
-        let host = create_host(&load_book(&[file.clone()], &transform_opts));
+        let host = create_host(&load_book(&[file.clone()], &transform_args));
         compile_executable(output, host).unwrap();
       }
-      CliMode::Run { run_opts, mut transform_opts, file, args } => {
+      CliMode::Run { run_opts, mut transform_args, file, args } => {
         // Don't pre-reduce or prune the entry point
-        transform_opts.pre_reduce_skip.push(args.entry_point.clone());
-        transform_opts.prune_entrypoints.push(args.entry_point.clone());
-        let host = create_host(&load_book(&[file], &transform_opts));
+        transform_args.transform_opts.pre_reduce_skip.push(args.entry_point.clone());
+        transform_args.transform_opts.prune_entrypoints.push(args.entry_point.clone());
+        let host = create_host(&load_book(&[file], &transform_args));
         run(host, run_opts, args);
       }
-      CliMode::Reduce { run_opts, transform_opts, files, exprs } => {
-        let host = create_host(&load_book(&files, &transform_opts));
+      CliMode::Reduce { run_opts, transform_args, files, exprs } => {
+        let host = create_host(&load_book(&files, &transform_args));
         let exprs: Vec<_> = exprs.iter().map(|x| Net::from_str(x).unwrap()).collect();
         reduce_exprs(host, &exprs, &run_opts);
       }
-      CliMode::Transform { transform_opts, files } => {
-        let book = load_book(&files, &transform_opts);
+      CliMode::Transform { transform_args, files } => {
+        let book = load_book(&files, &transform_args);
         println!("{}", book);
       }
     }
@@ -100,7 +102,7 @@ enum CliMode {
     /// Output path; defaults to the input file with `.hvmc` stripped.
     output: Option<String>,
     #[command(flatten)]
-    transform_opts: TransformOpts,
+    transform_args: TransformArgs,
   },
   /// Run a program, optionally passing a list of arguments to it.
   Run {
@@ -111,7 +113,7 @@ enum CliMode {
     #[command(flatten)]
     run_opts: RuntimeOpts,
     #[command(flatten)]
-    transform_opts: TransformOpts,
+    transform_args: TransformArgs,
   },
   /// Reduce hvm-core expressions to their normal form.
   ///
@@ -135,7 +137,7 @@ enum CliMode {
     #[command(flatten)]
     run_opts: RuntimeOpts,
     #[command(flatten)]
-    transform_opts: TransformOpts,
+    transform_args: TransformArgs,
   },
   /// Transform a hvm-core program using one of the optimization passes.
   Transform {
@@ -145,36 +147,18 @@ enum CliMode {
     #[arg(required = true)]
     files: Vec<String>,
     #[command(flatten)]
-    transform_opts: TransformOpts,
+    transform_args: TransformArgs,
   },
 }
 
 #[derive(Args, Clone, Debug)]
-struct TransformOpts {
-  #[arg(short = 'O', value_delimiter = ' ', action = clap::ArgAction::Append)]
+struct TransformArgs {
   /// Enables or disables transformation passes.
+  #[arg(short = 'O', value_delimiter = ' ', action = clap::ArgAction::Append)]
   transform_passes: Vec<TransformPass>,
 
-  #[arg(long = "pre-reduce-skip", value_delimiter = ' ', action = clap::ArgAction::Append)]
-  /// Names of the definitions that should not get pre-reduced.
-  ///
-  /// For programs that don't take arguments
-  /// and don't have side effects this is usually the entry point of the
-  /// program (otherwise, the whole program will get reduced to normal form).
-  pre_reduce_skip: Vec<String>,
-  #[arg(long = "pre-reduce-memory", value_parser = parse_abbrev_number::<usize>)]
-  /// How much memory to allocate when pre-reducing.
-  ///
-  /// Supports abbreviations such as '4G' or '400M'.
-  pre_reduce_memory: Option<usize>,
-  #[arg(long = "pre-reduce-rewrites", default_value = "100M", value_parser = parse_abbrev_number::<u64>)]
-  /// Maximum amount of rewrites to do when pre-reducing.
-  ///
-  /// Supports abbreviations such as '4G' or '400M'.
-  pre_reduce_rewrites: u64,
-  /// Names of the definitions that should not get pruned.
-  #[arg(long = "prune-entrypoints", default_value = "main")]
-  prune_entrypoints: Vec<String>,
+  #[command(flatten)]
+  transform_opts: TransformOpts,
 }
 
 #[derive(Args, Clone, Debug)]
@@ -192,7 +176,7 @@ struct RuntimeOpts {
   /// by a walk from the root of the net. This leads to a dramatic slowdown,
   /// but allows running programs that would expand indefinitely otherwise.
   lazy_mode: bool,
-  #[arg(short = 'm', long = "memory", value_parser = parse_abbrev_number::<usize>)]
+  #[arg(short = 'm', long = "memory", value_parser = util::parse_abbrev_number::<usize>)]
   /// How much memory to allocate on startup.
   ///
   /// Supports abbreviations such as '4G' or '400M'.
@@ -213,73 +197,6 @@ struct RunArgs {
   args: Vec<String>,
 }
 
-macro_rules! transform_passes {
-  ($($pass:ident: $name:literal $(| $alias:literal)*),* $(,)?) => {
-    #[derive(Clone, Debug)]
-    #[allow(non_camel_case_types)]
-    pub enum TransformPass {
-      all(bool),
-      $($pass(bool),)*
-    }
-
-    #[derive(Default)]
-    struct TransformPasses {
-      $($pass: bool),*
-    }
-
-    impl TransformPasses {
-      fn set_all(&mut self) {
-        $(self.$pass = true;)*
-      }
-    }
-
-    impl clap::ValueEnum for TransformPass {
-      fn value_variants<'a>() -> &'a [Self] {
-        &[
-          Self::all(true), Self::all(false),
-          $(Self::$pass(true), Self::$pass(false),)*
-        ]
-      }
-
-      fn to_possible_value(&self) -> Option<clap::builder::PossibleValue> {
-        use TransformPass::*;
-        Some(match self {
-          all(true) => clap::builder::PossibleValue::new("all"),
-          all(false) => clap::builder::PossibleValue::new("no-all"),
-          $(
-            $pass(true) => clap::builder::PossibleValue::new($name)$(.alias($alias))*,
-            $pass(false) => clap::builder::PossibleValue::new(concat!("no-", $name))$(.alias(concat!("no-", $alias)))*,
-          )*
-        })
-      }
-    }
-
-    impl TransformPass {
-      fn passes_from_cli(args: &Vec<Self>) -> TransformPasses {
-        use TransformPass::*;
-        let mut opts = TransformPasses::default();
-        for arg in args {
-          match arg {
-            all(true) => opts.set_all(),
-            all(false) => opts = TransformPasses::default(),
-            $(&$pass(b) => opts.$pass = b,)*
-          }
-        }
-        opts
-      }
-    }
-  };
-}
-
-transform_passes! {
-  pre_reduce: "pre-reduce" | "pre",
-  coalesce_ctrs: "coalesce-ctrs" | "coalesce",
-  encode_adts: "encode-adts" | "adts",
-  eta_reduce: "eta-reduce" | "eta",
-  inline: "inline",
-  prune: "prune",
-}
-
 fn run(host: Arc<Mutex<Host>>, opts: RuntimeOpts, args: RunArgs) {
   let mut net = Net { root: Tree::Ref { nam: args.entry_point }, redexes: vec![] };
   for arg in args.args {
@@ -290,29 +207,8 @@ fn run(host: Arc<Mutex<Host>>, opts: RuntimeOpts, args: RunArgs) {
 
   reduce_exprs(host, &[net], &opts);
 }
-/// Turn a string representation of a number, such as '1G' or '400K', into a
-/// number.
-///
-/// This return a [`u64`] instead of [`usize`] to ensure that parsing CLI args
-/// doesn't fail on 32-bit systems. We want it to fail later on, when attempting
-/// to run the program.
-fn parse_abbrev_number<T: TryFrom<u64>>(arg: &str) -> Result<T, String>
-where
-  <T as TryFrom<u64>>::Error: core::fmt::Debug,
-{
-  let (base, scale) = match arg.to_lowercase().chars().last() {
-    None => return Err("Mem size argument is empty".to_string()),
-    Some('k') => (&arg[0 .. arg.len() - 1], 1u64 << 10),
-    Some('m') => (&arg[0 .. arg.len() - 1], 1u64 << 20),
-    Some('g') => (&arg[0 .. arg.len() - 1], 1u64 << 30),
-    Some('t') => (&arg[0 .. arg.len() - 1], 1u64 << 40),
-    Some(_) => (arg, 1),
-  };
-  let base = base.parse::<u64>().map_err(|e| e.to_string())?;
-  Ok((base * scale).try_into().map_err(|e| format!("{:?}", e))?)
-}
 
-fn load_book(files: &[String], transform_opts: &TransformOpts) -> Book {
+fn load_book(files: &[String], transform_args: &TransformArgs) -> Book {
   let mut book = files
     .iter()
     .map(|name| {
@@ -329,58 +225,10 @@ fn load_book(files: &[String], transform_opts: &TransformOpts) -> Book {
       acc.nets.extend(i.nets);
       acc
     });
-  let transform_passes = TransformPass::passes_from_cli(&transform_opts.transform_passes);
 
-  if transform_passes.pre_reduce {
-    if transform_passes.eta_reduce {
-      for (_, def) in &mut book.nets {
-        def.eta_reduce();
-      }
-    }
-    book.pre_reduce(
-      &|x| transform_opts.pre_reduce_skip.iter().any(|y| x == y),
-      transform_opts.pre_reduce_memory,
-      transform_opts.pre_reduce_rewrites,
-    );
-  }
-  for (_, def) in &mut book.nets {
-    if transform_passes.eta_reduce {
-      def.eta_reduce();
-    }
-    for tree in def.trees_mut() {
-      if transform_passes.coalesce_ctrs {
-        tree.coalesce_constructors();
-      }
-      if transform_passes.encode_adts {
-        tree.encode_scott_adts();
-      }
-    }
-  }
-  if transform_passes.inline {
-    loop {
-      let inline_changed = book.inline().unwrap();
-      if inline_changed.is_empty() {
-        break;
-      }
-      if !(transform_passes.eta_reduce || transform_passes.encode_adts) {
-        break;
-      }
-      for name in inline_changed {
-        let def = book.get_mut(&name).unwrap();
-        if transform_passes.eta_reduce {
-          def.eta_reduce();
-        }
-        if transform_passes.encode_adts {
-          for tree in def.trees_mut() {
-            tree.encode_scott_adts();
-          }
-        }
-      }
-    }
-  }
-  if transform_passes.prune {
-    book.prune(&transform_opts.prune_entrypoints);
-  }
+  let transform_passes = TransformPasses::from(&transform_args.transform_passes[..]);
+  book.transform(transform_passes, &transform_args.transform_opts).unwrap();
+
   book
 }
 
@@ -389,7 +237,7 @@ fn reduce_exprs(host: Arc<Mutex<Host>>, exprs: &[Net], opts: &RuntimeOpts) {
   for expr in exprs {
     let mut net = DynNet::new(&heap, opts.lazy_mode);
     dispatch_dyn_net!(&mut net => {
-      host.lock().unwrap().encode_net(net, Trg::port(run::Port::new_var(net.root.addr())), expr);
+      host.lock().encode_net(net, Trg::port(run::Port::new_var(net.root.addr())), expr);
       let start_time = Instant::now();
       if opts.single_core {
         net.normal();
@@ -397,7 +245,7 @@ fn reduce_exprs(host: Arc<Mutex<Host>>, exprs: &[Net], opts: &RuntimeOpts) {
         net.parallel_normal();
       }
       let elapsed = start_time.elapsed();
-      println!("{}", host.lock().unwrap().readback(net));
+      println!("{}", host.lock().readback(net));
       if opts.show_stats {
         print_stats(net, elapsed);
       }
@@ -428,13 +276,14 @@ fn pretty_num(n: u64) -> String {
 }
 
 fn compile_executable(target: &str, host: Arc<Mutex<host::Host>>) -> Result<(), io::Error> {
-  let gen = compile::compile_host(&host.lock().unwrap());
+  let gen = compile::compile_host(&host.lock());
   let outdir = ".hvm";
   if Path::new(&outdir).exists() {
     fs::remove_dir_all(outdir)?;
   }
   let cargo_toml = include_str!("../Cargo.toml");
-  let cargo_toml = cargo_toml.split("##--COMPILER-CUTOFF--##").next().unwrap();
+  let mut cargo_toml = cargo_toml.split_once("##--COMPILER-CUTOFF--##").unwrap().0.to_owned();
+  cargo_toml.push_str("[features]\ndefault = ['cli']\ncli = ['std', 'dep:clap']\nstd = []");
 
   macro_rules! include_files {
     ($([$($prefix:ident)*])? $mod:ident {$($sub:tt)*} $($rest:tt)*) => {
@@ -467,10 +316,7 @@ fn compile_executable(target: &str, host: Arc<Mutex<host::Host>>) -> Result<(), 
     }
     lib
     main
-    ops {
-      num
-      word
-    }
+    prelude
     run {
       addr
       allocator
@@ -502,6 +348,7 @@ fn compile_executable(target: &str, host: Arc<Mutex<host::Host>>) -> Result<(), 
       create_var
       deref
       maybe_grow
+      parse_abbrev_number
       stats
     }
   }

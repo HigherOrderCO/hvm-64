@@ -1,20 +1,17 @@
-use std::{
-  collections::{HashMap, HashSet},
-  ops::BitOr,
-};
+use crate::prelude::*;
 
+use super::TransformError;
 use crate::{
   ast::{Book, Net, Tree},
   util::maybe_grow,
 };
-
-use super::TransformError;
+use core::ops::BitOr;
 
 impl Book {
-  pub fn inline(&mut self) -> Result<HashSet<String>, TransformError> {
+  pub fn inline(&mut self) -> Result<Set<String>, TransformError> {
     let mut state = InlineState::default();
     state.populate_inlinees(self)?;
-    let mut all_changed = HashSet::new();
+    let mut all_changed = Set::new();
     for (name, net) in &mut self.nets {
       let mut inlined = false;
       for tree in net.trees_mut() {
@@ -30,7 +27,7 @@ impl Book {
 
 #[derive(Debug, Default)]
 struct InlineState {
-  inlinees: HashMap<String, Tree>,
+  inlinees: Map<String, Tree>,
 }
 
 impl InlineState {

@@ -1,6 +1,7 @@
-use crate::ast::{Net, Tree};
+use crate::prelude::*;
 
 use super::{create_var, var_to_num};
+use crate::ast::{Net, Tree};
 
 impl Net {
   /// Transforms the net `x & ...` into `y & x ~ (arg y) & ...`
@@ -15,7 +16,7 @@ impl Net {
 
     let fresh_str = create_var(fresh + 1);
 
-    let fun = core::mem::take(&mut self.root);
+    let fun = mem::take(&mut self.root);
     let app = Tree::Ctr { lab: 0, ports: vec![arg, Tree::Var { nam: fresh_str.clone() }] };
     self.root = Tree::Var { nam: fresh_str };
     self.redexes.push((fun, app));

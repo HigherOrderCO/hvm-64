@@ -10,6 +10,7 @@
 //!
 //! [interaction calculus]: https://en.wikipedia.org/wiki/Interaction_nets#Interaction_calculus
 
+use crate::prelude::*;
 use arrayvec::ArrayVec;
 use ordered_float::OrderedFloat;
 
@@ -18,7 +19,10 @@ use crate::{
   run::Lab,
   util::{array_vec, deref, maybe_grow},
 };
-use std::{collections::BTreeMap, fmt, mem, str::FromStr};
+use alloc::collections::BTreeMap;
+use arrayvec::ArrayVec;
+use core::str::FromStr;
+use TSPL::{new_parser, Parser};
 
 /// The top level AST node, representing a collection of named nets.
 ///
@@ -149,16 +153,16 @@ pub const MAX_ADT_FIELDS: usize = MAX_ARITY - 1;
 
 impl Net {
   pub fn trees(&self) -> impl Iterator<Item = &Tree> {
-    std::iter::once(&self.root).chain(self.redexes.iter().map(|(x, y)| [x, y]).flatten())
+    iter::once(&self.root).chain(self.redexes.iter().flat_map(|(x, y)| [x, y]))
   }
   pub fn trees_mut(&mut self) -> impl Iterator<Item = &mut Tree> {
-    std::iter::once(&mut self.root).chain(self.redexes.iter_mut().map(|(x, y)| [x, y]).flatten())
+    iter::once(&mut self.root).chain(self.redexes.iter_mut().flat_map(|(x, y)| [x, y]))
   }
 }
 
 impl Tree {
   #[inline(always)]
-  pub fn children(&self) -> impl Iterator<Item = &Tree> + ExactSizeIterator + DoubleEndedIterator {
+  pub fn children(&self) -> impl ExactSizeIterator + DoubleEndedIterator<Item = &Tree> {
     ArrayVec::<_, MAX_ARITY>::into_iter(match self {
       Tree::Era | Tree::Int { .. } | Tree::F32 { .. } | Tree::Ref { .. } | Tree::Var { .. } => {
         array_vec::from_array([])
@@ -171,7 +175,7 @@ impl Tree {
   }
 
   #[inline(always)]
-  pub fn children_mut(&mut self) -> impl Iterator<Item = &mut Tree> + ExactSizeIterator + DoubleEndedIterator {
+  pub fn children_mut(&mut self) -> impl ExactSizeIterator + DoubleEndedIterator<Item = &mut Tree> {
     ArrayVec::<_, MAX_ARITY>::into_iter(match self {
       Tree::Era | Tree::Int { .. } | Tree::F32 { .. } | Tree::Ref { .. } | Tree::Var { .. } => {
         array_vec::from_array([])
@@ -193,7 +197,7 @@ impl Tree {
 
   pub fn legacy_mat(mut arms: Tree, out: Tree) -> Option<Tree> {
     let Tree::Ctr { lab: 0, ports } = &mut arms else { None? };
-    let ports = std::mem::take(ports);
+    let ports = mem::take(ports);
     let Ok([zero, succ]) = <[_; 2]>::try_from(ports) else { None? };
     let zero = Box::new(zero);
     let succ = Box::new(succ);
@@ -201,13 +205,9 @@ impl Tree {
   }
 }
 
-/// The state of the HVMC parser.
-struct Parser<'i> {
-  /// The remaining characters in the input. An empty string indicates EOF.
-  input: &'i str,
-}
+new_parser!(HvmcParser);
 
-impl<'i> Parser<'i> {
+impl<'i> HvmcParser<'i> {
   /// Book = ("@" Name "=" Net)*
   fn parse_book(&mut self) -> Result<Book, String> {
     maybe_grow(move || {
@@ -238,19 +238,19 @@ impl<'i> Parser<'i> {
   fn parse_tree(&mut self) -> Result<Tree, String> {
     maybe_grow(move || {
       self.skip_trivia();
-      match self.peek_char() {
+      match self.peek_one() {
         // Era = "*"
         Some('*') => {
-          self.advance_char();
+          self.advance_one();
           Ok(Tree::Era)
         }
         // Ctr = "(" Tree Tree ")" | "[" Tree Tree "]" | "{" Int Tree Tree "}"
         Some(char @ ('(' | '[' | '{')) => {
-          self.advance_char();
+          self.advance_one();
           let lab = match char {
             '(' => 0,
             '[' => 1,
-            '{' => self.parse_int()? as Lab,
+            '{' => self.parse_u64()? as Lab,
             _ => unreachable!(),
           };
           let close = match char {
@@ -260,18 +260,18 @@ impl<'i> Parser<'i> {
             _ => unreachable!(),
           };
           self.skip_trivia();
-          if self.peek_char().is_some_and(|x| x == ':') {
-            self.advance_char();
-            let variant_index = self.parse_int()?;
+          if self.peek_one().is_some_and(|x| x == ':') {
+            self.advance_one();
+            let variant_index = self.parse_u64()?;
             self.consume(":")?;
-            let variant_count = self.parse_int()?;
+            let variant_count = self.parse_u64()?;
             let mut fields = Vec::new();
             self.skip_trivia();
-            while self.peek_char() != Some(close) {
+            while self.peek_one() != Some(close) {
               fields.push(self.parse_tree()?);
               self.skip_trivia();
             }
-            self.advance_char();
+            self.advance_one();
             if variant_count == 0 {
               Err("variant count cannot be zero".to_owned())?;
             }
@@ -290,11 +290,11 @@ impl<'i> Parser<'i> {
           } else {
             let mut ports = Vec::new();
             self.skip_trivia();
-            while self.peek_char() != Some(close) {
+            while self.peek_one() != Some(close) {
               ports.push(self.parse_tree()?);
               self.skip_trivia();
             }
-            self.advance_char();
+            self.advance_one();
             if ports.len() > MAX_ARITY {
               Err("ctr has too many ports".to_owned())?;
             }
@@ -303,7 +303,7 @@ impl<'i> Parser<'i> {
         }
         // Ref = "@" Name
         Some('@') => {
-          self.advance_char();
+          self.advance_one();
           self.skip_trivia();
           let nam = self.parse_name()?;
           Ok(Tree::Ref { nam })
@@ -331,7 +331,7 @@ impl<'i> Parser<'i> {
         }
         // Op = "<" Op Tree Tree ">"
         Some('<') => {
-          self.advance_char();
+          self.advance_one();
           let op = self.parse_op()?;
           let rhs = Box::new(self.parse_tree()?);
           let out = Box::new(self.parse_tree()?);
@@ -340,13 +340,13 @@ impl<'i> Parser<'i> {
         }
         // Mat = "?<" Tree Tree ">"
         Some('?') => {
-          self.advance_char();
+          self.advance_one();
           self.consume("<")?;
           let zero = self.parse_tree()?;
           let succ = self.parse_tree()?;
           self.skip_trivia();
-          if self.peek_char() == Some('>') {
-            self.advance_char();
+          if self.peek_one() == Some('>') {
+            self.advance_one();
             Tree::legacy_mat(zero, succ).ok_or_else(|| "invalid legacy match".to_owned())
           } else {
             let zero = Box::new(zero);
@@ -366,7 +366,7 @@ impl<'i> Parser<'i> {
   fn parse_name(&mut self) -> Result<String, String> {
     let name = self.take_while(|c| c.is_alphanumeric() || c == '_' || c == '.' || c == '$');
     if name.is_empty() {
-      return Err(format!("Expected a name character, found {:?}", self.peek_char()));
+      return self.expected("name");
     }
     Ok(name.to_owned())
   }
@@ -381,54 +381,6 @@ impl<'i> Parser<'i> {
   fn parse_op(&mut self) -> Result<Op, String> {
     let op = self.take_while(|c| c.is_alphanumeric() || ".+-=*/%<>|&^!?$".contains(c));
     op.parse().map_err(|_| format!("Unknown operator: {op:?}"))
-  }
-
-  /// Inspects the next character in the input without consuming it.
-  fn peek_char(&self) -> Option<char> {
-    self.input.chars().next()
-  }
-
-  /// Consumes the next character in the input.
-  fn advance_char(&mut self) -> Option<char> {
-    let char = self.input.chars().next()?;
-    self.input = &self.input[char.len_utf8() ..];
-    Some(char)
-  }
-
-  /// Skips whitespace & comments in the input.
-  fn skip_trivia(&mut self) {
-    while let Some(c) = self.peek_char() {
-      if c.is_ascii_whitespace() {
-        self.advance_char();
-        continue;
-      }
-      if c == '/' && self.input.starts_with("//") {
-        while self.peek_char() != Some('\n') {
-          self.advance_char();
-        }
-        continue;
-      }
-      break;
-    }
-  }
-
-  /// Consumes an instance of the given string, erroring if it is not found.
-  fn consume(&mut self, text: &str) -> Result<(), String> {
-    self.skip_trivia();
-    let Some(rest) = self.input.strip_prefix(text) else {
-      return Err(format!("Expected {:?}, found {:?}", text, self.input.split_ascii_whitespace().next().unwrap_or("")));
-    };
-    self.input = rest;
-    Ok(())
-  }
-
-  /// Consumes all of the contiguous next characters in the input matching a
-  /// given predicate.
-  fn take_while(&mut self, mut f: impl FnMut(char) -> bool) -> &'i str {
-    let len = self.input.chars().take_while(|&c| f(c)).map(char::len_utf8).sum();
-    let (name, rest) = self.input.split_at(len);
-    self.input = rest;
-    name
   }
 }
 
@@ -445,10 +397,10 @@ fn parse_int(input: &str) -> Result<u64, String> {
 
 /// Parses the input with the callback, ensuring that the whole input is
 /// consumed.
-fn parse_eof<'i, T>(input: &'i str, parse_fn: impl Fn(&mut Parser<'i>) -> Result<T, String>) -> Result<T, String> {
-  let mut parser = Parser { input };
+fn parse_eof<'i, T>(input: &'i str, parse_fn: impl Fn(&mut HvmcParser<'i>) -> Result<T, String>) -> Result<T, String> {
+  let mut parser = HvmcParser::new(input);
   let out = parse_fn(&mut parser)?;
-  if !parser.input.is_empty() {
+  if parser.index != parser.input.len() {
     return Err("Unable to parse the whole input. Is this not an hvmc file?".to_owned());
   }
   Ok(out)
@@ -457,21 +409,21 @@ fn parse_eof<'i, T>(input: &'i str, parse_fn: impl Fn(&mut Parser<'i>) -> Result
 impl FromStr for Book {
   type Err = String;
   fn from_str(str: &str) -> Result<Self, Self::Err> {
-    parse_eof(str, Parser::parse_book)
+    parse_eof(str, HvmcParser::parse_book)
   }
 }
 
 impl FromStr for Net {
   type Err = String;
   fn from_str(str: &str) -> Result<Self, Self::Err> {
-    parse_eof(str, Parser::parse_net)
+    parse_eof(str, HvmcParser::parse_net)
   }
 }
 
 impl FromStr for Tree {
   type Err = String;
   fn from_str(str: &str) -> Result<Self, Self::Err> {
-    parse_eof(str, Parser::parse_tree)
+    parse_eof(str, HvmcParser::parse_tree)
   }
 }
 
@@ -557,15 +509,12 @@ impl Clone for Tree {
       Tree::Int { val } => Tree::Int { val: val.clone() },
       Tree::F32 { val } => Tree::F32 { val: val.clone() },
       Tree::Ref { nam } => Tree::Ref { nam: nam.clone() },
-      Tree::Ctr { lab, ports } => Tree::Ctr { lab: lab.clone(), ports: ports.clone() },
-      Tree::Op { op, rhs, out } => Tree::Op { op: op.clone(), rhs: rhs.clone(), out: out.clone() },
+      Tree::Ctr { lab, ports } => Tree::Ctr { lab: *lab, ports: ports.clone() },
+      Tree::Op { op, rhs, out } => Tree::Op { op: *op, rhs: rhs.clone(), out: out.clone() },
       Tree::Mat { zero, succ, out } => Tree::Mat { zero: zero.clone(), succ: succ.clone(), out: out.clone() },
-      Tree::Adt { lab, variant_index, variant_count, fields } => Tree::Adt {
-        lab: lab.clone(),
-        variant_index: variant_index.clone(),
-        variant_count: variant_count.clone(),
-        fields: fields.clone(),
-      },
+      Tree::Adt { lab, variant_index, variant_count, fields } => {
+        Tree::Adt { lab: *lab, variant_index: *variant_index, variant_count: *variant_count, fields: fields.clone() }
+      }
       Tree::Var { nam } => Tree::Var { nam: nam.clone() },
     })
   }
@@ -600,6 +549,8 @@ impl Drop for Tree {
 
 #[test]
 fn test_tree_drop() {
+  use alloc::vec;
+
   drop(Tree::from_str("((* (* *)) (* *))"));
 
   let mut long_tree = Tree::Era;

@@ -1,3 +1,10 @@
+#![cfg(feature = "std")]
+
+use std::{sync::Barrier, thread};
+
+use ::alloc::sync::Arc;
+use atomic::AtomicUsize;
+
 use super::*;
 
 impl<'h, M: Mode> Net<'h, M> {
@@ -11,7 +18,7 @@ impl<'h, M: Mode> Net<'h, M> {
     (0 .. tids).map(move |tid| {
       let heap_size = (heap.0.len() / tids) & !63; // round down to needed alignment
       let heap_start = heap_size * tid;
-      let area = unsafe { std::mem::transmute(&heap.0[heap_start .. heap_start + heap_size]) };
+      let area = unsafe { mem::transmute(&heap.0[heap_start .. heap_start + heap_size]) };
       let mut net = Net::new_with_root(area, root.clone());
       net.next = next.saturating_sub(heap_start);
       net.head = if tid == 0 { net.head } else { Addr::NULL };
@@ -47,7 +54,7 @@ impl<'h, M: Mode> Net<'h, M> {
     }
 
     // Initialize global objects
-    let cores = std::thread::available_parallelism().unwrap().get() as usize;
+    let cores = thread::available_parallelism().unwrap().get();
     let tlog2 = cores.ilog2() as usize;
     let tids = 1 << tlog2;
     let delta = AtomicRewrites::default(); // delta rewrite counter
@@ -57,7 +64,7 @@ impl<'h, M: Mode> Net<'h, M> {
     let barry = Arc::new(Barrier::new(tids)); // global barrier
 
     // Perform parallel reductions
-    std::thread::scope(|s| {
+    thread::scope(|s| {
       for net in self.fork(tids) {
         let mut ctx = ThreadContext {
           tid: net.tid,
@@ -126,11 +133,11 @@ impl<'h, M: Mode> Net<'h, M> {
         let b_len = ctx.rlens[b_tid].load(Relaxed);
         let send = if a_len > b_len { (a_len - b_len) / 2 } else { 0 };
         let recv = if b_len > a_len { (b_len - a_len) / 2 } else { 0 };
-        let send = std::cmp::min(send, SHARE_LIMIT);
-        let recv = std::cmp::min(recv, SHARE_LIMIT);
+        let send = usize::min(send, SHARE_LIMIT);
+        let recv = usize::min(recv, SHARE_LIMIT);
         for i in 0 .. send {
           let init = a_len - send * 2;
-          let rdx0 = ctx.net.redexes.slow[init + i * 2 + 0].clone();
+          let rdx0 = ctx.net.redexes.slow[init + i * 2].clone();
           let rdx1 = ctx.net.redexes.slow[init + i * 2 + 1].clone();
           //let init = 0;
           //let ref0 = ctx.net.redexes.get_unchecked_mut(init + i * 2 + 0);

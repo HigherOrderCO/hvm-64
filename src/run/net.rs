@@ -1,6 +1,6 @@
-use std::mem::MaybeUninit;
-
 use super::*;
+
+use mem::MaybeUninit;
 
 /// An interaction combinator net.
 pub struct Net<'a, M: Mode> {
@@ -16,7 +16,7 @@ deref!({<'a, M: Mode>} Net<'a, M> => self.linker: Linker<'a, M>);
 impl<'h, M: Mode> Net<'h, M> {
   /// Creates an empty net with a given heap.
   pub fn new(heap: &'h Heap) -> Self {
-    let mut net = Net::new_with_root(heap, Wire(std::ptr::null()));
+    let mut net = Net::new_with_root(heap, Wire(ptr::null()));
     net.root = Wire::new(net.alloc());
     net
   }
@@ -28,13 +28,6 @@ impl<'h, M: Mode> Net<'h, M> {
   /// Boots a net from a Def.
   pub fn boot(&mut self, def: &Def) {
     self.call(Port::new_ref(def), self.root.as_var());
-  }
-
-  pub fn match_laziness_mut(&mut self) -> Result<&mut Net<'h, Lazy>, &mut Net<'h, Strict>> {
-    if M::LAZY { Ok(unsafe { core::mem::transmute(self) }) } else { Err(unsafe { core::mem::transmute(self) }) }
-  }
-  pub fn match_laziness(self) -> Result<Net<'h, Lazy>, Net<'h, Strict>> {
-    if M::LAZY { Ok(unsafe { core::mem::transmute(self) }) } else { Err(unsafe { core::mem::transmute(self) }) }
   }
 }
 
@@ -60,7 +53,7 @@ impl<'a, M: Mode> Net<'a, M> {
 
   // Lazy mode weak head normalizer
   #[inline(always)]
-  fn weak_normal(&mut self, mut prev: Port, root: Wire) -> Port {
+  pub fn weak_normal(&mut self, mut prev: Port, root: Wire) -> Port {
     assert!(M::LAZY);
 
     let mut path: Vec<Port> = vec![];
@@ -99,7 +92,7 @@ impl<'a, M: Mode> Net<'a, M> {
       prev = main.this.clone();
     }
 
-    return self.get_target_full(prev);
+    self.get_target_full(prev)
   }
 
   pub fn normal_from(&mut self, root: Wire) {
@@ -135,7 +128,7 @@ impl<'h, M: Mode> Net<'h, M> {
   pub fn expand(&mut self) {
     assert!(!M::LAZY);
     let (new_root, out_port) = self.create_wire();
-    let old_root = std::mem::replace(&mut self.root, new_root);
+    let old_root = mem::replace(&mut self.root, new_root);
     self.link_wire_port(old_root, ExpandDef::new(out_port));
   }
 }

@@ -1,3 +1,5 @@
+use crate::prelude::*;
+
 use crate::{
   ast::{Tree, MAX_ARITY},
   util::maybe_grow,
@@ -14,9 +16,9 @@ impl Tree {
           Some(Tree::Ctr { lab: inner_lab, ports: inner_ports })
             if inner_lab == lab && ports.len() + inner_ports.len() < MAX_ARITY =>
           {
-            ports.extend(inner_ports.drain(..));
+            ports.append(inner_ports);
           }
-          Some(other) => ports.push(std::mem::take(other)),
+          Some(other) => ports.push(mem::take(other)),
           None => (),
         }
       }

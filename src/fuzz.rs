@@ -1,3 +1,4 @@
+#![cfg(feature = "std")]
 //! An 'atomic fuzzer' to exhaustively test an atomic algorithm for correctness.
 //!
 //! This fuzzer can test an algorithm with every possible ordering of parallel
@@ -69,14 +70,21 @@
 //! algorithm is changed (particularly, the atomic instructions it executes),
 //! old paths may no longer be valid.)
 
-use std::{
+use crate::prelude::*;
+
+use alloc::sync::Arc;
+use core::{
   any::Any,
   cell::{OnceCell, RefCell},
   fmt::Debug,
   marker::PhantomData,
   ops::Add,
-  sync::{atomic, Arc, Condvar, Mutex},
+  sync::atomic,
+};
+use std::{
+  sync::{Condvar, Mutex},
   thread::{self, Scope, ThreadId},
+  thread_local,
 };
 
 use nohash_hasher::IntMap;
@@ -453,7 +461,7 @@ impl<'s, 'p: 's, 'e: 's> FuzzScope<'s, 'p, 'e> {
       }
     });
     while !ready.load(atomic::Ordering::Relaxed) {
-      std::hint::spin_loop()
+      hint::spin_loop()
     }
   }
 }

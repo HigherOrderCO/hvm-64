@@ -1,3 +1,5 @@
+use crate::prelude::*;
+
 /// Creates a variable uniquely identified by `id`.
 pub(crate) fn create_var(mut id: usize) -> String {
   let mut txt = Vec::new();

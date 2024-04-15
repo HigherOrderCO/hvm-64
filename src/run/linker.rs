@@ -111,10 +111,8 @@ impl<'h, M: Mode> Linker<'h, M> {
     trace!(self, a_port, b_port);
     if a_port.is(Tag::Var) {
       a_port.wire().set_target(b_port);
-    } else {
-      if M::LAZY {
-        self.set_header(a_port, b_port);
-      }
+    } else if M::LAZY {
+      self.set_header(a_port, b_port);
     }
   }
 
@@ -284,11 +282,13 @@ impl Trg {
   }
 
   #[inline(always)]
+  #[allow(clippy::wrong_self_convention)]
   pub(super) fn as_wire(self) -> Wire {
     Wire(self.0.0 as _)
   }
 
   #[inline(always)]
+  #[allow(clippy::wrong_self_convention)]
   pub(super) fn as_port(self) -> Port {
     self.0
   }

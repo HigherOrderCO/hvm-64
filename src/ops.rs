@@ -1,13 +1,13 @@
 mod num;
 mod word;
 
-use crate::util::bi_enum;
+use crate::{prelude::*, util::bi_enum};
 
 use self::{
   num::Numeric,
   word::{FromWord, ToWord},
 };
-use std::{
+use core::{
   cmp::{Eq, Ord},
   fmt::Display,
   str::FromStr,

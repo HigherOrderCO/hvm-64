@@ -1,3 +1,5 @@
+#![cfg(feature = "std")]
+
 use crate::loaders::*;
 use hvmc::ast::Book;
 use insta::assert_debug_snapshot;
@@ -9,7 +11,7 @@ fn list_got(index: u32) -> Book {
   let def = book.get_mut("GenGotIndex").unwrap();
   def.apply_tree(hvmc::ast::Tree::Ref { nam: format!("S{index}") });
   let def = book.get_mut("main").unwrap();
-  def.apply_tree(hvmc::ast::Tree::Ref { nam: format!("GenGotIndex") });
+  def.apply_tree(hvmc::ast::Tree::Ref { nam: "GenGotIndex".to_string() });
   book
 }
 
@@ -20,7 +22,7 @@ fn list_put(index: u32, value: u32) -> Book {
   def.apply_tree(hvmc::ast::Tree::Ref { nam: format!("S{index}") });
   def.apply_tree(hvmc::ast::Tree::Ref { nam: format!("S{value}") });
   let def = book.get_mut("main").unwrap();
-  def.apply_tree(hvmc::ast::Tree::Ref { nam: format!("GenPutIndexValue") });
+  def.apply_tree(hvmc::ast::Tree::Ref { nam: "GenPutIndexValue".to_string() });
   book
 }
 
