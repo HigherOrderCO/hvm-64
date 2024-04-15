@@ -27,6 +27,7 @@
     "lldb",
     "lnet",
     "lnum",
+    "monoid",
     "monomorphized",
     "newtype",
     "nilary",
