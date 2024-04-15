@@ -105,39 +105,34 @@ impl Op {
     }
   }
 
-  fn op_monoid<T: Numeric>(self, a: T, b: T) -> T {
-    match self {
-      Self::Add => T::add(a, b),
-      Self::Sub => T::sub(a, b),
-      Self::SubS => T::sub(b, a),
-      Self::Mul => T::mul(a, b),
-      Self::Div => T::div(a, b),
-      Self::DivS => T::div(b, a),
-      Self::Rem => T::rem(a, b),
-      Self::RemS => T::rem(b, a),
-      Self::And => T::and(a, b),
-      Self::Or => T::or(a, b),
-      Self::Xor => T::xor(a, b),
-      Self::Shl => T::shl(a, b),
-      Self::ShlS => T::shl(b, a),
-      Self::Shr => T::shr(a, b),
-      Self::ShrS => T::shr(b, a),
+  fn op<T: Numeric + FromWord + ToWord>(self, a: u64, b: u64) -> u64 {
+    let a = T::from_word(a);
+    let b = T::from_word(b);
 
-      Self::Eq | Self::Ne | Self::Lt | Self::Le | Self::Gt | Self::Ge => unreachable!("non-monoid operation {self}"),
-    }
-  }
-
-  fn op_word<T: Numeric + FromWord + ToWord>(self, a: u64, b: u64) -> u64 {
     match self {
+      Self::Add => T::add(a, b).to_word(),
+      Self::Sub => T::sub(a, b).to_word(),
+      Self::SubS => T::sub(b, a).to_word(),
+      Self::Mul => T::mul(a, b).to_word(),
+      Self::Div => T::div(a, b).to_word(),
+      Self::DivS => T::div(b, a).to_word(),
+      Self::Rem => T::rem(a, b).to_word(),
+      Self::RemS => T::rem(b, a).to_word(),
+      Self::And => T::and(a, b).to_word(),
+      Self::Or => T::or(a, b).to_word(),
+      Self::Xor => T::xor(a, b).to_word(),
+      Self::Shl => T::shl(a, b).to_word(),
+      Self::ShlS => T::shl(b, a).to_word(),
+      Self::Shr => T::shr(a, b).to_word(),
+      Self::ShrS => T::shr(b, a).to_word(),
+
       // comparison operators return an integer, which is not necessarily a `T`.
-      Self::Eq => (T::from_word(a) == T::from_word(b)).into(),
-      Self::Ne => (T::from_word(a) != T::from_word(b)).into(),
-      Self::Lt => (T::from_word(a) < T::from_word(b)).into(),
-      Self::Le => (T::from_word(a) <= T::from_word(b)).into(),
-      Self::Gt => (T::from_word(a) > T::from_word(b)).into(),
-      Self::Ge => (T::from_word(a) >= T::from_word(b)).into(),
-
-      op => op.op_monoid(T::from_word(a), T::from_word(b)).to_word(),
+      Self::Eq => (a == b).into(),
+      Self::Ne => (a != b).into(),
+      Self::Lt => (a < b).into(),
+      Self::Le => (a <= b).into(),
+      Self::Gt => (a > b).into(),
+      Self::Ge => (a >= b).into(),
     }
   }
 
@@ -177,16 +172,16 @@ impl TypedOp {
     const U60: u64 = 0xFFF_FFFF_FFFF_FFFF;
 
     match self.ty {
-      Ty::I8 => self.op.op_word::<i8>(a, b),
-      Ty::I16 => self.op.op_word::<i16>(a, b),
-      Ty::I32 => self.op.op_word::<i32>(a, b),
+      Ty::I8 => self.op.op::<i8>(a, b),
+      Ty::I16 => self.op.op::<i16>(a, b),
+      Ty::I32 => self.op.op::<i32>(a, b),
 
-      Ty::U8 => self.op.op_word::<u8>(a, b),
-      Ty::U16 => self.op.op_word::<u16>(a, b),
-      Ty::U32 => self.op.op_word::<u32>(a, b),
-      Ty::U60 => self.op.op_word::<u64>(a, b) & U60,
+      Ty::U8 => self.op.op::<u8>(a, b),
+      Ty::U16 => self.op.op::<u16>(a, b),
+      Ty::U32 => self.op.op::<u32>(a, b),
+      Ty::U60 => self.op.op::<u64>(a, b) & U60,
 
-      Ty::F32 => self.op.op_word::<f32>(a, b),
+      Ty::F32 => self.op.op::<f32>(a, b),
     }
   }
 }
