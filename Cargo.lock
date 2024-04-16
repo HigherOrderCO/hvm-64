@@ -295,13 +295,14 @@ checksum = "809e18805660d7b6b2e2b9f316a5099521b5998d5cba4dda11b5157a21aaef03"
 
 [[package]]
 name = "hvm-core"
-version = "0.2.24"
+version = "0.2.25"
 dependencies = [
  "TSPL",
  "arrayvec",
  "clap",
  "insta",
  "nohash-hasher",
+ "ordered-float",
  "parking_lot",
  "serial_test",
  "stacker",
@@ -370,10 +371,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2bf50223579dc7cdcfb3bfcacf7069ff68243f8c363f62ffa99cf000a6b9c451"
 
 [[package]]
+name = "num-traits"
+version = "0.2.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "da0df0e5185db44f69b44f26786fe401b6c293d1907744beaa7fa62b2e5a517a"
+dependencies = [
+ "autocfg",
+]
+
+[[package]]
 name = "once_cell"
 version = "1.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3fdb12b2476b595f9358c5161aa467c2438859caa136dec86c26fdd2efe17b92"
+
+[[package]]
+name = "ordered-float"
+version = "4.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a76df7075c7d4d01fdcb46c912dd17fba5b60c78ea480b475f2b6ab6f666584e"
+dependencies = [
+ "num-traits",
+]
 
 [[package]]
 name = "parking_lot"

@@ -25,7 +25,7 @@ fn _compile_host(host: &Host) -> Result<String, fmt::Error> {
     .map(|(raw_name, def)| (raw_name, sanitize_name(raw_name), def));
 
   writeln!(code, "#![allow(non_upper_case_globals, unused_imports)]")?;
-  writeln!(code, "use crate::{{host::{{Host, DefRef}}, run::*, ops::{{Op, Ty::*, IntOp::*}}}};")?;
+  writeln!(code, "use crate::{{host::{{Host, DefRef}}, run::*, ops::{{TypedOp, Ty::*, Op::*}}}};")?;
   writeln!(code)?;
 
   writeln!(code, "pub fn host() -> Host {{")?;
@@ -75,7 +75,7 @@ fn compile_def(code: &mut String, host: &Host, name: &str, instr: &[Instruction]
         writeln!(code, "let ({rhs}, {out}) = net.do_op({op:?}, {trg});")
       }
       Instruction::OpNum { op, trg, rhs, out } => {
-        writeln!(code, "let {out} = net.do_op_num({op:?}, {trg}, {rhs});")
+        writeln!(code, "let {out} = net.do_op_num({op:?}, {trg}, {rhs:?});")
       }
       Instruction::Mat { trg, lft, rgt } => {
         writeln!(code, "let ({lft}, {rgt}) = net.do_mat({trg});")
@@ -97,8 +97,10 @@ fn compile_port(host: &Host, port: &Port) -> String {
   } else if port.tag() == Tag::Ref {
     let name = sanitize_name(&host.back[&port.addr()]);
     format!("Port::new_ref(unsafe {{ &*DEF_{name} }})")
-  } else if port.tag() == Tag::Num {
-    format!("Port::new_num({})", port.num())
+  } else if port.tag() == Tag::Int {
+    format!("Port::new_int({})", port.int())
+  } else if port.tag() == Tag::F32 {
+    format!("Port::new_float({})", port.float())
   } else {
     unreachable!()
   }

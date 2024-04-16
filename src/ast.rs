@@ -10,16 +10,17 @@
 //!
 //! [interaction calculus]: https://en.wikipedia.org/wiki/Interaction_nets#Interaction_calculus
 
-use crate::prelude::*;
-
 use crate::{
-  ops::Op,
+  ops::TypedOp as Op,
+  prelude::*,
   run::Lab,
   util::{array_vec, deref, maybe_grow},
 };
+
 use alloc::collections::BTreeMap;
 use arrayvec::ArrayVec;
 use core::str::FromStr;
+use ordered_float::OrderedFloat;
 use TSPL::{new_parser, Parser};
 
 /// The top level AST node, representing a collection of named nets.
@@ -60,7 +61,9 @@ pub enum Tree {
   /// A nilary eraser node.
   Era,
   /// A native 60-bit integer.
-  Num { val: i64 },
+  Int { val: i64 },
+  /// A native 32-bit float.
+  F32 { val: OrderedFloat<f32> },
   /// A nilary node, referencing a named net.
   Ref { nam: String },
   /// A n-ary interaction combinator.
@@ -121,8 +124,8 @@ pub enum Tree {
   ///     (0:2) = Adt { lab: 0, variant_index: 0, variant_count: 2, fields: [] }
   ///     (R * R) = Ctr { lab: 0, ports: [Var { nam: "R" }, Era, Var { nam: "R" }]}
   ///   (Some 123):
-  ///     (1:2 #123) = Adt { lab: 0, variant_index: 0, variant_count: 2, fields: [Num { val: 123 }] }
-  ///     (* (#123 R) R) = Ctr { lab: 0, ports: [Era, Ctr { lab: 0, ports: [Num { val: 123 }, Var { nam: "R" }] }, Var { nam: "R" }]}
+  ///     (1:2 #123) = Adt { lab: 0, variant_index: 0, variant_count: 2, fields: [Int { val: 123 }] }
+  ///     (* (#123 R) R) = Ctr { lab: 0, ports: [Era, Ctr { lab: 0, ports: [Int { val: 123 }, Var { nam: "R" }] }, Var { nam: "R" }]}
   /// ```
   Adt {
     lab: Lab,
@@ -160,7 +163,9 @@ impl Tree {
   #[inline(always)]
   pub fn children(&self) -> impl ExactSizeIterator + DoubleEndedIterator<Item = &Tree> {
     ArrayVec::<_, MAX_ARITY>::into_iter(match self {
-      Tree::Era | Tree::Num { .. } | Tree::Ref { .. } | Tree::Var { .. } => array_vec::from_array([]),
+      Tree::Era | Tree::Int { .. } | Tree::F32 { .. } | Tree::Ref { .. } | Tree::Var { .. } => {
+        array_vec::from_array([])
+      }
       Tree::Ctr { ports, .. } => array_vec::from_iter(ports),
       Tree::Op { rhs, out, .. } => array_vec::from_array([rhs, out]),
       Tree::Mat { zero, succ, out } => array_vec::from_array([zero, succ, out]),
@@ -171,7 +176,9 @@ impl Tree {
   #[inline(always)]
   pub fn children_mut(&mut self) -> impl ExactSizeIterator + DoubleEndedIterator<Item = &mut Tree> {
     ArrayVec::<_, MAX_ARITY>::into_iter(match self {
-      Tree::Era | Tree::Num { .. } | Tree::Ref { .. } | Tree::Var { .. } => array_vec::from_array([]),
+      Tree::Era | Tree::Int { .. } | Tree::F32 { .. } | Tree::Ref { .. } | Tree::Var { .. } => {
+        array_vec::from_array([])
+      }
       Tree::Ctr { ports, .. } => array_vec::from_iter(ports),
       Tree::Op { rhs, out, .. } => array_vec::from_array([rhs, out]),
       Tree::Mat { zero, succ, out } => array_vec::from_array([zero, succ, out]),
@@ -300,15 +307,25 @@ impl<'i> HvmcParser<'i> {
           let nam = self.parse_name()?;
           Ok(Tree::Ref { nam })
         }
-        // Num = "#" Int
+        // Int = "#" [-] Int
+        // F32 = "#" [-] ( Int "." Int | "NaN" | "inf" )
         Some('#') => {
           self.advance_one();
-          match self.peek_one() {
-            Some('-') => {
-              self.advance_one();
-              Ok(Tree::Num { val: -(self.parse_u64()? as i64) })
+          let is_neg = self.consume("-").is_ok();
+          let num = self.take_while(|c| c.is_alphanumeric() || c == '.');
+
+          if num.contains('.') || num.contains("NaN") || num.contains("inf") {
+            let mut val: f32 = num.parse().map_err(|err| format!("{err:?}"))?;
+            if is_neg {
+              val = -val;
             }
-            _ => Ok(Tree::Num { val: self.parse_u64()? as i64 }),
+            Ok(Tree::F32 { val: val.into() })
+          } else {
+            let mut val: i64 = parse_int(num)? as i64;
+            if is_neg {
+              val = -val;
+            }
+            Ok(Tree::Int { val })
           }
         }
         // Op = "<" Op Tree Tree ">"
@@ -355,8 +372,19 @@ impl<'i> HvmcParser<'i> {
 
   /// See `ops.rs` for the available operators.
   fn parse_op(&mut self) -> Result<Op, String> {
-    let op = self.take_while(|c| "ui0123456789.+-=*/%<>|&^!?$".contains(c));
+    let op = self.take_while(|c| c.is_alphanumeric() || ".+-=*/%<>|&^!?$".contains(c));
     op.parse().map_err(|_| format!("Unknown operator: {op:?}"))
+  }
+}
+
+/// Parses an unsigned integer with an optional radix prefix.
+fn parse_int(input: &str) -> Result<u64, String> {
+  if let Some(rest) = input.strip_prefix("0x") {
+    u64::from_str_radix(rest, 16).map_err(|err| format!("{err:?}"))
+  } else if let Some(rest) = input.strip_prefix("0b") {
+    u64::from_str_radix(rest, 2).map_err(|err| format!("{err:?}"))
+  } else {
+    input.parse::<u64>().map_err(|err| format!("{err:?}"))
   }
 }
 
@@ -458,7 +486,8 @@ impl fmt::Display for Tree {
       }
       Tree::Var { nam } => write!(f, "{nam}"),
       Tree::Ref { nam } => write!(f, "@{nam}"),
-      Tree::Num { val } => write!(f, "#{val}"),
+      Tree::Int { val } => write!(f, "#{val}"),
+      Tree::F32 { val } => write!(f, "#{:?}", val.0),
       Tree::Op { op, rhs, out } => write!(f, "<{op} {rhs} {out}>"),
       Tree::Mat { zero, succ, out } => write!(f, "?<{zero} {succ} {out}>"),
     })
@@ -470,7 +499,8 @@ impl Clone for Tree {
   fn clone(&self) -> Tree {
     maybe_grow(|| match self {
       Tree::Era => Tree::Era,
-      Tree::Num { val } => Tree::Num { val: *val },
+      Tree::Int { val } => Tree::Int { val: *val },
+      Tree::F32 { val } => Tree::F32 { val: *val },
       Tree::Ref { nam } => Tree::Ref { nam: nam.clone() },
       Tree::Ctr { lab, ports } => Tree::Ctr { lab: *lab, ports: ports.clone() },
       Tree::Op { op, rhs, out } => Tree::Op { op: *op, rhs: rhs.clone(), out: out.clone() },

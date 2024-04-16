@@ -1,150 +1,23 @@
-use crate::prelude::*;
+mod num;
+mod word;
 
-use crate::util::bi_enum;
+use crate::{prelude::*, util::bi_enum};
+
+use self::{
+  num::Numeric,
+  word::{FromWord, ToWord},
+};
 use core::{
   cmp::{Eq, Ord},
   str::FromStr,
 };
 
-trait Num: Eq + Ord + Sized {
-  const ZERO: Self;
-  const ONE: Self;
-
-  fn add(a: Self, b: Self) -> Self;
-  fn sub(a: Self, b: Self) -> Self;
-  fn mul(a: Self, b: Self) -> Self;
-  fn div(a: Self, b: Self) -> Self;
-  fn rem(a: Self, b: Self) -> Self;
-  fn and(a: Self, b: Self) -> Self;
-  fn or(a: Self, b: Self) -> Self;
-  fn xor(a: Self, b: Self) -> Self;
-  fn shl(a: Self, b: Self) -> Self;
-  fn shr(a: Self, b: Self) -> Self;
-
-  fn from_bool(b: bool) -> Self {
-    if b { Self::ONE } else { Self::ZERO }
-  }
-}
-
-macro_rules! impl_num {
-  ( $($ty:ty),+ ) => {
-    $(
-    impl Num for $ty {
-      const ZERO: $ty = 0;
-      const ONE: $ty = 1;
-
-      fn add(a: $ty, b: $ty) -> $ty { a.wrapping_add(b) }
-      fn sub(a: $ty, b: $ty) -> $ty { a.wrapping_sub(b) }
-      fn mul(a: $ty, b: $ty) -> $ty { a.wrapping_mul(b) }
-      fn div(a: $ty, b: $ty) -> $ty { a.checked_div(b).unwrap_or(0) }
-      fn rem(a: $ty, b: $ty) -> $ty { a.checked_rem(b).unwrap_or(0) }
-      fn and(a: $ty, b: $ty) -> $ty { a & b }
-      fn or(a: $ty, b: $ty) -> $ty { a | b }
-      fn xor(a: $ty, b: $ty) -> $ty { a ^ b }
-      fn shl(a: $ty, b: $ty) -> $ty { a.wrapping_shl(b as u32) }
-      fn shr(a: $ty, b: $ty) -> $ty { a.wrapping_shr(b as u32) }
-    }
-    )*
-  }
-}
-
-impl_num! { u8, u16, u32, u64, i8, i16, i32 }
-
 bi_enum! {
   #[repr(u8)]
-  /// Native operations on mixed-width integers (u8, u16, u32, u60, i8, i16, i32).
+  /// The type of a numeric operation.
   ///
-  /// Each operation has a swapped counterpart (accessible with `.swap()`),
-  /// where the order of the operands is swapped.
-  ///
-  /// Operations without an already-named counterpart (e.g. `Add <-> Add` and
-  /// `Lt <-> Gt`) are suffixed with `$`/`S`: `(-$ 1 2) = (- 2 1) = 1`.
-  #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-  pub enum IntOp {
-    "+":   Add  = 0,
-    "-":   Sub  = 1,
-    "-$":  SubS = 2,
-    "*":   Mul  = 3,
-    "/":   Div  = 4,
-    "/$":  DivS = 5,
-    "%":   Rem  = 6,
-    "%$":  RemS = 7,
-    "==":  Eq   = 8,
-    "!=":  Ne   = 9,
-    "<":   Lt   = 10,
-    ">":   Gt   = 11,
-    "<=":  Le   = 12,
-    ">=":  Ge   = 13,
-    "&":   And  = 14,
-    "|":   Or   = 15,
-    "^":   Xor  = 16,
-    "<<":  Shl  = 17,
-    "<<$": ShlS = 18,
-    ">>":  Shr  = 19,
-    ">>$": ShrS = 20,
-  }
-}
-
-impl IntOp {
-  /// Returns this operation's swapped counterpart.
-  ///
-  /// For all `op, a, b`, `op.swap().op(a, b) == op.op(b, a)`.
-  #[inline]
-  fn swap(self) -> Self {
-    match self {
-      Self::Add => Self::Add,
-      Self::Sub => Self::SubS,
-      Self::SubS => Self::Sub,
-      Self::Mul => Self::Mul,
-      Self::Div => Self::DivS,
-      Self::DivS => Self::Div,
-      Self::Rem => Self::RemS,
-      Self::RemS => Self::Rem,
-      Self::Eq => Self::Eq,
-      Self::Ne => Self::Ne,
-      Self::Lt => Self::Gt,
-      Self::Gt => Self::Lt,
-      Self::Le => Self::Ge,
-      Self::Ge => Self::Le,
-      Self::And => Self::And,
-      Self::Or => Self::Or,
-      Self::Xor => Self::Xor,
-      Self::Shl => Self::ShlS,
-      Self::ShlS => Self::Shl,
-      Self::Shr => Self::ShrS,
-      Self::ShrS => Self::Shr,
-    }
-  }
-
-  fn op<T: Num>(self, a: T, b: T) -> T {
-    match self {
-      Self::Add => T::add(a, b),
-      Self::Sub => T::sub(a, b),
-      Self::SubS => T::sub(b, a),
-      Self::Mul => T::mul(a, b),
-      Self::Div => T::div(a, b),
-      Self::DivS => T::div(b, a),
-      Self::Rem => T::rem(a, b),
-      Self::RemS => T::rem(b, a),
-      Self::Eq => T::from_bool(a == b),
-      Self::Ne => T::from_bool(a != b),
-      Self::Lt => T::from_bool(a < b),
-      Self::Le => T::from_bool(a <= b),
-      Self::Gt => T::from_bool(a > b),
-      Self::Ge => T::from_bool(a >= b),
-      Self::And => T::and(a, b),
-      Self::Or => T::or(a, b),
-      Self::Xor => T::xor(a, b),
-      Self::Shl => T::shl(a, b),
-      Self::ShlS => T::shl(b, a),
-      Self::Shr => T::shr(a, b),
-      Self::ShrS => T::shr(b, a),
-    }
-  }
-}
-
-bi_enum! {
-  #[repr(u8)]
+  /// This dictates how the bits of the operands will be interpreted,
+  /// and the return type of the operation.
   #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
   pub enum Ty {
     "u8":  U8  = 0,
@@ -154,17 +27,166 @@ bi_enum! {
     "i8":  I8  = 4,
     "i16": I16 = 5,
     "i32": I32 = 6,
+    "f32": F32 = 7,
   }
 }
 
-#[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Op {
-  pub ty: Ty,
-  pub op: IntOp,
+impl Ty {
+  #[inline(always)]
+  fn is_int(&self) -> bool {
+    *self < Self::F32
+  }
 }
 
-impl fmt::Display for Op {
+bi_enum! {
+  #[repr(u8)]
+  /// Native operations on numerics (u8, u16, u32, u60, i8, i16, i32, f32).
+  ///
+  /// Each operation has a swapped counterpart (accessible with `.swap()`),
+  /// where the order of the operands is swapped.
+  ///
+  /// Operations without an already-named counterpart (e.g. `Add <-> Add` and
+  /// `Lt <-> Gt`) are suffixed with `$`/`S`: `(-$ 1 2) = (- 2 1) = 1`.
+  #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+  pub enum Op {
+    "+":   Add  = 0,
+    "-":   Sub  = 1,
+    "-$":  SubS = 2,
+    "*":   Mul  = 3,
+    "/":   Div  = 4,
+    "/$":  DivS = 5,
+    "%":   Rem  = 6,
+    "%$":  RemS = 7,
+    "&":   And  = 8,
+    "|":   Or   = 9,
+    "^":   Xor  = 10,
+    "<<":  Shl  = 11,
+    "<<$": ShlS = 12,
+    ">>":  Shr  = 13,
+    ">>$": ShrS = 14,
+    // operators returning ints should go after `Eq`
+    "==":  Eq   = 15,
+    "!=":  Ne   = 16,
+    "<":   Lt   = 17,
+    ">":   Gt   = 18,
+    "<=":  Le   = 19,
+    ">=":  Ge   = 20,
+  }
+}
+
+impl Op {
+  /// Returns this operation's swapped counterpart.
+  ///
+  /// For all `op, a, b`, `op.swap().op(a, b) == op.op(b, a)`.
+  #[inline]
+  pub fn swap(self) -> Self {
+    match self {
+      Self::Add => Self::Add,
+      Self::Sub => Self::SubS,
+      Self::SubS => Self::Sub,
+      Self::Mul => Self::Mul,
+      Self::Div => Self::DivS,
+      Self::DivS => Self::Div,
+      Self::Rem => Self::RemS,
+      Self::RemS => Self::Rem,
+      Self::And => Self::And,
+      Self::Or => Self::Or,
+      Self::Xor => Self::Xor,
+      Self::Shl => Self::ShlS,
+      Self::ShlS => Self::Shl,
+      Self::Shr => Self::ShrS,
+      Self::ShrS => Self::Shr,
+      Self::Eq => Self::Eq,
+      Self::Ne => Self::Ne,
+      Self::Lt => Self::Gt,
+      Self::Gt => Self::Lt,
+      Self::Le => Self::Ge,
+      Self::Ge => Self::Le,
+    }
+  }
+
+  fn op<T: Numeric + FromWord + ToWord>(self, a: u64, b: u64) -> u64 {
+    let a = T::from_word(a);
+    let b = T::from_word(b);
+
+    match self {
+      Self::Add => T::add(a, b).to_word(),
+      Self::Sub => T::sub(a, b).to_word(),
+      Self::SubS => T::sub(b, a).to_word(),
+      Self::Mul => T::mul(a, b).to_word(),
+      Self::Div => T::div(a, b).to_word(),
+      Self::DivS => T::div(b, a).to_word(),
+      Self::Rem => T::rem(a, b).to_word(),
+      Self::RemS => T::rem(b, a).to_word(),
+      Self::And => T::and(a, b).to_word(),
+      Self::Or => T::or(a, b).to_word(),
+      Self::Xor => T::xor(a, b).to_word(),
+      Self::Shl => T::shl(a, b).to_word(),
+      Self::ShlS => T::shl(b, a).to_word(),
+      Self::Shr => T::shr(a, b).to_word(),
+      Self::ShrS => T::shr(b, a).to_word(),
+
+      // comparison operators return an integer, which is not necessarily a `T`.
+      Self::Eq => (a == b).into(),
+      Self::Ne => (a != b).into(),
+      Self::Lt => (a < b).into(),
+      Self::Le => (a <= b).into(),
+      Self::Gt => (a > b).into(),
+      Self::Ge => (a >= b).into(),
+    }
+  }
+
+  #[inline(always)]
+  fn is_comparison(&self) -> bool {
+    *self >= Self::Eq
+  }
+}
+
+/// A numeric operator.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[repr(C, align(2))]
+pub struct TypedOp {
+  /// The type of the operands.
+  pub ty: Ty,
+  /// The operation. An opaque type whose interpretation depends on `ty`.
+  pub op: Op,
+}
+
+impl TypedOp {
+  pub unsafe fn from_unchecked(val: u16) -> Self {
+    mem::transmute(val)
+  }
+
+  /// Whether this operation returns an int.
+  #[inline(always)]
+  pub fn is_int(&self) -> bool {
+    self.ty.is_int() || self.op.is_comparison()
+  }
+
+  pub fn swap(self) -> Self {
+    Self { op: self.op.swap(), ty: self.ty }
+  }
+
+  #[inline]
+  pub fn op(self, a: u64, b: u64) -> u64 {
+    const U60: u64 = 0xFFF_FFFF_FFFF_FFFF;
+
+    match self.ty {
+      Ty::I8 => self.op.op::<i8>(a, b),
+      Ty::I16 => self.op.op::<i16>(a, b),
+      Ty::I32 => self.op.op::<i32>(a, b),
+
+      Ty::U8 => self.op.op::<u8>(a, b),
+      Ty::U16 => self.op.op::<u16>(a, b),
+      Ty::U32 => self.op.op::<u32>(a, b),
+      Ty::U60 => self.op.op::<u64>(a, b) & U60,
+
+      Ty::F32 => self.op.op::<f32>(a, b),
+    }
+  }
+}
+
+impl fmt::Display for TypedOp {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     match self.ty {
       Ty::U60 => write!(f, "{}", self.op),
@@ -173,52 +195,43 @@ impl fmt::Display for Op {
   }
 }
 
-impl TryFrom<u16> for Op {
+impl TryFrom<u16> for TypedOp {
   type Error = ();
 
   fn try_from(value: u16) -> Result<Self, Self::Error> {
-    let [ty, op] = value.to_be_bytes();
+    let [ty, op] = value.to_ne_bytes();
 
-    Ok(Self { ty: Ty::try_from(ty)?, op: IntOp::try_from(op)? })
+    Ok(Self { ty: Ty::try_from(ty)?, op: Op::try_from(op)? })
   }
 }
 
-impl From<Op> for u16 {
-  fn from(op: Op) -> Self {
-    (op.ty as u16) << 8 | op.op as u16
+impl From<TypedOp> for u16 {
+  fn from(TypedOp { ty, op }: TypedOp) -> Self {
+    u16::from_ne_bytes([ty as u8, op as u8])
   }
 }
 
-impl FromStr for Op {
-  type Err = ();
+#[cfg_attr(feature = "std", derive(Error))]
+#[derive(Debug)]
+pub enum OpParseError {
+  #[cfg_attr(feature = "std", error("invalid type: {0}"))]
+  Type(String),
+  #[cfg_attr(feature = "std", error("invalid operator: {0}"))]
+  Op(String),
+}
+
+impl FromStr for TypedOp {
+  type Err = OpParseError;
 
   fn from_str(s: &str) -> Result<Self, Self::Err> {
     match s.split('.').collect::<Vec<_>>().as_slice() {
-      [ty, op] => Ok(Self { ty: Ty::from_str(ty)?, op: IntOp::from_str(op)? }),
-      [op] => Ok(Self { ty: Ty::U60, op: IntOp::from_str(op)? }),
+      [ty, op] => Ok(Self {
+        ty: Ty::from_str(ty).map_err(|_| OpParseError::Type(ty.to_string()))?,
+        op: Op::from_str(op).map_err(|_| OpParseError::Op(op.to_string()))?,
+      }),
+      [op] => Ok(Self { ty: Ty::U60, op: Op::from_str(op).map_err(|_| OpParseError::Op(op.to_string()))? }),
 
-      _ => Err(()),
-    }
-  }
-}
-
-impl Op {
-  pub fn swap(self) -> Self {
-    Self { op: self.op.swap(), ty: self.ty }
-  }
-
-  #[inline]
-  pub fn op(self, a: i64, b: i64) -> i64 {
-    const U60: i64 = 0xFFF_FFFF_FFFF_FFFF;
-
-    match self.ty {
-      Ty::U8 => self.op.op(a as u8, b as u8) as i64,
-      Ty::U16 => self.op.op(a as u16, b as u16) as i64,
-      Ty::U32 => self.op.op(a as u32, b as u32) as i64,
-      Ty::U60 => self.op.op(a as u64, b as u64) as i64 & U60,
-      Ty::I8 => self.op.op(a as i8, b as i8) as i64,
-      Ty::I16 => self.op.op(a as i16, b as i16) as i64,
-      Ty::I32 => self.op.op(a as i32, b as i32) as i64,
+      _ => Err(OpParseError::Op(s.to_string())),
     }
   }
 }

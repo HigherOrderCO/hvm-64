@@ -73,7 +73,7 @@ use core::{
 use parking_lot::{Mutex, Once};
 
 use crate::{
-  ops::Op,
+  ops::TypedOp as Op,
   run::{Addr, Port, Trg, Wire},
 };
 
@@ -367,7 +367,7 @@ impl TraceArg for Op {
     u16::from(*self) as u64
   }
   fn from_word(word: u64) -> impl Debug {
-    unsafe { Op::try_from(word as u16).unwrap_unchecked() }
+    unsafe { Op::from_unchecked(word as u16) }
   }
 }
 

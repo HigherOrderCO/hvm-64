@@ -1,7 +1,7 @@
 use crate::prelude::*;
 
 use super::*;
-use crate::{ops::Op, run::Lab, util::maybe_grow};
+use crate::{ops::TypedOp as Op, run::Lab, util::maybe_grow};
 
 impl Host {
   /// Converts an ast net to a list of instructions to create the net.
@@ -50,7 +50,7 @@ impl<'a, E: Encoder> State<'a, E> {
     let (port, tree) = match (a, b) {
       (Tree::Era, t) | (t, Tree::Era) => (Port::ERA, t),
       (Tree::Ref { nam }, t) | (t, Tree::Ref { nam }) => (Port::new_ref(&self.host.defs[nam]), t),
-      (Tree::Num { val }, t) | (t, Tree::Num { val }) => (Port::new_num(*val), t),
+      (Tree::Int { val }, t) | (t, Tree::Int { val }) => (Port::new_int(*val), t),
       (t, u) => {
         let (av, aw, bv, bw) = self.encoder.wires();
         self.visit_tree(t, av);
@@ -66,7 +66,8 @@ impl<'a, E: Encoder> State<'a, E> {
     static ERA: Tree = Tree::Era;
     maybe_grow(move || match tree {
       Tree::Era => self.encoder.link_const(trg, Port::ERA),
-      Tree::Num { val } => self.encoder.link_const(trg, Port::new_num(*val)),
+      Tree::Int { val } => self.encoder.link_const(trg, Port::new_int(*val)),
+      Tree::F32 { val } => self.encoder.link_const(trg, Port::new_float(val.0)),
       Tree::Ref { nam } => self.encoder.link_const(trg, Port::new_ref(&self.host.defs[nam])),
       Tree::Ctr { lab, ports } => {
         if ports.is_empty() {
@@ -100,16 +101,21 @@ impl<'a, E: Encoder> State<'a, E> {
         }
         self.encoder.link(l, r);
       }
-      Tree::Op { op, rhs: lft, out: rgt } => {
-        if let Tree::Num { val } = &**lft {
-          let o = self.encoder.op_num(*op, trg, *val);
+      Tree::Op { op, rhs: lft, out: rgt } => match &**lft {
+        Tree::Int { val } => {
+          let o = self.encoder.op_num(*op, trg, Port::new_int(*val));
           self.visit_tree(rgt, o);
-        } else {
+        }
+        Tree::F32 { val } => {
+          let o = self.encoder.op_num(*op, trg, Port::new_float(val.0));
+          self.visit_tree(rgt, o);
+        }
+        _ => {
           let (l, r) = self.encoder.op(*op, trg);
           self.visit_tree(lft, l);
           self.visit_tree(rgt, r);
         }
-      }
+      },
       Tree::Mat { zero, succ, out } => {
         let (a, o) = self.encoder.mat(trg);
         let (z, s) = self.encoder.ctr(0, a);
@@ -134,7 +140,7 @@ trait Encoder {
   fn make_const(&mut self, port: Port) -> Self::Trg;
   fn ctr(&mut self, lab: Lab, trg: Self::Trg) -> (Self::Trg, Self::Trg);
   fn op(&mut self, op: Op, trg: Self::Trg) -> (Self::Trg, Self::Trg);
-  fn op_num(&mut self, op: Op, trg: Self::Trg, rhs: i64) -> Self::Trg;
+  fn op_num(&mut self, op: Op, trg: Self::Trg, rhs: Port) -> Self::Trg;
   fn mat(&mut self, trg: Self::Trg) -> (Self::Trg, Self::Trg);
   fn wires(&mut self) -> (Self::Trg, Self::Trg, Self::Trg, Self::Trg);
 }
@@ -172,7 +178,7 @@ impl Encoder for InterpretedDef {
     self.instr.push(Instruction::Op { op, trg, rhs, out });
     (rhs, out)
   }
-  fn op_num(&mut self, op: Op, trg: Self::Trg, rhs: i64) -> Self::Trg {
+  fn op_num(&mut self, op: Op, trg: Self::Trg, rhs: Port) -> Self::Trg {
     let out = self.new_trg_id();
     self.instr.push(Instruction::OpNum { op, trg, rhs, out });
     out
@@ -210,7 +216,7 @@ impl<'a, M: Mode> Encoder for run::Net<'a, M> {
   fn op(&mut self, op: Op, trg: Self::Trg) -> (Self::Trg, Self::Trg) {
     self.do_op(op, trg)
   }
-  fn op_num(&mut self, op: Op, trg: Self::Trg, rhs: i64) -> Self::Trg {
+  fn op_num(&mut self, op: Op, trg: Self::Trg, rhs: Port) -> Self::Trg {
     self.do_op_num(op, trg, rhs)
   }
   fn mat(&mut self, trg: Self::Trg) -> (Self::Trg, Self::Trg) {

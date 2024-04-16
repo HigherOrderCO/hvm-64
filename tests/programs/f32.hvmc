@@ -1,0 +1,36 @@
+@half = x & #1.0 ~ <f32./ #2.0 x>
+@nan = x & #0.0 ~ <f32./ #0.0 x>
+
+@main = x
+  // nan and inf divisions
+  & x ~ [n x] & #1.0  ~ <f32./ #0.0 n> // inf
+  & x ~ [n x] & #-1.0 ~ <f32./ #0.0 n> // -inf
+  & x ~ [n x] & #0.0  ~ <f32./ #0.0 n> // NaN
+
+  // general operators
+  & x ~ [n x] & @half ~ <f32.+ #2.0 n>  // 2.5
+  & x ~ [n x] & @half ~ <f32.- #2.0 n>  // -1.5
+  & x ~ [n x] & @half ~ <f32.* #2.3 n>  // 1.15
+  & x ~ [n x] & @half ~ <f32./ #2.0 n>  // 0.25
+  & x ~ [n x] & @half ~ <f32.% #2.0 n>  // 0.5
+
+  // comparisons (returning ints)
+  & x ~ [n x] & @half ~ <f32.== #2.0 n> // 0
+  & x ~ [n x] & @half ~ <f32.!= #2.0 n> // 1
+  & x ~ [n x] & @half ~ <f32.< #2.0 n>  // 1
+  & x ~ [n x] & @half ~ <f32.> #2.0 n>  // 0
+
+  // ieee nan comparisons
+  & x ~ [n x] & @nan ~ <f32.== @nan n> // 0
+  & x ~ [n x] & @nan ~ <f32.<= @nan n> // 0
+  & x ~ [n x] & @nan ~ <f32.< @nan n>  // 0
+  & x ~ [n x] & @nan ~ <f32.>= @nan n> // 0
+  & x ~ [n x] & @nan ~ <f32.> @nan n>  // 0
+
+  // parsing
+  & x ~ [n x] & #NaN  ~ <f32.+ #0.0 n> // NaN
+  & x ~ [n x] & #inf  ~ <f32.+ #0.0 n> // inf
+  & x ~ [n x] & #-inf ~ <f32.+ #0.0 n> // -inf
+  & x ~ [n x] & #1.02 ~ <f32.+ #0.0 n> // 1.02
+
+  & x ~ *
