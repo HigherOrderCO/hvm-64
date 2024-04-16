@@ -213,7 +213,7 @@ impl From<TypedOp> for u16 {
 
 #[cfg_attr(feature = "std", derive(Error))]
 #[derive(Debug)]
-pub enum Error {
+pub enum OpParseError {
   #[cfg_attr(feature = "std", error("invalid type: {0}"))]
   Type(String),
   #[cfg_attr(feature = "std", error("invalid operator: {0}"))]
@@ -221,17 +221,17 @@ pub enum Error {
 }
 
 impl FromStr for TypedOp {
-  type Err = Error;
+  type Err = OpParseError;
 
   fn from_str(s: &str) -> Result<Self, Self::Err> {
     match s.split('.').collect::<Vec<_>>().as_slice() {
       [ty, op] => Ok(Self {
-        ty: Ty::from_str(ty).map_err(|_| Error::Type(ty.to_string()))?,
-        op: Op::from_str(op).map_err(|_| Error::Op(op.to_string()))?,
+        ty: Ty::from_str(ty).map_err(|_| OpParseError::Type(ty.to_string()))?,
+        op: Op::from_str(op).map_err(|_| OpParseError::Op(op.to_string()))?,
       }),
-      [op] => Ok(Self { ty: Ty::U60, op: Op::from_str(op).map_err(|_| Error::Op(op.to_string()))? }),
+      [op] => Ok(Self { ty: Ty::U60, op: Op::from_str(op).map_err(|_| OpParseError::Op(op.to_string()))? }),
 
-      _ => Err(Error::Op(s.to_string())),
+      _ => Err(OpParseError::Op(s.to_string())),
     }
   }
 }

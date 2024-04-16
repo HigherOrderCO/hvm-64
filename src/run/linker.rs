@@ -393,5 +393,5 @@ impl RedexQueue {
 fn redex_would_shrink(a: &Port, b: &Port) -> bool {
   (*a == Port::ERA || *b == Port::ERA)
     || (a.tag() == Tag::Ctr && b.tag() == Tag::Ctr && a.lab() == b.lab())
-    || (!(a.tag() == Tag::Ref || b.tag() == Tag::Ref) && (a.tag() == Tag::Int || b.tag() == Tag::Int))
+    || (!(a.tag() == Tag::Ref || b.tag() == Tag::Ref) && (a.is_num() || b.is_num()))
 }

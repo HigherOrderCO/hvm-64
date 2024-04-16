@@ -107,7 +107,7 @@ impl fmt::Debug for Port {
       Port::LOCK => write!(f, "[LOCK]"),
       _ => match self.tag() {
         Int => write!(f, "[Int {}]", self.int()),
-        F32 => write!(f, "[F32 {}]", self.float()),
+        F32 => write!(f, "[F32 {:?}]", self.float()),
         Var | Red | Mat => write!(f, "[{:?} {:?}]", self.tag(), self.addr()),
         Op | Ctr | Ref => write!(f, "[{:?} {:?} {:?}]", self.tag(), self.lab(), self.addr()),
       },
@@ -216,10 +216,9 @@ impl Port {
   /// [`F32`] ports. This is meant for numeric operations to defer
   /// interpreting this port as an integer or as a float until the operation
   /// type is known.
-  ///
-  /// The intermediate cast to `i64` is to sign-extend during bit-shift.
   #[inline(always)]
   pub const fn num(&self) -> u64 {
+    // The intermediate cast to `i64` is to sign-extend during bit-shift.
     ((self.0 as i64) >> 4) as u64
   }
 

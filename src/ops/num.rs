@@ -1,7 +1,6 @@
 #[rustfmt::skip]
 pub trait Numeric: PartialEq + PartialOrd + Sized {
   const ZERO: Self;
-  const ONE: Self;
 
   fn add(_: Self, _: Self) -> Self { Self::ZERO }
   fn sub(_: Self, _: Self) -> Self { Self::ZERO }
@@ -13,10 +12,6 @@ pub trait Numeric: PartialEq + PartialOrd + Sized {
   fn xor(_: Self, _: Self) -> Self { Self::ZERO }
   fn shl(_: Self, _: Self) -> Self { Self::ZERO }
   fn shr(_: Self, _: Self) -> Self { Self::ZERO }
-
-  fn from_bool(b: bool) -> Self {
-    if b { Self::ONE } else { Self::ZERO }
-  }
 }
 
 macro_rules! impl_numeric {
@@ -24,7 +19,6 @@ macro_rules! impl_numeric {
     $(
       impl Numeric for $ty {
         const ZERO: Self = 0;
-        const ONE: Self = 1;
 
         fn add(a: Self, b: Self) -> Self { a.wrapping_add(b) }
         fn sub(a: Self, b: Self) -> Self { a.wrapping_sub(b) }
@@ -45,7 +39,6 @@ impl_numeric! { u8, u16, u32, u64, i8, i16, i32 }
 
 impl Numeric for f32 {
   const ZERO: Self = 0.0;
-  const ONE: Self = 1.0;
 
   fn add(a: Self, b: Self) -> Self {
     a + b

@@ -161,7 +161,7 @@ impl<'a, M: Mode> Net<'a, M> {
 
       let res = op.op(port.num(), rhs.num());
 
-      if op.is_int() { Trg::port(Port::new_num(Tag::Int, res)) } else { Trg::port(Port::new_num(Tag::F32, res)) }
+      Trg::port(Port::new_num(if op.is_int() { Tag::Int } else { Tag::F32 }, res))
     } else if !M::LAZY && port == Port::ERA {
       self.free_trg(trg);
       Trg::port(Port::ERA)
