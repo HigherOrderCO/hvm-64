@@ -29,7 +29,7 @@ fn _compile_host(host: &Host) -> Result<String, fmt::Error> {
   writeln!(code, "#![allow(non_camel_case_types, unused_imports, unused_variables)]")?;
   writeln!(
     code,
-    "use crate::{{host::{{Host, DefRef}}, stdlib::{{AsHostedDef, HostedDef}}, run::*, ops::{{TypedOp, Ty::*, Op::*}}}};"
+    "use crate::{{host::Host, stdlib::{{AsHostedDef, HostedDef}}, run::*, ops::{{TypedOp, Ty::*, Op::*}}}};"
   )?;
   writeln!(code)?;
 
