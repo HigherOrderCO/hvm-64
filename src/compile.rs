@@ -26,7 +26,7 @@ fn _compile_host(host: &Host) -> Result<String, fmt::Error> {
     .filter_map(|(name, def)| Some((name, def.downcast_ref::<HostedDef<InterpretedDef>>()?)))
     .map(|(raw_name, def)| (raw_name, sanitize_name(raw_name), def));
 
-  writeln!(code, "#![allow(non_upper_case_globals, unused_imports)]")?;
+  writeln!(code, "#![allow(non_camel_case_types, unused_imports, unused_variables)]")?;
   writeln!(
     code,
     "use crate::{{host::{{Host, DefRef}}, stdlib::{{AsHostedDef, HostedDef}}, run::*, ops::{{TypedOp, Ty::*, Op::*}}}};"
