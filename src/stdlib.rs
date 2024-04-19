@@ -141,6 +141,13 @@ impl<T: AsArcDef> AsDef for ArcDef<T> {
 pub struct HostedDef<T: AsHostedDef>(pub T, PhantomData<()>);
 
 impl<T: AsHostedDef> HostedDef<T> {
+  pub unsafe fn new(labs: LabSet) -> DefRef
+  where
+    T: Default,
+  {
+    Self::new_hosted(labs, T::default())
+  }
+
   pub unsafe fn new_hosted(labs: LabSet, data: T) -> DefRef {
     DefRef::Owned(Box::new(Def::new(labs, HostedDef(data, PhantomData))))
   }

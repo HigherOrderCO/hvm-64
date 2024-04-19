@@ -54,8 +54,9 @@ fn main() {
     }
   } else {
     let cli = BareCli::parse();
-    let host = hvmc::gen::host();
-    run(Arc::new(Mutex::new(host)), cli.opts, cli.args);
+    let host = create_host(&Book::default());
+    gen::insert_into_host(&mut host.lock());
+    run(host, cli.opts, cli.args);
   }
   if cfg!(feature = "trace") {
     hvmc::trace::_read_traces(usize::MAX);
