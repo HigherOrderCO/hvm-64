@@ -1,14 +1,22 @@
 #![cfg(feature = "std")]
 
+use alloc::collections::{BTreeMap, BTreeSet};
+
 use crate::prelude::*;
 
 use crate::{
   host::Host,
-  run::{Instruction, InterpretedDef, LabSet, Port, Tag},
+  run::{Def, Instruction, InterpretedDef, LabSet, Port, Tag},
   stdlib::HostedDef,
 };
 use core::{fmt::Write, hash::Hasher};
 use std::hash::DefaultHasher;
+
+struct DefInfo<'a> {
+  rust_name: String,
+  def: &'a Def<HostedDef<InterpretedDef>>,
+  refs: BTreeSet<&'a str>,
+}
 
 /// Compiles a [`Host`] to Rust, returning a file to replace `gen.rs`.
 pub fn compile_host(host: &Host) -> String {
@@ -18,46 +26,106 @@ pub fn compile_host(host: &Host) -> String {
 fn _compile_host(host: &Host) -> Result<String, fmt::Error> {
   let mut code = String::default();
 
-  let defs = host
-    .defs
-    .iter()
-    .filter_map(|(name, def)| Some((name, def.downcast_ref::<HostedDef<InterpretedDef>>()?)))
-    .map(|(raw_name, def)| (raw_name, sanitize_name(raw_name), def));
+  let mut def_infos: BTreeMap<&str, DefInfo<'_>> = BTreeMap::new();
+  for (hvmc_name, def) in &host.defs {
+    if let Some(def) = def.downcast_ref::<HostedDef<InterpretedDef>>() {
+      def_infos.insert(hvmc_name, DefInfo {
+        rust_name: sanitize_name(hvmc_name),
+        refs: refs(host, &def.data.0.instr),
+        def,
+      });
+    }
+  }
 
-  writeln!(code, "#![allow(non_upper_case_globals, unused_imports)]")?;
-  writeln!(code, "use crate::{{host::{{Host, DefRef}}, run::*, ops::{{TypedOp, Ty::*, Op::*}}}};")?;
+  writeln!(code, "#![allow(warnings)]")?;
+  writeln!(
+    code,
+    "use crate::{{host::Host, stdlib::{{AsHostedDef, HostedDef}}, run::*, ops::{{TypedOp, Ty::*, Op::*}}}};"
+  )?;
   writeln!(code)?;
 
-  writeln!(code, "pub fn host() -> Host {{")?;
-  writeln!(code, "  let mut host = Host::default();")?;
-  for (raw_name, name, _) in defs.clone() {
-    writeln!(code, r##"  host.insert_def(r#"{raw_name}"#, DefRef::Static(unsafe {{ &*DEF_{name} }}));"##)?;
-  }
-  writeln!(code, "  host")?;
-  writeln!(code, "}}\n")?;
+  writeln!(code, "pub fn insert_into_host(host: &mut Host) {{")?;
 
-  for (_, name, def) in defs.clone() {
+  // insert empty defs
+  for (hvmc_name, DefInfo { rust_name, def, .. }) in &def_infos {
     let labs = compile_lab_set(&def.labs)?;
     writeln!(
       code,
-      "pub const DEF_{name}: *const Def = const {{ &Def::new({labs}, (call_{name}, call_{name})) }}.upcast();"
+      r##"  host.insert_def(r#"{hvmc_name}"#, unsafe {{ HostedDef::<Def_{rust_name}>::new({labs}) }});"##,
+    )?;
+  }
+  writeln!(code)?;
+
+  // hoist all unique refs present in the right hand side of some def
+  for hvmc_name in def_infos.values().flat_map(|info| &info.refs).collect::<BTreeSet<_>>() {
+    let rust_name = &def_infos[hvmc_name].rust_name;
+
+    writeln!(code, r##"  let def_{rust_name} = Port::new_ref(&host.defs[r#"{hvmc_name}"#]);"##)?;
+  }
+  writeln!(code)?;
+
+  // initialize defs that have refs
+  for (hvmc_name, DefInfo { rust_name, refs, .. }) in &def_infos {
+    if refs.is_empty() {
+      continue;
+    }
+
+    let fields = refs.iter().map(|r| format!("def_{}", sanitize_name(r))).collect::<Vec<_>>().join(", ");
+
+    writeln!(
+      code,
+      r##"  host.get_mut::<HostedDef<Def_{rust_name}>>(r#"{hvmc_name}"#).data.0 = Def_{rust_name} {{ {fields} }};"##
     )?;
   }
 
+  writeln!(code, "}}")?;
   writeln!(code)?;
 
-  for (_, name, def) in defs {
-    compile_def(&mut code, host, &name, &def.data.0.instr)?;
+  for DefInfo { rust_name, def, .. } in def_infos.values() {
+    compile_struct(&mut code, host, rust_name, def)?;
   }
 
   Ok(code)
 }
 
-fn compile_def(code: &mut String, host: &Host, name: &str, instr: &[Instruction]) -> fmt::Result {
-  writeln!(code, "pub fn call_{name}<M: Mode>(net: &mut Net<M>, to: Port) {{")?;
-  writeln!(code, "  let t0 = Trg::port(to);")?;
-  for instr in instr {
-    write!(code, "  ")?;
+fn refs<'a>(host: &'a Host, instructions: &'a [Instruction]) -> BTreeSet<&'a str> {
+  let mut refs = BTreeSet::new();
+
+  for instr in instructions {
+    if let Instruction::Const { port, .. } | Instruction::LinkConst { port, .. } = instr {
+      if port.tag() == Tag::Ref {
+        refs.insert(host.back[&port.addr()].as_str());
+      }
+    }
+  }
+
+  refs
+}
+
+fn compile_struct(
+  code: &mut String,
+  host: &Host,
+  rust_name: &str,
+  def: &Def<HostedDef<InterpretedDef>>,
+) -> fmt::Result {
+  let refs = refs(host, &def.data.0.instr)
+    .iter()
+    .map(|r| format!("def_{}: Port", sanitize_name(r)))
+    .collect::<Vec<_>>()
+    .join(",\n  ");
+
+  writeln!(code, "#[derive(Default)]")?;
+  writeln!(code, "struct Def_{rust_name} {{")?;
+  writeln!(code, "  {refs}")?;
+  writeln!(code, "}}")?;
+  writeln!(code)?;
+
+  writeln!(code, "impl AsHostedDef for Def_{rust_name} {{")?;
+  writeln!(code, "  fn call<M: Mode>(slf: &Def<Self>, net: &mut Net<M>, port: Port) {{")?;
+  writeln!(code, "    let t0 = Trg::port(port);")?;
+
+  for instr in &def.data.0.instr {
+    write!(code, "    ")?;
     match instr {
       Instruction::Const { trg, port } => {
         writeln!(code, "let {trg} = Trg::port({});", compile_port(host, port))
@@ -85,8 +153,8 @@ fn compile_def(code: &mut String, host: &Host, name: &str, instr: &[Instruction]
       }
     }?;
   }
+  writeln!(code, "  }}")?;
   writeln!(code, "}}")?;
-  code.write_char('\n')?;
 
   Ok(())
 }
@@ -96,11 +164,11 @@ fn compile_port(host: &Host, port: &Port) -> String {
     "Port::ERA".to_owned()
   } else if port.tag() == Tag::Ref {
     let name = sanitize_name(&host.back[&port.addr()]);
-    format!("Port::new_ref(unsafe {{ &*DEF_{name} }})")
+    format!("slf.data.def_{name}.clone()")
   } else if port.tag() == Tag::Int {
     format!("Port::new_int({})", port.int())
   } else if port.tag() == Tag::F32 {
-    format!("Port::new_float({})", port.float())
+    format!("Port::new_float({:?})", port.float())
   } else {
     unreachable!()
   }

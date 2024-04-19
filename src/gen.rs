@@ -2,6 +2,4 @@
 
 use crate::host::Host;
 
-pub fn host() -> Host {
-  Host::default()
-}
+pub fn insert_into_host(_: &mut Host) {}

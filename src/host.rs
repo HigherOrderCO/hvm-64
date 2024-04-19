@@ -91,10 +91,7 @@ impl Host {
     // each of the new defs.
     for (nam, net) in book.iter() {
       let data = self.encode_def(net);
-      match self.defs.get_mut(nam).unwrap() {
-        DefRef::Owned(def) => def.downcast_mut::<HostedDef<InterpretedDef>>().unwrap().data.0 = data,
-        DefRef::Static(_) => unreachable!(),
-      }
+      self.get_mut::<HostedDef<InterpretedDef>>(nam).data.0 = data;
     }
   }
 
@@ -102,5 +99,13 @@ impl Host {
   pub fn insert_def(&mut self, name: &str, def: DefRef) {
     self.back.insert(Port::new_ref(&def).addr(), name.to_owned());
     self.defs.insert(name.to_owned(), def);
+  }
+
+  /// Returns a mutable [`Def`] named `name`.
+  pub fn get_mut<T: Send + Sync + 'static>(&mut self, name: &str) -> &mut Def<T> {
+    match self.defs.get_mut(name).unwrap() {
+      DefRef::Owned(def) => def.downcast_mut().unwrap(),
+      DefRef::Static(_) => unreachable!(),
+    }
   }
 }
