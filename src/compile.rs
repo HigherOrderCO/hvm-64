@@ -37,7 +37,7 @@ fn _compile_host(host: &Host) -> Result<String, fmt::Error> {
     }
   }
 
-  writeln!(code, "#![allow(non_camel_case_types, unused_imports, unused_variables)]")?;
+  writeln!(code, "#![allow(warnings)]")?;
   writeln!(
     code,
     "use crate::{{host::Host, stdlib::{{AsHostedDef, HostedDef}}, run::*, ops::{{TypedOp, Ty::*, Op::*}}}};"
