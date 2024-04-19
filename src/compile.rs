@@ -1,6 +1,6 @@
 #![cfg(feature = "std")]
 
-use alloc::collections::BTreeSet;
+use alloc::collections::{BTreeMap, BTreeSet};
 
 use crate::prelude::*;
 
@@ -12,6 +12,12 @@ use crate::{
 use core::{fmt::Write, hash::Hasher};
 use std::hash::DefaultHasher;
 
+struct DefInfo<'a> {
+  rust_name: String,
+  def: &'a Def<HostedDef<InterpretedDef>>,
+  refs: BTreeSet<&'a str>,
+}
+
 /// Compiles a [`Host`] to Rust, returning a file to replace `gen.rs`.
 pub fn compile_host(host: &Host) -> String {
   _compile_host(host).unwrap()
@@ -20,11 +26,16 @@ pub fn compile_host(host: &Host) -> String {
 fn _compile_host(host: &Host) -> Result<String, fmt::Error> {
   let mut code = String::default();
 
-  let defs = host
-    .defs
-    .iter()
-    .filter_map(|(name, def)| Some((name, def.downcast_ref::<HostedDef<InterpretedDef>>()?)))
-    .map(|(raw_name, def)| (raw_name, sanitize_name(raw_name), def));
+  let mut def_infos: BTreeMap<&str, DefInfo<'_>> = BTreeMap::new();
+  for (hvmc_name, def) in &host.defs {
+    if let Some(def) = def.downcast_ref::<HostedDef<InterpretedDef>>() {
+      def_infos.insert(hvmc_name, DefInfo {
+        rust_name: sanitize_name(hvmc_name),
+        refs: refs(host, &def.data.0.instr),
+        def,
+      });
+    }
+  }
 
   writeln!(code, "#![allow(non_camel_case_types, unused_imports, unused_variables)]")?;
   writeln!(
@@ -36,39 +47,42 @@ fn _compile_host(host: &Host) -> Result<String, fmt::Error> {
   writeln!(code, "pub fn insert_into_host(host: &mut Host) {{")?;
 
   // insert empty defs
-  for (hvmc_name, rust_name, def) in defs.clone() {
+  for (hvmc_name, DefInfo { rust_name, def, .. }) in &def_infos {
     let labs = compile_lab_set(&def.labs)?;
     writeln!(
       code,
-      r##"  host.insert_def(r#"{hvmc_name}"#, unsafe {{ HostedDef::<Def_{rust_name}>::new({labs}) }});"##
+      r##"  host.insert_def(r#"{hvmc_name}"#, unsafe {{ HostedDef::<Def_{rust_name}>::new({labs}) }});"##,
     )?;
   }
   writeln!(code)?;
 
   // hoist all unique refs present in the right hand side of some def
-  for hvmc_name in defs.clone().flat_map(|(_, _, def)| refs(host, &def.data.0.instr)).collect::<BTreeSet<_>>() {
-    let rust_name = sanitize_name(hvmc_name);
+  for hvmc_name in def_infos.values().flat_map(|info| &info.refs).collect::<BTreeSet<_>>() {
+    let rust_name = &def_infos[hvmc_name].rust_name;
 
     writeln!(code, r##"  let def_{rust_name} = Port::new_ref(&host.defs[r#"{hvmc_name}"#]);"##)?;
   }
   writeln!(code)?;
 
-  // initialize each def with the refs it makes use of
-  for (hvmc_name, rust_name, def) in defs.clone() {
-    let refs =
-      refs(host, &def.data.0.instr).iter().map(|r| format!("def_{}", sanitize_name(r))).collect::<Vec<_>>().join(", ");
+  // initialize defs that have refs
+  for (hvmc_name, DefInfo { rust_name, refs, .. }) in &def_infos {
+    if refs.is_empty() {
+      continue;
+    }
+
+    let fields = refs.iter().map(|r| format!("def_{}", sanitize_name(r))).collect::<Vec<_>>().join(", ");
 
     writeln!(
       code,
-      r##"  host.get_mut::<HostedDef<Def_{rust_name}>>(r#"{hvmc_name}"#).data.0 = Def_{rust_name} {{ {refs} }};"##
+      r##"  host.get_mut::<HostedDef<Def_{rust_name}>>(r#"{hvmc_name}"#).data.0 = Def_{rust_name} {{ {fields} }};"##
     )?;
   }
 
   writeln!(code, "}}")?;
   writeln!(code)?;
 
-  for (_, rust_name, def) in defs.clone() {
-    compile_struct(&mut code, host, &rust_name, def)?;
+  for DefInfo { rust_name, def, .. } in def_infos.values() {
+    compile_struct(&mut code, host, rust_name, def)?;
   }
 
   Ok(code)
