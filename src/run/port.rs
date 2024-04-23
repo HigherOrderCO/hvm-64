@@ -181,6 +181,12 @@ impl Port {
     self.tag() == Tag::Int || self.tag() == Tag::F32
   }
 
+  /// Whether this port is an [`ERA`] port.
+  #[inline(always)]
+  pub fn is_era(&self) -> bool {
+    matches!(*self, Port::ERA)
+  }
+
   /// Accesses the label of this port; this is valid for all non-numeric ports.
   #[inline(always)]
   pub const fn lab(&self) -> Lab {
