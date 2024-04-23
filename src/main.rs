@@ -13,7 +13,7 @@ use hvmc::{
 use parking_lot::Mutex;
 use std::{
   fs, io,
-  path::Path,
+  path::{Path, PathBuf},
   process::{self, Stdio},
   str::FromStr,
   sync::Arc,
@@ -26,14 +26,29 @@ fn main() {
   }
   if cfg!(feature = "_full_cli") {
     let cli = FullCli::parse();
+
     match cli.mode {
-      CliMode::Compile { file, transform_args, output } => {
-        let output = output.as_deref().or_else(|| file.strip_suffix(".hvmc")).unwrap_or_else(|| {
+      CliMode::Compile { file, dylib, transform_args, output } => {
+        let output = if let Some(output) = output {
+          output
+        } else if let Some(file_stem) = file.file_stem() {
+          file_stem.into()
+        } else {
           eprintln!("file missing `.hvmc` extension; explicitly specify an output path with `--output`.");
           process::exit(1);
-        });
-        let host = create_host(&load_book(&[file.clone()], &transform_args));
-        compile_executable(output, host).unwrap();
+        };
+
+        let host = create_host(&load_book(&[file], &transform_args));
+        prepare_temp_hvm_dir(host).unwrap();
+        compile_temp_hvm_dir().unwrap();
+
+        if dylib {
+          prepare_temp_hvm_dylib_main().unwrap();
+
+          fs::copy(".hvm/target/release/hvmc.so", output).unwrap();
+        } else {
+          fs::copy(".hvm/target/release/hvmc", output).unwrap();
+        }
       }
       CliMode::Run { run_opts, mut transform_args, file, args } => {
         // Don't pre-reduce or prune the entry point
@@ -98,17 +113,22 @@ enum CliMode {
   /// Compile a hvm-core program into a Rust crate.
   Compile {
     /// hvm-core file to compile.
-    file: String,
-    #[arg(short = 'o', long = "output")]
+    file: PathBuf,
+    /// Compile this hvm-core file to a dynamic library.
+    ///
+    /// These can be included when running with the `--include` option.
+    #[arg(short, long)]
+    dylib: bool,
     /// Output path; defaults to the input file with `.hvmc` stripped.
-    output: Option<String>,
+    #[arg(short, long)]
+    output: Option<PathBuf>,
     #[command(flatten)]
     transform_args: TransformArgs,
   },
   /// Run a program, optionally passing a list of arguments to it.
   Run {
     /// Name of the file to load.
-    file: String,
+    file: PathBuf,
     #[command(flatten)]
     args: RunArgs,
     #[command(flatten)]
@@ -123,17 +143,17 @@ enum CliMode {
   /// which makes it possible to reference definitions from the file
   /// in the expression.
   Reduce {
-    #[arg(required = false)]
     /// Files to load before reducing the expressions.
     ///
     /// Multiple files will act as if they're concatenated together.
-    files: Vec<String>,
-    #[arg(required = false, last = true)]
+    #[arg(required = false)]
+    files: Vec<PathBuf>,
     /// Expressions to reduce.
     ///
     /// The normal form of each expression will be
     /// printed on a new line. This list must be separated from the file list
     /// with a double dash ('--').
+    #[arg(required = false, last = true)]
     exprs: Vec<String>,
     #[command(flatten)]
     run_opts: RuntimeOpts,
@@ -146,7 +166,7 @@ enum CliMode {
     ///
     /// Multiple files will act as if they're concatenated together.
     #[arg(required = true)]
-    files: Vec<String>,
+    files: Vec<PathBuf>,
     #[command(flatten)]
     transform_args: TransformArgs,
   },
@@ -157,38 +177,42 @@ struct TransformArgs {
   /// Enables or disables transformation passes.
   #[arg(short = 'O', value_delimiter = ' ', action = clap::ArgAction::Append)]
   transform_passes: Vec<TransformPass>,
-
   #[command(flatten)]
   transform_opts: TransformOpts,
 }
 
 #[derive(Args, Clone, Debug)]
 struct RuntimeOpts {
-  #[arg(short = 's', long = "stats")]
   /// Show performance statistics.
+  #[arg(short, long = "stats")]
   show_stats: bool,
-  #[arg(short = '1', long = "single")]
   /// Single-core mode (no parallelism).
+  #[arg(short = '1', long = "single")]
   single_core: bool,
-  #[arg(short = 'l', long = "lazy")]
   /// Lazy mode.
   ///
   /// Lazy mode only expands references that are reachable
   /// by a walk from the root of the net. This leads to a dramatic slowdown,
   /// but allows running programs that would expand indefinitely otherwise.
+  #[arg(short, long = "lazy")]
   lazy_mode: bool,
-  #[arg(short = 'm', long = "memory", value_parser = util::parse_abbrev_number::<usize>)]
   /// How much memory to allocate on startup.
   ///
   /// Supports abbreviations such as '4G' or '400M'.
+  #[arg(short, long, value_parser = util::parse_abbrev_number::<usize>)]
   memory: Option<usize>,
 }
 
 #[derive(Args, Clone, Debug)]
 struct RunArgs {
-  #[arg(short = 'e', default_value = "main")]
   /// Name of the definition that will get reduced.
+  #[arg(short, default_value = "main")]
   entry_point: String,
+  /// Dynamic library hvm-core files to include.
+  ///
+  /// hvm-core files can be compiled as dylibs with the `--dylib` option.
+  #[arg(short = 'O', value_delimiter = ' ', action = clap::ArgAction::Append)]
+  include: Vec<PathBuf>,
   /// List of arguments to pass to the program.
   ///
   /// Arguments are passed using the lambda-calculus interpretation
@@ -209,7 +233,7 @@ fn run(host: Arc<Mutex<Host>>, opts: RuntimeOpts, args: RunArgs) {
   reduce_exprs(host, &[net], &opts);
 }
 
-fn load_book(files: &[String], transform_args: &TransformArgs) -> Book {
+fn load_book(files: &[PathBuf], transform_args: &TransformArgs) -> Book {
   let mut book = files
     .iter()
     .map(|name| {
@@ -276,7 +300,7 @@ fn pretty_num(n: u64) -> String {
     .collect()
 }
 
-fn compile_executable(target: &str, host: Arc<Mutex<host::Host>>) -> Result<(), io::Error> {
+fn prepare_temp_hvm_dir(host: Arc<Mutex<host::Host>>) -> Result<(), io::Error> {
   let gen = compile::compile_host(&host.lock());
   let outdir = ".hvm";
   if Path::new(&outdir).exists() {
@@ -358,17 +382,34 @@ fn compile_executable(target: &str, host: Arc<Mutex<host::Host>>) -> Result<(), 
     }
   }
 
+  Ok(())
+}
+
+fn prepare_temp_hvm_dylib_main() -> Result<(), io::Error> {
+  fs::write(
+    ".hvm/src/gen.rs",
+    r#"
+#![crate_type = "dylib"]
+
+#[no_mangle]
+pub fn hvmc_dylib_v0__insert_host(host: &mut Host) {
+  gen::insert_into_host(host)
+}
+    "#,
+  )
+}
+
+fn compile_temp_hvm_dir() -> Result<(), io::Error> {
   let output = process::Command::new("cargo")
     .current_dir(".hvm")
     .arg("build")
     .arg("--release")
     .stderr(Stdio::inherit())
     .output()?;
+
   if !output.status.success() {
     process::exit(1);
   }
-
-  fs::copy(".hvm/target/release/hvmc", target)?;
 
   Ok(())
 }
