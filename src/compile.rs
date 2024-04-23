@@ -93,7 +93,7 @@ fn refs<'a>(host: &'a Host, instructions: &'a [Instruction]) -> BTreeSet<&'a str
 
   for instr in instructions {
     if let Instruction::Const { port, .. } | Instruction::LinkConst { port, .. } = instr {
-      if port.tag() == Tag::Ref {
+      if port.tag() == Tag::Ref && !port.is_era() {
         refs.insert(host.back[&port.addr()].as_str());
       }
     }
@@ -143,7 +143,7 @@ fn compile_struct(
         writeln!(code, "let ({rhs}, {out}) = net.do_op({op:?}, {trg});")
       }
       Instruction::OpNum { op, trg, rhs, out } => {
-        writeln!(code, "let {out} = net.do_op_num({op:?}, {trg}, {rhs:?});")
+        writeln!(code, "let {out} = net.do_op_num({op:?}, {trg}, {});", compile_port(host, rhs))
       }
       Instruction::Mat { trg, lft, rgt } => {
         writeln!(code, "let ({lft}, {rgt}) = net.do_mat({trg});")
@@ -168,7 +168,17 @@ fn compile_port(host: &Host, port: &Port) -> String {
   } else if port.tag() == Tag::Int {
     format!("Port::new_int({})", port.int())
   } else if port.tag() == Tag::F32 {
-    format!("Port::new_float({:?})", port.float())
+    let float = port.float();
+
+    if float.is_nan() {
+      "Port::new_float(f32::NAN)".to_string()
+    } else if float.is_infinite() && float > 0.0 {
+      "Port::new_float(f32::INFINITY)".to_string()
+    } else if float.is_infinite() {
+      "Port::new_float(f32::NEG_INFINITY)".to_string()
+    } else {
+      format!("Port::new_float({float:?})")
+    }
   } else {
     unreachable!()
   }
