@@ -12,7 +12,9 @@ use hvmc::{
 
 use parking_lot::Mutex;
 use std::{
-  fs, io,
+  fmt::Write,
+  fs::{self, File},
+  io::{self, BufRead},
   path::{Path, PathBuf},
   process::{self, Stdio},
   str::FromStr,
@@ -39,14 +41,18 @@ fn main() {
         };
 
         let host = create_host(&load_book(&[file], &transform_args));
-        prepare_temp_hvm_dir(host).unwrap();
-        compile_temp_hvm_dir().unwrap();
+        create_temp_hvm(host).unwrap();
 
         if dylib {
-          prepare_temp_hvm_dylib_main().unwrap();
+          prepare_temp_hvm_dylib().unwrap();
+          compile_temp_hvm(&["--lib"]).unwrap();
 
-          fs::copy(".hvm/target/release/hvmc.so", output).unwrap();
+          // TODO: this can be a different extension on different platforms
+          // see: https://doc.rust-lang.org/reference/linkage.html
+          fs::copy(".hvm/target/release/libhvmc.so", output).unwrap();
         } else {
+          compile_temp_hvm(&[]).unwrap();
+
           fs::copy(".hvm/target/release/hvmc", output).unwrap();
         }
       }
@@ -300,7 +306,7 @@ fn pretty_num(n: u64) -> String {
     .collect()
 }
 
-fn prepare_temp_hvm_dir(host: Arc<Mutex<host::Host>>) -> Result<(), io::Error> {
+fn create_temp_hvm(host: Arc<Mutex<host::Host>>) -> Result<(), io::Error> {
   let gen = compile::compile_host(&host.lock());
   let outdir = ".hvm";
   if Path::new(&outdir).exists() {
@@ -385,25 +391,49 @@ fn prepare_temp_hvm_dir(host: Arc<Mutex<host::Host>>) -> Result<(), io::Error> {
   Ok(())
 }
 
-fn prepare_temp_hvm_dylib_main() -> Result<(), io::Error> {
-  fs::write(
-    ".hvm/src/gen.rs",
+fn prepare_temp_hvm_dylib() -> Result<(), io::Error> {
+  insert_crate_type_cargo_toml()?;
+
+  let mut lib = fs::read_to_string(".hvm/src/lib.rs")?;
+
+  writeln!(lib).unwrap();
+  writeln!(
+    lib,
     r#"
-#![crate_type = "dylib"]
-
 #[no_mangle]
-pub fn hvmc_dylib_v0__insert_host(host: &mut Host) {
+pub fn hvmc_dylib_v0__insert_host(host: &mut host::Host) {{
   gen::insert_into_host(host)
-}
-    "#,
+}}
+  "#
   )
+  .unwrap();
+
+  fs::write(".hvm/src/lib.rs", lib)?;
+  fs::remove_file(".hvm/src/main.rs")
 }
 
-fn compile_temp_hvm_dir() -> Result<(), io::Error> {
+fn insert_crate_type_cargo_toml() -> Result<(), io::Error> {
+  let mut cargo_toml = String::new();
+
+  let file = File::open(".hvm/Cargo.toml")?;
+  for line in io::BufReader::new(file).lines() {
+    let line = line?;
+    writeln!(cargo_toml, "{line}").unwrap();
+
+    if line == "[lib]" {
+      writeln!(cargo_toml, r#"crate_type = ["dylib"]"#).unwrap();
+    }
+  }
+
+  fs::write(".hvm/Cargo.toml", cargo_toml)
+}
+
+fn compile_temp_hvm(args: &[&'static str]) -> Result<(), io::Error> {
   let output = process::Command::new("cargo")
     .current_dir(".hvm")
     .arg("build")
     .arg("--release")
+    .args(args)
     .stderr(Stdio::inherit())
     .output()?;
 
