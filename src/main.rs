@@ -12,7 +12,6 @@ use hvmc::{
 
 use parking_lot::Mutex;
 use std::{
-  ffi::OsStr,
   fmt::Write,
   fs::{self, File},
   io::{self, BufRead},
@@ -434,11 +433,7 @@ fn insert_crate_type_cargo_toml() -> Result<(), io::Error> {
 }
 
 /// Compiles the `.hvm` directory, appending the provided `args` to `cargo`.
-fn compile_temp_hvm<I, S>(args: I) -> Result<(), io::Error>
-where
-  I: IntoIterator<Item = S>,
-  S: AsRef<OsStr>,
-{
+fn compile_temp_hvm(args: &[&'static str]) -> Result<(), io::Error> {
   let output = process::Command::new("cargo")
     .current_dir(".hvm")
     .arg("build")
