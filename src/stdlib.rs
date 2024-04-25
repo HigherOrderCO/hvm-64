@@ -61,8 +61,7 @@ impl<F: Fn(Tree) + Clone + Send + Sync + 'static> AsHostedDef for LogDef<F> {
 /// Create a `Host` from a `Book`, including `hvm-core`'s built-in definitions
 #[cfg(feature = "std")]
 #[allow(clippy::absolute_paths)]
-pub fn create_host(book: &crate::ast::Book) -> Arc<Mutex<Host>> {
-  let host = Arc::new(Mutex::new(Host::default()));
+pub fn insert_book(host: Arc<Mutex<Host>>, book: &crate::ast::Book) {
   host.lock().insert_def("HVM.log", unsafe {
     crate::stdlib::LogDef::new(host.clone(), {
       move |tree| {
@@ -72,7 +71,6 @@ pub fn create_host(book: &crate::ast::Book) -> Arc<Mutex<Host>> {
   });
   host.lock().insert_def("HVM.black_box", DefRef::Static(unsafe { &*IDENTITY }));
   host.lock().insert_book(book);
-  host
 }
 
 #[repr(transparent)]

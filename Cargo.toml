@@ -27,6 +27,7 @@ debug = "full"
 TSPL = "0.0.9"
 arrayvec = "0.7.4"
 clap = { version = "4.5.1", features = ["derive"], optional = true }
+libloading = "0.8.3"
 nohash-hasher = { version = "0.2.0" }
 ordered-float = "4.2.0"
 parking_lot = "0.12.1"

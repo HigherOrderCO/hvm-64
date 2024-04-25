@@ -5,7 +5,7 @@ use hvmc::{
   ast::{Book, Net, Tree},
   host::Host,
   run::{DynNet, Mode, Trg},
-  stdlib::create_host,
+  stdlib::insert_book,
   transform::{TransformOpts, TransformPass, TransformPasses},
   *,
 };
@@ -40,7 +40,8 @@ fn main() {
           process::exit(1);
         };
 
-        let host = create_host(&load_book(&[file], &transform_args));
+        let host: Arc<Mutex<Host>> = Default::default();
+        insert_book(host.clone(), &load_book(&[file], &transform_args));
         create_temp_hvm(host).unwrap();
 
         if dylib {
@@ -60,11 +61,16 @@ fn main() {
         // Don't pre-reduce or prune the entry point
         transform_args.transform_opts.pre_reduce_skip.push(args.entry_point.clone());
         transform_args.transform_opts.prune_entrypoints.push(args.entry_point.clone());
-        let host = create_host(&load_book(&[file], &transform_args));
+
+        let host: Arc<Mutex<Host>> = Default::default();
+        load_dylibs(host.clone(), &args.include);
+        insert_book(host.clone(), &load_book(&[file], &transform_args));
+
         run(host, run_opts, args);
       }
       CliMode::Reduce { run_opts, transform_args, files, exprs } => {
-        let host = create_host(&load_book(&files, &transform_args));
+        let host: Arc<Mutex<Host>> = Default::default();
+        insert_book(host.clone(), &load_book(&files, &transform_args));
         let exprs: Vec<_> = exprs.iter().map(|x| Net::from_str(x).unwrap()).collect();
         reduce_exprs(host, &exprs, &run_opts);
       }
@@ -75,7 +81,8 @@ fn main() {
     }
   } else {
     let cli = BareCli::parse();
-    let host = create_host(&Book::default());
+    let host: Arc<Mutex<Host>> = Default::default();
+    insert_book(host.clone(), &Book::default());
     gen::insert_into_host(&mut host.lock());
     run(host, cli.opts, cli.args);
   }
@@ -217,7 +224,7 @@ struct RunArgs {
   /// Dynamic library hvm-core files to include.
   ///
   /// hvm-core files can be compiled as dylibs with the `--dylib` option.
-  #[arg(short = 'O', value_delimiter = ' ', action = clap::ArgAction::Append)]
+  #[arg(short, long, value_delimiter = ' ', action = clap::ArgAction::Append)]
   include: Vec<PathBuf>,
   /// List of arguments to pass to the program.
   ///
@@ -261,6 +268,26 @@ fn load_book(files: &[PathBuf], transform_args: &TransformArgs) -> Book {
   book.transform(transform_passes, &transform_args.transform_opts).unwrap();
 
   book
+}
+
+fn load_dylibs(host: Arc<Mutex<Host>>, include: &[PathBuf]) {
+  let current_dir = std::env::current_dir().unwrap();
+
+  for file in include {
+    unsafe {
+      let lib = if file.is_absolute() {
+        libloading::Library::new(file)
+      } else {
+        libloading::Library::new(current_dir.join(file))
+      }
+      .expect("failed to load dylib");
+
+      let insert_into_host = lib.get::<fn(&mut Host)>(b"hvmc_dylib_v0__insert_host").expect("failed to load symbol");
+      insert_into_host(&mut host.lock());
+
+      std::mem::forget(lib);
+    }
+  }
 }
 
 fn reduce_exprs(host: Arc<Mutex<Host>>, exprs: &[Net], opts: &RuntimeOpts) {
