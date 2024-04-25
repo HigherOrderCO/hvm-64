@@ -12,6 +12,7 @@ use hvmc::{
 
 use parking_lot::Mutex;
 use std::{
+  ffi::OsStr,
   fmt::Write,
   fs::{self, File},
   io::{self, BufRead},
@@ -306,6 +307,8 @@ fn pretty_num(n: u64) -> String {
     .collect()
 }
 
+/// Copies the `hvm-core` source to a temporary `.hvm` directory.
+/// Only a subset of `Cargo.toml` is included.
 fn create_temp_hvm(host: Arc<Mutex<host::Host>>) -> Result<(), io::Error> {
   let gen = compile::compile_host(&host.lock());
   let outdir = ".hvm";
@@ -391,6 +394,8 @@ fn create_temp_hvm(host: Arc<Mutex<host::Host>>) -> Result<(), io::Error> {
   Ok(())
 }
 
+/// Appends a function to `lib.rs` that will be dynamically loaded
+/// by hvm-core when the generated dylib is included.
 fn prepare_temp_hvm_dylib() -> Result<(), io::Error> {
   insert_crate_type_cargo_toml()?;
 
@@ -408,8 +413,7 @@ pub fn hvmc_dylib_v0__insert_host(host: &mut host::Host) {{
   )
   .unwrap();
 
-  fs::write(".hvm/src/lib.rs", lib)?;
-  fs::remove_file(".hvm/src/main.rs")
+  fs::write(".hvm/src/lib.rs", lib)
 }
 
 /// Adds `crate_type = ["dylib"]` under the `[lib]` section of `Cargo.toml`.
@@ -429,7 +433,12 @@ fn insert_crate_type_cargo_toml() -> Result<(), io::Error> {
   fs::write(".hvm/Cargo.toml", cargo_toml)
 }
 
-fn compile_temp_hvm(args: &[&'static str]) -> Result<(), io::Error> {
+/// Compiles the `.hvm` directory, appending the provided `args` to `cargo`.
+fn compile_temp_hvm<I, S>(args: I) -> Result<(), io::Error>
+where
+  I: IntoIterator<Item = S>,
+  S: AsRef<OsStr>,
+{
   let output = process::Command::new("cargo")
     .current_dir(".hvm")
     .arg("build")
