@@ -26,6 +26,8 @@
     "ilog",
     "inlinees",
     "insta",
+    "libhvmc",
+    "libloading",
     "lldb",
     "lnet",
     "lnum",
