@@ -5,7 +5,7 @@ use hvmc::{
   ast::{Book, Net, Tree},
   host::Host,
   run::{DynNet, Mode, Trg},
-  stdlib::insert_book,
+  stdlib::{create_host, insert_book},
   transform::{TransformOpts, TransformPass, TransformPasses},
   *,
 };
@@ -40,8 +40,7 @@ fn main() {
           process::exit(1);
         };
 
-        let host: Arc<Mutex<Host>> = Default::default();
-        insert_book(host.clone(), &load_book(&[file], &transform_args));
+        let host = create_host(&load_book(&[file], &transform_args));
         create_temp_hvm(host).unwrap();
 
         if dylib {
@@ -69,8 +68,7 @@ fn main() {
         run(host, run_opts, args);
       }
       CliMode::Reduce { run_opts, transform_args, files, exprs } => {
-        let host: Arc<Mutex<Host>> = Default::default();
-        insert_book(host.clone(), &load_book(&files, &transform_args));
+        let host = create_host(&load_book(&files, &transform_args));
         let exprs: Vec<_> = exprs.iter().map(|x| Net::from_str(x).unwrap()).collect();
         reduce_exprs(host, &exprs, &run_opts);
       }
@@ -81,8 +79,7 @@ fn main() {
     }
   } else {
     let cli = BareCli::parse();
-    let host: Arc<Mutex<Host>> = Default::default();
-    insert_book(host.clone(), &Book::default());
+    let host = create_host(&Book::default());
     gen::insert_into_host(&mut host.lock());
     run(host, cli.opts, cli.args);
   }
