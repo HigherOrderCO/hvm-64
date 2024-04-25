@@ -412,6 +412,7 @@ pub fn hvmc_dylib_v0__insert_host(host: &mut host::Host) {{
   fs::remove_file(".hvm/src/main.rs")
 }
 
+/// Adds `crate_type = ["dylib"]` under the `[lib]` section of `Cargo.toml`.
 fn insert_crate_type_cargo_toml() -> Result<(), io::Error> {
   let mut cargo_toml = String::new();
 
