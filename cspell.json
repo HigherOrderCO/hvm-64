@@ -15,6 +15,7 @@
     "dref",
     "dups",
     "dylib",
+    "dylibs",
     "effectful",
     "fmts",
     "fuzzer",
