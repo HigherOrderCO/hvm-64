@@ -12,6 +12,7 @@ use hvmc::{
 
 use parking_lot::Mutex;
 use std::{
+  ffi::OsStr,
   fmt::Write,
   fs::{self, File},
   io::{self, BufRead},
@@ -33,10 +34,11 @@ fn main() {
       CliMode::Compile { file, dylib, transform_args, output } => {
         let output = if let Some(output) = output {
           output
-        } else if let Some(file_stem) = file.file_stem() {
-          file_stem.into()
+        } else if let Some("hvmc") = file.extension().and_then(OsStr::to_str) {
+          file.with_extension("")
         } else {
           eprintln!("file missing `.hvmc` extension; explicitly specify an output path with `--output`.");
+
           process::exit(1);
         };
 
