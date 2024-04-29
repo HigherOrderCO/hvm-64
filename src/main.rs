@@ -12,7 +12,7 @@ use hvmc::{
 
 use parking_lot::Mutex;
 use std::{
-  env::consts::{DLL_EXTENSION, DLL_PREFIX},
+  env::consts::{DLL_PREFIX, DLL_SUFFIX},
   ffi::OsStr,
   fmt::Write,
   fs::{self, File},
@@ -50,7 +50,7 @@ fn main() {
           prepare_temp_hvm_dylib().unwrap();
           compile_temp_hvm(&["--lib"]).unwrap();
 
-          fs::copy(format!(".hvm/target/release/{DLL_PREFIX}hvmc.{DLL_EXTENSION}"), output).unwrap();
+          fs::copy(format!(".hvm/target/release/{DLL_PREFIX}hvmc{DLL_SUFFIX}"), output).unwrap();
         } else {
           compile_temp_hvm(&[]).unwrap();
 
@@ -281,11 +281,22 @@ fn load_dylibs(host: Arc<Mutex<Host>>, include: &[PathBuf]) {
       }
       .expect("failed to load dylib");
 
-      let dylib_version = lib.get::<fn() -> &'static str>(b"hvmc_dylib_v0__version").expect("failed to load version");
-      let dylib_version = dylib_version();
-      if dylib_version != env!("CARGO_PKG_VERSION") {
+      let rust_version =
+        lib.get::<fn() -> &'static str>(b"hvmc_dylib_v0__rust_version").expect("failed to load rust version");
+      let rust_version = rust_version();
+      if rust_version != env!("RUSTC_VERSION") {
         eprintln!(
-          "warning: dylib {file:?} was compiled with hvmc version {dylib_version}, but is being run with hvmc version {}",
+          "warning: dylib {file:?} was compiled with rust version {rust_version}, but is being run with rust version {}",
+          env!("RUSTC_VERSION")
+        );
+      }
+
+      let hvmc_version =
+        lib.get::<fn() -> &'static str>(b"hvmc_dylib_v0__hvmc_version").expect("failed to load hvmc version");
+      let hvmc_version = hvmc_version();
+      if hvmc_version != env!("CARGO_PKG_VERSION") {
+        eprintln!(
+          "warning: dylib {file:?} was compiled with hvmc version {hvmc_version}, but is being run with hvmc version {}",
           env!("CARGO_PKG_VERSION")
         );
       }
@@ -446,12 +457,17 @@ pub fn hvmc_dylib_v0__insert_host(host: &mut host::Host) {{
 }}
 
 #[no_mangle]
-pub fn hvmc_dylib_v0__version() -> &'static str {{
-  {:?}
+pub fn hvmc_dylib_v0__hvmc_version() -> &'static str {{
+  {hvmc_version:?}
 }}
 
+#[no_mangle]
+pub fn hvmc_dylib_v0__rust_version() -> &'static str {{
+  {rust_version:?}
+}}
   "#,
-    env!("CARGO_PKG_VERSION")
+    hvmc_version = env!("CARGO_PKG_VERSION"),
+    rust_version = env!("RUSTC_VERSION"),
   )
   .unwrap();
 
