@@ -5,7 +5,7 @@ use hvmc::{
   ast::{Book, Net, Tree},
   host::Host,
   run::{DynNet, Mode, Trg},
-  stdlib::{create_host, insert_book},
+  stdlib::{create_host, insert_stdlib},
   transform::{TransformOpts, TransformPass, TransformPasses},
   *,
 };
@@ -63,7 +63,8 @@ fn main() {
 
         let host: Arc<Mutex<Host>> = Default::default();
         load_dylibs(host.clone(), &args.include);
-        insert_book(host.clone(), &load_book(&[file], &transform_args));
+        insert_stdlib(host.clone());
+        host.lock().insert_book(&load_book(&[file], &transform_args));
 
         run(host, run_opts, args);
       }
