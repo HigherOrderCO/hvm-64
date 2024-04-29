@@ -281,7 +281,17 @@ fn load_dylibs(host: Arc<Mutex<Host>>, include: &[PathBuf]) {
       }
       .expect("failed to load dylib");
 
-      let insert_into_host = lib.get::<fn(&mut Host)>(b"hvmc_dylib_v0__insert_host").expect("failed to load symbol");
+      let dylib_version = lib.get::<fn() -> &'static str>(b"hvmc_dylib_v0__version").expect("failed to load version");
+      let dylib_version = dylib_version();
+      if dylib_version != env!("CARGO_PKG_VERSION") {
+        eprintln!(
+          "warning: dylib {file:?} was compiled with hvmc version {dylib_version}, but is being run with hvmc version {}",
+          env!("CARGO_PKG_VERSION")
+        );
+      }
+
+      let insert_into_host =
+        lib.get::<fn(&mut Host)>(b"hvmc_dylib_v0__insert_host").expect("failed to load insert_host");
       insert_into_host(&mut host.lock());
 
       std::mem::forget(lib);
@@ -434,7 +444,14 @@ fn prepare_temp_hvm_dylib() -> Result<(), io::Error> {
 pub fn hvmc_dylib_v0__insert_host(host: &mut host::Host) {{
   gen::insert_into_host(host)
 }}
-  "#
+
+#[no_mangle]
+pub fn hvmc_dylib_v0__version() -> &'static str {{
+  {:?}
+}}
+
+  "#,
+    env!("CARGO_PKG_VERSION")
   )
   .unwrap();
 
