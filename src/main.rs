@@ -12,6 +12,7 @@ use hvmc::{
 
 use parking_lot::Mutex;
 use std::{
+  env::consts::{DLL_EXTENSION, DLL_PREFIX},
   ffi::OsStr,
   fmt::Write,
   fs::{self, File},
@@ -49,9 +50,7 @@ fn main() {
           prepare_temp_hvm_dylib().unwrap();
           compile_temp_hvm(&["--lib"]).unwrap();
 
-          // TODO: this can be a different extension on different platforms
-          // see: https://doc.rust-lang.org/reference/linkage.html
-          fs::copy(".hvm/target/release/libhvmc.so", output).unwrap();
+          fs::copy(format!(".hvm/target/release/{DLL_PREFIX}hvmc.{DLL_EXTENSION}"), output).unwrap();
         } else {
           compile_temp_hvm(&[]).unwrap();
 
