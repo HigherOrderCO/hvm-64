@@ -70,7 +70,7 @@ pub fn create_host(book: &crate::ast::Book) -> Arc<Mutex<Host>> {
   host
 }
 
-/// Create a `Host` from a `Book`, including `hvm-core`'s built-in definitions
+/// Insert `hvm-core`'s built-in definitions into a host.
 #[cfg(feature = "std")]
 #[allow(clippy::absolute_paths)]
 pub fn insert_stdlib(host: Arc<Mutex<Host>>) {
