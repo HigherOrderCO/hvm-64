@@ -70,7 +70,11 @@ fn _compile_host(host: &Host) -> Result<String, fmt::Error> {
       continue;
     }
 
-    let fields = refs.iter().map(|r| format!("def_{}", sanitize_name(r))).collect::<Vec<_>>().join(", ");
+    let fields = refs
+      .iter()
+      .map(|r| format!("def_{rust_name}: def_{rust_name}.clone()", rust_name = sanitize_name(r)))
+      .collect::<Vec<_>>()
+      .join(", ");
 
     writeln!(
       code,
