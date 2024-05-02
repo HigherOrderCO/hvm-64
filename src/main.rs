@@ -63,14 +63,14 @@ fn main() {
         transform_args.transform_opts.prune_entrypoints.push(args.entry_point.clone());
 
         let host: Arc<Mutex<Host>> = Default::default();
-        load_dylibs(host.clone(), &args.include);
+        load_dylibs(host.clone(), &run_opts.include);
         insert_stdlib(host.clone());
         host.lock().insert_book(&load_book(&[file], &transform_args));
 
         run(host, run_opts, args);
       }
       CliMode::Reduce { run_opts, transform_args, files, exprs } => {
-        let host = create_host(&load_book(&files, &transform_args));
+        let host = load_host(&files, &transform_args, &run_opts.include);
         let exprs: Vec<_> = exprs.iter().map(|x| Net::from_str(x).unwrap()).collect();
         reduce_exprs(host, &exprs, &run_opts);
       }
@@ -213,6 +213,11 @@ struct RuntimeOpts {
   /// Supports abbreviations such as '4G' or '400M'.
   #[arg(short, long, value_parser = util::parse_abbrev_number::<usize>)]
   memory: Option<usize>,
+  /// Dynamic library hvm-core files to include.
+  ///
+  /// hvm-core files can be compiled as dylibs with the `--dylib` option.
+  #[arg(short, long, value_delimiter = ' ', action = clap::ArgAction::Append)]
+  include: Vec<PathBuf>,
 }
 
 #[derive(Args, Clone, Debug)]
@@ -220,11 +225,6 @@ struct RunArgs {
   /// Name of the definition that will get reduced.
   #[arg(short, default_value = "main")]
   entry_point: String,
-  /// Dynamic library hvm-core files to include.
-  ///
-  /// hvm-core files can be compiled as dylibs with the `--dylib` option.
-  #[arg(short, long, value_delimiter = ' ', action = clap::ArgAction::Append)]
-  include: Vec<PathBuf>,
   /// List of arguments to pass to the program.
   ///
   /// Arguments are passed using the lambda-calculus interpretation
@@ -243,6 +243,18 @@ fn run(host: Arc<Mutex<Host>>, opts: RuntimeOpts, args: RunArgs) {
   }
 
   reduce_exprs(host, &[net], &opts);
+}
+
+fn load_host(
+  files: &[PathBuf],
+  transform_args: &TransformArgs,
+  include: &[PathBuf],
+) -> Arc<parking_lot::lock_api::Mutex<parking_lot::RawMutex, Host>> {
+  let host: Arc<Mutex<Host>> = Default::default();
+  load_dylibs(host.clone(), include);
+  insert_stdlib(host.clone());
+  host.lock().insert_book(&load_book(files, transform_args));
+  host
 }
 
 fn load_book(files: &[PathBuf], transform_args: &TransformArgs) -> Book {
