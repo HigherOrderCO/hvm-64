@@ -5,15 +5,19 @@ use hvmc::{
   ast::{Book, Net, Tree},
   host::Host,
   run::{DynNet, Mode, Trg},
-  stdlib::create_host,
+  stdlib::{create_host, insert_stdlib},
   transform::{TransformOpts, TransformPass, TransformPasses},
   *,
 };
 
 use parking_lot::Mutex;
 use std::{
-  fs, io,
-  path::Path,
+  env::consts::{DLL_PREFIX, DLL_SUFFIX},
+  ffi::OsStr,
+  fmt::Write,
+  fs::{self, File},
+  io::{self, BufRead},
+  path::{Path, PathBuf},
   process::{self, Stdio},
   str::FromStr,
   sync::Arc,
@@ -26,24 +30,47 @@ fn main() {
   }
   if cfg!(feature = "_full_cli") {
     let cli = FullCli::parse();
+
     match cli.mode {
-      CliMode::Compile { file, transform_args, output } => {
-        let output = output.as_deref().or_else(|| file.strip_suffix(".hvmc")).unwrap_or_else(|| {
+      CliMode::Compile { file, dylib, transform_args, output } => {
+        let output = if let Some(output) = output {
+          output
+        } else if let Some("hvmc") = file.extension().and_then(OsStr::to_str) {
+          file.with_extension("")
+        } else {
           eprintln!("file missing `.hvmc` extension; explicitly specify an output path with `--output`.");
+
           process::exit(1);
-        });
-        let host = create_host(&load_book(&[file.clone()], &transform_args));
-        compile_executable(output, host).unwrap();
+        };
+
+        let host = create_host(&load_book(&[file], &transform_args));
+        create_temp_hvm(host).unwrap();
+
+        if dylib {
+          prepare_temp_hvm_dylib().unwrap();
+          compile_temp_hvm(&["--lib"]).unwrap();
+
+          fs::copy(format!(".hvm/target/release/{DLL_PREFIX}hvmc{DLL_SUFFIX}"), output).unwrap();
+        } else {
+          compile_temp_hvm(&[]).unwrap();
+
+          fs::copy(".hvm/target/release/hvmc", output).unwrap();
+        }
       }
       CliMode::Run { run_opts, mut transform_args, file, args } => {
         // Don't pre-reduce or prune the entry point
         transform_args.transform_opts.pre_reduce_skip.push(args.entry_point.clone());
         transform_args.transform_opts.prune_entrypoints.push(args.entry_point.clone());
-        let host = create_host(&load_book(&[file], &transform_args));
+
+        let host: Arc<Mutex<Host>> = Default::default();
+        load_dylibs(host.clone(), &run_opts.include);
+        insert_stdlib(host.clone());
+        host.lock().insert_book(&load_book(&[file], &transform_args));
+
         run(host, run_opts, args);
       }
       CliMode::Reduce { run_opts, transform_args, files, exprs } => {
-        let host = create_host(&load_book(&files, &transform_args));
+        let host = load_host(&files, &transform_args, &run_opts.include);
         let exprs: Vec<_> = exprs.iter().map(|x| Net::from_str(x).unwrap()).collect();
         reduce_exprs(host, &exprs, &run_opts);
       }
@@ -98,17 +125,22 @@ enum CliMode {
   /// Compile a hvm-core program into a Rust crate.
   Compile {
     /// hvm-core file to compile.
-    file: String,
-    #[arg(short = 'o', long = "output")]
+    file: PathBuf,
+    /// Compile this hvm-core file to a dynamic library.
+    ///
+    /// These can be included when running with the `--include` option.
+    #[arg(short, long)]
+    dylib: bool,
     /// Output path; defaults to the input file with `.hvmc` stripped.
-    output: Option<String>,
+    #[arg(short, long)]
+    output: Option<PathBuf>,
     #[command(flatten)]
     transform_args: TransformArgs,
   },
   /// Run a program, optionally passing a list of arguments to it.
   Run {
     /// Name of the file to load.
-    file: String,
+    file: PathBuf,
     #[command(flatten)]
     args: RunArgs,
     #[command(flatten)]
@@ -123,17 +155,17 @@ enum CliMode {
   /// which makes it possible to reference definitions from the file
   /// in the expression.
   Reduce {
-    #[arg(required = false)]
     /// Files to load before reducing the expressions.
     ///
     /// Multiple files will act as if they're concatenated together.
-    files: Vec<String>,
-    #[arg(required = false, last = true)]
+    #[arg(required = false)]
+    files: Vec<PathBuf>,
     /// Expressions to reduce.
     ///
     /// The normal form of each expression will be
     /// printed on a new line. This list must be separated from the file list
     /// with a double dash ('--').
+    #[arg(required = false, last = true)]
     exprs: Vec<String>,
     #[command(flatten)]
     run_opts: RuntimeOpts,
@@ -146,7 +178,7 @@ enum CliMode {
     ///
     /// Multiple files will act as if they're concatenated together.
     #[arg(required = true)]
-    files: Vec<String>,
+    files: Vec<PathBuf>,
     #[command(flatten)]
     transform_args: TransformArgs,
   },
@@ -157,37 +189,41 @@ struct TransformArgs {
   /// Enables or disables transformation passes.
   #[arg(short = 'O', value_delimiter = ' ', action = clap::ArgAction::Append)]
   transform_passes: Vec<TransformPass>,
-
   #[command(flatten)]
   transform_opts: TransformOpts,
 }
 
 #[derive(Args, Clone, Debug)]
 struct RuntimeOpts {
-  #[arg(short = 's', long = "stats")]
   /// Show performance statistics.
+  #[arg(short, long = "stats")]
   show_stats: bool,
-  #[arg(short = '1', long = "single")]
   /// Single-core mode (no parallelism).
+  #[arg(short = '1', long = "single")]
   single_core: bool,
-  #[arg(short = 'l', long = "lazy")]
   /// Lazy mode.
   ///
   /// Lazy mode only expands references that are reachable
   /// by a walk from the root of the net. This leads to a dramatic slowdown,
   /// but allows running programs that would expand indefinitely otherwise.
+  #[arg(short, long = "lazy")]
   lazy_mode: bool,
-  #[arg(short = 'm', long = "memory", value_parser = util::parse_abbrev_number::<usize>)]
   /// How much memory to allocate on startup.
   ///
   /// Supports abbreviations such as '4G' or '400M'.
+  #[arg(short, long, value_parser = util::parse_abbrev_number::<usize>)]
   memory: Option<usize>,
+  /// Dynamic library hvm-core files to include.
+  ///
+  /// hvm-core files can be compiled as dylibs with the `--dylib` option.
+  #[arg(short, long, value_delimiter = ' ', action = clap::ArgAction::Append)]
+  include: Vec<PathBuf>,
 }
 
 #[derive(Args, Clone, Debug)]
 struct RunArgs {
-  #[arg(short = 'e', default_value = "main")]
   /// Name of the definition that will get reduced.
+  #[arg(short, default_value = "main")]
   entry_point: String,
   /// List of arguments to pass to the program.
   ///
@@ -209,7 +245,19 @@ fn run(host: Arc<Mutex<Host>>, opts: RuntimeOpts, args: RunArgs) {
   reduce_exprs(host, &[net], &opts);
 }
 
-fn load_book(files: &[String], transform_args: &TransformArgs) -> Book {
+fn load_host(
+  files: &[PathBuf],
+  transform_args: &TransformArgs,
+  include: &[PathBuf],
+) -> Arc<parking_lot::lock_api::Mutex<parking_lot::RawMutex, Host>> {
+  let host: Arc<Mutex<Host>> = Default::default();
+  load_dylibs(host.clone(), include);
+  insert_stdlib(host.clone());
+  host.lock().insert_book(&load_book(files, transform_args));
+  host
+}
+
+fn load_book(files: &[PathBuf], transform_args: &TransformArgs) -> Book {
   let mut book = files
     .iter()
     .map(|name| {
@@ -231,6 +279,47 @@ fn load_book(files: &[String], transform_args: &TransformArgs) -> Book {
   book.transform(transform_passes, &transform_args.transform_opts).unwrap();
 
   book
+}
+
+fn load_dylibs(host: Arc<Mutex<Host>>, include: &[PathBuf]) {
+  let current_dir = std::env::current_dir().unwrap();
+
+  for file in include {
+    unsafe {
+      let lib = if file.is_absolute() {
+        libloading::Library::new(file)
+      } else {
+        libloading::Library::new(current_dir.join(file))
+      }
+      .expect("failed to load dylib");
+
+      let rust_version =
+        lib.get::<fn() -> &'static str>(b"hvmc_dylib_v0__rust_version").expect("failed to load rust version");
+      let rust_version = rust_version();
+      if rust_version != env!("RUSTC_VERSION") {
+        eprintln!(
+          "warning: dylib {file:?} was compiled with rust version {rust_version}, but is being run with rust version {}",
+          env!("RUSTC_VERSION")
+        );
+      }
+
+      let hvmc_version =
+        lib.get::<fn() -> &'static str>(b"hvmc_dylib_v0__hvmc_version").expect("failed to load hvmc version");
+      let hvmc_version = hvmc_version();
+      if hvmc_version != env!("CARGO_PKG_VERSION") {
+        eprintln!(
+          "warning: dylib {file:?} was compiled with hvmc version {hvmc_version}, but is being run with hvmc version {}",
+          env!("CARGO_PKG_VERSION")
+        );
+      }
+
+      let insert_into_host =
+        lib.get::<fn(&mut Host)>(b"hvmc_dylib_v0__insert_host").expect("failed to load insert_host");
+      insert_into_host(&mut host.lock());
+
+      std::mem::forget(lib);
+    }
+  }
 }
 
 fn reduce_exprs(host: Arc<Mutex<Host>>, exprs: &[Net], opts: &RuntimeOpts) {
@@ -276,7 +365,9 @@ fn pretty_num(n: u64) -> String {
     .collect()
 }
 
-fn compile_executable(target: &str, host: Arc<Mutex<host::Host>>) -> Result<(), io::Error> {
+/// Copies the `hvm-core` source to a temporary `.hvm` directory.
+/// Only a subset of `Cargo.toml` is included.
+fn create_temp_hvm(host: Arc<Mutex<host::Host>>) -> Result<(), io::Error> {
   let gen = compile::compile_host(&host.lock());
   let outdir = ".hvm";
   if Path::new(&outdir).exists() {
@@ -358,17 +449,73 @@ fn compile_executable(target: &str, host: Arc<Mutex<host::Host>>) -> Result<(), 
     }
   }
 
+  Ok(())
+}
+
+/// Appends a function to `lib.rs` that will be dynamically loaded
+/// by hvm-core when the generated dylib is included.
+fn prepare_temp_hvm_dylib() -> Result<(), io::Error> {
+  insert_crate_type_cargo_toml()?;
+
+  let mut lib = fs::read_to_string(".hvm/src/lib.rs")?;
+
+  writeln!(lib).unwrap();
+  writeln!(
+    lib,
+    r#"
+#[no_mangle]
+pub fn hvmc_dylib_v0__insert_host(host: &mut host::Host) {{
+  gen::insert_into_host(host)
+}}
+
+#[no_mangle]
+pub fn hvmc_dylib_v0__hvmc_version() -> &'static str {{
+  {hvmc_version:?}
+}}
+
+#[no_mangle]
+pub fn hvmc_dylib_v0__rust_version() -> &'static str {{
+  {rust_version:?}
+}}
+  "#,
+    hvmc_version = env!("CARGO_PKG_VERSION"),
+    rust_version = env!("RUSTC_VERSION"),
+  )
+  .unwrap();
+
+  fs::write(".hvm/src/lib.rs", lib)
+}
+
+/// Adds `crate_type = ["dylib"]` under the `[lib]` section of `Cargo.toml`.
+fn insert_crate_type_cargo_toml() -> Result<(), io::Error> {
+  let mut cargo_toml = String::new();
+
+  let file = File::open(".hvm/Cargo.toml")?;
+  for line in io::BufReader::new(file).lines() {
+    let line = line?;
+    writeln!(cargo_toml, "{line}").unwrap();
+
+    if line == "[lib]" {
+      writeln!(cargo_toml, r#"crate_type = ["dylib"]"#).unwrap();
+    }
+  }
+
+  fs::write(".hvm/Cargo.toml", cargo_toml)
+}
+
+/// Compiles the `.hvm` directory, appending the provided `args` to `cargo`.
+fn compile_temp_hvm(args: &[&'static str]) -> Result<(), io::Error> {
   let output = process::Command::new("cargo")
     .current_dir(".hvm")
     .arg("build")
     .arg("--release")
+    .args(args)
     .stderr(Stdio::inherit())
     .output()?;
+
   if !output.status.success() {
     process::exit(1);
   }
-
-  fs::copy(".hvm/target/release/hvmc", target)?;
 
   Ok(())
 }
