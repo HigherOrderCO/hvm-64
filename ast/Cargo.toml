@@ -7,16 +7,14 @@ edition = "2021"
 path = "src/ast.rs"
 
 [dependencies]
-arrayvec = { version = "0.7.4", default-features = false }
 ordered-float = { version = "4.2.0", default-features = false }
-thiserror = { version = "1.0.59", optional = true }
 TSPL = { version = "0.0.12", optional = true }
 
-hvm64-util = { path = "../util", default-features = false }
+hvm64-util = { path = "../util" }
 
 [features]
 default = ["std", "parser"]
-std = ["hvm64-util/std", "ordered-float/std", "dep:thiserror"]
+std = []
 parser = ["dep:TSPL"]
 
 [lints]

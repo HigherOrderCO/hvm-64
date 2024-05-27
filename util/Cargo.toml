@@ -4,11 +4,7 @@ version = "0.3.0"
 edition = "2021"
 
 [dependencies]
-arrayvec = { version = "0.7.4", default-features = false }
-stacker = { version = "0.1.15", default-features = false }
-
-[features]
-std = ["arrayvec/std"]
+stacker = { version = "0.1.15" }
 
 [lints]
 workspace = true

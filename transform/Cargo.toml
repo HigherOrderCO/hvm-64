@@ -10,14 +10,14 @@ path = "src/transform.rs"
 ordered-float = { version = "4.2.0", default-features = false }
 thiserror = "1.0.58"
 
-hvm64-ast = { path = "../ast", default-features = false }
+hvm64-util = { path = "../util" }
 hvm64-runtime = { path = "../runtime", default-features = false }
-hvm64-util = { path = "../util", default-features = false }
+hvm64-ast = { path = "../ast", default-features = false }
 hvm64-host = { path = "../host", default-features = false }
 
 [features]
 default = ["std"]
-std = ["hvm64-ast/std", "hvm64-runtime/std", "hvm64-util/std", "hvm64-host/std"]
+std = ["hvm64-runtime/std", "hvm64-ast/std", "hvm64-host/std"]
 
 [lints]
 workspace = true

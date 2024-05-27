@@ -76,11 +76,11 @@ hvm64-runtime = { path = "../runtime", default-features = false }
     prelude
     crate util {
       lib
-      array_vec
       bi_enum
       create_var
       deref
       maybe_grow
+      multi_iterator
       ops {
         num
         word

@@ -70,12 +70,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "arrayvec"
-version = "0.7.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "96d30a06541fbafbc7f82ed10c06164cfbd2c401138f6addd8404629c4b16711"
-
-[[package]]
 name = "autocfg"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -297,10 +291,8 @@ name = "hvm64-ast"
 version = "0.3.0"
 dependencies = [
  "TSPL",
- "arrayvec",
  "hvm64-util",
  "ordered-float",
- "thiserror",
 ]
 
 [[package]]
@@ -335,7 +327,6 @@ dependencies = [
 name = "hvm64-util"
 version = "0.3.0"
 dependencies = [
- "arrayvec",
  "stacker",
 ]
 

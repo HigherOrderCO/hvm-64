@@ -9,9 +9,6 @@
 //! The AST is based on the [interaction calculus].
 //!
 //! [interaction calculus]: https://en.wikipedia.org/wiki/Interaction_nets#Interaction_calculus
-#![cfg_attr(not(feature = "std"), no_std)]
-#![allow(incomplete_features)]
-#![feature(generic_const_exprs)]
 
 include!("../../prelude.rs");
 
@@ -21,9 +18,8 @@ mod parser;
 use alloc::collections::BTreeMap;
 
 use crate::prelude::*;
-use hvm64_util::{array_vec, create_var, deref, maybe_grow, ops::TypedOp as Op, var_to_num};
+use hvm64_util::{create_var, deref, maybe_grow, multi_iterator, ops::TypedOp as Op, var_to_num};
 
-use arrayvec::ArrayVec;
 use ordered_float::OrderedFloat;
 
 pub type Lab = u16;
@@ -194,28 +190,26 @@ impl Net {
 impl Tree {
   #[inline(always)]
   pub fn children(&self) -> impl ExactSizeIterator + DoubleEndedIterator<Item = &Tree> {
-    ArrayVec::<_, MAX_ARITY>::into_iter(match self {
-      Tree::Era | Tree::Int { .. } | Tree::F32 { .. } | Tree::Ref { .. } | Tree::Var { .. } => {
-        array_vec::from_array([])
-      }
-      Tree::Ctr { ports, .. } => array_vec::from_iter(ports),
-      Tree::Op { rhs, out, .. } => array_vec::from_array([rhs, out]),
-      Tree::Mat { zero, succ, out } => array_vec::from_array([zero, succ, out]),
-      Tree::Adt { fields, .. } => array_vec::from_iter(fields),
-    })
+    multi_iterator! { Iter { Nil, Two, Three, Vec } }
+    match self {
+      Tree::Era | Tree::Int { .. } | Tree::F32 { .. } | Tree::Ref { .. } | Tree::Var { .. } => Iter::Nil([]),
+      Tree::Ctr { ports, .. } => Iter::Vec(ports),
+      Tree::Op { rhs, out, .. } => Iter::Two([&**rhs, out]),
+      Tree::Mat { zero, succ, out } => Iter::Three([&**zero, succ, out]),
+      Tree::Adt { fields, .. } => Iter::Vec(fields),
+    }
   }
 
   #[inline(always)]
   pub fn children_mut(&mut self) -> impl ExactSizeIterator + DoubleEndedIterator<Item = &mut Tree> {
-    ArrayVec::<_, MAX_ARITY>::into_iter(match self {
-      Tree::Era | Tree::Int { .. } | Tree::F32 { .. } | Tree::Ref { .. } | Tree::Var { .. } => {
-        array_vec::from_array([])
-      }
-      Tree::Ctr { ports, .. } => array_vec::from_iter(ports),
-      Tree::Op { rhs, out, .. } => array_vec::from_array([rhs, out]),
-      Tree::Mat { zero, succ, out } => array_vec::from_array([zero, succ, out]),
-      Tree::Adt { fields, .. } => array_vec::from_iter(fields),
-    })
+    multi_iterator! { Iter { Nil, Two, Three, Vec } }
+    match self {
+      Tree::Era | Tree::Int { .. } | Tree::F32 { .. } | Tree::Ref { .. } | Tree::Var { .. } => Iter::Nil([]),
+      Tree::Ctr { ports, .. } => Iter::Vec(ports),
+      Tree::Op { rhs, out, .. } => Iter::Two([&mut **rhs, out]),
+      Tree::Mat { zero, succ, out } => Iter::Three([&mut **zero, succ, out]),
+      Tree::Adt { fields, .. } => Iter::Vec(fields),
+    }
   }
 
   pub fn lab(&self) -> Option<Lab> {
@@ -373,24 +367,26 @@ impl fmt::Display for Tree {
   }
 }
 
-// #[test]
-// fn test_tree_drop() {
-//   use alloc::vec;
+#[test]
+#[cfg(feature = "parser")]
+fn test_tree_drop() {
+  use alloc::vec;
+  use core::str::FromStr;
 
-//   drop(Tree::from_str("((* (* *)) (* *))"));
+  drop(Tree::from_str("((* (* *)) (* *))"));
 
-//   let mut long_tree = Tree::Era;
-//   let mut cursor = &mut long_tree;
-//   for _ in 0 .. 100_000 {
-//     *cursor = Tree::Ctr { lab: 0, ports: vec![Tree::Era, Tree::Era] };
-//     let Tree::Ctr { ports, .. } = cursor else { unreachable!() };
-//     cursor = &mut ports[0];
-//   }
-//   drop(long_tree);
+  let mut long_tree = Tree::Era;
+  let mut cursor = &mut long_tree;
+  for _ in 0 .. 100_000 {
+    *cursor = Tree::Ctr { lab: 0, ports: vec![Tree::Era, Tree::Era] };
+    let Tree::Ctr { ports, .. } = cursor else { unreachable!() };
+    cursor = &mut ports[0];
+  }
+  drop(long_tree);
 
-//   let mut big_tree = Tree::Era;
-//   for _ in 0 .. 16 {
-//     big_tree = Tree::Ctr { lab: 0, ports: vec![big_tree.clone(), big_tree] };
-//   }
-//   drop(big_tree);
-// }
+  let mut big_tree = Tree::Era;
+  for _ in 0 .. 16 {
+    big_tree = Tree::Ctr { lab: 0, ports: vec![big_tree.clone(), big_tree] };
+  }
+  drop(big_tree);
+}

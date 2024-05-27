@@ -7,12 +7,13 @@ edition = "2021"
 path = "src/host.rs"
 
 [dependencies]
+hvm64-util = { path = "../util" }
 hvm64-ast = { path = "../ast", default-features = false }
-hvm64-util = { path = "../util", default-features = false }
 hvm64-runtime = { path = "../runtime", default-features = false }
 
 [features]
-std = ["hvm64-ast/std", "hvm64-util/std", "hvm64-runtime/std"]
+default = ["std"]
+std = ["hvm64-ast/std", "hvm64-runtime/std"]
 
 [lints]
 workspace = true
