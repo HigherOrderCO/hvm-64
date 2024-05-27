@@ -45,7 +45,6 @@ fn _compile_host(host: &Host) -> Result<String, fmt::Error> {
   write!(
     code,
     "
-#![no_std]
 #![allow(warnings)]
 
 extern crate alloc;
