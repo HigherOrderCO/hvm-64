@@ -25,6 +25,13 @@ path = "src/main.rs"
 bench = false
 required-features = ["std"]
 
+[profile.release]
+codegen-units = 1
+lto = "fat"
+opt-level = 3
+panic = "abort"
+debug = "full"
+
 [dependencies]
 clap = { version = "4.5.4", features = ["derive"] }
 libloading = { version = "0.8.3", default-features = false }
