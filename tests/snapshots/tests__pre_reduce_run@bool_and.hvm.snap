@@ -1,0 +1,20 @@
+---
+source: tests/tests.rs
+expression: output
+input_file: tests/programs/bool_and.hvm
+---
+(* (a a))
+pre-reduce:
+RWTS   :               3
+- ANNI :               0
+- COMM :               0
+- ERAS :               0
+- DREF :               3
+- OPER :               0
+run:
+RWTS   :              14
+- ANNI :               4
+- COMM :               0
+- ERAS :               1
+- DREF :               9
+- OPER :               0

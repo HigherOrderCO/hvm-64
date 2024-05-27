@@ -4,13 +4,13 @@ use alloc::collections::BTreeMap;
 use core::str::FromStr;
 
 use crate::{Book, Lab, Net, Tree, MAX_ADT_FIELDS, MAX_ADT_VARIANTS, MAX_ARITY};
-use hvmc_util::{maybe_grow, ops::TypedOp as Op};
+use hvm64_util::{maybe_grow, ops::TypedOp as Op};
 
 use TSPL::{new_parser, Parser};
 
-new_parser!(HvmcParser);
+new_parser!(Hvm64Parser);
 
-impl<'i> HvmcParser<'i> {
+impl<'i> Hvm64Parser<'i> {
   /// Book = ("@" Name "=" Net)*
   fn parse_book(&mut self) -> Result<Book, String> {
     maybe_grow(move || {
@@ -194,11 +194,11 @@ fn parse_int(input: &str) -> Result<u64, String> {
 
 /// Parses the input with the callback, ensuring that the whole input is
 /// consumed.
-fn parse_eof<'i, T>(input: &'i str, parse_fn: impl Fn(&mut HvmcParser<'i>) -> Result<T, String>) -> Result<T, String> {
-  let mut parser = HvmcParser::new(input);
+fn parse_eof<'i, T>(input: &'i str, parse_fn: impl Fn(&mut Hvm64Parser<'i>) -> Result<T, String>) -> Result<T, String> {
+  let mut parser = Hvm64Parser::new(input);
   let out = parse_fn(&mut parser)?;
   if parser.index != parser.input.len() {
-    return Err("Unable to parse the whole input. Is this not an hvmc file?".to_owned());
+    return Err("Unable to parse the whole input. Is this not an hvm64 file?".to_owned());
   }
   Ok(out)
 }
@@ -206,20 +206,20 @@ fn parse_eof<'i, T>(input: &'i str, parse_fn: impl Fn(&mut HvmcParser<'i>) -> Re
 impl FromStr for Book {
   type Err = String;
   fn from_str(str: &str) -> Result<Self, Self::Err> {
-    parse_eof(str, HvmcParser::parse_book)
+    parse_eof(str, Hvm64Parser::parse_book)
   }
 }
 
 impl FromStr for Net {
   type Err = String;
   fn from_str(str: &str) -> Result<Self, Self::Err> {
-    parse_eof(str, HvmcParser::parse_net)
+    parse_eof(str, Hvm64Parser::parse_net)
   }
 }
 
 impl FromStr for Tree {
   type Err = String;
   fn from_str(str: &str) -> Result<Self, Self::Err> {
-    parse_eof(str, HvmcParser::parse_tree)
+    parse_eof(str, Hvm64Parser::parse_tree)
   }
 }

@@ -17,7 +17,7 @@
 //!     \|-' '-|/
 //! ```
 //!
-//! In hvm-core's AST representation, this reduction looks like this
+//! In hvm-64's AST representation, this reduction looks like this
 //!
 //! ```txt
 //! {lab x y} ... {lab x y} ~~~~~~~~> x ..... x
@@ -56,7 +56,7 @@
 use core::ops::RangeFrom;
 
 use crate::prelude::*;
-use hvmc_ast::{Net, Tree};
+use hvm64_ast::{Net, Tree};
 
 use ordered_float::OrderedFloat;
 

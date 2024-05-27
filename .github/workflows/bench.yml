@@ -1,7 +1,6 @@
 name: Bench
 
-on:
-  pull_request:
+on: {} # temporarily disabled
 
 concurrency:
   group: bench-${{ github.ref }}
@@ -28,13 +27,13 @@ jobs:
           git clone https://github.com/higherorderco/hvm-compare-perf
           cd hvm-compare-perf
           NO_COLOR=1 cargo run bench \
-            --core ../hvm-core \
+            --core ../hvm-64 \
             -r main -r ${{ github.sha }} \
             -m intr-singl -m intr-multi \
-            > ../hvm-core/table
+            > ../hvm-64/table
       - name: write comment
         run: |
-          echo 'Perf run for [`'`git rev-parse --short ${{ github.sha }}`'`](https://github.com/higherorderco/hvm-core/commit/${{ github.sha }}):' >> comment
+          echo 'Perf run for [`'`git rev-parse --short ${{ github.sha }}`'`](https://github.com/higherorderco/hvm-64/commit/${{ github.sha }}):' >> comment
           echo '```' >> comment
           cat table >> comment
           echo '```' >> comment
@@ -50,7 +49,7 @@ jobs:
             gh api graphql -F pr=${{ github.event.number }} -f query='
               query($pr: Int!) {
                 organization(login: "higherorderco") {
-                  repository(name: "hvm-core") {
+                  repository(name: "hvm-64") {
                     pullRequest(number: $pr) {
                       comments(last: 100) {
                         nodes { id author { login } }

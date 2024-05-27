@@ -1,0 +1,20 @@
+---
+source: tests/tests.rs
+expression: output
+input_file: examples/machine_u32/num_add.hvm
+---
+#223
+pre-reduce:
+RWTS   :               1
+- ANNI :               0
+- COMM :               0
+- ERAS :               0
+- DREF :               1
+- OPER :               0
+run:
+RWTS   :               6
+- ANNI :               2
+- COMM :               0
+- ERAS :               0
+- DREF :               3
+- OPER :               1

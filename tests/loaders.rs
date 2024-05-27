@@ -1,9 +1,9 @@
 #![allow(dead_code)]
 
-// use hvmc::{ast::*, run, stdlib::create_host};
-use hvmc_ast::{Book, Net};
-use hvmc_host::stdlib::create_host;
-use hvmc_runtime as run;
+// use hvm64::{ast::*, run, stdlib::create_host};
+use hvm64_ast::{Book, Net};
+use hvm64_host::stdlib::create_host;
+use hvm64_runtime as run;
 use std::fs;
 
 pub fn load_file(file: &str) -> String {
@@ -11,7 +11,7 @@ pub fn load_file(file: &str) -> String {
   fs::read_to_string(path).unwrap()
 }
 
-// Parses code and generate Book from hvm-core syntax
+// Parses code and generate Book from hvm-64 syntax
 pub fn parse_core(code: &str) -> Book {
   code.parse().unwrap()
 }

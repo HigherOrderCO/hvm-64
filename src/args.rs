@@ -1,5 +1,5 @@
 use clap::Args;
-use hvmc_transform::TransformPasses;
+use hvm64_transform::TransformPasses;
 use std::path::PathBuf;
 
 #[derive(Args, Clone, Debug)]
@@ -38,12 +38,12 @@ pub struct RuntimeOpts {
   /// How much memory to allocate on startup.
   ///
   /// Supports abbreviations such as '4G' or '400M'.
-  #[arg(short, long, value_parser = hvmc_util::parse_abbrev_number::<usize>)]
+  #[arg(short, long, value_parser = hvm64_util::parse_abbrev_number::<usize>)]
   pub memory: Option<usize>,
 
-  /// Dynamic library hvm-core files to include.
+  /// Dynamic library hvm-64 files to include.
   ///
-  /// hvm-core files can be compiled as dylibs with the `--dylib` option.
+  /// hvm-64 files can be compiled as dylibs with the `--dylib` option.
   #[arg(short, long, value_delimiter = ' ', action = clap::ArgAction::Append)]
   pub include: Vec<PathBuf>,
 }
@@ -62,13 +62,13 @@ pub struct TransformOpts {
   /// How much memory to allocate when pre-reducing.
   ///
   /// Supports abbreviations such as '4G' or '400M'.
-  #[arg(long = "pre-reduce-memory", value_parser = hvmc_util::parse_abbrev_number::<usize>)]
+  #[arg(long = "pre-reduce-memory", value_parser = hvm64_util::parse_abbrev_number::<usize>)]
   pub pre_reduce_memory: Option<usize>,
 
   /// Maximum amount of rewrites to do when pre-reducing.
   ///
   /// Supports abbreviations such as '4G' or '400M'.
-  #[arg(long = "pre-reduce-rewrites", default_value = "100M", value_parser = hvmc_util::parse_abbrev_number::<u64>)]
+  #[arg(long = "pre-reduce-rewrites", default_value = "100M", value_parser = hvm64_util::parse_abbrev_number::<u64>)]
   pub pre_reduce_rewrites: u64,
 
   /// Names of the definitions that should not get pruned.

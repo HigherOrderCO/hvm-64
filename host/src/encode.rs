@@ -1,9 +1,9 @@
 use crate::prelude::*;
 
 use crate::Host;
-use hvmc_ast::{Lab, Net as AstNet, Tree};
-use hvmc_runtime::{Instruction, InterpretedDef, Mode, Net, Port, Trg, TrgId};
-use hvmc_util::{maybe_grow, ops::TypedOp as Op};
+use hvm64_ast::{Lab, Net as AstNet, Tree};
+use hvm64_runtime::{Instruction, InterpretedDef, Mode, Net, Port, Trg, TrgId};
+use hvm64_util::{maybe_grow, ops::TypedOp as Op};
 
 impl Host {
   /// Converts an ast net to a list of instructions to create the net.

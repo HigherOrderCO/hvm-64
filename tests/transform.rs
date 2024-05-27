@@ -2,8 +2,8 @@
 
 //! Tests for transformation passes
 
-use hvmc_ast::{Book, Net, Tree};
-use hvmc_transform::{
+use hvm64_ast::{Book, Net, Tree};
+use hvm64_transform::{
   coalesce_ctrs::CoalesceCtrs, encode_adts::EncodeAdts, eta_reduce::EtaReduce, inline::Inline, pre_reduce::PreReduce,
   prune::Prune, TransformError,
 };
@@ -17,7 +17,7 @@ use loaders::*;
 #[test]
 /// Test that ensures that pre_reduce only reduces repeated refs once.
 pub fn test_fast_pre_reduce() {
-  let book = parse_core(&load_file("heavy_pre_reduction.hvmc"));
+  let book = parse_core(&load_file("heavy_pre_reduction.hvm"));
   let (mut book_1, mut book_2) = (book.clone(), book);
 
   let rwts_1 = book_1.pre_reduce(&|x| !["expensive", "main_fast"].contains(&x), None, u64::MAX).rewrites;

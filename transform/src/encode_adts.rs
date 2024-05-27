@@ -1,6 +1,6 @@
 use crate::prelude::*;
-use hvmc_ast::{Tree, MAX_ADT_VARIANTS};
-use hvmc_util::maybe_grow;
+use hvm64_ast::{Tree, MAX_ADT_VARIANTS};
+use hvm64_util::maybe_grow;
 
 pub trait EncodeAdts {
   fn encode_scott_adts(&mut self);

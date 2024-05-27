@@ -1,0 +1,12 @@
+---
+source: tests/tests.rs
+expression: output
+input_file: examples/church_encoding/church.hvm
+---
+({9 {7 (a {5 b c}) {7 (d a) ({5 c e} d)}} {3 (f e) {3 (g f) {3 (h g) {3 (i h) *}}}}} (i b))
+RWTS   :              65
+- ANNI :              25
+- COMM :               1
+- ERAS :               0
+- DREF :              39
+- OPER :               0

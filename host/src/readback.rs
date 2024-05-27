@@ -4,8 +4,8 @@ use super::{Addr, Host, Mode, Port, Tag, Wire};
 
 use core::ops::RangeFrom;
 
-use hvmc_ast::{Net, Tree};
-use hvmc_util::{create_var, maybe_grow};
+use hvm64_ast::{Net, Tree};
+use hvm64_util::{create_var, maybe_grow};
 
 impl Host {
   /// Creates an ast tree from a wire in a runtime net.
@@ -19,7 +19,7 @@ impl Host {
   /// resulting ast net, as it is impossible to read these back from the runtime
   /// net representation. In the case of vicious circles, this may result in
   /// unbound variables.
-  pub fn readback<M: Mode>(&self, rt_net: &hvmc_runtime::Net<M>) -> Net {
+  pub fn readback<M: Mode>(&self, rt_net: &hvm64_runtime::Net<M>) -> Net {
     let mut state = ReadbackState { host: self, vars: Default::default(), var_id: 0 .. };
     let mut net = Net::default();
 

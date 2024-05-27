@@ -1,4 +1,4 @@
-//! The textual language of HVMC.
+//! The textual language of hvm-64.
 //!
 //! This file defines an AST for interaction nets, and functions to convert this
 //! AST to/from the textual syntax.
@@ -21,7 +21,7 @@ mod parser;
 use alloc::collections::BTreeMap;
 
 use crate::prelude::*;
-use hvmc_util::{array_vec, create_var, deref, maybe_grow, ops::TypedOp as Op, var_to_num};
+use hvm64_util::{array_vec, create_var, deref, maybe_grow, ops::TypedOp as Op, var_to_num};
 
 use arrayvec::ArrayVec;
 use ordered_float::OrderedFloat;

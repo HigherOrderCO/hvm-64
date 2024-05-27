@@ -1,0 +1,20 @@
+---
+source: tests/tests.rs
+expression: output
+input_file: examples/sort/merge/merge_sort.hvm
+---
+{4 * {4 {4 {4 * {4 {4 {4 {4 #3 a} {4 * a}} {4 {4 {4 #2 b} {4 * b}} c}} c}} {4 {4 * {4 {4 {4 {4 #1 d} {4 * d}} {4 {4 {4 #0 e} {4 * e}} f}} f}} g}} g}}
+pre-reduce:
+RWTS   :              53
+- ANNI :              21
+- COMM :               0
+- ERAS :               0
+- DREF :              32
+- OPER :               0
+run:
+RWTS   :             438
+- ANNI :              48
+- COMM :             242
+- ERAS :              79
+- DREF :              53
+- OPER :              16

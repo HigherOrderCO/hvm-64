@@ -9,8 +9,8 @@ use std::{
 };
 
 use crate::prelude::*;
-use hvmc_host::Host;
-use hvmc_runtime::{Def, Instruction, InterpretedDef, LabSet, Port, Tag};
+use hvm64_host::Host;
+use hvm64_runtime::{Def, Instruction, InterpretedDef, LabSet, Port, Tag};
 
 struct DefInfo<'a> {
   rust_name: String,
@@ -23,7 +23,7 @@ pub fn compile_host(host: &Host) -> String {
   _compile_host(host).unwrap()
 }
 
-const HVMC_VERSION: &str = env!("CARGO_PKG_VERSION");
+const HVM64_VERSION: &str = env!("CARGO_PKG_VERSION");
 const RUST_VERSION: &str = env!("RUSTC_VERSION");
 
 /// Compiles a [`Host`] to Rust, returning a file to replace `gen.rs`.
@@ -32,10 +32,10 @@ fn _compile_host(host: &Host) -> Result<String, fmt::Error> {
   let mut code = String::default();
 
   let mut def_infos: BTreeMap<&str, DefInfo<'_>> = BTreeMap::new();
-  for (hvmc_name, def) in &host.defs {
+  for (hvm64_name, def) in &host.defs {
     if let Some(def) = def.downcast_ref::<InterpretedDef>() {
-      def_infos.insert(hvmc_name, DefInfo {
-        rust_name: sanitize_name(hvmc_name),
+      def_infos.insert(hvm64_name, DefInfo {
+        rust_name: sanitize_name(hvm64_name),
         refs: refs(host, def.data.instructions()),
         def,
       });
@@ -50,22 +50,22 @@ fn _compile_host(host: &Host) -> Result<String, fmt::Error> {
 
 extern crate alloc;
 
-use hvmc_runtime::{{*, ops::{{TypedOp, Ty::*, Op::*}}}};
+use hvm64_runtime::{{*, ops::{{TypedOp, Ty::*, Op::*}}}};
 use core::ops::DerefMut;
 use alloc::boxed::Box;
 
 #[no_mangle]
-pub fn hvmc_dylib_v0__hvmc_version() -> &'static str {{
-  {HVMC_VERSION:?}
+pub fn hvm64_dylib_v0__hvm64_version() -> &'static str {{
+  {HVM64_VERSION:?}
 }}
 
 #[no_mangle]
-pub fn hvmc_dylib_v0__rust_version() -> &'static str {{
+pub fn hvm64_dylib_v0__rust_version() -> &'static str {{
   {RUST_VERSION:?}
 }}
 
 #[no_mangle]
-pub fn hvmc_dylib_v0__insert_into(insert: &mut dyn FnMut(&str, Box<dyn DerefMut<Target = Def> + Send + Sync>)) {{
+pub fn hvm64_dylib_v0__insert_into(insert: &mut dyn FnMut(&str, Box<dyn DerefMut<Target = Def> + Send + Sync>)) {{
 "
   )?;
 
@@ -93,8 +93,8 @@ pub fn hvmc_dylib_v0__insert_into(insert: &mut dyn FnMut(&str, Box<dyn DerefMut<
   writeln!(code)?;
 
   // insert them
-  for (hvmc_name, DefInfo { rust_name, .. }) in &def_infos {
-    writeln!(code, r##"  insert(r#"{hvmc_name}"#, def_{rust_name});"##)?;
+  for (hvm64_name, DefInfo { rust_name, .. }) in &def_infos {
+    writeln!(code, r##"  insert(r#"{hvm64_name}"#, def_{rust_name});"##)?;
   }
 
   writeln!(code, "}}")?;

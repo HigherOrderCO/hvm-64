@@ -1,6 +1,6 @@
 [package]
-name = "hvmc-runtime"
-version = "0.1.0"
+name = "hvm64-runtime"
+version = "0.3.0"
 edition = "2021"
 
 [lib]
@@ -10,10 +10,10 @@ path = "src/runtime.rs"
 parking_lot = "0.12.2"
 nohash-hasher = { version = "0.2.0", optional = true }
 
-hvmc-util = { path = "../util", default-features = false }
+hvm64-util = { path = "../util", default-features = false }
 
 [features]
-std = ["hvmc-util/std", "dep:nohash-hasher"]
+std = ["hvm64-util/std", "dep:nohash-hasher"]
 trace = []
 
 [lints]

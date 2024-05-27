@@ -1,0 +1,12 @@
+---
+source: tests/tests.rs
+expression: output
+input_file: tests/programs/alloc_small_tree.hvm
+---
+(a (* a))
+RWTS   :             104
+- ANNI :              43
+- COMM :              13
+- ERAS :              17
+- DREF :              31
+- OPER :               0

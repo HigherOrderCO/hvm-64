@@ -1,6 +1,6 @@
 use crate::prelude::*;
-use hvmc_ast::{Book, Tree};
-use hvmc_util::maybe_grow;
+use hvm64_ast::{Book, Tree};
+use hvm64_util::maybe_grow;
 
 pub trait Prune {
   fn prune(&mut self, entrypoints: &[String]);

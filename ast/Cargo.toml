@@ -1,6 +1,6 @@
 [package]
-name = "hvmc-ast"
-version = "0.1.0"
+name = "hvm64-ast"
+version = "0.3.0"
 edition = "2021"
 
 [lib]
@@ -12,11 +12,11 @@ ordered-float = { version = "4.2.0", default-features = false }
 thiserror = { version = "1.0.59", optional = true }
 TSPL = { version = "0.0.12", optional = true }
 
-hvmc-util = { path = "../util", default-features = false }
+hvm64-util = { path = "../util", default-features = false }
 
 [features]
 default = ["std", "parser"]
-std = ["hvmc-util/std", "ordered-float/std", "dep:thiserror"]
+std = ["hvm64-util/std", "ordered-float/std", "dep:thiserror"]
 parser = ["dep:TSPL"]
 
 [lints]

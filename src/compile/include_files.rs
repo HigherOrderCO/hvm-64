@@ -1,6 +1,6 @@
 use std::{fs, io, path::Path, sync::Arc};
 
-use hvmc_host::Host;
+use hvm64_host::Host;
 
 use parking_lot::Mutex;
 
@@ -36,7 +36,7 @@ macro_rules! include_files {
   ($([$($prefix:ident)*])?) => {};
 }
 
-/// Copies the `hvm-core` source to a temporary `.hvm` directory.
+/// Copies the `hvm-64` source to a temporary `.hvm` directory.
 /// Only a subset of `Cargo.toml` is included.
 pub fn create_temp_hvm(host: Arc<Mutex<Host>>) -> Result<(), io::Error> {
   let lib = super::compile_host(&host.lock());
@@ -61,15 +61,15 @@ members = ["util", "runtime", "gen"]
     ".hvm/gen/Cargo.toml",
     r#"
 [package]
-name = "hvmc-gen"
-version = "0.0.0"
+name = "hvm64-gen"
+version = "0.3.0"
 edition = "2021"
 
 [lib]
 crate-type = ["dylib"]
 
 [dependencies]
-hvmc-runtime = { path = "../runtime", default-features = false }
+hvm64-runtime = { path = "../runtime", default-features = false }
 "#,
   )?;
   fs::write(".hvm/gen/src/lib.rs", lib)?;
