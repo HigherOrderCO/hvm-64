@@ -3,7 +3,7 @@ use crate::prelude::*;
 use alloc::collections::BTreeMap;
 use core::str::FromStr;
 
-use crate::{Book, Lab, Net, Tree, MAX_ADT_FIELDS, MAX_ADT_VARIANTS, MAX_ARITY};
+use crate::{Book, Lab, Net, Tree};
 use hvm64_util::{maybe_grow, ops::TypedOp as Op};
 
 use TSPL::{new_parser, Parser};
@@ -57,52 +57,16 @@ impl<'i> Hvm64Parser<'i> {
             _ => unreachable!(),
           };
           let close = match char {
-            '(' => ')',
-            '[' => ']',
-            '{' => '}',
+            '(' => ")",
+            '[' => "]",
+            '{' => "}",
             _ => unreachable!(),
           };
           self.skip_trivia();
-          if self.peek_one().is_some_and(|x| x == ':') {
-            self.advance_one();
-            let variant_index = self.parse_u64()?;
-            self.consume(":")?;
-            let variant_count = self.parse_u64()?;
-            let mut fields = Vec::new();
-            self.skip_trivia();
-            while self.peek_one() != Some(close) {
-              fields.push(self.parse_tree()?);
-              self.skip_trivia();
-            }
-            self.advance_one();
-            if variant_count == 0 {
-              Err("variant count cannot be zero".to_owned())?;
-            }
-            if variant_count > (MAX_ADT_VARIANTS as u64) {
-              Err("adt has too many variants".to_owned())?;
-            }
-            if variant_index >= variant_count {
-              Err("variant index out of range".to_owned())?;
-            }
-            let variant_index = variant_index as usize;
-            let variant_count = variant_count as usize;
-            if fields.len() > MAX_ADT_FIELDS {
-              Err("adt has too many fields".to_owned())?;
-            }
-            Ok(Tree::Adt { lab, variant_index, variant_count, fields })
-          } else {
-            let mut ports = Vec::new();
-            self.skip_trivia();
-            while self.peek_one() != Some(close) {
-              ports.push(self.parse_tree()?);
-              self.skip_trivia();
-            }
-            self.advance_one();
-            if ports.len() > MAX_ARITY {
-              Err("ctr has too many ports".to_owned())?;
-            }
-            Ok(Tree::Ctr { lab, ports })
-          }
+          let lft = Box::new(self.parse_tree()?);
+          let rgt = Box::new(self.parse_tree()?);
+          self.consume(close)?;
+          Ok(Tree::Ctr { lab, lft, rgt })
         }
         // Ref = "@" Name
         Some('@') => {
@@ -143,21 +107,11 @@ impl<'i> Hvm64Parser<'i> {
         }
         // Mat = "?<" Tree Tree ">"
         Some('?') => {
-          self.advance_one();
-          self.consume("<")?;
-          let zero = self.parse_tree()?;
-          let succ = self.parse_tree()?;
-          self.skip_trivia();
-          if self.peek_one() == Some('>') {
-            self.advance_one();
-            Tree::legacy_mat(zero, succ).ok_or_else(|| "invalid legacy match".to_owned())
-          } else {
-            let zero = Box::new(zero);
-            let succ = Box::new(succ);
-            let out = Box::new(self.parse_tree()?);
-            self.consume(">")?;
-            Ok(Tree::Mat { zero, succ, out })
-          }
+          self.consume("?<")?;
+          let arms = Box::new(self.parse_tree()?);
+          let out = Box::new(self.parse_tree()?);
+          self.consume(">")?;
+          Ok(Tree::Mat { arms, out })
         }
         // Var = Name
         _ => Ok(Tree::Var { nam: self.parse_name()? }),

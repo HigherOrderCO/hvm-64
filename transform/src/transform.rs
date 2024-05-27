@@ -4,15 +4,11 @@ include!("../../prelude.rs");
 
 use hvm64_ast::Book;
 
-pub mod coalesce_ctrs;
-pub mod encode_adts;
 pub mod eta_reduce;
 pub mod inline;
 pub mod pre_reduce;
 pub mod prune;
 
-use coalesce_ctrs::CoalesceCtrs;
-use encode_adts::EncodeAdts;
 use eta_reduce::EtaReduce;
 use inline::Inline;
 use pre_reduce::PreReduce;
@@ -51,14 +47,6 @@ impl Transform for Book {
       if passes.eta_reduce {
         def.eta_reduce();
       }
-      for tree in def.trees_mut() {
-        if passes.coalesce_ctrs {
-          tree.coalesce_constructors();
-        }
-        if passes.encode_adts {
-          tree.encode_scott_adts();
-        }
-      }
     }
     if passes.inline {
       loop {
@@ -66,19 +54,12 @@ impl Transform for Book {
         if inline_changed.is_empty() {
           break;
         }
-        if !(passes.eta_reduce || passes.encode_adts) {
+        if !passes.eta_reduce {
           break;
         }
         for name in inline_changed {
           let def = self.get_mut(&name).unwrap();
-          if passes.eta_reduce {
-            def.eta_reduce();
-          }
-          if passes.encode_adts {
-            for tree in def.trees_mut() {
-              tree.encode_scott_adts();
-            }
-          }
+          def.eta_reduce();
         }
       }
     }
@@ -121,8 +102,6 @@ macro_rules! transform_passes {
 
 transform_passes! {
   pre_reduce,
-  coalesce_ctrs,
-  encode_adts,
   eta_reduce,
   inline,
   prune,

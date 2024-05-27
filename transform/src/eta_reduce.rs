@@ -98,14 +98,10 @@ struct Phase1<'a> {
 impl<'a> Phase1<'a> {
   fn walk_tree(&mut self, tree: &'a Tree) {
     match tree {
-      Tree::Ctr { lab, ports } => {
-        let last_port = ports.len() - 1;
-        for (idx, i) in ports.iter().enumerate() {
-          if idx != last_port {
-            self.nodes.push(NodeType::Ctr(*lab));
-          }
-          self.walk_tree(i);
-        }
+      Tree::Ctr { lab, lft, rgt } => {
+        self.nodes.push(NodeType::Ctr(*lab));
+        self.walk_tree(lft);
+        self.walk_tree(rgt);
       }
       Tree::Var { nam } => {
         if let Some(i) = self.vars.get(&**nam) {
@@ -136,42 +132,28 @@ struct Phase2 {
 }
 
 impl Phase2 {
-  fn reduce_ctr(&mut self, lab: u16, ports: &mut Vec<Tree>, skip: usize) -> NodeType {
-    if skip == ports.len() {
-      return NodeType::Other;
-    }
-    if skip == ports.len() - 1 {
-      return self.reduce_tree(&mut ports[skip]);
-    }
-    let head_index = self.index.next().unwrap();
-    let a = self.reduce_tree(&mut ports[skip]);
-    let b = self.reduce_ctr(lab, ports, skip + 1);
-    if a == b {
-      let reducible = match a {
-        NodeType::Var(delta) => self.nodes[head_index.wrapping_add_signed(delta)] == NodeType::Ctr(lab),
-        NodeType::Era | NodeType::Int(_) | NodeType::F32(_) => true,
-        _ => false,
-      };
-      if reducible {
-        ports.pop();
-        return a;
-      }
-    }
-    NodeType::Ctr(lab)
-  }
   fn reduce_tree(&mut self, tree: &mut Tree) -> NodeType {
-    if let Tree::Ctr { lab, ports } = tree {
-      let ty = self.reduce_ctr(*lab, ports, 0);
-      if ports.len() == 1 {
-        *tree = ports.pop().unwrap();
+    let index = self.index.next().unwrap();
+    let ty = self.nodes[index];
+    if let Tree::Ctr { lft, rgt, .. } = tree {
+      let a = self.reduce_tree(lft);
+      let b = self.reduce_tree(rgt);
+      if a == b {
+        let reducible = match a {
+          NodeType::Var(delta) => self.nodes[index.wrapping_add_signed(delta)] == ty,
+          NodeType::Era | NodeType::Int(_) | NodeType::F32(_) => true,
+          _ => false,
+        };
+        if reducible {
+          *tree = mem::take(lft);
+          return a;
+        }
       }
-      ty
     } else {
-      let index = self.index.next().unwrap();
       for i in tree.children_mut() {
         self.reduce_tree(i);
       }
-      self.nodes[index]
     }
+    ty
   }
 }

@@ -72,16 +72,8 @@ pub enum Tree {
     /// The label of the combinator. (Combinators with the same label
     /// annihilate, and combinators with different labels commute.)
     lab: Lab,
-    /// The auxiliary ports of this node.
-    ///
-    /// - 0 ports: this behaves identically to an eraser node.
-    /// - 1 port: this behaves identically to a wire.
-    /// - 2 ports: this is a standard binary combinator node.
-    /// - 3+ ports: equivalent to right-chained binary nodes; `(a b c)` is
-    ///   equivalent to `(a (b c))`.
-    ///
-    /// The length of this vector must be less than [`MAX_ARITY`].
-    ports: Vec<Tree>,
+    lft: Box<Tree>,
+    rgt: Box<Tree>,
   },
   /// A binary node representing an operation on native integers.
   ///
@@ -98,58 +90,17 @@ pub enum Tree {
   ///
   /// The principal port connects to the integer to be matched on.
   Mat {
-    /// An auxiliary port; connects to the zero branch.
-    zero: Box<Tree>,
-    /// An auxiliary port; connects to the a CTR with label 0 containing the
-    /// predecessor and the output of the succ branch.
-    succ: Box<Tree>,
+    /// An auxiliary port; connects to a tree of the following structure:
+    /// ```text
+    /// (+value_if_zero (-predecessor_of_number +value_if_succ))
+    /// ```
+    arms: Box<Tree>,
     /// An auxiliary port; connects to the output.
     out: Box<Tree>,
-  },
-  /// An Scott-encoded ADT node.
-  ///
-  /// This is always equivalent to:
-  /// ```text
-  /// {$lab
-  ///   * * * ...                // one era node per `variant_index`
-  ///   {$lab $f0 $f1 $f2 ... R} // each field, in order, followed by a var node
-  ///   * * * ...                // one era node per `variant_count - variant_index - 1`
-  ///   R                        // a var node
-  /// }
-  /// ```
-  ///
-  /// For example:
-  /// ```text
-  /// data Option = None | (Some value):
-  ///   None:
-  ///     (0:2) = Adt { lab: 0, variant_index: 0, variant_count: 2, fields: [] }
-  ///     (R * R) = Ctr { lab: 0, ports: [Var { nam: "R" }, Era, Var { nam: "R" }]}
-  ///   (Some 123):
-  ///     (1:2 #123) = Adt { lab: 0, variant_index: 0, variant_count: 2, fields: [Int { val: 123 }] }
-  ///     (* (#123 R) R) = Ctr { lab: 0, ports: [Era, Ctr { lab: 0, ports: [Int { val: 123 }, Var { nam: "R" }] }, Var { nam: "R" }]}
-  /// ```
-  Adt {
-    lab: Lab,
-    /// The index of the variant of this ADT node.
-    ///
-    /// Must be less than `variant_count`.
-    variant_index: usize,
-    /// The number of variants in the data type.
-    ///
-    /// Must be greater than `0` and less than `MAX_ADT_VARIANTS`.
-    variant_count: usize,
-    /// The fields of this ADT node.
-    ///
-    /// Must have a length less than `MAX_ADT_FIELDS`.
-    fields: Vec<Tree>,
   },
   /// One side of a wire; the other side will have the same name.
   Var { nam: String },
 }
-
-pub const MAX_ARITY: usize = 8;
-pub const MAX_ADT_VARIANTS: usize = MAX_ARITY - 1;
-pub const MAX_ADT_FIELDS: usize = MAX_ARITY - 1;
 
 impl Net {
   pub fn trees(&self) -> impl Iterator<Item = &Tree> {
@@ -173,7 +124,7 @@ impl Net {
     let fresh_str = create_var(fresh + 1);
 
     let fun = mem::take(&mut self.root);
-    let app = Tree::Ctr { lab: 0, ports: vec![arg, Tree::Var { nam: fresh_str.clone() }] };
+    let app = Tree::Ctr { lab: 0, lft: Box::new(arg), rgt: Box::new(Tree::Var { nam: fresh_str.clone() }) };
     self.root = Tree::Var { nam: fresh_str };
     self.redexes.push((fun, app));
   }
@@ -190,43 +141,31 @@ impl Net {
 impl Tree {
   #[inline(always)]
   pub fn children(&self) -> impl ExactSizeIterator + DoubleEndedIterator<Item = &Tree> {
-    multi_iterator! { Iter { Nil, Two, Three, Vec } }
+    multi_iterator! { Iter { Nil, Two } }
     match self {
       Tree::Era | Tree::Int { .. } | Tree::F32 { .. } | Tree::Ref { .. } | Tree::Var { .. } => Iter::Nil([]),
-      Tree::Ctr { ports, .. } => Iter::Vec(ports),
+      Tree::Ctr { lft, rgt, .. } => Iter::Two([&**lft, rgt]),
       Tree::Op { rhs, out, .. } => Iter::Two([&**rhs, out]),
-      Tree::Mat { zero, succ, out } => Iter::Three([&**zero, succ, out]),
-      Tree::Adt { fields, .. } => Iter::Vec(fields),
+      Tree::Mat { arms, out } => Iter::Two([&**arms, out]),
     }
   }
 
   #[inline(always)]
   pub fn children_mut(&mut self) -> impl ExactSizeIterator + DoubleEndedIterator<Item = &mut Tree> {
-    multi_iterator! { Iter { Nil, Two, Three, Vec } }
+    multi_iterator! { Iter { Nil, Two } }
     match self {
       Tree::Era | Tree::Int { .. } | Tree::F32 { .. } | Tree::Ref { .. } | Tree::Var { .. } => Iter::Nil([]),
-      Tree::Ctr { ports, .. } => Iter::Vec(ports),
+      Tree::Ctr { lft, rgt, .. } => Iter::Two([&mut **lft, rgt]),
       Tree::Op { rhs, out, .. } => Iter::Two([&mut **rhs, out]),
-      Tree::Mat { zero, succ, out } => Iter::Three([&mut **zero, succ, out]),
-      Tree::Adt { fields, .. } => Iter::Vec(fields),
+      Tree::Mat { arms, out } => Iter::Two([&mut **arms, out]),
     }
   }
 
   pub fn lab(&self) -> Option<Lab> {
     match self {
-      Tree::Ctr { lab, ports } if ports.len() >= 2 => Some(*lab),
-      Tree::Adt { lab, .. } => Some(*lab),
+      Tree::Ctr { lab, .. } => Some(*lab),
       _ => None,
     }
-  }
-
-  pub fn legacy_mat(mut arms: Tree, out: Tree) -> Option<Tree> {
-    let Tree::Ctr { lab: 0, ports } = &mut arms else { None? };
-    let ports = mem::take(ports);
-    let Ok([zero, succ]) = <[_; 2]>::try_from(ports) else { None? };
-    let zero = Box::new(zero);
-    let succ = Box::new(succ);
-    Some(Tree::Mat { zero, succ, out: Box::new(out) })
   }
 
   /// Increases `fresh` until `create_var(*fresh)` does not conflict
@@ -252,12 +191,9 @@ impl Clone for Tree {
       Tree::Int { val } => Tree::Int { val: *val },
       Tree::F32 { val } => Tree::F32 { val: *val },
       Tree::Ref { nam } => Tree::Ref { nam: nam.clone() },
-      Tree::Ctr { lab, ports } => Tree::Ctr { lab: *lab, ports: ports.clone() },
+      Tree::Ctr { lab, lft, rgt } => Tree::Ctr { lab: *lab, lft: lft.clone(), rgt: rgt.clone() },
       Tree::Op { op, rhs, out } => Tree::Op { op: *op, rhs: rhs.clone(), out: out.clone() },
-      Tree::Mat { zero, succ, out } => Tree::Mat { zero: zero.clone(), succ: succ.clone(), out: out.clone() },
-      Tree::Adt { lab, variant_index, variant_count, fields } => {
-        Tree::Adt { lab: *lab, variant_index: *variant_index, variant_count: *variant_count, fields: fields.clone() }
-      }
+      Tree::Mat { arms, out } => Tree::Mat { arms: arms.clone(), out: out.clone() },
       Tree::Var { nam } => Tree::Var { nam: nam.clone() },
     })
   }
@@ -319,50 +255,17 @@ impl fmt::Display for Tree {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     maybe_grow(move || match self {
       Tree::Era => write!(f, "*"),
-      Tree::Ctr { lab, ports } => {
-        match lab {
-          0 => write!(f, "("),
-          1 => write!(f, "["),
-          _ => write!(f, "{{{lab}"),
-        }?;
-        let mut space = *lab > 1;
-        for port in ports {
-          if space {
-            write!(f, " ")?;
-          }
-          write!(f, "{port}")?;
-          space = true;
-        }
-        match lab {
-          0 => write!(f, ")"),
-          1 => write!(f, "]"),
-          _ => write!(f, "}}"),
-        }?;
-        Ok(())
-      }
-      Tree::Adt { lab, variant_index, variant_count, fields } => {
-        match lab {
-          0 => write!(f, "("),
-          1 => write!(f, "["),
-          _ => write!(f, "{{{lab}"),
-        }?;
-        write!(f, ":{}:{}", variant_index, variant_count)?;
-        for field in fields {
-          write!(f, " {field}")?;
-        }
-        match lab {
-          0 => write!(f, ")"),
-          1 => write!(f, "]"),
-          _ => write!(f, "}}"),
-        }?;
-        Ok(())
-      }
+      Tree::Ctr { lab, lft, rgt } => match lab {
+        0 => write!(f, "({lft} {rgt})"),
+        1 => write!(f, "[{lft} {rgt}]"),
+        _ => write!(f, "{{{lab} {lft} {rgt}}}"),
+      },
       Tree::Var { nam } => write!(f, "{nam}"),
       Tree::Ref { nam } => write!(f, "@{nam}"),
       Tree::Int { val } => write!(f, "#{val}"),
       Tree::F32 { val } => write!(f, "#{:?}", val.0),
       Tree::Op { op, rhs, out } => write!(f, "<{op} {rhs} {out}>"),
-      Tree::Mat { zero, succ, out } => write!(f, "?<{zero} {succ} {out}>"),
+      Tree::Mat { arms, out } => write!(f, "?<{arms} {out}>"),
     })
   }
 }
@@ -370,7 +273,6 @@ impl fmt::Display for Tree {
 #[test]
 #[cfg(feature = "parser")]
 fn test_tree_drop() {
-  use alloc::vec;
   use core::str::FromStr;
 
   drop(Tree::from_str("((* (* *)) (* *))"));
@@ -378,15 +280,15 @@ fn test_tree_drop() {
   let mut long_tree = Tree::Era;
   let mut cursor = &mut long_tree;
   for _ in 0 .. 100_000 {
-    *cursor = Tree::Ctr { lab: 0, ports: vec![Tree::Era, Tree::Era] };
-    let Tree::Ctr { ports, .. } = cursor else { unreachable!() };
-    cursor = &mut ports[0];
+    *cursor = Tree::Ctr { lab: 0, lft: Box::new(Tree::Era), rgt: Box::new(Tree::Era) };
+    let Tree::Ctr { lft, .. } = cursor else { unreachable!() };
+    cursor = lft;
   }
   drop(long_tree);
 
   let mut big_tree = Tree::Era;
   for _ in 0 .. 16 {
-    big_tree = Tree::Ctr { lab: 0, ports: vec![big_tree.clone(), big_tree] };
+    big_tree = Tree::Ctr { lab: 0, lft: Box::new(big_tree.clone()), rgt: Box::new(big_tree) };
   }
   drop(big_tree);
 }

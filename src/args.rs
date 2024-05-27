@@ -127,8 +127,6 @@ macro_rules! transform_passes {
 
 transform_passes! {
   pre_reduce: "pre-reduce" | "pre",
-  coalesce_ctrs: "coalesce-ctrs" | "coalesce",
-  encode_adts: "encode-adts" | "adts",
   eta_reduce: "eta-reduce" | "eta",
   inline: "inline",
   prune: "prune",

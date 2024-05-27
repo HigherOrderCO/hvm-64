@@ -65,43 +65,15 @@ impl<'a, E: Encoder> State<'a, E> {
     self.visit_tree(tree, trg);
   }
   fn visit_tree(&mut self, tree: &'a Tree, trg: E::Trg) {
-    static ERA: Tree = Tree::Era;
     maybe_grow(move || match tree {
       Tree::Era => self.encoder.link_const(trg, Port::ERA),
       Tree::Int { val } => self.encoder.link_const(trg, Port::new_int(*val)),
       Tree::F32 { val } => self.encoder.link_const(trg, Port::new_float(val.0)),
       Tree::Ref { nam } => self.encoder.link_const(trg, Port::new_ref(&self.host.defs[nam])),
-      Tree::Ctr { lab, ports } => {
-        if ports.is_empty() {
-          return self.visit_tree(&ERA, trg);
-        }
-        let mut trg = trg;
-        for port in &ports[0 .. ports.len() - 1] {
-          let (l, r) = self.encoder.ctr(*lab, trg);
-          self.visit_tree(port, l);
-          trg = r;
-        }
-        self.visit_tree(ports.last().unwrap(), trg);
-      }
-      Tree::Adt { lab, variant_index, variant_count, fields } => {
-        let mut trg = trg;
-        for _ in 0 .. *variant_index {
-          let (l, r) = self.encoder.ctr(*lab, trg);
-          self.visit_tree(&ERA, l);
-          trg = r;
-        }
-        let (mut l, mut r) = self.encoder.ctr(*lab, trg);
-        for field in fields {
-          let (x, y) = self.encoder.ctr(*lab, l);
-          self.visit_tree(field, x);
-          l = y;
-        }
-        for _ in 0 .. (*variant_count - *variant_index - 1) {
-          let (x, y) = self.encoder.ctr(*lab, r);
-          self.visit_tree(&ERA, x);
-          r = y;
-        }
-        self.encoder.link(l, r);
+      Tree::Ctr { lab, lft, rgt } => {
+        let (l, r) = self.encoder.ctr(*lab, trg);
+        self.visit_tree(lft, l);
+        self.visit_tree(rgt, r);
       }
       Tree::Op { op, rhs: lft, out: rgt } => match &**lft {
         Tree::Int { val } => {
@@ -118,11 +90,9 @@ impl<'a, E: Encoder> State<'a, E> {
           self.visit_tree(rgt, r);
         }
       },
-      Tree::Mat { zero, succ, out } => {
+      Tree::Mat { arms, out } => {
         let (a, o) = self.encoder.mat(trg);
-        let (z, s) = self.encoder.ctr(0, a);
-        self.visit_tree(zero, z);
-        self.visit_tree(succ, s);
+        self.visit_tree(arms, a);
         self.visit_tree(out, o);
       }
       Tree::Var { nam } => match self.scope.entry(nam) {
