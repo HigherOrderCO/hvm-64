@@ -1,7 +1,6 @@
 name: Bench
 
-on:
-  pull_request:
+on: {} # temporarily disabled
 
 concurrency:
   group: bench-${{ github.ref }}
