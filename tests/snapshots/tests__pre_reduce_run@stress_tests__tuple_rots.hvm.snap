@@ -1,0 +1,20 @@
+---
+source: tests/tests.rs
+expression: output
+input_file: tests/programs/stress_tests/tuple_rots.hvm
+---
+((#1 (#2 (#3 (#4 (#5 (#6 (#7 (#8 a)))))))) a)
+pre-reduce:
+RWTS   :              19
+- ANNI :              11
+- COMM :               0
+- ERAS :               0
+- DREF :               8
+- OPER :               0
+run:
+RWTS   :      40_000_037
+- ANNI :      28_000_012
+- COMM :       2_000_000
+- ERAS :       2_000_002
+- DREF :       6_000_022
+- OPER :       2_000_001

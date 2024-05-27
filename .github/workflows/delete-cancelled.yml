@@ -5,12 +5,12 @@ on:
     inputs:
       run_id:
         type: string
-        description: "" 
+        description: ""
 
 jobs:
   delete:
     runs-on: ubuntu-latest
     steps:
-      - run: gh api "repos/higherorderco/hvm-core/actions/runs/${{ inputs.run_id }}" -X DELETE
+      - run: gh api "repos/higherorderco/hvm-64/actions/runs/${{ inputs.run_id }}" -X DELETE
         env:
           GH_TOKEN: ${{ secrets.PAT }}

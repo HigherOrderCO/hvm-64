@@ -1,0 +1,20 @@
+---
+source: tests/tests.rs
+expression: output
+input_file: tests/programs/commutation.hvm
+---
+(a a)
+pre-reduce:
+RWTS   :               0
+- ANNI :               0
+- COMM :               0
+- ERAS :               0
+- DREF :               0
+- OPER :               0
+run:
+RWTS   :               7
+- ANNI :               1
+- COMM :               2
+- ERAS :               1
+- DREF :               3
+- OPER :               0

@@ -2,7 +2,7 @@
 
 include!("../../prelude.rs");
 
-use hvmc_ast::Book;
+use hvm64_ast::Book;
 
 pub mod coalesce_ctrs;
 pub mod encode_adts;

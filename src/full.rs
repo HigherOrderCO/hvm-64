@@ -13,11 +13,11 @@ use crate::{args::TransformArgs, RunArgs, RuntimeOpts};
 A massively parallel Interaction Combinator evaluator
 
 Examples: 
-$ hvmc run examples/church_encoding/church.hvm
-$ hvmc run examples/addition.hvmc "#16" "#3"
-$ hvmc compile examples/addition.hvmc
-$ hvmc reduce examples/addition.hvmc -- "a & @mul ~ (#3 (#4 a))"
-$ hvmc reduce -- "a & #3 ~ <* #4 a>""##
+$ hvm64 run examples/church_encoding/church.hvm
+$ hvm64 run examples/addition.hvm "#16" "#3"
+$ hvm64 compile examples/addition.hvm
+$ hvm64 reduce examples/addition.hvm -- "a & @mul ~ (#3 (#4 a))"
+$ hvm64 reduce -- "a & #3 ~ <* #4 a>""##
 )]
 pub struct FullCli {
   #[command(subcommand)]
@@ -27,11 +27,11 @@ pub struct FullCli {
 #[derive(Subcommand, Clone, Debug)]
 #[command(author, version)]
 pub enum CliMode {
-  /// Compile a hvm-core program into a Rust crate.
+  /// Compile a hvm-64 program into a Rust crate.
   Compile {
-    /// hvm-core file to compile.
+    /// hvm-64 file to compile.
     file: PathBuf,
-    /// Output path; defaults to the input file with `.hvmc` stripped.
+    /// Output path; defaults to the input file with `.hvm` stripped.
     #[arg(short, long)]
     output: Option<PathBuf>,
     #[command(flatten)]
@@ -48,7 +48,7 @@ pub enum CliMode {
     #[command(flatten)]
     transform_args: TransformArgs,
   },
-  /// Reduce hvm-core expressions to their normal form.
+  /// Reduce hvm-64 expressions to their normal form.
   ///
   /// The expressions are passed as command-line arguments.
   /// It is also possible to load files before reducing the expression,
@@ -72,7 +72,7 @@ pub enum CliMode {
     #[command(flatten)]
     transform_args: TransformArgs,
   },
-  /// Transform a hvm-core program using one of the optimization passes.
+  /// Transform a hvm-64 program using one of the optimization passes.
   Transform {
     /// Files to load before reducing the expressions.
     ///

@@ -1,6 +1,6 @@
 #![cfg(feature = "std")]
 
-use hvmc_transform::pre_reduce::PreReduce;
+use hvm64_transform::pre_reduce::PreReduce;
 use parking_lot::Mutex;
 use std::{
   fs,
@@ -11,9 +11,9 @@ use std::{
   time::Instant,
 };
 
-use hvmc_ast::{self as ast, Book, Net};
-use hvmc_host::{stdlib::create_host, Host};
-use hvmc_runtime as run;
+use hvm64_ast::{self as ast, Book, Net};
+use hvm64_host::{stdlib::create_host, Host};
+use hvm64_runtime as run;
 
 use insta::assert_snapshot;
 
@@ -80,7 +80,7 @@ fn test_path(path: &Path) {
 }
 
 fn test_dir(dir: &Path, filter: impl Fn(&Path) -> bool) {
-  insta::glob!(dir, "**/*.hvmc", |p| {
+  insta::glob!(dir, "**/*.hvm", |p| {
     if filter(p) {
       test_path(p);
     }

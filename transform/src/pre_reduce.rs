@@ -4,8 +4,8 @@
 //! - Each definition is visited in topological order (dependencies before
 //!   dependents). In the case of cycles, one will be arbitrarily selected to be
 //!   first.
-//! - The definition is reduced in a [`hvmc_runtime::Net`]
-//! - The reduced [`hvmc_runtime::Net`] is readback into an [`ast::Net`]
+//! - The definition is reduced in a [`hvm64_runtime::Net`]
+//! - The reduced [`hvm64_runtime::Net`] is readback into an [`ast::Net`]
 //! - The [`ast::Net`] is encoded into a [`Vec<Instruction>`]
 //! - The [`ast::Net`] is stored in the [`State`], as it will be used later.
 //! - The [`InterpretedDef`] corresponding to the definition is mutated in-place
@@ -15,13 +15,13 @@
 //! overriding the previous one.
 
 use crate::prelude::*;
-use hvmc_ast::{Book, Tree};
-use hvmc_host::{
+use hvm64_ast::{Book, Tree};
+use hvm64_host::{
   stdlib::{AsHostedDef, HostedDef},
   DefRef, Host,
 };
-use hvmc_runtime::{Def, Heap, InterpretedDef, LabSet, Mode, Port, Rewrites, Strict};
-use hvmc_util::maybe_grow;
+use hvm64_runtime::{Def, Heap, InterpretedDef, LabSet, Mode, Port, Rewrites, Strict};
+use hvm64_util::maybe_grow;
 
 use alloc::sync::Arc;
 use parking_lot::Mutex;
@@ -85,7 +85,7 @@ pub struct PreReduceStats {
 
 enum SeenState {
   Cycled,
-  Reduced { net: hvmc_ast::Net, normal: bool },
+  Reduced { net: hvm64_ast::Net, normal: bool },
 }
 
 /// A Def that pushes all interactions to its inner Vec.
@@ -93,7 +93,7 @@ enum SeenState {
 struct InertDef(Arc<Mutex<Vec<(Port, Port)>>>);
 
 impl AsHostedDef for InertDef {
-  fn call<M: Mode>(def: &Def<Self>, _: &mut hvmc_runtime::Net<M>, port: Port) {
+  fn call<M: Mode>(def: &Def<Self>, _: &mut hvm64_runtime::Net<M>, port: Port) {
     def.data.0.lock().push((Port::new_ref(def), port));
   }
 }
@@ -123,7 +123,7 @@ impl<'a> State<'a> {
       tree.children().for_each(|child| self.visit_tree(child))
     })
   }
-  fn visit_net(&mut self, net: &hvmc_ast::Net) {
+  fn visit_net(&mut self, net: &hvm64_ast::Net) {
     self.visit_tree(&net.root);
     for (a, b) in &net.redexes {
       self.visit_tree(a);
@@ -139,7 +139,7 @@ impl<'a> State<'a> {
     // First, pre-reduce all nets referenced by this net by walking the tree
     self.visit_net(self.book.get(nam).unwrap());
 
-    let mut rt = hvmc_runtime::Net::<Strict>::new(self.area);
+    let mut rt = hvm64_runtime::Net::<Strict>::new(self.area);
     rt.boot(self.host.defs.get(nam).expect("No function."));
     let n_reduced = rt.reduce(self.max_rwts as usize);
 

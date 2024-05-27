@@ -1,5 +1,5 @@
 [package]
-name = "hvmc-transform"
+name = "hvm64-transform"
 version = "0.1.0"
 edition = "2021"
 
@@ -11,14 +11,14 @@ ordered-float = { version = "4.2.0", default-features = false }
 parking_lot = "0.12.2"
 thiserror = "1.0.58"
 
-hvmc-ast = { path = "../ast", default-features = false }
-hvmc-runtime = { path = "../runtime", default-features = false }
-hvmc-util = { path = "../util", default-features = false }
-hvmc-host = { path = "../host", default-features = false }
+hvm64-ast = { path = "../ast", default-features = false }
+hvm64-runtime = { path = "../runtime", default-features = false }
+hvm64-util = { path = "../util", default-features = false }
+hvm64-host = { path = "../host", default-features = false }
 
 [features]
 default = ["std"]
-std = ["hvmc-ast/std", "hvmc-runtime/std", "hvmc-util/std", "hvmc-host/std"]
+std = ["hvm64-ast/std", "hvm64-runtime/std", "hvm64-util/std", "hvm64-host/std"]
 
 [lints]
 workspace = true

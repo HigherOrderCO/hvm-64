@@ -1,0 +1,20 @@
+---
+source: tests/tests.rs
+expression: output
+input_file: tests/programs/stress_tests/all_tree.hvm
+---
+(a (* a))
+pre-reduce:
+RWTS   :              32
+- ANNI :              13
+- COMM :               0
+- ERAS :               0
+- DREF :              19
+- OPER :               0
+run:
+RWTS   :     503_316_468
+- ANNI :     218_103_801
+- COMM :      83_886_075
+- ERAS :     117_440_507
+- DREF :      50_331_654
+- OPER :      33_554_431

@@ -9,9 +9,9 @@ use core::{
 use parking_lot::Mutex;
 
 use crate::{DefRef, Host};
-use hvmc_ast::Tree;
-use hvmc_runtime::{dispatch_dyn_net, AsDef, Def, DynNetMut, LabSet, Mode, Net, Port, Tag, Trg};
-use hvmc_util::create_var;
+use hvm64_ast::Tree;
+use hvm64_runtime::{dispatch_dyn_net, AsDef, Def, DynNetMut, LabSet, Mode, Net, Port, Tag, Trg};
+use hvm64_util::create_var;
 
 /// `@IDENTITY = (x x)`
 pub const IDENTITY: *const Def = const { &Def::new(LabSet::from_bits(&[1]), (call_identity, call_identity)) }.upcast();
@@ -57,10 +57,10 @@ impl<F: Fn(Tree) + Clone + Send + Sync + 'static> AsHostedDef for LogDef<F> {
   }
 }
 
-/// Create a `Host` from a `Book`, including `hvm-core`'s built-in definitions
+/// Create a `Host` from a `Book`, including `hvm-64`'s built-in definitions
 #[cfg(feature = "std")]
 #[allow(clippy::absolute_paths)]
-pub fn create_host(book: &hvmc_ast::Book) -> Arc<Mutex<Host>> {
+pub fn create_host(book: &hvm64_ast::Book) -> Arc<Mutex<Host>> {
   let host: Arc<Mutex<Host>> = Default::default();
 
   insert_stdlib(host.clone());
@@ -69,7 +69,7 @@ pub fn create_host(book: &hvmc_ast::Book) -> Arc<Mutex<Host>> {
   host
 }
 
-/// Insert `hvm-core`'s built-in definitions into a host.
+/// Insert `hvm-64`'s built-in definitions into a host.
 #[cfg(feature = "std")]
 #[allow(clippy::absolute_paths)]
 pub fn insert_stdlib(host: Arc<Mutex<Host>>) {

@@ -1,0 +1,20 @@
+---
+source: tests/tests.rs
+expression: output
+input_file: tests/programs/log.hvm
+---
+#2
+pre-reduce:
+RWTS   :               0
+- ANNI :               0
+- COMM :               0
+- ERAS :               0
+- DREF :               0
+- OPER :               0
+run:
+RWTS   :               7
+- ANNI :               2
+- COMM :               0
+- ERAS :               0
+- DREF :               5
+- OPER :               0

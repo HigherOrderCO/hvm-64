@@ -1,0 +1,20 @@
+---
+source: tests/tests.rs
+expression: output
+input_file: tests/programs/alloc_small_tree.hvm
+---
+(a (* a))
+pre-reduce:
+RWTS   :              34
+- ANNI :              11
+- COMM :               0
+- ERAS :               0
+- DREF :              23
+- OPER :               0
+run:
+RWTS   :              86
+- ANNI :              33
+- COMM :              13
+- ERAS :              17
+- DREF :              23
+- OPER :               0

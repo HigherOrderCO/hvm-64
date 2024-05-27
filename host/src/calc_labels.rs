@@ -1,6 +1,6 @@
 use super::*;
 
-use hvmc_util::maybe_grow;
+use hvm64_util::maybe_grow;
 
 /// Calculates the labels used in each definition of a book.
 ///

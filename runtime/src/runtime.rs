@@ -24,9 +24,9 @@ include!("../../prelude.rs");
 
 use crate::prelude::*;
 
-pub use hvmc_util::ops;
+pub use hvm64_util::ops;
 
-use hvmc_util::{bi_enum, deref, pretty_num};
+use hvm64_util::{bi_enum, deref, pretty_num};
 
 use self::trace::Tracer;
 use alloc::borrow::Cow;

@@ -1,6 +1,6 @@
-//! An efficient debugging utility to trace the execution of hvm-core.
+//! An efficient debugging utility to trace the execution of hvm-64.
 //!
-//! Some bugs in hvm-core occur so rarely (once in hundreds of millions of
+//! Some bugs in hvm-64 occur so rarely (once in hundreds of millions of
 //! interactions) that standard debugging tools are ineffective. Traditional
 //! `println!` debugging can slow down the process to the point where the bug in
 //! question will never be reached.
@@ -9,8 +9,8 @@
 //! binary execution log to an in-memory ring buffer. When a segfault/panic is
 //! encountered, the `_read_traces` function can read the data from these
 //! buffers out in a human-readable format. The `trace!` macro is sufficiently
-//! performant that it can reasonably be called even inside hvmc's hot reduction
-//! loop.
+//! performant that it can reasonably be called even inside hvm64's hot
+//! reduction loop.
 //!
 //! To use this utility, compile with `--features trace`, run the resulting
 //! binary in a debugger, and – when the bug occurs – call [`_read_traces()`] to
@@ -18,16 +18,16 @@
 //! automatically print traces on panic.
 //!
 //! ```sh
-//! $ cargo build --release --features trace; rust-lldb -- ./target/release/hvmc run path/to/file.hvmc -s
+//! $ cargo build --release --features trace; rust-lldb -- ./target/release/hvm64 run path/to/file.hvm -s
 //! (lldb) process launch -e path/to/trace/output
 //! ...
 //! Process ##### stopped
 //! * thread ###, name = 't##', stop reason = signal SIGABRT
 //! ...
 //! (lldb) image lookup -s _read_traces
-//! 1 symbols match '_read_traces' in .../hvm-core/target/release/hvmc:
-//!   Address: hvmc[0x000000010002fe94] (hvmc.__TEXT.__text + 191024)
-//!   Summary: hvmc`_read_traces
+//! 1 symbols match '_read_traces' in .../hvm-64/target/release/hvm64:
+//!   Address: hvm64[0x000000010002fe94] (hvm64.__TEXT.__text + 191024)
+//!   Summary: hvm64`_read_traces
 //! (lldb) expr ((void(*)(long long))0x000000010002fe94)(-1)
 //! (lldb) ^D
 //! $ less path/to/trace/output
@@ -73,7 +73,7 @@ use core::{
 use parking_lot::{Mutex, Once};
 
 use crate::prelude::*;
-use hvmc_util::ops::TypedOp as Op;
+use hvm64_util::ops::TypedOp as Op;
 
 use crate::{Addr, Port, Trg, Wire};
 

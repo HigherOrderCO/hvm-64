@@ -5,7 +5,7 @@ echo "Compiling all .hvm2 files"
 shopt -s globstar
 
 for hvml in **/*.hvm2; do
-  hvmc="${hvml%.hvm2}.hvmc"
+  hvm64="${hvml%.hvm2}.hvm"
   echo "> $hvml"
-  hvml compile "$hvml" > "$hvmc"
+  hvml compile "$hvml" > "$hvm64"
 done

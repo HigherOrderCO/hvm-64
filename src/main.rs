@@ -23,17 +23,17 @@ use self::full::{CliMode, FullCli};
 use args::{RunArgs, RuntimeOpts, TransformArgs, TransformPass};
 use clap::Parser;
 
-use hvmc_ast::{Book, Net, Tree};
-use hvmc_host::{
+use hvm64_ast::{Book, Net, Tree};
+use hvm64_host::{
   stdlib::{create_host, insert_stdlib},
   DefRef, Host,
 };
-use hvmc_runtime::{dispatch_dyn_net, Def, DynNet, Heap, Mode, Port, Trg};
-use hvmc_transform::Transform;
+use hvm64_runtime::{dispatch_dyn_net, Def, DynNet, Heap, Mode, Port, Trg};
+use hvm64_transform::Transform;
 
 fn main() {
   if cfg!(feature = "trace") {
-    hvmc_runtime::trace::set_hook();
+    hvm64_runtime::trace::set_hook();
   }
 
   let cli = FullCli::parse();
@@ -42,10 +42,10 @@ fn main() {
     CliMode::Compile { file, transform_args, output } => {
       let output = if let Some(output) = output {
         output
-      } else if let Some("hvmc") = file.extension().and_then(OsStr::to_str) {
+      } else if let Some("hvm") = file.extension().and_then(OsStr::to_str) {
         file.with_extension("")
       } else {
-        eprintln!("file missing `.hvmc` extension; explicitly specify an output path with `--output`.");
+        eprintln!("file missing `.hvm` extension; explicitly specify an output path with `--output`.");
 
         process::exit(1);
       };
@@ -55,7 +55,7 @@ fn main() {
 
       compile_temp_hvm().unwrap();
 
-      fs::copy(format!(".hvm/target/release/{DLL_PREFIX}hvmc_gen{DLL_SUFFIX}"), output).unwrap();
+      fs::copy(format!(".hvm/target/release/{DLL_PREFIX}hvm64_gen{DLL_SUFFIX}"), output).unwrap();
     }
     CliMode::Run { run_opts, mut transform_args, file, args } => {
       // Don't pre-reduce or prune the entry point
@@ -77,7 +77,7 @@ fn main() {
   };
 
   if cfg!(feature = "trace") {
-    hvmc_runtime::trace::_read_traces(usize::MAX);
+    hvm64_runtime::trace::_read_traces(usize::MAX);
   }
 }
 
@@ -124,7 +124,7 @@ fn load_book(files: &[PathBuf], transform_args: TransformArgs) -> Book {
 
   let transform_passes = TransformPass::to_passes(&transform_args.transform_passes[..]);
   book
-    .transform(transform_passes, &hvmc_transform::TransformOpts {
+    .transform(transform_passes, &hvm64_transform::TransformOpts {
       pre_reduce_skip: transform_args.transform_opts.pre_reduce_skip,
       pre_reduce_memory: transform_args.transform_opts.pre_reduce_memory,
       pre_reduce_rewrites: transform_args.transform_opts.pre_reduce_rewrites,
@@ -148,7 +148,7 @@ fn load_dylibs(host: Arc<Mutex<Host>>, include: &[PathBuf]) {
       .expect("failed to load dylib");
 
       let rust_version =
-        lib.get::<fn() -> &'static str>(b"hvmc_dylib_v0__rust_version").expect("failed to load rust version");
+        lib.get::<fn() -> &'static str>(b"hvm64_dylib_v0__rust_version").expect("failed to load rust version");
       let rust_version = rust_version();
       if rust_version != env!("RUSTC_VERSION") {
         eprintln!(
@@ -157,18 +157,18 @@ fn load_dylibs(host: Arc<Mutex<Host>>, include: &[PathBuf]) {
         );
       }
 
-      let hvmc_version =
-        lib.get::<fn() -> &'static str>(b"hvmc_dylib_v0__hvmc_version").expect("failed to load hvmc version");
-      let hvmc_version = hvmc_version();
-      if hvmc_version != env!("CARGO_PKG_VERSION") {
+      let hvm64_version =
+        lib.get::<fn() -> &'static str>(b"hvm64_dylib_v0__hvm64_version").expect("failed to load hvm64 version");
+      let hvm64_version = hvm64_version();
+      if hvm64_version != env!("CARGO_PKG_VERSION") {
         eprintln!(
-          "warning: dylib {file:?} was compiled with hvmc version {hvmc_version}, but is being run with hvmc version {}",
+          "warning: dylib {file:?} was compiled with hvm64 version {hvm64_version}, but is being run with hvm64 version {}",
           env!("CARGO_PKG_VERSION")
         );
       }
 
       let insert_into = lib
-        .get::<fn(&mut dyn FnMut(&str, Box<dyn DerefMut<Target = Def> + Send + Sync>))>(b"hvmc_dylib_v0__insert_into")
+        .get::<fn(&mut dyn FnMut(&str, Box<dyn DerefMut<Target = Def> + Send + Sync>))>(b"hvm64_dylib_v0__insert_into")
         .expect("failed to load insert_into");
       let mut host = host.lock();
       insert_into(&mut |name, def| {
@@ -202,7 +202,7 @@ fn reduce_exprs(host: Arc<Mutex<Host>>, exprs: &[Net], opts: &RuntimeOpts) {
   }
 }
 
-fn print_stats<M: Mode>(net: &hvmc_runtime::Net<M>, elapsed: Duration) {
+fn print_stats<M: Mode>(net: &hvm64_runtime::Net<M>, elapsed: Duration) {
   eprintln!("RWTS   : {:>15}", pretty_num(net.rwts.total()));
   eprintln!("- ANNI : {:>15}", pretty_num(net.rwts.anni));
   eprintln!("- COMM : {:>15}", pretty_num(net.rwts.comm));

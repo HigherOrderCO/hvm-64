@@ -1,6 +1,6 @@
 use crate::prelude::*;
-use hvmc_ast::{Tree, MAX_ARITY};
-use hvmc_util::maybe_grow;
+use hvm64_ast::{Tree, MAX_ARITY};
+use hvm64_util::maybe_grow;
 
 pub trait CoalesceCtrs {
   fn coalesce_constructors(&mut self);
