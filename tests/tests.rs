@@ -21,7 +21,7 @@ use serial_test::serial;
 
 fn execute_host(host: Arc<Mutex<Host>>) -> Option<(run::Rewrites, Net)> {
   let heap = run::Heap::new(None).unwrap();
-  let mut net = run::Net::<run::Strict>::new(&heap);
+  let mut net = run::Net::new(&heap);
   // The host is locked inside this block.
   {
     let lock = host.lock();

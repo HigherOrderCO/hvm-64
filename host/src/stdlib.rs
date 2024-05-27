@@ -10,13 +10,13 @@ use parking_lot::Mutex;
 
 use crate::{DefRef, Host};
 use hvm64_ast::Tree;
-use hvm64_runtime::{dispatch_dyn_net, AsDef, Def, DynNetMut, LabSet, Mode, Net, Port, Tag, Trg};
+use hvm64_runtime::{AsDef, Def, LabSet, Net, Port, Tag, Trg};
 use hvm64_util::create_var;
 
 /// `@IDENTITY = (x x)`
-pub const IDENTITY: *const Def = const { &Def::new(LabSet::from_bits(&[1]), (call_identity, call_identity)) }.upcast();
+pub const IDENTITY: *const Def = const { &Def::new(LabSet::from_bits(&[1]), call_identity) }.upcast();
 
-fn call_identity<M: Mode>(net: &mut Net<M>, port: Port) {
+fn call_identity(net: &mut Net, port: Port) {
   let (a, b) = net.do_ctr(0, Trg::port(port));
   net.link_trg(a, b);
 }
@@ -41,7 +41,7 @@ impl<F: Fn(Tree) + Clone + Send + Sync + 'static> LogDef<F> {
 pub struct LogDef<F>(Arc<Mutex<Host>>, F);
 
 impl<F: Fn(Tree) + Clone + Send + Sync + 'static> AsHostedDef for LogDef<F> {
-  fn call<M: Mode>(def: &Def<Self>, net: &mut Net<M>, port: Port) {
+  fn call(def: &Def<Self>, net: &mut Net, port: Port) {
     let (arg, seq) = net.do_ctr(0, Trg::port(port));
     let seq = net.wire_to_trg(seq);
     // SAFETY: the function inside `readback` won't live longer than
@@ -50,9 +50,7 @@ impl<F: Fn(Tree) + Clone + Send + Sync + 'static> AsHostedDef for LogDef<F> {
     let def: &'static Def<Self> = unsafe { mem::transmute(def) };
     readback(net, def.data.0.clone(), arg, |net, tree| {
       (def.data.1)(tree);
-      dispatch_dyn_net!(net => {
-        net.link_wire_port(seq, Port::new_ref(unsafe { &*IDENTITY }));
-      });
+      net.link_wire_port(seq, Port::new_ref(unsafe { &*IDENTITY }));
     });
   }
 }
@@ -102,11 +100,11 @@ impl<T: AsBoxDef> BoxDef<T> {
 }
 
 pub trait AsBoxDef: Send + Sync + 'static {
-  fn call<M: Mode>(slf: Box<Def<Self>>, net: &mut Net<M>, port: Port);
+  fn call(slf: Box<Def<Self>>, net: &mut Net, port: Port);
 }
 
 impl<T: AsBoxDef> AsDef for BoxDef<T> {
-  unsafe fn call<M: Mode>(slf: *const Def<Self>, net: &mut Net<M>, port: Port) {
+  unsafe fn call(slf: *const Def<Self>, net: &mut Net, port: Port) {
     T::call(Box::from_raw(slf as *mut _), net, port)
   }
 }
@@ -136,11 +134,11 @@ impl<T: AsArcDef> ArcDef<T> {
 }
 
 pub trait AsArcDef: Send + Sync + 'static {
-  fn call<M: Mode>(slf: Arc<Def<Self>>, net: &mut Net<M>, port: Port);
+  fn call(slf: Arc<Def<Self>>, net: &mut Net, port: Port);
 }
 
 impl<T: AsArcDef> AsDef for ArcDef<T> {
-  unsafe fn call<M: Mode>(slf: *const Def<Self>, net: &mut Net<M>, port: Port) {
+  unsafe fn call(slf: *const Def<Self>, net: &mut Net, port: Port) {
     T::call(Arc::from_raw(slf as *mut _), net, port);
   }
 }
@@ -162,11 +160,11 @@ impl<T: AsHostedDef> HostedDef<T> {
 }
 
 pub trait AsHostedDef: Send + Sync + 'static {
-  fn call<M: Mode>(slf: &Def<Self>, net: &mut Net<M>, port: Port);
+  fn call(slf: &Def<Self>, net: &mut Net, port: Port);
 }
 
 impl<T: AsHostedDef> AsDef for HostedDef<T> {
-  unsafe fn call<M: Mode>(slf: *const Def<Self>, net: &mut Net<M>, port: Port) {
+  unsafe fn call(slf: *const Def<Self>, net: &mut Net, port: Port) {
     T::call((slf as *const Def<T>).as_ref().unwrap(), net, port)
   }
 }
@@ -182,15 +180,15 @@ impl UniqueTreePtr {
   }
 }
 
-pub struct ReadbackDef<F: FnOnce(DynNetMut) + Send + Sync + 'static> {
+pub struct ReadbackDef<F: FnOnce(&mut Net) + Send + Sync + 'static> {
   root: Arc<F>,
   host: Arc<Mutex<Host>>,
   var_idx: Arc<AtomicUsize>,
   tree: UniqueTreePtr,
 }
 
-impl<F: FnOnce(DynNetMut) + Send + Sync + 'static> ReadbackDef<F> {
-  fn maybe_finish(net: DynNetMut<'_, '_>, root: Arc<F>) {
+impl<F: FnOnce(&mut Net) + Send + Sync + 'static> ReadbackDef<F> {
+  fn maybe_finish(net: &mut Net, root: Arc<F>) {
     let Some(root) = Arc::into_inner(root) else { return };
     (root)(net)
   }
@@ -204,8 +202,8 @@ impl<F: FnOnce(DynNetMut) + Send + Sync + 'static> ReadbackDef<F> {
   }
 }
 
-impl<F: FnOnce(DynNetMut) + Send + Sync + 'static> AsBoxDef for ReadbackDef<F> {
-  fn call<M: Mode>(def: Box<Def<Self>>, net: &mut Net<M>, port: Port) {
+impl<F: FnOnce(&mut Net) + Send + Sync + 'static> AsBoxDef for ReadbackDef<F> {
+  fn call(def: Box<Def<Self>>, net: &mut Net, port: Port) {
     match port.tag() {
       Tag::Var | Tag::Red => {
         unreachable!()
@@ -218,7 +216,7 @@ impl<F: FnOnce(DynNetMut) + Send + Sync + 'static> AsBoxDef for ReadbackDef<F> {
             (*def.data.tree.0) = var.clone();
             (*other.data.0.tree.0) = var;
           }
-          Self::maybe_finish(DynNetMut::from(&mut *net), other.data.0.root);
+          Self::maybe_finish(net, other.data.0.root);
         } else if let Some(back) = def.data.host.lock().back.get(&port.addr()) {
           unsafe { *(def.data.tree.0) = Tree::Ref { nam: back.clone() } };
         } else {
@@ -267,38 +265,30 @@ impl<F: FnOnce(DynNetMut) + Send + Sync + 'static> AsBoxDef for ReadbackDef<F> {
         net.link_wire_port(old.p2, def.data.with(rhs));
       }
     }
-    Self::maybe_finish(DynNetMut::from(net), def.data.root);
+    Self::maybe_finish(net, def.data.root);
   }
 }
 
-pub fn readback<M: Mode>(
-  net: &mut Net<M>,
+pub fn readback(
+  net: &mut Net,
   host: Arc<Mutex<Host>>,
   from: Trg,
-  f: impl FnOnce(DynNetMut, Tree) + Send + Sync + 'static,
+  f: impl FnOnce(&mut Net, Tree) + Send + Sync + 'static,
 ) {
   let root = UniqueTreePtr(Box::leak(Box::default()));
 
-  if M::LAZY {
-    let from = net.wire_to_trg(from);
-    net.normal_from(from.clone());
-    let tree = host.lock().readback_tree(&from);
-    net.link_wire_port(from, Port::ERA);
-    f(DynNetMut::from(net), tree);
-  } else {
-    let closure: Box<dyn FnOnce(DynNetMut) + Send + Sync + 'static> = Box::new(move |net| {
-      let root = unsafe { root.to_box() };
-      f(net, *root);
-    });
+  let closure: Box<dyn FnOnce(&mut Net) + Send + Sync + 'static> = Box::new(move |net| {
+    let root = unsafe { root.to_box() };
+    f(net, *root);
+  });
 
-    net.link_trg_port(
-      from,
-      Port::new_ref(Box::leak(BoxDef::new_boxed(LabSet::ALL, ReadbackDef {
-        root: Arc::new(closure),
-        host,
-        tree: root,
-        var_idx: Arc::new(AtomicUsize::from(0)),
-      }))),
-    );
-  }
+  net.link_trg_port(
+    from,
+    Port::new_ref(Box::leak(BoxDef::new_boxed(LabSet::ALL, ReadbackDef {
+      root: Arc::new(closure),
+      host,
+      tree: root,
+      var_idx: Arc::new(AtomicUsize::from(0)),
+    }))),
+  );
 }

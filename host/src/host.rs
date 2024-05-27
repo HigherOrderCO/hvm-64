@@ -7,7 +7,7 @@ include!("../../prelude.rs");
 
 use crate::prelude::*;
 use hvm64_ast::{Book, Tree};
-use hvm64_runtime::{Addr, Def, InterpretedDef, LabSet, Mode, Port, Tag, Wire};
+use hvm64_runtime::{Addr, Def, InterpretedDef, LabSet, Port, Tag, Wire};
 
 use core::ops::{Deref, DerefMut};
 

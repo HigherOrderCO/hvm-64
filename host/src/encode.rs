@@ -2,7 +2,7 @@ use crate::prelude::*;
 
 use crate::Host;
 use hvm64_ast::{Lab, Net as AstNet, Tree};
-use hvm64_runtime::{Instruction, InterpretedDef, Mode, Net, Port, Trg, TrgId};
+use hvm64_runtime::{Instruction, InterpretedDef, Net, Port, Trg, TrgId};
 use hvm64_util::{maybe_grow, ops::TypedOp as Op};
 
 impl Host {
@@ -19,7 +19,7 @@ impl Host {
 
   /// Encode `tree` directly into `trg`, skipping the intermediate `Def`
   /// representation.
-  pub fn encode_tree<M: Mode>(&self, net: &mut Net<M>, trg: Trg, tree: &Tree) {
+  pub fn encode_tree(&self, net: &mut Net, trg: Trg, tree: &Tree) {
     let mut state = State { host: self, encoder: net, scope: Default::default() };
     state.visit_tree(tree, trg);
     state.finish();
@@ -27,7 +27,7 @@ impl Host {
 
   /// Encode the root of `ast_net` directly into `trg` and encode its redexes
   /// into `net` redex list.
-  pub fn encode_net<M: Mode>(&self, net: &mut Net<M>, trg: Trg, ast_net: &AstNet) {
+  pub fn encode_net(&self, net: &mut Net, trg: Trg, ast_net: &AstNet) {
     let mut state = State { host: self, encoder: net, scope: Default::default() };
     state.visit_net(ast_net, trg);
     state.finish();
@@ -193,7 +193,7 @@ impl Encoder for InterpretedDef {
   }
 }
 
-impl<'a, M: Mode> Encoder for Net<'a, M> {
+impl<'a> Encoder for Net<'a> {
   type Trg = Trg;
 
   fn link_const(&mut self, trg: Self::Trg, port: Port) {

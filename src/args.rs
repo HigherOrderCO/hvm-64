@@ -27,14 +27,6 @@ pub struct RuntimeOpts {
   #[arg(short = '1', long = "single")]
   pub single_core: bool,
 
-  /// Lazy mode.
-  ///
-  /// Lazy mode only expands references that are reachable
-  /// by a walk from the root of the net. This leads to a dramatic slowdown,
-  /// but allows running programs that would expand indefinitely otherwise.
-  #[arg(short, long = "lazy")]
-  pub lazy_mode: bool,
-
   /// How much memory to allocate on startup.
   ///
   /// Supports abbreviations such as '4G' or '400M'.

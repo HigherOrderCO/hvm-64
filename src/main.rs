@@ -28,7 +28,7 @@ use hvm64_host::{
   stdlib::{create_host, insert_stdlib},
   DefRef, Host,
 };
-use hvm64_runtime::{dispatch_dyn_net, Def, DynNet, Heap, Mode, Port, Trg};
+use hvm64_runtime::{Def, Heap, Port, Trg};
 use hvm64_transform::Transform;
 
 fn main() {
@@ -184,25 +184,23 @@ fn load_dylibs(host: Arc<Mutex<Host>>, include: &[PathBuf]) {
 fn reduce_exprs(host: Arc<Mutex<Host>>, exprs: &[Net], opts: &RuntimeOpts) {
   let heap = Heap::new(opts.memory).expect("memory allocation failed");
   for expr in exprs {
-    let mut net = DynNet::new(&heap, opts.lazy_mode);
-    dispatch_dyn_net!(&mut net => {
-      host.lock().encode_net(net, Trg::port(Port::new_var(net.root.addr())), expr);
-      let start_time = Instant::now();
-      if opts.single_core {
-        net.normal();
-      } else {
-        net.parallel_normal();
-      }
-      let elapsed = start_time.elapsed();
-      println!("{}", host.lock().readback(net));
-      if opts.show_stats {
-        print_stats(net, elapsed);
-      }
-    });
+    let net = &mut hvm64_runtime::Net::new(&heap);
+    host.lock().encode_net(net, Trg::port(Port::new_var(net.root.addr())), expr);
+    let start_time = Instant::now();
+    if opts.single_core {
+      net.normal();
+    } else {
+      net.parallel_normal();
+    }
+    let elapsed = start_time.elapsed();
+    println!("{}", host.lock().readback(net));
+    if opts.show_stats {
+      print_stats(net, elapsed);
+    }
   }
 }
 
-fn print_stats<M: Mode>(net: &hvm64_runtime::Net<M>, elapsed: Duration) {
+fn print_stats(net: &hvm64_runtime::Net, elapsed: Duration) {
   eprintln!("RWTS   : {:>15}", pretty_num(net.rwts.total()));
   eprintln!("- ANNI : {:>15}", pretty_num(net.rwts.anni));
   eprintln!("- COMM : {:>15}", pretty_num(net.rwts.comm));

@@ -122,7 +122,7 @@ fn compile_struct(code: &mut String, host: &Host, rust_name: &str, def: &Def<Int
   writeln!(code)?;
 
   writeln!(code, "impl AsDef for Def_{rust_name} {{")?;
-  writeln!(code, "  unsafe fn call<M: Mode>(slf: *const Def<Self>, net: &mut Net<M>, port: Port) {{")?;
+  writeln!(code, "  unsafe fn call(slf: *const Def<Self>, net: &mut Net, port: Port) {{")?;
   writeln!(code, "    let slf = unsafe {{ &*slf }};")?;
   writeln!(code, "    let t0 = Trg::port(port);")?;
 

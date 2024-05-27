@@ -3,17 +3,17 @@ use super::*;
 use mem::MaybeUninit;
 
 /// An interaction combinator net.
-pub struct Net<'a, M: Mode> {
-  pub(super) linker: Linker<'a, M>,
+pub struct Net<'a> {
+  pub(super) linker: Linker<'a>,
   pub tid: usize,  // thread id
   pub tids: usize, // thread count
   pub trgs: Box<[MaybeUninit<Trg>]>,
   pub root: Wire,
 }
 
-deref!({<'a, M: Mode>} Net<'a, M> => self.linker: Linker<'a, M>);
+deref!({<'a, >} Net<'a> => self.linker: Linker<'a>);
 
-impl<'h, M: Mode> Net<'h, M> {
+impl<'h> Net<'h> {
   /// Creates an empty net with a given heap.
   pub fn new(heap: &'h Heap) -> Self {
     let mut net = Net::new_with_root(heap, Wire(ptr::null()));
@@ -31,14 +31,13 @@ impl<'h, M: Mode> Net<'h, M> {
   }
 }
 
-impl<'a, M: Mode> Net<'a, M> {
+impl<'a> Net<'a> {
   /// Reduces at most `limit` redexes.
   ///
   /// If normalized, returns `Some(num_redexes)`.
   /// If stopped because the limit was reached, returns `None`.
   #[inline(always)]
   pub fn reduce(&mut self, limit: usize) -> Option<usize> {
-    assert!(!M::LAZY);
     let mut count = 0;
 
     while let Some((a, b)) = self.redexes.pop() {
@@ -51,82 +50,18 @@ impl<'a, M: Mode> Net<'a, M> {
     Some(count)
   }
 
-  // Lazy mode weak head normalizer
-  #[inline(always)]
-  pub fn weak_normal(&mut self, mut prev: Port, root: Wire) -> Port {
-    assert!(M::LAZY);
-
-    let mut path: Vec<Port> = vec![];
-
-    loop {
-      trace!(self.tracer, prev);
-      // Load ptrs
-      let next = self.get_target_full(prev.clone());
-      trace!(self.tracer, next);
-
-      // If next is root, stop.
-      if next == Port::new_var(root.addr()) || next == Port::new_var(self.root.addr()) {
-        break;
-      }
-
-      // If next is a main port...
-      if next.is_principal() {
-        // If prev is a main port, reduce the active pair.
-        if prev.is_principal() {
-          self.interact(next, prev.clone());
-          prev = path.pop().unwrap();
-          continue;
-        // Otherwise, if it is a ref, expand it.
-        } else if next.tag() == Ref && next != Port::ERA {
-          self.call(next, prev.clone());
-          continue;
-        // Otherwise, we're done.
-        } else {
-          break;
-        }
-      }
-
-      // If next is an aux port, pass through.
-      let main = self.get_header(next.addr().left_half());
-      path.push(prev);
-      prev = main.this.clone();
-    }
-
-    self.get_target_full(prev)
-  }
-
-  pub fn normal_from(&mut self, root: Wire) {
-    assert!(M::LAZY);
-    let mut visit = vec![Port::new_var(root.addr())];
-    while let Some(prev) = visit.pop() {
-      trace!(self.tracer, "visit", prev);
-      //println!("normal {} | {}", prev.view(), self.rewrites());
-      let next = self.weak_normal(prev, root.clone());
-      trace!(self.tracer, "got", next);
-      if next.is_full_node() {
-        visit.push(Port::new_var(next.addr()));
-        visit.push(Port::new_var(next.addr().other_half()));
-      }
-    }
-  }
-
   /// Reduces a net to normal form.
   pub fn normal(&mut self) {
-    if M::LAZY {
-      self.normal_from(self.root.clone());
-    } else {
-      self.expand();
-      while !self.redexes.is_empty() {
-        self.reduce(usize::MAX);
-      }
+    self.expand();
+    while !self.redexes.is_empty() {
+      self.reduce(usize::MAX);
     }
   }
 }
 
-impl<'h, M: Mode> Net<'h, M> {
+impl<'h> Net<'h> {
   /// Expands [`Tag::Ref`] nodes in the tree connected to `root`.
   pub fn expand(&mut self) {
-    assert!(!M::LAZY);
     let (new_root, out_port) = self.create_wire();
     let old_root = mem::replace(&mut self.root, new_root);
     self.link_wire_port(old_root, ExpandDef::new(out_port));
@@ -144,7 +79,7 @@ impl ExpandDef {
 }
 
 impl AsDef for ExpandDef {
-  unsafe fn call<M: Mode>(def: *const Def<Self>, net: &mut Net<M>, port: Port) {
+  unsafe fn call(def: *const Def<Self>, net: &mut Net, port: Port) {
     if port.tag() == Tag::Ref && port != Port::ERA {
       let other: *const Def = port.addr().def() as *const _;
       if let Some(other) = Def::downcast_ptr::<Self>(other) {

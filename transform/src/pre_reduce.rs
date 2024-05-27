@@ -20,7 +20,7 @@ use hvm64_host::{
   stdlib::{AsHostedDef, HostedDef},
   DefRef, Host,
 };
-use hvm64_runtime::{Def, Heap, InterpretedDef, LabSet, Mode, Port, Rewrites, Strict};
+use hvm64_runtime::{Def, Heap, InterpretedDef, LabSet, Port, Rewrites};
 use hvm64_util::maybe_grow;
 
 use alloc::sync::Arc;
@@ -93,7 +93,7 @@ enum SeenState {
 struct InertDef(Arc<Mutex<Vec<(Port, Port)>>>);
 
 impl AsHostedDef for InertDef {
-  fn call<M: Mode>(def: &Def<Self>, _: &mut hvm64_runtime::Net<M>, port: Port) {
+  fn call(def: &Def<Self>, _: &mut hvm64_runtime::Net, port: Port) {
     def.data.0.lock().push((Port::new_ref(def), port));
   }
 }
@@ -139,7 +139,7 @@ impl<'a> State<'a> {
     // First, pre-reduce all nets referenced by this net by walking the tree
     self.visit_net(self.book.get(nam).unwrap());
 
-    let mut rt = hvm64_runtime::Net::<Strict>::new(self.area);
+    let mut rt = hvm64_runtime::Net::new(self.area);
     rt.boot(self.host.defs.get(nam).expect("No function."));
     let n_reduced = rt.reduce(self.max_rwts as usize);
 

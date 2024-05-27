@@ -1,19 +1,5 @@
 use super::*;
 
-#[cfg(not(feature = "std"))]
-use crate::prelude::Map as IntMap;
-#[cfg(feature = "std")]
-use nohash_hasher::IntMap;
-
-/// Stores extra data needed about the nodes when in lazy mode. (In strict mode,
-/// this is unused.)
-pub(super) struct Header {
-  /// the principal port of this node
-  pub(super) this: Port,
-  /// the port connected to the principal port of this node
-  pub(super) targ: Port,
-}
-
 /// Manages linking ports and wires within the net.
 ///
 /// When threads interfere, this uses the atomic linking algorithm described in
@@ -21,25 +7,17 @@ pub(super) struct Header {
 ///
 /// Linking wires must be done atomically, but linking ports can be done
 /// non-atomically (because they must be locked).
-pub struct Linker<'h, M: Mode> {
+pub struct Linker<'h> {
   pub(super) allocator: Allocator<'h>,
   pub rwts: Rewrites,
   pub redexes: RedexQueue,
-  headers: IntMap<Addr, Header>,
-  _mode: PhantomData<M>,
 }
 
-deref!({<'h, M: Mode>} Linker<'h, M> => self.allocator: Allocator<'h>);
+deref!({<'h, >} Linker<'h> => self.allocator: Allocator<'h>);
 
-impl<'h, M: Mode> Linker<'h, M> {
+impl<'h> Linker<'h> {
   pub fn new(heap: &'h Heap) -> Self {
-    Linker {
-      allocator: Allocator::new(heap),
-      redexes: RedexQueue::default(),
-      rwts: Default::default(),
-      headers: Default::default(),
-      _mode: PhantomData,
-    }
+    Linker { allocator: Allocator::new(heap), redexes: RedexQueue::default(), rwts: Default::default() }
   }
 
   /// Links two ports.
@@ -94,7 +72,7 @@ impl<'h, M: Mode> Linker<'h, M> {
     debug_assert!(!(a.is(Tag::Var) || a.is(Tag::Red) || b.is(Tag::Var) || b.is(Tag::Red)));
     if a.is_skippable() && b.is_skippable() {
       self.rwts.eras += 1;
-    } else if !M::LAZY {
+    } else {
       // Prioritize redexes that do not allocate memory,
       // to prevent OOM errors that can be avoided
       // by reducing redexes in a different order (see #91)
@@ -103,9 +81,6 @@ impl<'h, M: Mode> Linker<'h, M> {
       } else {
         self.redexes.slow.push((a, b));
       }
-    } else {
-      self.set_header(a.clone(), b.clone());
-      self.set_header(b.clone(), a.clone());
     }
   }
 
@@ -116,8 +91,6 @@ impl<'h, M: Mode> Linker<'h, M> {
     trace!(self, a_port, b_port);
     if a_port.is(Tag::Var) {
       a_port.wire().set_target(b_port);
-    } else if M::LAZY {
-      self.set_header(a_port, b_port);
     }
   }
 
@@ -150,9 +123,6 @@ impl<'h, M: Mode> Linker<'h, M> {
       }
     } else {
       self.free_wire(a_wire);
-      if M::LAZY {
-        self.set_header(a_port, b_port);
-      }
     }
   }
 
@@ -310,7 +280,7 @@ impl Trg {
   }
 }
 
-impl<'h, M: Mode> Linker<'h, M> {
+impl<'h> Linker<'h> {
   /// Links a `Trg` to a port, delegating to the appropriate method based on the
   /// type of `a`.
   #[inline(always)]
@@ -331,27 +301,6 @@ impl<'h, M: Mode> Linker<'h, M> {
       (false, true) => self.link_wire_port(b.as_wire(), a.as_port()),
       (false, false) => self.link_port_port(a.as_port(), b.as_port()),
     }
-  }
-
-  pub(super) fn get_header(&self, addr: Addr) -> &Header {
-    assert!(M::LAZY);
-    &self.headers[&addr]
-  }
-
-  pub(super) fn set_header(&mut self, ptr: Port, trg: Port) {
-    assert!(M::LAZY);
-    trace!(self, ptr, trg);
-    if ptr.is_full_node() {
-      self.headers.insert(ptr.addr(), Header { this: ptr, targ: trg });
-    }
-  }
-
-  pub(super) fn get_target_full(&self, port: Port) -> Port {
-    assert!(M::LAZY);
-    if !port.is_principal() {
-      return port.wire().load_target();
-    }
-    self.headers[&port.addr()].targ.clone()
   }
 }
 

@@ -88,8 +88,7 @@ pub struct Def<T: ?Sized + Send + Sync = Dynamic> {
   /// interaction combinator whose label is not in this set.
   pub labs: LabSet,
   ty: TypeId,
-  call_strict: unsafe fn(*const Def<T>, &mut Net<Strict>, port: Port),
-  call_lazy: unsafe fn(*const Def<T>, &mut Net<Lazy>, port: Port),
+  call: unsafe fn(*const Def<T>, &mut Net, port: Port),
   pub data: T,
 }
 
@@ -106,7 +105,7 @@ unsafe impl Send for Dynamic {}
 unsafe impl Sync for Dynamic {}
 
 pub trait AsDef: Any + Send + Sync {
-  unsafe fn call<M: Mode>(slf: *const Def<Self>, net: &mut Net<M>, port: Port);
+  unsafe fn call(slf: *const Def<Self>, net: &mut Net, port: Port);
 }
 
 impl<T: Send + Sync> Def<T> {
@@ -114,7 +113,7 @@ impl<T: Send + Sync> Def<T> {
   where
     T: AsDef,
   {
-    Def { labs, ty: TypeId::of::<T>(), call_strict: T::call::<Strict>, call_lazy: T::call::<Lazy>, data }
+    Def { labs, ty: TypeId::of::<T>(), call: T::call, data }
   }
 
   #[inline(always)]
@@ -146,11 +145,8 @@ impl Def {
     unsafe { Def::downcast_mut_ptr(self).map(|x| &mut *x) }
   }
   #[inline(always)]
-  pub unsafe fn call<M: Mode>(slf: *const Def, net: &mut Net<M>, port: Port) {
-    match net.as_dyn_mut() {
-      DynNetMut::Strict(net) => ((*slf).call_strict)(slf as *const _, net, port),
-      DynNetMut::Lazy(net) => ((*slf).call_lazy)(slf as *const _, net, port),
-    }
+  pub unsafe fn call(slf: *const Def, net: &mut Net, port: Port) {
+    ((*slf).call)(slf as *const _, net, port)
   }
 }
 
@@ -169,18 +165,13 @@ impl<T: Send + Sync> DerefMut for Def<T> {
   }
 }
 
-impl<F: Fn(&mut Net<Strict>, Port) + Send + Sync + 'static, G: Fn(&mut Net<Lazy>, Port) + Send + Sync + 'static> AsDef
-  for (F, G)
-{
-  unsafe fn call<M: Mode>(slf: *const Def<Self>, net: &mut Net<M>, port: Port) {
-    match net.as_dyn_mut() {
-      DynNetMut::Strict(net) => ((*slf).data.0)(net, port),
-      DynNetMut::Lazy(net) => ((*slf).data.1)(net, port),
-    }
+impl<F: Fn(&mut Net, Port) + Send + Sync + 'static> AsDef for F {
+  unsafe fn call(slf: *const Def<Self>, net: &mut Net, port: Port) {
+    ((*slf).data)(net, port)
   }
 }
 
-impl<'a, M: Mode> Net<'a, M> {
+impl<'a> Net<'a> {
   /// Expands a [`Ref`] node connected to `trg`.
   #[inline(never)]
   pub fn call(&mut self, port: Port, trg: Port) {
@@ -223,7 +214,7 @@ impl InterpretedDef {
 }
 
 impl AsDef for InterpretedDef {
-  unsafe fn call<M: Mode>(def: *const Def<InterpretedDef>, net: &mut Net<M>, trg: Port) {
+  unsafe fn call(def: *const Def<InterpretedDef>, net: &mut Net, trg: Port) {
     let def = unsafe { &*def };
     let def = &def.data;
     let instructions = &def.instr;

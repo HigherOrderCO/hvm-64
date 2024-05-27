@@ -209,7 +209,7 @@ fn test_apply_tree() {
     }
 
     let host = Host::default();
-    let mut rnet = run::Net::<run::Strict>::new(&area);
+    let mut rnet = run::Net::new(&area);
     let root_port = run::Trg::port(run::Port::new_var(rnet.root.addr()));
     host.encode_net(&mut rnet, root_port, &fun);
     rnet.normal();

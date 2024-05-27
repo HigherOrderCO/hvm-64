@@ -1,6 +1,6 @@
 use crate::prelude::*;
 
-use super::{Addr, Host, Mode, Port, Tag, Wire};
+use super::{Addr, Host, Port, Tag, Wire};
 
 use core::ops::RangeFrom;
 
@@ -19,7 +19,7 @@ impl Host {
   /// resulting ast net, as it is impossible to read these back from the runtime
   /// net representation. In the case of vicious circles, this may result in
   /// unbound variables.
-  pub fn readback<M: Mode>(&self, rt_net: &hvm64_runtime::Net<M>) -> Net {
+  pub fn readback(&self, rt_net: &hvm64_runtime::Net) -> Net {
     let mut state = ReadbackState { host: self, vars: Default::default(), var_id: 0 .. };
     let mut net = Net::default();
 

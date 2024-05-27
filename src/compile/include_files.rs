@@ -95,7 +95,6 @@ hvm64-runtime = { path = "../runtime", default-features = false }
       addr
       allocator
       def
-      dyn_net
       instruction
       interact
       linker

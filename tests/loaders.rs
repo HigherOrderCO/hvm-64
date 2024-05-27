@@ -29,7 +29,7 @@ pub fn normal_with(book: Book, mem: Option<usize>, entry_point: &str) -> (run::R
   let area = run::Heap::new(mem).unwrap();
   let host = create_host(&book);
 
-  let mut rnet = run::Net::<run::Strict>::new(&area);
+  let mut rnet = run::Net::new(&area);
   rnet.boot(&host.lock().defs[entry_point]);
   rnet.normal();
 
