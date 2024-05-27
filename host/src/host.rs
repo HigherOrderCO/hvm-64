@@ -7,11 +7,7 @@ include!("../../prelude.rs");
 
 use crate::prelude::*;
 use hvm64_ast::{Book, Tree};
-use hvm64_runtime::{Addr, Def, InterpretedDef, LabSet, Port, Tag, Wire};
-
-use core::ops::{Deref, DerefMut};
-
-pub mod stdlib;
+use hvm64_runtime::{Addr, Def, DynDef, InterpretedDef, LabSet, Port, Tag, Wire};
 
 mod calc_labels;
 mod encode;
@@ -23,27 +19,9 @@ use calc_labels::calculate_label_sets;
 #[derive(Default)]
 pub struct Host {
   /// the forward mapping, from a name to the runtime def
-  pub defs: Map<String, DefRef>,
+  pub defs: Map<String, Box<DynDef>>,
   /// the backward mapping, from the address of a runtime def to the name
   pub back: Map<Addr, String>,
-}
-
-/// A potentially-owned reference to a [`Def`]. Vitally, the address of the
-/// `Def` is stable, even if the `DefRef` moves -- this is why
-/// [`std::Borrow::Cow`] cannot be used here.
-pub enum DefRef {
-  Owned(Box<dyn DerefMut<Target = Def> + Send + Sync>),
-  Static(&'static Def),
-}
-
-impl Deref for DefRef {
-  type Target = Def;
-  fn deref(&self) -> &Def {
-    match self {
-      DefRef::Owned(x) => x,
-      DefRef::Static(x) => x,
-    }
-  }
 }
 
 impl Host {
@@ -63,7 +41,7 @@ impl Host {
   /// Like `insert_book`, but allows specifying a function (`default_def`) that
   /// will be run when the name of a definition is not found in the book.
   /// The return value of the function will be inserted into the host.
-  pub fn insert_book_with_default(&mut self, book: &Book, default_def: &mut dyn FnMut(&str) -> DefRef) {
+  pub fn insert_book_with_default(&mut self, book: &Book, default_def: &mut dyn FnMut(&str) -> Box<DynDef>) {
     #[cfg(feature = "std")]
     {
       self.defs.reserve(book.len());
@@ -85,7 +63,7 @@ impl Host {
     })
     .into_iter()
     {
-      let def = DefRef::Owned(Box::new(Def::new(labs, InterpretedDef::default())));
+      let def = Box::new(Def::new(labs, InterpretedDef::default()));
       self.insert_def(name, def);
     }
 
@@ -98,16 +76,13 @@ impl Host {
   }
 
   /// Inserts a singular def into the mapping.
-  pub fn insert_def(&mut self, name: &str, def: DefRef) {
+  pub fn insert_def(&mut self, name: &str, def: Box<DynDef>) {
     self.back.insert(Port::new_ref(&def).addr(), name.to_owned());
     self.defs.insert(name.to_owned(), def);
   }
 
   /// Returns a mutable [`Def`] named `name`.
   pub fn get_mut<T: Send + Sync + 'static>(&mut self, name: &str) -> &mut Def<T> {
-    match self.defs.get_mut(name).unwrap() {
-      DefRef::Owned(def) => def.downcast_mut().unwrap(),
-      DefRef::Static(_) => unreachable!(),
-    }
+    self.defs.get_mut(name).unwrap().downcast_mut().unwrap()
   }
 }

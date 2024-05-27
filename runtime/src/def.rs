@@ -92,6 +92,8 @@ pub struct Def<T: ?Sized + Send + Sync = Dynamic> {
   pub data: T,
 }
 
+pub type DynDef = dyn DerefMut<Target = Def> + Send + Sync;
+
 extern "C" {
   /// An internal type used to mark dynamic `Def`s.
   ///

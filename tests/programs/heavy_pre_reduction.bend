@@ -11,11 +11,13 @@ fib =
 
 expensive = (fib (C4 C2))
 
-erase = λn λx (n HVM.black_box x)
-black_plus = (HVM.black_box plus)
+erase = λn λx (n black_box x)
+black_plus = (black_box plus)
 expensive_1 = (fib (C4 C2))
 expensive_2 = (fib (C4 C2))
 
 main_fast = (black_plus expensive   expensive   )
 main_slow = (black_plus expensive_1 expensive_2 )
 main = *
+
+black_box = @x x

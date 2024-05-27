@@ -9,14 +9,10 @@ use std::{
   env::consts::{DLL_PREFIX, DLL_SUFFIX},
   ffi::OsStr,
   fs, io,
-  ops::DerefMut,
   path::PathBuf,
   process::{self, Stdio},
-  sync::Arc,
   time::{Duration, Instant},
 };
-
-use parking_lot::Mutex;
 
 use self::full::{CliMode, FullCli};
 
@@ -24,11 +20,8 @@ use args::{RunArgs, RuntimeOpts, TransformArgs, TransformPass};
 use clap::Parser;
 
 use hvm64_ast::{Book, Net, Tree};
-use hvm64_host::{
-  stdlib::{create_host, insert_stdlib},
-  DefRef, Host,
-};
-use hvm64_runtime::{Def, Heap, Port, Trg};
+use hvm64_host::Host;
+use hvm64_runtime::{DynDef, Heap, Port, Trg};
 use hvm64_transform::Transform;
 
 fn main() {
@@ -50,8 +43,8 @@ fn main() {
         process::exit(1);
       };
 
-      let host = create_host(&load_book(&[file], transform_args));
-      compile::create_temp_hvm(host).unwrap();
+      let host = Host::new(&load_book(&[file], transform_args));
+      compile::create_temp_hvm(&host).unwrap();
 
       compile_temp_hvm().unwrap();
 
@@ -63,12 +56,12 @@ fn main() {
       transform_args.transform_opts.prune_entrypoints.push(args.entry_point.clone());
 
       let host = load_host(&[file], transform_args, &run_opts.include);
-      run(host, run_opts, args);
+      run(&host, run_opts, args);
     }
     CliMode::Reduce { run_opts, transform_args, files, exprs } => {
       let host = load_host(&files, transform_args, &run_opts.include);
       let exprs: Vec<_> = exprs.iter().map(|x| x.parse().unwrap()).collect();
-      reduce_exprs(host, &exprs, &run_opts);
+      reduce_exprs(&host, &exprs, &run_opts);
     }
     CliMode::Transform { transform_args, files } => {
       let book = load_book(&files, transform_args);
@@ -81,7 +74,7 @@ fn main() {
   }
 }
 
-fn run(host: Arc<Mutex<Host>>, opts: RuntimeOpts, args: RunArgs) {
+fn run(host: &Host, opts: RuntimeOpts, args: RunArgs) {
   let mut net = Net { root: Tree::Ref { nam: args.entry_point }, redexes: vec![] };
   for arg in args.args {
     let arg: Net = arg.parse().unwrap();
@@ -92,15 +85,10 @@ fn run(host: Arc<Mutex<Host>>, opts: RuntimeOpts, args: RunArgs) {
   reduce_exprs(host, &[net], &opts);
 }
 
-fn load_host(
-  files: &[PathBuf],
-  transform_args: TransformArgs,
-  include: &[PathBuf],
-) -> Arc<parking_lot::lock_api::Mutex<parking_lot::RawMutex, Host>> {
-  let host: Arc<Mutex<Host>> = Default::default();
-  load_dylibs(host.clone(), include);
-  insert_stdlib(host.clone());
-  host.lock().insert_book(&load_book(files, transform_args));
+fn load_host(files: &[PathBuf], transform_args: TransformArgs, include: &[PathBuf]) -> Host {
+  let mut host: Host = Default::default();
+  load_dylibs(&mut host, include);
+  host.insert_book(&load_book(files, transform_args));
   host
 }
 
@@ -135,7 +123,7 @@ fn load_book(files: &[PathBuf], transform_args: TransformArgs) -> Book {
   book
 }
 
-fn load_dylibs(host: Arc<Mutex<Host>>, include: &[PathBuf]) {
+fn load_dylibs(host: &mut Host, include: &[PathBuf]) {
   let current_dir = std::env::current_dir().unwrap();
 
   for file in include {
@@ -168,11 +156,10 @@ fn load_dylibs(host: Arc<Mutex<Host>>, include: &[PathBuf]) {
       }
 
       let insert_into = lib
-        .get::<fn(&mut dyn FnMut(&str, Box<dyn DerefMut<Target = Def> + Send + Sync>))>(b"hvm64_dylib_v0__insert_into")
+        .get::<fn(&mut dyn FnMut(&str, Box<DynDef>))>(b"hvm64_dylib_v0__insert_into")
         .expect("failed to load insert_into");
-      let mut host = host.lock();
       insert_into(&mut |name, def| {
-        host.insert_def(name, DefRef::Owned(def));
+        host.insert_def(name, def);
       });
 
       // Leak the lib to avoid unloading it, as code from it is still referenced.
@@ -181,11 +168,11 @@ fn load_dylibs(host: Arc<Mutex<Host>>, include: &[PathBuf]) {
   }
 }
 
-fn reduce_exprs(host: Arc<Mutex<Host>>, exprs: &[Net], opts: &RuntimeOpts) {
+fn reduce_exprs(host: &Host, exprs: &[Net], opts: &RuntimeOpts) {
   let heap = Heap::new(opts.memory).expect("memory allocation failed");
   for expr in exprs {
     let net = &mut hvm64_runtime::Net::new(&heap);
-    host.lock().encode_net(net, Trg::port(Port::new_var(net.root.addr())), expr);
+    host.encode_net(net, Trg::port(Port::new_var(net.root.addr())), expr);
     let start_time = Instant::now();
     if opts.single_core {
       net.normal();
@@ -193,7 +180,7 @@ fn reduce_exprs(host: Arc<Mutex<Host>>, exprs: &[Net], opts: &RuntimeOpts) {
       net.parallel_normal();
     }
     let elapsed = start_time.elapsed();
-    println!("{}", host.lock().readback(net));
+    println!("{}", host.readback(net));
     if opts.show_stats {
       print_stats(net, elapsed);
     }

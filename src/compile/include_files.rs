@@ -1,8 +1,6 @@
-use std::{fs, io, path::Path, sync::Arc};
+use std::{fs, io, path::Path};
 
 use hvm64_host::Host;
-
-use parking_lot::Mutex;
 
 macro_rules! include_files {
   ($([$($prefix:ident)*])? crate $name:ident {$($sub:tt)*} $($rest:tt)*) => {
@@ -38,8 +36,8 @@ macro_rules! include_files {
 
 /// Copies the `hvm-64` source to a temporary `.hvm` directory.
 /// Only a subset of `Cargo.toml` is included.
-pub fn create_temp_hvm(host: Arc<Mutex<Host>>) -> Result<(), io::Error> {
-  let lib = super::compile_host(&host.lock());
+pub fn create_temp_hvm(host: &Host) -> Result<(), io::Error> {
+  let lib = super::compile_host(host);
   let outdir = ".hvm";
   if Path::new(&outdir).exists() {
     fs::remove_dir_all(outdir)?;

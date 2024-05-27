@@ -7,13 +7,12 @@ edition = "2021"
 path = "src/runtime.rs"
 
 [dependencies]
-parking_lot = "0.12.2"
-
 hvm64-util = { path = "../util", default-features = false }
 
 [features]
+default = ["std"]
 std = ["hvm64-util/std"]
-trace = []
+trace = ["std"]
 
 [lints]
 workspace = true

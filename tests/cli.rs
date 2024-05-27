@@ -160,20 +160,6 @@ fn test_cli_transform() {
   @sub = (<- a b> (a b))
   "###
   );
-
-  // Test log
-
-  assert_snapshot!(
-    execute_hvm64(&[
-      "transform",
-      "-Opre-reduce",
-      &(env!("CARGO_MANIFEST_DIR").to_owned() + "/tests/programs/log.hvm")
-    ]).unwrap().1,
-    @r###"
-  @main = a
-    & @HVM.log ~ (#1 (#2 a))
-  "###
-  );
 }
 
 #[test]

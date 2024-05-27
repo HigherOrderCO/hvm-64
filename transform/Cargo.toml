@@ -8,7 +8,6 @@ path = "src/transform.rs"
 
 [dependencies]
 ordered-float = { version = "4.2.0", default-features = false }
-parking_lot = "0.12.2"
 thiserror = "1.0.58"
 
 hvm64-ast = { path = "../ast", default-features = false }

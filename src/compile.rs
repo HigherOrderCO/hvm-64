@@ -51,7 +51,6 @@ fn _compile_host(host: &Host) -> Result<String, fmt::Error> {
 extern crate alloc;
 
 use hvm64_runtime::{{*, ops::{{TypedOp, Ty::*, Op::*}}}};
-use core::ops::DerefMut;
 use alloc::boxed::Box;
 
 #[no_mangle]
@@ -65,7 +64,7 @@ pub fn hvm64_dylib_v0__rust_version() -> &'static str {{
 }}
 
 #[no_mangle]
-pub fn hvm64_dylib_v0__insert_into(insert: &mut dyn FnMut(&str, Box<dyn DerefMut<Target = Def> + Send + Sync>)) {{
+pub fn hvm64_dylib_v0__insert_into(insert: &mut dyn FnMut(&str, Box<DynDef>)) {{
 "
   )?;
 

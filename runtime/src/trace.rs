@@ -70,7 +70,8 @@ use core::{
   sync::atomic::{AtomicBool, AtomicU64, Ordering},
 };
 
-use parking_lot::{Mutex, Once};
+#[cfg(feature = "std")]
+use std::sync::{Mutex, Once};
 
 use crate::prelude::*;
 use hvm64_util::ops::TypedOp as Op;
@@ -180,6 +181,7 @@ impl TraceData {
 }
 
 #[allow(clippy::vec_box)] // the address of `TraceLock` needs to remain stable
+#[cfg(feature = "std")]
 static ACTIVE_TRACERS: Mutex<Vec<Box<TraceLock>>> = Mutex::new(Vec::new());
 
 struct TraceWriter {
@@ -196,8 +198,8 @@ impl Default for TraceWriter {
       data: UnsafeCell::new(TraceData { tid: 0, cursor: 0, data: Box::new([0; TRACE_SIZE]) }),
     });
     let lock = unsafe { &*(&*boxed as *const _) };
-    let mut active_tracers = ACTIVE_TRACERS.lock();
-    active_tracers.push(boxed);
+    #[cfg(feature = "std")]
+    ACTIVE_TRACERS.lock().unwrap().push(boxed);
     TraceWriter { lock, nonce: TRACE_NONCE.fetch_add(1, Ordering::Relaxed) }
   }
 }
@@ -294,7 +296,7 @@ impl<'a> TraceReader<'a> {
 #[cfg_attr(feature = "trace", no_mangle)]
 #[cfg(feature = "std")]
 pub fn _read_traces(limit: usize) {
-  let active_tracers = &*ACTIVE_TRACERS.lock();
+  let active_tracers = &*ACTIVE_TRACERS.lock().unwrap();
   let mut readers = active_tracers
     .iter()
     .enumerate()
@@ -315,8 +317,9 @@ pub fn _read_traces(limit: usize) {
   eprintln!("{}", out);
 }
 
+#[cfg(feature = "std")]
 pub unsafe fn _reset_traces() {
-  ACTIVE_TRACERS.lock().clear();
+  ACTIVE_TRACERS.lock().unwrap().clear();
   TRACE_NONCE.store(1, Ordering::Relaxed);
 }
 
@@ -461,10 +464,10 @@ impl fmt::Debug for FmtWord {
   }
 }
 
+#[cfg(feature = "std")]
 pub fn set_hook() {
   static ONCE: Once = Once::new();
   if cfg!(feature = "trace") {
-    #[cfg(feature = "std")]
     ONCE.call_once(|| {
       use std::panic;
       let hook = panic::take_hook();

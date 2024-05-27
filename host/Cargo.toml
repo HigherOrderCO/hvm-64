@@ -7,8 +7,6 @@ edition = "2021"
 path = "src/host.rs"
 
 [dependencies]
-parking_lot = "0.12.2"
-
 hvm64-ast = { path = "../ast", default-features = false }
 hvm64-util = { path = "../util", default-features = false }
 hvm64-runtime = { path = "../runtime", default-features = false }

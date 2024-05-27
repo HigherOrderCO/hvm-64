@@ -1,1 +1,0 @@
-main = (HVM.log 1 2)

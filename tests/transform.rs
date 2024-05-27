@@ -17,12 +17,16 @@ use loaders::*;
 #[test]
 /// Test that ensures that pre_reduce only reduces repeated refs once.
 pub fn test_fast_pre_reduce() {
-  let book = parse_core(&load_file("heavy_pre_reduction.hvm"));
+  let mut book = parse_core(&load_file("heavy_pre_reduction.hvm"));
+  let black_box = book.remove("black_box").unwrap();
   let (mut book_1, mut book_2) = (book.clone(), book);
 
   let rwts_1 = book_1.pre_reduce(&|x| !["expensive", "main_fast"].contains(&x), None, u64::MAX).rewrites;
   let rwts_2 =
     book_2.pre_reduce(&|x| !["expensive_1", "expensive_2", "main_slow"].contains(&x), None, u64::MAX).rewrites;
+
+  book_1.insert("black_box".to_owned(), black_box.clone());
+  book_2.insert("black_box".to_owned(), black_box);
 
   let rwts_1 = rwts_1 + normal_with(book_1, None, "main_fast").0;
   let rwts_2 = rwts_2 + normal_with(book_2, None, "main_slow").0;
