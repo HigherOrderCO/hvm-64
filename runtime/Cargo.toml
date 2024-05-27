@@ -1,0 +1,20 @@
+[package]
+name = "hvmc-runtime"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+path = "src/runtime.rs"
+
+[dependencies]
+parking_lot = "0.12.2"
+nohash-hasher = { version = "0.2.0", optional = true }
+
+hvmc-util = { path = "../util", default-features = false }
+
+[features]
+std = ["hvmc-util/std", "dep:nohash-hasher"]
+trace = []
+
+[lints]
+workspace = true

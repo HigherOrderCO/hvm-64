@@ -1,5 +1,6 @@
 #![cfg(feature = "std")]
 
+use hvmc_transform::pre_reduce::PreReduce;
 use parking_lot::Mutex;
 use std::{
   fs,
@@ -10,62 +11,17 @@ use std::{
   time::Instant,
 };
 
-use hvmc::{
-  ast::{self, Book, Net},
-  host::Host,
-  run::{self, Strict},
-  util::show_rewrites,
-};
-use insta::{assert_debug_snapshot, assert_snapshot};
-use loaders::*;
+use hvmc_ast::{self as ast, Book, Net};
+use hvmc_host::{stdlib::create_host, Host};
+use hvmc_runtime as run;
 
-mod loaders;
+use insta::assert_snapshot;
 
 use serial_test::serial;
 
-#[test]
-fn test_era_era() {
-  let net = parse_core("@main = * & * ~ *");
-  let (rwts, net) = normal(net, Some(128));
-  assert_snapshot!(Net::to_string(&net), @"*");
-  assert_debug_snapshot!(rwts.total(), @"3");
-}
-
-#[test]
-fn test_era_era2() {
-  let net = parse_core("@main = (* *) & * ~ *");
-  let (rwts, net) = normal(net, Some(128));
-  assert_snapshot!(Net::to_string(&net), @"(* *)");
-  assert_debug_snapshot!(rwts.total(), @"5");
-}
-
-#[test]
-fn test_commutation() {
-  let net = parse_core("@main = root & (x x) ~ [* root]");
-  let (rwts, net) = normal(net, Some(128));
-  assert_snapshot!(Net::to_string(&net), @"(a a)");
-  assert_debug_snapshot!(rwts.total(), @"7");
-}
-
-#[test]
-fn test_bool_and() {
-  let book = parse_core(
-    "
-    @true = (b (* b))
-    @false = (* (b b))
-    @and  = ((b (@false c)) (b c))
-    @main = root & @and ~ (@true (@false root))
-  ",
-  );
-  let (rwts, net) = normal(book, Some(128));
-
-  assert_snapshot!(Net::to_string(&net), @"(* (a a))");
-  assert_debug_snapshot!(rwts.total(), @"14");
-}
-
 fn execute_host(host: Arc<Mutex<Host>>) -> Option<(run::Rewrites, Net)> {
   let heap = run::Heap::new(None).unwrap();
-  let mut net = run::Net::<Strict>::new(&heap);
+  let mut net = run::Net::<run::Strict>::new(&heap);
   // The host is locked inside this block.
   {
     let lock = host.lock();
@@ -87,7 +43,7 @@ fn test_run(name: &str, host: Arc<Mutex<Host>>) {
 
   let Some((rwts, net)) = execute_host(host) else { return };
 
-  let output = format!("{}\n{}", net, show_rewrites(&rwts));
+  let output = format!("{}\n{}", net, &rwts);
   assert_snapshot!(output);
 }
 
@@ -101,20 +57,20 @@ fn test_pre_reduce_run(path: &str, mut book: Book) {
   print!(" {:.3?}...", start.elapsed());
   io::stdout().flush().unwrap();
 
-  let host = hvmc::stdlib::create_host(&book);
+  let host = create_host(&book);
   let Some((rwts, net)) = execute_host(host) else {
-    assert_snapshot!(show_rewrites(&pre_stats.rewrites));
+    assert_snapshot!(&pre_stats.rewrites);
     return;
   };
 
-  let output = format!("{}\npre-reduce:\n{}run:\n{}", net, show_rewrites(&pre_stats.rewrites), show_rewrites(&rwts));
+  let output = format!("{}\npre-reduce:\n{}run:\n{}", net, &pre_stats.rewrites, &rwts);
   assert_snapshot!(output);
 }
 
 fn test_path(path: &Path) {
   let code = fs::read_to_string(path).unwrap();
   let book = ast::Book::from_str(&code).unwrap();
-  let host = hvmc::stdlib::create_host(&book);
+  let host = create_host(&book);
 
   let path = path.strip_prefix(env!("CARGO_MANIFEST_DIR")).unwrap();
   let path = path.to_str().unwrap();

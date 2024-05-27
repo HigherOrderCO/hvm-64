@@ -3,15 +3,13 @@
 use std::{
   error::Error,
   io::Read,
-  path::PathBuf,
   process::{Command, ExitStatus, Stdio},
 };
 
-use hvmc::{
-  ast::{Net, Tree},
-  host::Host,
-};
-use insta::assert_display_snapshot;
+use hvmc_ast::{Net, Tree};
+use hvmc_host::Host;
+use hvmc_runtime as run;
+use insta::assert_snapshot;
 
 fn get_arithmetic_program_path() -> String {
   env!("CARGO_MANIFEST_DIR").to_owned() + "/examples/arithmetic.hvmc"
@@ -41,17 +39,17 @@ fn execute_hvmc(args: &[&str]) -> Result<(ExitStatus, String), Box<dyn Error>> {
 #[test]
 fn test_cli_reduce() {
   // Test normal-form expressions
-  assert_display_snapshot!(
+  assert_snapshot!(
     execute_hvmc(&["reduce", "-m", "100M", "--", "#1"]).unwrap().1,
     @"#1"
   );
   // Test non-normal form expressions
-  assert_display_snapshot!(
+  assert_snapshot!(
     execute_hvmc(&["reduce", "-m", "100M", "--", "a & #3 ~ <* #4 a>"]).unwrap().1,
     @"#12"
   );
   // Test multiple expressions
-  assert_display_snapshot!(
+  assert_snapshot!(
     execute_hvmc(&["reduce", "-m", "100M", "--", "a & #3 ~ <* #4 a>", "a & #64 ~ </ #2 a>"]).unwrap().1,
     @"#12\n#32"
   );
@@ -59,7 +57,7 @@ fn test_cli_reduce() {
   // Test loading file and reducing expression
   let arithmetic_program = get_arithmetic_program_path();
 
-  assert_display_snapshot!(
+  assert_snapshot!(
     execute_hvmc(&[
       "reduce", "-m", "100M",
       &arithmetic_program,
@@ -68,7 +66,7 @@ fn test_cli_reduce() {
     @"#12"
   );
 
-  assert_display_snapshot!(
+  assert_snapshot!(
     execute_hvmc(&[
       "reduce", "-m", "100M",
       &arithmetic_program,
@@ -83,7 +81,7 @@ fn test_cli_run_with_args() {
   let arithmetic_program = get_arithmetic_program_path();
 
   // Test simple program running
-  assert_display_snapshot!(
+  assert_snapshot!(
     execute_hvmc(&[
       "run", "-m", "100M",
       &arithmetic_program,
@@ -92,7 +90,7 @@ fn test_cli_run_with_args() {
   );
 
   // Test partial argument passing
-  assert_display_snapshot!(
+  assert_snapshot!(
     execute_hvmc(&[
       "run", "-m", "100M",
       &arithmetic_program,
@@ -102,7 +100,7 @@ fn test_cli_run_with_args() {
   );
 
   // Test passing all arguments.
-  assert_display_snapshot!(
+  assert_snapshot!(
     execute_hvmc(&[
       "run", "-m", "100M",
       &arithmetic_program,
@@ -118,7 +116,7 @@ fn test_cli_transform() {
   let arithmetic_program = get_arithmetic_program_path();
 
   // Test simple program running
-  assert_display_snapshot!(
+  assert_snapshot!(
     execute_hvmc(&[
       "transform",
       "-Opre-reduce",
@@ -139,7 +137,7 @@ fn test_cli_transform() {
   "###
   );
 
-  assert_display_snapshot!(
+  assert_snapshot!(
     execute_hvmc(&[
       "transform",
       "-Opre-reduce",
@@ -165,7 +163,7 @@ fn test_cli_transform() {
 
   // Test log
 
-  assert_display_snapshot!(
+  assert_snapshot!(
     execute_hvmc(&[
       "transform",
       "-Opre-reduce",
@@ -181,7 +179,7 @@ fn test_cli_transform() {
 #[test]
 fn test_cli_errors() {
   // Test passing all arguments.
-  assert_display_snapshot!(
+  assert_snapshot!(
     execute_hvmc(&[
       "run", "this-file-does-not-exist.hvmc"
     ]).unwrap().1,
@@ -189,7 +187,7 @@ fn test_cli_errors() {
  Input file "this-file-does-not-exist.hvmc" not found
  "###
   );
-  assert_display_snapshot!(
+  assert_snapshot!(
     execute_hvmc(&[
       "reduce", "this-file-does-not-exist.hvmc"
     ]).unwrap().1,
@@ -201,7 +199,6 @@ fn test_cli_errors() {
 
 #[test]
 fn test_apply_tree() {
-  use hvmc::run;
   fn eval_with_args(fun: &str, args: &[&str]) -> Net {
     let area = run::Heap::new_exact(16).unwrap();
 
@@ -218,31 +215,31 @@ fn test_apply_tree() {
     rnet.normal();
     host.readback(&rnet)
   }
-  assert_display_snapshot!(
+  assert_snapshot!(
     eval_with_args("(a a)", &["(a a)"]),
     @"(a a)"
   );
-  assert_display_snapshot!(
+  assert_snapshot!(
     eval_with_args("b & (a b) ~ a", &["(a a)"]),
     @"a"
   );
-  assert_display_snapshot!(
+  assert_snapshot!(
     eval_with_args("(z0 z0)", &["(z1 z1)"]),
     @"(a a)"
   );
-  assert_display_snapshot!(
+  assert_snapshot!(
     eval_with_args("(* #1)", &["(a a)"]),
     @"#1"
   );
-  assert_display_snapshot!(
+  assert_snapshot!(
     eval_with_args("(<+ a b> (a b))", &["#1", "#2"]),
     @"#3"
   );
-  assert_display_snapshot!(
+  assert_snapshot!(
     eval_with_args("(<* a b> (a b))", &["#2", "#3"]),
     @"#6"
   );
-  assert_display_snapshot!(
+  assert_snapshot!(
     eval_with_args("(<* a b> (a b))", &["#2"]),
     @"(<* #2 a> a)"
   );
@@ -250,8 +247,6 @@ fn test_apply_tree() {
 
 #[test]
 fn test_cli_compile() {
-  // Test normal-form expressions
-
   if !Command::new(env!("CARGO_BIN_EXE_hvmc"))
     .args(["compile", &get_arithmetic_program_path()])
     .stdout(Stdio::inherit())
@@ -265,18 +260,12 @@ fn test_cli_compile() {
     panic!("{:?}", "compilation failed");
   };
 
-  let mut output_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-  output_path.push("examples/arithmetic");
-  let mut child = Command::new(&output_path).args(["#40", "#3"]).stdout(Stdio::piped()).spawn().unwrap();
+  let (status, output) = execute_hvmc(&["run", "-i", "examples/arithmetic", "/dev/null", "#40", "#3"]).unwrap();
 
-  let mut stdout = child.stdout.take().ok_or("Couldn't capture stdout!").unwrap();
-  child.wait().unwrap();
-  let mut output = String::new();
-  stdout.read_to_string(&mut output).unwrap();
-
-  assert_display_snapshot!(output, @r###"
+  assert_snapshot!(format_args!("{status}\n{output}"), @r###"
+  exit status: 0
   [#13 #1]
   "###);
 
-  std::fs::remove_file(&output_path).unwrap();
+  std::fs::remove_file("examples/arithmetic").unwrap();
 }

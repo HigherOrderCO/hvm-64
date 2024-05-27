@@ -1,0 +1,20 @@
+[package]
+name = "hvmc-host"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+path = "src/host.rs"
+
+[dependencies]
+parking_lot = "0.12.2"
+
+hvmc-ast = { path = "../ast", default-features = false }
+hvmc-util = { path = "../util", default-features = false }
+hvmc-runtime = { path = "../runtime", default-features = false }
+
+[features]
+std = ["hvmc-ast/std", "hvmc-util/std", "hvmc-runtime/std"]
+
+[lints]
+workspace = true

@@ -1,5 +1,19 @@
+[workspace]
+resolver = "2"
+
+members = ["ast", "host", "runtime", "transform", "util"]
+
+[workspace.lints.clippy]
+alloc_instead_of_core = "warn"
+std_instead_of_core = "warn"
+std_instead_of_alloc = "warn"
+absolute_paths = "warn"
+field_reassign_with_default = "allow"
+missing_safety_doc = "allow"
+new_ret_no_self = "allow"
+
 [package]
-name = "hvm-core"
+name = "hvmc"
 version = "0.2.26"
 edition = "2021"
 description = "HVM-Core is a massively parallel Interaction Combinator evaluator."
@@ -8,43 +22,27 @@ license = "MIT"
 [[bin]]
 name = "hvmc"
 path = "src/main.rs"
-required-features = ["cli"]
 bench = false
-
-[lib]
-name = "hvmc"
-path = "src/lib.rs"
-bench = false
-
-[profile.release]
-codegen-units = 1
-lto = "fat"
-opt-level = 3
-panic = "abort"
-debug = "full"
+required-features = ["std"]
 
 [dependencies]
-TSPL = "0.0.9"
-arrayvec = "0.7.4"
-clap = { version = "4.5.1", features = ["derive"], optional = true }
-libloading = "0.8.3"
-nohash-hasher = { version = "0.2.0" }
-ordered-float = "4.2.0"
-parking_lot = "0.12.1"
-stacker = "0.1.15"
+clap = { version = "4.5.4", features = ["derive"] }
+libloading = { version = "0.8.3", default-features = false }
+ordered-float = { version = "4.2.0" }
+parking_lot = "0.12.2"
 thiserror = "1.0.58"
 
-##--COMPILER-CUTOFF--##
-
-[features]
-default = ["cli", "_full_cli"]
-std = []
-cli = ["std", "dep:clap"]
-trace = []
-_full_cli = []
-_fuzz = ["std"]
-_fuzz_no_free = ["_fuzz"]
+hvmc-ast = { path = "./ast" }
+hvmc-runtime = { path = "./runtime" }
+hvmc-transform = { path = "./transform" }
+hvmc-util = { path = "./util" }
+hvmc-host = { path = "./host" }
 
 [dev-dependencies]
 insta = { version = "1.34.0", features = ["glob"] }
 serial_test = "3.0.0"
+
+[features]
+default = ["std"]
+std = []
+trace = ["hvmc-runtime/trace"]

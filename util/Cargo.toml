@@ -1,0 +1,14 @@
+[package]
+name = "hvmc-util"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+arrayvec = { version = "0.7.4", default-features = false }
+stacker = { version = "0.1.15", default-features = false }
+
+[features]
+std = ["arrayvec/std"]
+
+[lints]
+workspace = true
