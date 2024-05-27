@@ -62,7 +62,7 @@ members = ["util", "runtime", "gen"]
     r#"
 [package]
 name = "hvm64-gen"
-version = "0.0.0"
+version = "0.3.0"
 edition = "2021"
 
 [lib]

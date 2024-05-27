@@ -14,7 +14,7 @@ new_ret_no_self = "allow"
 
 [package]
 name = "hvm64"
-version = "0.2.26"
+version = "0.3.0"
 edition = "2021"
 description = "HVM-Core is a massively parallel Interaction Combinator evaluator."
 license = "MIT"
