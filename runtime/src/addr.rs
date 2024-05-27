@@ -12,9 +12,6 @@ use super::*;
 #[must_use]
 pub struct Addr(pub usize);
 
-#[cfg(feature = "std")]
-impl nohash_hasher::IsEnabled for Addr {}
-
 impl fmt::Debug for Addr {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     write!(f, "{:012x?}", self.0)

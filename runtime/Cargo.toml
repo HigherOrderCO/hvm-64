@@ -8,12 +8,11 @@ path = "src/runtime.rs"
 
 [dependencies]
 parking_lot = "0.12.2"
-nohash-hasher = { version = "0.2.0", optional = true }
 
 hvm64-util = { path = "../util", default-features = false }
 
 [features]
-std = ["hvm64-util/std", "dep:nohash-hasher"]
+std = ["hvm64-util/std"]
 trace = []
 
 [lints]
