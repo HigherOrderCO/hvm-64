@@ -9,6 +9,7 @@
 //! The AST is based on the [interaction calculus].
 //!
 //! [interaction calculus]: https://en.wikipedia.org/wiki/Interaction_nets#Interaction_calculus
+#![cfg_attr(not(feature = "std"), no_std)]
 
 include!("../../prelude.rs");
 

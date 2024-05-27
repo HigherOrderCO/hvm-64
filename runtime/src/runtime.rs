@@ -19,6 +19,7 @@
 //! - active pairs are thus stored in a dedicated vector, `net.redexes`
 #![feature(const_type_id, extern_types, inline_const, new_uninit)]
 #![cfg_attr(feature = "trace", feature(const_type_name))]
+#![cfg_attr(not(feature = "std"), no_std)]
 
 include!("../../prelude.rs");
 

@@ -8,13 +8,13 @@ path = "src/ast.rs"
 
 [dependencies]
 ordered-float = { version = "4.2.0", default-features = false }
-TSPL = { version = "0.0.12", optional = true }
+TSPL = { git = "https://github.com/tjjfvi/TSPL", branch = "no_std", optional = true }
 
-hvm64-util = { path = "../util" }
+hvm64-util = { path = "../util", default-features = false }
 
 [features]
 default = ["std", "parser"]
-std = []
+std = ["hvm64-util/std"]
 parser = ["dep:TSPL"]
 
 [lints]

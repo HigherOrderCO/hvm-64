@@ -5,8 +5,7 @@ version = 3
 [[package]]
 name = "TSPL"
 version = "0.0.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "52dfd6238b1461b99635b26585a85b4e7b9c786cc0481b3c540ae5f590b6dfb6"
+source = "git+https://github.com/tjjfvi/TSPL?branch=no_std#35e172d6369794c6a81c9cd1bb249277e66e79c6"
 dependencies = [
  "highlight_error",
 ]
@@ -266,8 +265,7 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 [[package]]
 name = "highlight_error"
 version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "809e18805660d7b6b2e2b9f316a5099521b5998d5cba4dda11b5157a21aaef03"
+source = "git+https://github.com/tjjfvi/rust_highlight_error/?branch=no_std#e4136b3dd5a80699ecbab8fe708433da21ff1be1"
 
 [[package]]
 name = "hvm64"
@@ -320,7 +318,6 @@ dependencies = [
  "hvm64-runtime",
  "hvm64-util",
  "ordered-float",
- "thiserror",
 ]
 
 [[package]]

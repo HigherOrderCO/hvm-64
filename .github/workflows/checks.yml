@@ -24,6 +24,8 @@ jobs:
       - run: RUSTFLAGS="-D warnings" cargo check --all-targets
       - run: RUSTFLAGS="-D warnings" cargo check --all-targets --features trace
       - run: RUSTFLAGS="-D warnings" cargo check --all-targets --no-default-features
+      - run: cargo install cargo-no-std-check
+      - run: cargo no-std-check --workspace --exclude hvm64 --no-default-features
   clippy:
     runs-on: ubuntu-latest
     timeout-minutes: 10

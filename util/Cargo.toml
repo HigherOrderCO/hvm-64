@@ -4,7 +4,11 @@ version = "0.3.0"
 edition = "2021"
 
 [dependencies]
-stacker = { version = "0.1.15" }
+stacker = { version = "0.1.15", optional = true }
+
+[features]
+default = ["std"]
+std = ["dep:stacker"]
 
 [lints]
 workspace = true

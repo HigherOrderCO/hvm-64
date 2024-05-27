@@ -2,6 +2,8 @@
 
 include!("../../prelude.rs");
 
+use crate::prelude::*;
+
 use hvm64_ast::Book;
 
 pub mod eta_reduce;
@@ -16,10 +18,16 @@ use prune::Prune;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
-#[cfg_attr(feature = "std", derive(thiserror::Error))]
 pub enum TransformError {
-  #[cfg_attr(feature = "std", error("infinite reference cycle in `@{0}`"))]
   InfiniteRefCycle(String),
+}
+
+impl fmt::Display for TransformError {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    match self {
+      TransformError::InfiniteRefCycle(name) => write!(f, "infinite reference cycle in `@{name}`"),
+    }
+  }
 }
 
 pub trait Transform {
