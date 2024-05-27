@@ -1,0 +1,23 @@
+[package]
+name = "hvmc-ast"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+path = "src/ast.rs"
+
+[dependencies]
+arrayvec = { version = "0.7.4", default-features = false }
+ordered-float = { version = "4.2.0", default-features = false }
+thiserror = { version = "1.0.59", optional = true }
+TSPL = { version = "0.0.12", optional = true }
+
+hvmc-util = { path = "../util", default-features = false }
+
+[features]
+default = ["std", "parser"]
+std = ["hvmc-util/std", "ordered-float/std", "dep:thiserror"]
+parser = ["dep:TSPL"]
+
+[lints]
+workspace = true

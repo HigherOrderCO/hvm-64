@@ -1,0 +1,4 @@
+@true = (b (* b))
+@false = (* (b b))
+@and  = ((b (@false c)) (b c))
+@main = root & @and ~ (@true (@false root))
