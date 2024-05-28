@@ -37,19 +37,12 @@ impl Wire {
 
   #[inline(always)]
   fn target<'a>(&self) -> &'a AtomicU64 {
-    if cfg!(feature = "_fuzz") {
-      assert_ne!(self.0 as usize, 0xfffffffffff0u64 as usize);
-      assert_ne!(self.0 as usize, 0);
-    }
     unsafe { &*self.0 }
   }
 
   #[inline(always)]
   pub fn load_target(&self) -> Port {
     let port = Port(self.target().load(Relaxed));
-    if cfg!(feature = "_fuzz") {
-      assert_ne!(port, Port::FREE);
-    }
     port
   }
 
@@ -66,9 +59,6 @@ impl Wire {
   #[inline(always)]
   pub fn swap_target(&self, value: Port) -> Port {
     let port = Port(self.target().swap(value.0, Relaxed));
-    if cfg!(feature = "_fuzz") {
-      assert_ne!(port, Port::FREE);
-    }
     port
   }
 
@@ -77,9 +67,6 @@ impl Wire {
   pub fn lock_target(&self) -> Port {
     loop {
       let got = self.swap_target(Port::LOCK);
-      if cfg!(feature = "_fuzz") {
-        assert_ne!(got, Port::FREE);
-      }
       if got != Port::LOCK {
         return got;
       }

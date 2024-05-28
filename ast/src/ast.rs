@@ -19,7 +19,7 @@ mod parser;
 use alloc::collections::BTreeMap;
 
 use crate::prelude::*;
-use hvm64_util::{create_var, deref, maybe_grow, multi_iterator, ops::TypedOp as Op, var_to_num};
+use hvm64_util::{create_var, deref_to, maybe_grow, multi_iterator, ops::TypedOp as Op, var_to_num};
 
 use ordered_float::OrderedFloat;
 
@@ -34,7 +34,7 @@ pub struct Book {
   pub nets: BTreeMap<String, Net>,
 }
 
-deref!(Book => self.nets: BTreeMap<String, Net>);
+deref_to!(Book => self.nets: BTreeMap<String, Net>);
 
 /// An AST node representing an interaction net with one free port.
 ///

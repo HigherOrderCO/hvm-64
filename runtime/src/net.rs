@@ -1,5 +1,6 @@
 use super::*;
 
+use hvm64_util::new_uninit_slice;
 use mem::MaybeUninit;
 
 /// An interaction combinator net.
@@ -11,7 +12,7 @@ pub struct Net<'a> {
   pub root: Wire,
 }
 
-deref!({<'a, >} Net<'a> => self.linker: Linker<'a>);
+deref_to!({<'a, >} Net<'a> => self.linker: Linker<'a>);
 
 impl<'h> Net<'h> {
   /// Creates an empty net with a given heap.
@@ -22,7 +23,7 @@ impl<'h> Net<'h> {
   }
 
   pub(super) fn new_with_root(heap: &'h Heap, root: Wire) -> Self {
-    Net { linker: Linker::new(heap), tid: 0, tids: 1, trgs: Box::new_uninit_slice(1 << 16), root }
+    Net { linker: Linker::new(heap), tid: 0, tids: 1, trgs: new_uninit_slice(1 << 16), root }
   }
 
   /// Boots a net from a Def.

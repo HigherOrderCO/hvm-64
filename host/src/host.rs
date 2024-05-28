@@ -1,7 +1,6 @@
 //! The runtime's host, which acts as a translation layer between the AST and
 //! the runtime.
 #![cfg_attr(not(feature = "std"), no_std)]
-#![feature(inline_const)]
 
 include!("../../prelude.rs");
 
@@ -83,6 +82,6 @@ impl Host {
 
   /// Returns a mutable [`Def`] named `name`.
   pub fn get_mut<T: Send + Sync + 'static>(&mut self, name: &str) -> &mut Def<T> {
-    self.defs.get_mut(name).unwrap().downcast_mut().unwrap()
+    Def::downcast_mut(self.defs.get_mut(name).unwrap()).unwrap()
   }
 }

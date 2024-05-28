@@ -18,7 +18,7 @@ impl<'h> Net<'h> {
     (0 .. tids).map(move |tid| {
       let heap_size = (heap.0.len() / tids) & !63; // round down to needed alignment
       let heap_start = heap_size * tid;
-      let area = unsafe { mem::transmute(&heap.0[heap_start .. heap_start + heap_size]) };
+      let area = unsafe { mem::transmute::<&[Node], &Heap>(&heap.0[heap_start .. heap_start + heap_size]) };
       let mut net = Net::new_with_root(area, root.clone());
       net.next = next.saturating_sub(heap_start);
       net.head = if tid == 0 { net.head } else { Addr::NULL };

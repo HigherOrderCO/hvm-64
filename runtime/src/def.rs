@@ -1,3 +1,5 @@
+use hvm64_util::new_uninit_slice;
+
 use super::*;
 
 /// A bitset representing the set of labels used in a def.
@@ -94,14 +96,10 @@ pub struct Def<T: ?Sized + Send + Sync = Dynamic> {
 
 pub type DynDef = dyn DerefMut<Target = Def> + Send + Sync;
 
-extern "C" {
-  /// An internal type used to mark dynamic `Def`s.
-  ///
-  /// Because this is an `extern type`, it is unsized, but has zero metadata.
-  /// This is essentially a workaround for the lack of custom DSTs.
-  #[doc(hidden)]
-  pub type Dynamic;
-}
+/// An internal type used to mark dynamic `Def`s.
+///
+/// This should be unsized, but there is no stable way to do this at the moment.
+pub struct Dynamic(());
 
 unsafe impl Send for Dynamic {}
 unsafe impl Sync for Dynamic {}
@@ -111,7 +109,7 @@ pub trait AsDef: Any + Send + Sync {
 }
 
 impl<T: Send + Sync> Def<T> {
-  pub const fn new(labs: LabSet, data: T) -> Self
+  pub fn new(labs: LabSet, data: T) -> Self
   where
     T: AsDef,
   {
@@ -132,11 +130,11 @@ impl<T: Send + Sync> Def<T> {
 impl Def {
   #[inline(always)]
   pub unsafe fn downcast_ptr<T: Send + Sync + 'static>(slf: *const Def) -> Option<*const Def<T>> {
-    if (*slf).ty == TypeId::of::<T>() { Some(slf.cast()) } else { None }
+    if (*slf).ty == TypeId::of::<T>() { Some(slf as *const Def<T>) } else { None }
   }
   #[inline(always)]
   pub unsafe fn downcast_mut_ptr<T: Send + Sync + 'static>(slf: *mut Def) -> Option<*mut Def<T>> {
-    if (*slf).ty == TypeId::of::<T>() { Some(slf.cast()) } else { None }
+    if (*slf).ty == TypeId::of::<T>() { Some(slf as *mut Def<T>) } else { None }
   }
   #[inline(always)]
   pub fn downcast_ref<T: Send + Sync + 'static>(&self) -> Option<&Def<T>> {
@@ -156,14 +154,14 @@ impl<T: Send + Sync> Deref for Def<T> {
   type Target = Def;
   #[inline(always)]
   fn deref(&self) -> &Self::Target {
-    self.upcast()
+    Def::upcast(self)
   }
 }
 
 impl<T: Send + Sync> DerefMut for Def<T> {
   #[inline(always)]
   fn deref_mut(&mut self) -> &mut Self::Target {
-    self.upcast_mut()
+    Def::upcast_mut(self)
   }
 }
 
@@ -222,7 +220,7 @@ impl AsDef for InterpretedDef {
     let instructions = &def.instr;
 
     if def.trgs >= net.trgs.len() {
-      net.trgs = Box::new_uninit_slice(def.trgs);
+      net.trgs = new_uninit_slice(def.trgs);
     }
 
     let mut trgs = Trgs(&mut net.trgs[..] as *mut _ as *mut _);
