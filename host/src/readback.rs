@@ -1,6 +1,6 @@
 use crate::prelude::*;
 
-use super::{Addr, Host, Mode, Port, Tag, Wire};
+use super::{Addr, Host, Port, Tag, Wire};
 
 use core::ops::RangeFrom;
 
@@ -19,7 +19,7 @@ impl Host {
   /// resulting ast net, as it is impossible to read these back from the runtime
   /// net representation. In the case of vicious circles, this may result in
   /// unbound variables.
-  pub fn readback<M: Mode>(&self, rt_net: &hvm64_runtime::Net<M>) -> Net {
+  pub fn readback(&self, rt_net: &hvm64_runtime::Net) -> Net {
     let mut state = ReadbackState { host: self, vars: Default::default(), var_id: 0 .. };
     let mut net = Net::default();
 
@@ -72,13 +72,13 @@ impl<'a> ReadbackState<'a> {
       }
       Tag::Ctr => {
         let node = port.traverse_node();
-        Tree::Ctr { lab: node.lab, ports: vec![self.read_wire(node.p1), self.read_wire(node.p2)] }
+        Tree::Ctr { lab: node.lab, lft: Box::new(self.read_wire(node.p1)), rgt: Box::new(self.read_wire(node.p2)) }
       }
       Tag::Mat => {
         let node = port.traverse_node();
         let arms = self.read_wire(node.p1);
         let out = self.read_wire(node.p2);
-        Tree::legacy_mat(arms, out).expect("invalid mat node")
+        Tree::Mat { arms: Box::new(arms), out: Box::new(out) }
       }
     })
   }

@@ -1,6 +1,6 @@
 use super::*;
 
-impl<'a, M: Mode> Net<'a, M> {
+impl<'a> Net<'a> {
   /// Performs an interaction between two connected principal ports.
   #[inline(always)]
   pub fn interact(&mut self, a: Port, b: Port) {

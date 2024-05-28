@@ -5,8 +5,7 @@ version = 3
 [[package]]
 name = "TSPL"
 version = "0.0.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "52dfd6238b1461b99635b26585a85b4e7b9c786cc0481b3c540ae5f590b6dfb6"
+source = "git+https://github.com/tjjfvi/TSPL?branch=no_std#35e172d6369794c6a81c9cd1bb249277e66e79c6"
 dependencies = [
  "highlight_error",
 ]
@@ -68,12 +67,6 @@ dependencies = [
  "anstyle",
  "windows-sys",
 ]
-
-[[package]]
-name = "arrayvec"
-version = "0.7.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "96d30a06541fbafbc7f82ed10c06164cfbd2c401138f6addd8404629c4b16711"
 
 [[package]]
 name = "autocfg"
@@ -272,8 +265,7 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 [[package]]
 name = "highlight_error"
 version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "809e18805660d7b6b2e2b9f316a5099521b5998d5cba4dda11b5157a21aaef03"
+source = "git+https://github.com/tjjfvi/rust_highlight_error/?branch=no_std#e4136b3dd5a80699ecbab8fe708433da21ff1be1"
 
 [[package]]
 name = "hvm64"
@@ -287,10 +279,7 @@ dependencies = [
  "hvm64-util",
  "insta",
  "libloading",
- "ordered-float",
- "parking_lot",
  "serial_test",
- "thiserror",
 ]
 
 [[package]]
@@ -298,10 +287,8 @@ name = "hvm64-ast"
 version = "0.3.0"
 dependencies = [
  "TSPL",
- "arrayvec",
  "hvm64-util",
  "ordered-float",
- "thiserror",
 ]
 
 [[package]]
@@ -311,7 +298,6 @@ dependencies = [
  "hvm64-ast",
  "hvm64-runtime",
  "hvm64-util",
- "parking_lot",
 ]
 
 [[package]]
@@ -319,8 +305,6 @@ name = "hvm64-runtime"
 version = "0.3.0"
 dependencies = [
  "hvm64-util",
- "nohash-hasher",
- "parking_lot",
 ]
 
 [[package]]
@@ -332,15 +316,12 @@ dependencies = [
  "hvm64-runtime",
  "hvm64-util",
  "ordered-float",
- "parking_lot",
- "thiserror",
 ]
 
 [[package]]
 name = "hvm64-util"
 version = "0.3.0"
 dependencies = [
- "arrayvec",
  "stacker",
 ]
 
@@ -413,12 +394,6 @@ name = "memchr"
 version = "2.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6c8640c5d730cb13ebd907d8d04b52f55ac9a2eec55b440c8892f40d56c76c1d"
-
-[[package]]
-name = "nohash-hasher"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2bf50223579dc7cdcfb3bfcacf7069ff68243f8c363f62ffa99cf000a6b9c451"
 
 [[package]]
 name = "num-traits"
@@ -656,26 +631,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
-]
-
-[[package]]
-name = "thiserror"
-version = "1.0.59"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f0126ad08bff79f29fc3ae6a55cc72352056dfff61e3ff8bb7129476d44b23aa"
-dependencies = [
- "thiserror-impl",
-]
-
-[[package]]
-name = "thiserror-impl"
-version = "1.0.59"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d1cd413b5d558b4c5bf3680e324a6fa5014e7b7c067a51e69dbdf47eb7148b66"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
 ]
 
 [[package]]

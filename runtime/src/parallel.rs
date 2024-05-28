@@ -7,7 +7,7 @@ use atomic::AtomicUsize;
 
 use super::*;
 
-impl<'h, M: Mode> Net<'h, M> {
+impl<'h> Net<'h> {
   /// Forks the net into `tids` child nets, for parallel operation.
   pub fn fork(&mut self, tids: usize) -> impl Iterator<Item = Self> + '_ {
     let redexes_len = self.linker.redexes.len();
@@ -33,19 +33,17 @@ impl<'h, M: Mode> Net<'h, M> {
 
   // Evaluates a term to normal form in parallel
   pub fn parallel_normal(&mut self) {
-    assert!(!M::LAZY);
-
     self.expand();
 
     const SHARE_LIMIT: usize = 1 << 12; // max share redexes per split
     const LOCAL_LIMIT: usize = 1 << 18; // max local rewrites per epoch
 
     // Local thread context
-    struct ThreadContext<'a, M: Mode> {
+    struct ThreadContext<'a> {
       tid: usize,                             // thread id
       tlog2: usize,                           // log2 of thread count
       tick: usize,                            // current tick
-      net: Net<'a, M>,                        // thread's own net object
+      net: Net<'a>,                           // thread's own net object
       delta: &'a AtomicRewrites,              // global delta rewrites
       share: &'a Vec<(AtomicU64, AtomicU64)>, // global share buffer
       rlens: &'a Vec<AtomicUsize>,            // global redex lengths (only counting shareable ones)
@@ -85,7 +83,7 @@ impl<'h, M: Mode> Net<'h, M> {
 
     // Main reduction loop
     #[inline(always)]
-    fn main<M: Mode>(ctx: &mut ThreadContext<M>) {
+    fn main(ctx: &mut ThreadContext) {
       loop {
         reduce(ctx);
         if count(ctx) == 0 {
@@ -97,7 +95,7 @@ impl<'h, M: Mode> Net<'h, M> {
 
     // Reduce redexes locally, then share with target
     #[inline(always)]
-    fn reduce<M: Mode>(ctx: &mut ThreadContext<M>) {
+    fn reduce(ctx: &mut ThreadContext) {
       loop {
         ctx.net.reduce(LOCAL_LIMIT);
         if count(ctx) == 0 {
@@ -111,7 +109,7 @@ impl<'h, M: Mode> Net<'h, M> {
 
     // Count total redexes (and populate 'rlens')
     #[inline(always)]
-    fn count<M: Mode>(ctx: &mut ThreadContext<M>) -> usize {
+    fn count(ctx: &mut ThreadContext) -> usize {
       ctx.barry.wait();
       ctx.total.store(0, Relaxed);
       ctx.barry.wait();
@@ -123,7 +121,7 @@ impl<'h, M: Mode> Net<'h, M> {
 
     // Share redexes with target thread
     #[inline(always)]
-    fn split<M: Mode>(ctx: &mut ThreadContext<M>, plog2: usize) {
+    fn split(ctx: &mut ThreadContext, plog2: usize) {
       unsafe {
         let side = (ctx.tid >> (plog2 - 1 - (ctx.tick % plog2))) & 1;
         let shift = (1 << (plog2 - 1)) >> (ctx.tick % plog2);

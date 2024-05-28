@@ -4,8 +4,8 @@
 @C4 = ({7 (a b) {7 (c a) {7 (d c) (e d)}}} (e b))
 @C6 = ({5 (a b) {5 (c a) {5 (d c) {5 (e d) {5 (f e) (g f)}}}}} (g b))
 @black_plus = a
-& @HVM.black_box ~ (@plus a)
-@erase = ((@HVM.black_box (a b)) (a b))
+& @black_box ~ (@plus a)
+@erase = ((@black_box (a b)) (a b))
 @expensive = a
 & @fib ~ (b a)
 & @C4 ~ (@C2 b)
@@ -24,4 +24,5 @@
 @main_slow = a
 & @black_plus ~ (@expensive_1 (@expensive_2 a))
 @plus = ((a (b c)) ((d (e b)) ({11 a d} (e c))))
+@black_box = (x x)
 

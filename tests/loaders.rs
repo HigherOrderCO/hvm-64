@@ -2,7 +2,7 @@
 
 // use hvm64::{ast::*, run, stdlib::create_host};
 use hvm64_ast::{Book, Net};
-use hvm64_host::stdlib::create_host;
+use hvm64_host::Host;
 use hvm64_runtime as run;
 use std::fs;
 
@@ -27,13 +27,13 @@ pub fn replace_template(mut code: String, map: &[(&str, &str)]) -> String {
 
 pub fn normal_with(book: Book, mem: Option<usize>, entry_point: &str) -> (run::Rewrites, Net) {
   let area = run::Heap::new(mem).unwrap();
-  let host = create_host(&book);
+  let host = Host::new(&book);
 
-  let mut rnet = run::Net::<run::Strict>::new(&area);
-  rnet.boot(&host.lock().defs[entry_point]);
+  let mut rnet = run::Net::new(&area);
+  rnet.boot(&host.defs[entry_point]);
   rnet.normal();
 
-  let net = host.lock().readback(&rnet);
+  let net = host.readback(&rnet);
   (rnet.rwts, net)
 }
 

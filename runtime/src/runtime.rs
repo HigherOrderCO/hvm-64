@@ -19,6 +19,7 @@
 //! - active pairs are thus stored in a dedicated vector, `net.redexes`
 #![feature(const_type_id, extern_types, inline_const, new_uninit)]
 #![cfg_attr(feature = "trace", feature(const_type_name))]
+#![cfg_attr(not(feature = "std"), no_std)]
 
 include!("../../prelude.rs");
 
@@ -34,7 +35,6 @@ use core::{
   alloc::Layout,
   any::{Any, TypeId},
   hint::unreachable_unchecked,
-  marker::PhantomData,
   mem::size_of,
   ops::{Add, AddAssign, Deref, DerefMut},
 };
@@ -51,7 +51,6 @@ use Tag::*;
 mod addr;
 mod allocator;
 mod def;
-mod dyn_net;
 mod instruction;
 mod interact;
 mod linker;
@@ -65,7 +64,6 @@ mod wire;
 pub use addr::*;
 pub use allocator::*;
 pub use def::*;
-pub use dyn_net::*;
 pub use instruction::*;
 pub use linker::*;
 pub use net::*;
@@ -74,30 +72,6 @@ pub use port::*;
 pub use wire::*;
 
 pub type Lab = u16;
-
-/// The runtime mode is represented with a generic such that, instead of
-/// repeatedly branching on the mode at runtime, the branch can happen at the
-/// top-most level, and delegate to monomorphized functions specialized for each
-/// particular mode.
-///
-/// This trait is `unsafe` as it may only be implemented by [`Strict`] and
-/// [`Lazy`].
-pub unsafe trait Mode: Send + Sync + 'static {
-  const LAZY: bool;
-}
-
-/// In strict mode, all active pairs are expanded.
-pub struct Strict;
-unsafe impl Mode for Strict {
-  const LAZY: bool = false;
-}
-
-/// In lazy mode, only active pairs that are reached from a walk from the root
-/// port are expanded.
-pub struct Lazy;
-unsafe impl Mode for Lazy {
-  const LAZY: bool = true;
-}
 
 /// Tracks the number of rewrites, categorized by type.
 #[derive(Clone, Copy, Debug, Default)]

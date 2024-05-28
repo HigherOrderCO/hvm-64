@@ -16,15 +16,12 @@
 
 use crate::prelude::*;
 use hvm64_ast::{Book, Tree};
-use hvm64_host::{
-  stdlib::{AsHostedDef, HostedDef},
-  DefRef, Host,
-};
-use hvm64_runtime::{Def, Heap, InterpretedDef, LabSet, Mode, Port, Rewrites, Strict};
+use hvm64_host::Host;
+use hvm64_runtime::{AsDef, Def, Heap, InterpretedDef, LabSet, Port, Rewrites};
 use hvm64_util::maybe_grow;
 
-use alloc::sync::Arc;
-use parking_lot::Mutex;
+use alloc::rc::Rc;
+use core::cell::Cell;
 
 pub trait PreReduce {
   fn pre_reduce(&mut self, skip: &dyn Fn(&str) -> bool, max_memory: Option<usize>, max_rwts: u64) -> PreReduceStats;
@@ -39,11 +36,9 @@ impl PreReduce for Book {
   /// `max_memory` is measured in bytes.
   fn pre_reduce(&mut self, skip: &dyn Fn(&str) -> bool, max_memory: Option<usize>, max_rwts: u64) -> PreReduceStats {
     let mut host = Host::default();
-    let captured_redexes = Arc::new(Mutex::new(Vec::new()));
+    let captured_redexes = Rc::new(Cell::new(Vec::new()));
     // When a ref is not found in the `Host`, put an inert def in its place.
-    host.insert_book_with_default(self, &mut |_| unsafe {
-      HostedDef::new_hosted(LabSet::ALL, InertDef(captured_redexes.clone()))
-    });
+    host.insert_book_with_default(self, &mut |_| Box::new(Def::new(LabSet::ALL, InertDef(captured_redexes.clone()))));
     let area = Heap::new(max_memory).expect("pre-reduce memory allocation failed");
 
     let mut state = State {
@@ -90,11 +85,18 @@ enum SeenState {
 
 /// A Def that pushes all interactions to its inner Vec.
 #[derive(Default)]
-struct InertDef(Arc<Mutex<Vec<(Port, Port)>>>);
+struct InertDef(Rc<Cell<Vec<(Port, Port)>>>);
 
-impl AsHostedDef for InertDef {
-  fn call<M: Mode>(def: &Def<Self>, _: &mut hvm64_runtime::Net<M>, port: Port) {
-    def.data.0.lock().push((Port::new_ref(def), port));
+// Safety: we don't actually send/share this across threads
+unsafe impl Send for InertDef {}
+unsafe impl Sync for InertDef {}
+
+impl AsDef for InertDef {
+  unsafe fn call(def: *const Def<Self>, _: &mut hvm64_runtime::Net, port: Port) {
+    let def = unsafe { &*def };
+    let mut vec = def.data.0.take();
+    vec.push((Port::new_ref(def), port));
+    def.data.0.set(vec);
   }
 }
 
@@ -106,7 +108,7 @@ struct State<'a> {
   max_rwts: u64,
 
   area: &'a Heap,
-  captured_redexes: Arc<Mutex<Vec<(Port, Port)>>>,
+  captured_redexes: Rc<Cell<Vec<(Port, Port)>>>,
 
   skip: &'a dyn Fn(&str) -> bool,
   seen: Map<String, SeenState>,
@@ -139,23 +141,22 @@ impl<'a> State<'a> {
     // First, pre-reduce all nets referenced by this net by walking the tree
     self.visit_net(self.book.get(nam).unwrap());
 
-    let mut rt = hvm64_runtime::Net::<Strict>::new(self.area);
+    let mut rt = hvm64_runtime::Net::new(self.area);
     rt.boot(self.host.defs.get(nam).expect("No function."));
     let n_reduced = rt.reduce(self.max_rwts as usize);
 
     self.rewrites += rt.rwts;
 
     // Move interactions with inert defs back into the net redexes array
-    self.captured_redexes.lock().drain(..).for_each(|r| rt.redux(r.0, r.1));
+    let mut captured_redexes = self.captured_redexes.take();
+    captured_redexes.drain(..).for_each(|r| rt.redux(r.0, r.1));
+    self.captured_redexes.set(captured_redexes);
 
     let net = self.host.readback(&rt);
 
     // Mutate the host in-place with the pre-reduced net.
     let instr = self.host.encode_def(&net);
-    if let DefRef::Owned(def_box) = self.host.defs.get_mut(nam).unwrap() {
-      let interpreted_def: &mut Def<InterpretedDef> = def_box.downcast_mut().unwrap();
-      interpreted_def.data = instr;
-    };
+    self.host.get_mut::<InterpretedDef>(nam).data = instr;
 
     // Replace the "Cycled" state with the "Reduced" state
     *self.seen.get_mut(nam).unwrap() = SeenState::Reduced { net, normal: n_reduced.is_some() };

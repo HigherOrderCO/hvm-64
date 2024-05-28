@@ -31,7 +31,7 @@ pub struct CreatedNode {
   pub p2: Port,
 }
 
-impl<'a, M: Mode> Net<'a, M> {
+impl<'a> Net<'a> {
   #[inline(always)]
   pub fn create_node(&mut self, tag: Tag, lab: Lab) -> CreatedNode {
     let addr = self.alloc();

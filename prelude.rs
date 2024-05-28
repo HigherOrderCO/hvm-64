@@ -2,7 +2,6 @@ extern crate alloc;
 
 #[allow(unused)]
 mod prelude {
-
   pub use alloc::{
     borrow::ToOwned,
     boxed::Box,

@@ -35,9 +35,6 @@ debug = "full"
 [dependencies]
 clap = { version = "4.5.4", features = ["derive"] }
 libloading = { version = "0.8.3", default-features = false }
-ordered-float = { version = "4.2.0" }
-parking_lot = "0.12.2"
-thiserror = "1.0.58"
 
 hvm64-ast = { path = "./ast" }
 hvm64-runtime = { path = "./runtime" }
@@ -53,3 +50,6 @@ serial_test = "3.0.0"
 default = ["std"]
 std = []
 trace = ["hvm64-runtime/trace"]
+
+[patch.crates-io]
+highlight_error = { git = "https://github.com/tjjfvi/rust_highlight_error/", branch = "no_std" }

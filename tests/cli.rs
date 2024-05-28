@@ -160,20 +160,6 @@ fn test_cli_transform() {
   @sub = (<- a b> (a b))
   "###
   );
-
-  // Test log
-
-  assert_snapshot!(
-    execute_hvm64(&[
-      "transform",
-      "-Opre-reduce",
-      &(env!("CARGO_MANIFEST_DIR").to_owned() + "/tests/programs/log.hvm")
-    ]).unwrap().1,
-    @r###"
-  @main = a
-    & @HVM.log ~ (#1 (#2 a))
-  "###
-  );
 }
 
 #[test]
@@ -209,7 +195,7 @@ fn test_apply_tree() {
     }
 
     let host = Host::default();
-    let mut rnet = run::Net::<run::Strict>::new(&area);
+    let mut rnet = run::Net::new(&area);
     let root_port = run::Trg::port(run::Port::new_var(rnet.root.addr()));
     host.encode_net(&mut rnet, root_port, &fun);
     rnet.normal();
