@@ -16,6 +16,7 @@
     "dups",
     "dylib",
     "dylibs",
+    "dyntest",
     "effectful",
     "fmts",
     "fuzzer",
