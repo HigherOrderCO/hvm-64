@@ -61,7 +61,7 @@ pub struct Allocator<'h> {
   pub(super) head: Addr,
 }
 
-deref!({<'h>} Allocator<'h> => self.tracer: Tracer);
+deref_to!({<'h>} Allocator<'h> => self.tracer: Tracer);
 
 impl<'h> Allocator<'h> {
   pub fn new(heap: &'h Heap) -> Self {

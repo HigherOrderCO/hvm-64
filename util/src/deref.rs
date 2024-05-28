@@ -1,5 +1,5 @@
 #[macro_export]
-macro_rules! deref {
+macro_rules! deref_to {
   ($({$($gen:tt)*})? $ty:ty => self.$field:ident: $trg:ty) => {
     impl $($($gen)*)? core::ops::Deref for $ty {
       type Target = $trg;

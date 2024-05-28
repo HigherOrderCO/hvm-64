@@ -13,7 +13,7 @@ pub struct Linker<'h> {
   pub redexes: RedexQueue,
 }
 
-deref!({<'h, >} Linker<'h> => self.allocator: Allocator<'h>);
+deref_to!({<'h, >} Linker<'h> => self.allocator: Allocator<'h>);
 
 impl<'h> Linker<'h> {
   pub fn new(heap: &'h Heap) -> Self {

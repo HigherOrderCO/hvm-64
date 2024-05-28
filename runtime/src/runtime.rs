@@ -17,7 +17,6 @@
 //!   the *auxiliary ports* of the net (as managed by the linker); the target of
 //!   the principal port is left implicit
 //! - active pairs are thus stored in a dedicated vector, `net.redexes`
-#![feature(const_type_id, extern_types, inline_const, new_uninit)]
 #![cfg_attr(feature = "trace", feature(const_type_name))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
@@ -27,7 +26,7 @@ use crate::prelude::*;
 
 pub use hvm64_util::ops;
 
-use hvm64_util::{bi_enum, deref, pretty_num};
+use hvm64_util::{bi_enum, deref_to, pretty_num};
 
 use self::trace::Tracer;
 use alloc::borrow::Cow;

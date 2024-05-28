@@ -33,7 +33,7 @@ fn _compile_host(host: &Host) -> Result<String, fmt::Error> {
 
   let mut def_infos: BTreeMap<&str, DefInfo<'_>> = BTreeMap::new();
   for (hvm64_name, def) in &host.defs {
-    if let Some(def) = def.downcast_ref::<InterpretedDef>() {
+    if let Some(def) = Def::downcast_ref::<InterpretedDef>(def) {
       def_infos.insert(hvm64_name, DefInfo {
         rust_name: sanitize_name(hvm64_name),
         refs: refs(host, def.data.instructions()),
