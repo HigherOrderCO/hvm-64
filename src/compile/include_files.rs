@@ -79,6 +79,7 @@ hvm64-runtime = { path = "../runtime", default-features = false }
       bi_enum
       create_var
       deref
+      new_uninit_slice
       maybe_grow
       multi_iterator
       ops {
