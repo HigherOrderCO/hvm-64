@@ -216,9 +216,6 @@ impl TraceWriter {
     self.lock.locked.store(false, Ordering::Release);
   }
   fn trace<S: TraceSourceBearer, A: TraceArgs>(&mut self, args: A) {
-    if cfg!(feature = "_fuzz") {
-      self.sync();
-    }
     let meta: &'static _ = &TraceMetadata { source: S::SOURCE, arg_fmts: A::FMTS };
     self.acquire(|data| {
       let nonce = self.nonce;

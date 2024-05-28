@@ -73,24 +73,18 @@ impl<'h> Allocator<'h> {
   pub fn half_free(&mut self, addr: Addr) {
     trace!(self.tracer, addr);
     const FREE: u64 = Port::FREE.0;
-    if cfg!(feature = "_fuzz") {
-      if cfg!(not(feature = "_fuzz_no_free")) {
-        assert_ne!(addr.val().swap(FREE, Relaxed), FREE, "double free");
-      }
-    } else {
-      addr.val().store(FREE, Relaxed);
-      if addr.other_half().val().load(Relaxed) == FREE {
-        trace!(self.tracer, "other free");
-        let addr = addr.left_half();
-        if addr.val().compare_exchange(FREE, self.head.0 as u64, Relaxed, Relaxed).is_ok() {
-          let old_head = &self.head;
-          let new_head = addr;
-          trace!(self.tracer, "appended", old_head, new_head);
-          self.head = new_head;
-        } else {
-          trace!(self.tracer, "too slow");
-        };
-      }
+    addr.val().store(FREE, Relaxed);
+    if addr.other_half().val().load(Relaxed) == FREE {
+      trace!(self.tracer, "other free");
+      let addr = addr.left_half();
+      if addr.val().compare_exchange(FREE, self.head.0 as u64, Relaxed, Relaxed).is_ok() {
+        let old_head = &self.head;
+        let new_head = addr;
+        trace!(self.tracer, "appended", old_head, new_head);
+        self.head = new_head;
+      } else {
+        trace!(self.tracer, "too slow");
+      };
     }
   }
 
