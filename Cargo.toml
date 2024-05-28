@@ -44,7 +44,7 @@ hvm64-host = { path = "./host" }
 
 [dev-dependencies]
 insta = { version = "1.34.0", features = ["glob"] }
-serial_test = "3.0.0"
+dyntest = "0.1.2"
 
 [features]
 default = ["std"]
@@ -53,3 +53,7 @@ trace = ["hvm64-runtime/trace"]
 
 [patch.crates-io]
 highlight_error = { git = "https://github.com/tjjfvi/rust_highlight_error/", branch = "no_std" }
+
+[[test]]
+name = "tests"
+harness = false

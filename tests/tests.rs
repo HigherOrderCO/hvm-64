@@ -1,13 +1,6 @@
-#![cfg(feature = "std")]
-
+use dyntest::{dyntest, DynTester};
 use hvm64_transform::pre_reduce::PreReduce;
-use std::{
-  fs,
-  io::{self, Write},
-  path::{Path, PathBuf},
-  str::FromStr,
-  time::Instant,
-};
+use std::{fs, path::Path, str::FromStr};
 
 use hvm64_ast::{self as ast, Book, Net};
 use hvm64_host::Host;
@@ -15,41 +8,40 @@ use hvm64_runtime as run;
 
 use insta::assert_snapshot;
 
-use serial_test::serial;
+dyntest!(test);
+
+fn test(t: &mut DynTester) {
+  for (name, path) in t.glob("{examples,tests/programs}/**/*.hvm") {
+    t.test(name.clone(), move || {
+      let mut settings = insta::Settings::new();
+      settings.set_prepend_module_to_snapshot(false);
+      settings.set_input_file(&path);
+      settings.set_snapshot_suffix(name);
+      settings.bind(|| {
+        test_path(&path);
+      })
+    });
+  }
+}
 
 fn execute_host(host: &Host) -> Option<(run::Rewrites, Net)> {
   let heap = run::Heap::new(None).unwrap();
   let mut net = run::Net::new(&heap);
-  let Some(entrypoint) = host.defs.get("main") else {
-    println!(" skipping");
-    return None;
-  };
+  let entrypoint = host.defs.get("main").unwrap();
   net.boot(entrypoint);
-  let start = Instant::now();
   net.parallel_normal();
-  println!(" {:.3?}", start.elapsed());
   Some((net.rwts, host.readback(&net)))
 }
 
-fn test_run(name: &str, host: &Host) {
-  print!("{name}...");
-  io::stdout().flush().unwrap();
-
+fn test_run(host: &Host) {
   let Some((rwts, net)) = execute_host(host) else { return };
 
   let output = format!("{}\n{}", net, &rwts);
   assert_snapshot!(output);
 }
 
-fn test_pre_reduce_run(path: &str, mut book: Book) {
-  print!("{path}...");
-  print!(" pre-reduce");
-  io::stdout().flush().unwrap();
-
-  let start = Instant::now();
+fn test_pre_reduce_run(mut book: Book) {
   let pre_stats = book.pre_reduce(&|x| x == "main", None, u64::MAX);
-  print!(" {:.3?}...", start.elapsed());
-  io::stdout().flush().unwrap();
 
   let host = Host::new(&book);
   let Some((rwts, net)) = execute_host(&host) else {
@@ -66,33 +58,6 @@ fn test_path(path: &Path) {
   let book = ast::Book::from_str(&code).unwrap();
   let host = Host::new(&book);
 
-  let path = path.strip_prefix(env!("CARGO_MANIFEST_DIR")).unwrap();
-  let path = path.to_str().unwrap();
-
-  test_pre_reduce_run(path, book.clone());
-  test_run(path, &host);
-}
-
-fn test_dir(dir: &Path, filter: impl Fn(&Path) -> bool) {
-  insta::glob!(dir, "**/*.hvm", |p| {
-    if filter(p) {
-      test_path(p);
-    }
-  })
-}
-
-fn manifest_relative(sub: &str) -> PathBuf {
-  format!("{}/{}", env!("CARGO_MANIFEST_DIR"), sub).into()
-}
-
-#[test]
-#[serial]
-fn test_programs() {
-  test_dir(&manifest_relative("tests/programs/"), |_| true)
-}
-
-#[test]
-#[serial]
-fn test_examples() {
-  test_dir(&manifest_relative("examples/"), |_| true);
+  test_pre_reduce_run(book.clone());
+  test_run(&host);
 }
