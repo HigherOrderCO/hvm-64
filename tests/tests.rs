@@ -1,5 +1,3 @@
-#![cfg(feature = "std")]
-
 use dyntest::{dyntest, DynTester};
 use hvm64_transform::pre_reduce::PreReduce;
 use std::{fs, path::Path, str::FromStr};
