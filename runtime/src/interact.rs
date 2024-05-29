@@ -14,12 +14,12 @@ impl<'a> Net<'a> {
       (Ref | Int | F32, Ref) if !b.is_skippable() => self.call(b, a),
       (Int | F32 | Ref, Int | F32 | Ref) => self.rwts.eras += 1,
       // comm 2/2
-      (Ctr, Mat) if a.lab() != 0 => self.comm22(a, b),
-      (Mat, Ctr) if b.lab() != 0 => self.comm22(a, b),
+      (Ctr, Switch) if a.lab() != 0 => self.comm22(a, b),
+      (Switch, Ctr) if b.lab() != 0 => self.comm22(a, b),
       (Ctr, Op) | (Op, Ctr) => self.comm22(a, b),
       (Ctr, Ctr) if a.lab() != b.lab() => self.comm22(a, b),
       // anni
-      (Mat, Mat) | (Op, Op) | (Ctr, Ctr) => self.anni2(a, b),
+      (Switch, Switch) | (Op, Op) | (Ctr, Ctr) => self.anni2(a, b),
       // comm 2/0
       (Ref, Ctr) if b.lab() >= a.lab() => self.comm02(a, b),
       (Ctr, Ref) if a.lab() >= b.lab() => self.comm02(b, a),
@@ -33,15 +33,15 @@ impl<'a> Net<'a> {
       // native ops
       (Op, Int | F32) => self.op_num(a, b),
       (Int | F32, Op) => self.op_num(b, a),
-      (Mat, Int) => self.mat_int(a, b),
-      (Int, Mat) => self.mat_int(b, a),
+      (Switch, Int) => self.switch_int(a, b),
+      (Int, Switch) => self.switch_int(b, a),
       // todo: what should the semantics of these be?
-      (Mat, F32)
-      | (F32, Mat)
-      | (Mat, Ctr) // b.lab() == 0
-      | (Ctr, Mat) // a.lab() == 0
-      | (Op, Mat)
-      | (Mat, Op) => unimplemented!("{:?}-{:?}", a.tag(), b.tag()),
+      (Switch, F32)
+      | (F32, Switch)
+      | (Switch, Ctr) // b.lab() == 0
+      | (Ctr, Switch) // a.lab() == 0
+      | (Op, Switch)
+      | (Switch, Op) => unimplemented!("{:?}-{:?}", a.tag(), b.tag()),
     }
   }
 
@@ -169,7 +169,7 @@ impl<'a> Net<'a> {
     self.link_wire_port(b.p2, a);
   }
 
-  /// Interacts a number and a numeric match node.
+  /// Interacts a number and a numeric switch node.
   ///
   /// ```text
   ///                             |
@@ -177,12 +177,12 @@ impl<'a> Net<'a> {
   ///              |              |              |
   ///              |              |              |
   ///             / \             |             / \
-  ///         a  /mat\            |         a  /mat\
+  ///         a  /swi\            |         a  /swi\
   ///           /_____\           |           /_____\
   ///            |   |            |            |   |
   ///         a1 |   | a2         |         a1 |   | a2
   ///                             |
-  /// --------------------------- | --------------------------- mat_int
+  /// --------------------------- | --------------------------- switch_int
   ///                             |          _ _ _ _ _
   ///                             |        /           \
   ///                             |    y2 |  (n) y1     |
@@ -200,7 +200,7 @@ impl<'a> Net<'a> {
   ///                             |
   /// ```
   #[inline(never)]
-  pub fn mat_int(&mut self, a: Port, b: Port) {
+  pub fn switch_int(&mut self, a: Port, b: Port) {
     trace!(self.tracer, a, b);
     self.rwts.oper += 1;
     let a = a.consume_node();

@@ -59,11 +59,11 @@ pub enum Instruction {
   /// let out = net.do_op_num(lab, trg, rhs);
   /// ```
   OpNum { op: Op, trg: TrgId, rhs: Port, out: TrgId },
-  /// See [`Net::do_mat`].
+  /// See [`Net::do_match`].
   /// ```rust,ignore
-  /// let (arms, out) = net.do_mat(trg);
+  /// let (arms, out) = net.do_match(trg);
   /// ```
-  Mat { trg: TrgId, arms: TrgId, out: TrgId },
+  Switch { trg: TrgId, arms: TrgId, out: TrgId },
   /// See [`Net::do_wires`].
   /// ```rust,ignore
   /// let (av, aw, bv, bw) = net.do_wires();
@@ -175,7 +175,7 @@ impl<'a> Net<'a> {
 
   /// `trg ~ ?<x y>`
   #[inline(always)]
-  pub fn do_mat(&mut self, trg: Trg) -> (Trg, Trg) {
+  pub fn do_match(&mut self, trg: Trg) -> (Trg, Trg) {
     let port = trg.target();
     if port.tag() == Int {
       self.rwts.oper += 1;
@@ -197,7 +197,7 @@ impl<'a> Net<'a> {
       self.free_trg(trg);
       (Trg::port(Port::ERA), Trg::port(Port::ERA))
     } else {
-      let m = self.create_node(Mat, 0);
+      let m = self.create_node(Switch, 0);
       self.link_trg_port(trg, m.p0);
       (Trg::port(m.p1), Trg::port(m.p2))
     }
@@ -213,7 +213,7 @@ impl<'a> Net<'a> {
   /// `trg ~ ?<(x (y z)) out>`
   #[inline(always)]
   #[allow(unused)] // TODO: emit this instruction
-  pub fn do_mat_con_con(&mut self, trg: Trg, out: Trg) -> (Trg, Trg, Trg) {
+  pub fn do_match_con_con(&mut self, trg: Trg, out: Trg) -> (Trg, Trg, Trg) {
     let port = trg.target();
     if trg.target().tag() == Int {
       self.rwts.oper += 1;
@@ -228,7 +228,7 @@ impl<'a> Net<'a> {
       self.link_trg_port(out, Port::ERA);
       (Trg::port(Port::ERA), Trg::port(Port::ERA), Trg::port(Port::ERA))
     } else {
-      let m = self.create_node(Mat, 0);
+      let m = self.create_node(Switch, 0);
       let c1 = self.create_node(Ctr, 0);
       let c2 = self.create_node(Ctr, 0);
       self.link_port_port(m.p1, c1.p0);
@@ -241,7 +241,7 @@ impl<'a> Net<'a> {
   /// `trg ~ ?<(x y) out>`
   #[inline(always)]
   #[allow(unused)] // TODO: emit this instruction
-  pub fn do_mat_con(&mut self, trg: Trg, out: Trg) -> (Trg, Trg) {
+  pub fn do_match_con(&mut self, trg: Trg, out: Trg) -> (Trg, Trg) {
     let port = trg.target();
     if trg.target().tag() == Int {
       self.rwts.oper += 1;
@@ -259,7 +259,7 @@ impl<'a> Net<'a> {
       self.link_trg_port(out, Port::ERA);
       (Trg::port(Port::ERA), Trg::port(Port::ERA))
     } else {
-      let m = self.create_node(Mat, 0);
+      let m = self.create_node(Switch, 0);
       let c1 = self.create_node(Ctr, 0);
       self.link_port_port(m.p1, c1.p0);
       self.link_trg_port(out, m.p2);

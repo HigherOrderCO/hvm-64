@@ -76,14 +76,14 @@ bi_enum! {
     /// storing the targets of the wires connected to the two auxiliary ports of
     /// this node.
     Op = 5,
-    /// A `Mat` port represents the principal port of a Mat node.
+    /// A `Switch` port represents the principal port of a Switch node.
     ///
     /// The address of this port is the address of a two-word allocation,
     /// storing the targets of the wires connected to the two auxiliary ports of
     /// the node.
     ///
     /// The label of this port is currently unused and always 0.
-    Mat = 6,
+    Switch = 6,
     /// A `Ctr` port represents the principal port of an binary interaction
     /// combinator node.
     ///
@@ -108,7 +108,7 @@ impl fmt::Debug for Port {
       _ => match self.tag() {
         Int => write!(f, "[Int {}]", self.int()),
         F32 => write!(f, "[F32 {:?}]", self.float()),
-        Var | Red | Mat => write!(f, "[{:?} {:?}]", self.tag(), self.addr()),
+        Var | Red | Switch => write!(f, "[{:?} {:?}]", self.tag(), self.addr()),
         Op | Ctr | Ref => write!(f, "[{:?} {:?} {:?}]", self.tag(), self.lab(), self.addr()),
       },
     }

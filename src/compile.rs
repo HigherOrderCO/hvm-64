@@ -143,7 +143,7 @@ fn compile_struct(code: &mut String, host: &Host, rust_name: &str, def: &Def<Int
       Instruction::OpNum { op, trg, rhs, out } => {
         writeln!(code, "let {out} = net.do_op_num({op:?}, {trg}, {});", compile_port(host, rhs))
       }
-      Instruction::Mat { trg, arms, out } => {
+      Instruction::Switch { trg, arms, out } => {
         writeln!(code, "let ({arms}, {out}) = net.do_mat({trg});")
       }
       Instruction::Wires { av, aw, bv, bw } => {

@@ -90,8 +90,8 @@ impl<'a, E: Encoder> State<'a, E> {
           self.visit_tree(out, o);
         }
       },
-      Tree::Mat { arms, out } => {
-        let (a, o) = self.encoder.mat(trg);
+      Tree::Switch { arms, out } => {
+        let (a, o) = self.encoder.switch(trg);
         self.visit_tree(arms, a);
         self.visit_tree(out, o);
       }
@@ -113,7 +113,7 @@ trait Encoder {
   fn ctr(&mut self, lab: Lab, trg: Self::Trg) -> (Self::Trg, Self::Trg);
   fn op(&mut self, op: Op, trg: Self::Trg) -> (Self::Trg, Self::Trg);
   fn op_num(&mut self, op: Op, trg: Self::Trg, rhs: Port) -> Self::Trg;
-  fn mat(&mut self, trg: Self::Trg) -> (Self::Trg, Self::Trg);
+  fn switch(&mut self, trg: Self::Trg) -> (Self::Trg, Self::Trg);
   fn wires(&mut self) -> (Self::Trg, Self::Trg, Self::Trg, Self::Trg);
 }
 
@@ -147,10 +147,10 @@ impl Encoder for InterpretedDef {
     self.instr.push(Instruction::OpNum { op, trg, rhs, out });
     out
   }
-  fn mat(&mut self, trg: Self::Trg) -> (Self::Trg, Self::Trg) {
+  fn switch(&mut self, trg: Self::Trg) -> (Self::Trg, Self::Trg) {
     let arms = self.new_trg_id();
     let out = self.new_trg_id();
-    self.instr.push(Instruction::Mat { trg, arms, out });
+    self.instr.push(Instruction::Switch { trg, arms, out });
     (arms, out)
   }
   fn wires(&mut self) -> (Self::Trg, Self::Trg, Self::Trg, Self::Trg) {
@@ -184,8 +184,8 @@ impl<'a> Encoder for Net<'a> {
   fn op_num(&mut self, op: Op, trg: Self::Trg, rhs: Port) -> Self::Trg {
     self.do_op_num(op, trg, rhs)
   }
-  fn mat(&mut self, trg: Self::Trg) -> (Self::Trg, Self::Trg) {
-    self.do_mat(trg)
+  fn switch(&mut self, trg: Self::Trg) -> (Self::Trg, Self::Trg) {
+    self.do_match(trg)
   }
   fn wires(&mut self) -> (Self::Trg, Self::Trg, Self::Trg, Self::Trg) {
     self.do_wires()

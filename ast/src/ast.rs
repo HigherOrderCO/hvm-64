@@ -87,7 +87,7 @@ pub enum Tree {
   /// A binary node representing a match on native integers.
   ///
   /// The principal port connects to the integer to be matched on.
-  Mat {
+  Switch {
     /// An auxiliary port; connects to a tree of the following structure:
     /// ```text
     /// (+value_if_zero (-predecessor_of_number +value_if_succ))
@@ -144,7 +144,7 @@ impl Tree {
       Tree::Era | Tree::Int { .. } | Tree::F32 { .. } | Tree::Ref(_) | Tree::Var(_) => Iter::Nil([]),
       Tree::Ctr { p1, p2, .. } => Iter::Two([&**p1, p2]),
       Tree::Op { rhs, out, .. } => Iter::Two([&**rhs, out]),
-      Tree::Mat { arms, out } => Iter::Two([&**arms, out]),
+      Tree::Switch { arms, out } => Iter::Two([&**arms, out]),
     }
   }
 
@@ -155,7 +155,7 @@ impl Tree {
       Tree::Era | Tree::Int { .. } | Tree::F32 { .. } | Tree::Ref(_) | Tree::Var(_) => Iter::Nil([]),
       Tree::Ctr { p1, p2, .. } => Iter::Two([&mut **p1, p2]),
       Tree::Op { rhs, out, .. } => Iter::Two([&mut **rhs, out]),
-      Tree::Mat { arms, out } => Iter::Two([&mut **arms, out]),
+      Tree::Switch { arms, out } => Iter::Two([&mut **arms, out]),
     }
   }
 
@@ -191,7 +191,7 @@ impl Clone for Tree {
       Tree::Ref(name) => Tree::Ref(name.clone()),
       Tree::Ctr { lab, p1, p2 } => Tree::Ctr { lab: *lab, p1: p1.clone(), p2: p2.clone() },
       Tree::Op { op, rhs, out } => Tree::Op { op: *op, rhs: rhs.clone(), out: out.clone() },
-      Tree::Mat { arms, out } => Tree::Mat { arms: arms.clone(), out: out.clone() },
+      Tree::Switch { arms, out } => Tree::Switch { arms: arms.clone(), out: out.clone() },
       Tree::Var(name) => Tree::Var(name.clone()),
     })
   }
@@ -263,7 +263,7 @@ impl fmt::Display for Tree {
       Tree::Int { val } => write!(f, "#{val}"),
       Tree::F32 { val } => write!(f, "#{:?}", val.0),
       Tree::Op { op, rhs, out } => write!(f, "<{op} {rhs} {out}>"),
-      Tree::Mat { arms, out } => write!(f, "?<{arms} {out}>"),
+      Tree::Switch { arms, out } => write!(f, "?<{arms} {out}>"),
     })
   }
 }

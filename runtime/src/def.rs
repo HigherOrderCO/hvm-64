@@ -271,8 +271,8 @@ impl AsDef for InterpretedDef {
             let o = net.do_op_num(op, trgs.get_trg(trg), rhs.clone());
             trgs.set_trg(out, o);
           }
-          Instruction::Mat { trg, arms, out } => {
-            let (a, o) = net.do_mat(trgs.get_trg(trg));
+          Instruction::Switch { trg, arms, out } => {
+            let (a, o) = net.do_match(trgs.get_trg(trg));
             trgs.set_trg(arms, a);
             trgs.set_trg(out, o);
           }
