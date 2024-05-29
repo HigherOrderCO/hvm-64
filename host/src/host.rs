@@ -2,11 +2,9 @@
 //! the runtime.
 #![cfg_attr(not(feature = "std"), no_std)]
 
-include!("../../prelude.rs");
-
-use crate::prelude::*;
 use hvm64_ast::{Book, Tree};
 use hvm64_runtime::{Addr, Def, DynDef, InterpretedDef, LabSet, Port, Tag, Wire};
+use hvm64_util::prelude::*;
 
 mod calc_labels;
 mod encode;

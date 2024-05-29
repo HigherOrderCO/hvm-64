@@ -1,4 +1,4 @@
-use crate::prelude::*;
+use hvm64_util::prelude::*;
 
 use crate::Host;
 use hvm64_ast::{Lab, Net as AstNet, Tree};

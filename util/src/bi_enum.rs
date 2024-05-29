@@ -54,6 +54,7 @@ macro_rules! bi_enum {
 
 #[test]
 fn test_bi_enum() {
+  use crate::prelude::*;
   use alloc::string::ToString;
   use core::str::FromStr;
 

@@ -1,6 +1,7 @@
+use hvm64_util::prelude::*;
+
 use core::ops::BitOr;
 
-use crate::prelude::*;
 use hvm64_ast::{Book, Net, Tree};
 use hvm64_util::maybe_grow;
 

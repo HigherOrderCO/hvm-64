@@ -73,7 +73,6 @@ hvm64-runtime = { path = "../runtime", default-features = false }
   fs::write(".hvm/gen/src/lib.rs", lib)?;
 
   include_files! {
-    prelude
     crate util {
       lib
       bi_enum
@@ -87,6 +86,7 @@ hvm64-runtime = { path = "../runtime", default-features = false }
         word
       }
       parse_abbrev_number
+      prelude
       pretty_num
     }
     crate runtime {

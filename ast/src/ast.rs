@@ -11,15 +11,12 @@
 //! [interaction calculus]: https://en.wikipedia.org/wiki/Interaction_nets#Interaction_calculus
 #![cfg_attr(not(feature = "std"), no_std)]
 
-include!("../../prelude.rs");
-
 #[cfg(feature = "parser")]
 mod parser;
 
 use alloc::collections::BTreeMap;
 
-use crate::prelude::*;
-use hvm64_util::{create_var, deref_to, maybe_grow, multi_iterator, ops::TypedOp as Op, var_to_num};
+use hvm64_util::{create_var, deref_to, maybe_grow, multi_iterator, ops::TypedOp as Op, prelude::*, var_to_num};
 
 use ordered_float::OrderedFloat;
 
