@@ -31,9 +31,11 @@ hvm64-transform = { path = "./transform" }
 hvm64-util = { path = "./util" }
 hvm64-host = { path = "./host" }
 
+dyntest = "0.1.2"
+TSPL = { git = "https://github.com/tjjfvi/TSPL", branch = "no_std" }
+
 [dev-dependencies]
 insta = { version = "1.34.0", features = ["glob"] }
-dyntest = "0.1.2"
 
 [features]
 default = ["std"]

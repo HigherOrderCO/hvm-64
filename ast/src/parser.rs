@@ -38,7 +38,7 @@ impl<'i> Hvm64Parser<'i> {
     Ok(Net { root, redexes })
   }
 
-  fn parse_tree(&mut self) -> Result<Tree, String> {
+  pub fn parse_tree(&mut self) -> Result<Tree, String> {
     maybe_grow(move || {
       self.skip_trivia();
       match self.peek_one() {
