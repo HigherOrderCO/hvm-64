@@ -52,6 +52,7 @@ workspace = true
 
 [workspace]
 resolver = "2"
+members = ["num"]
 
 [workspace.lints.clippy]
 alloc_instead_of_core = "warn"

@@ -253,6 +253,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "hvm64_num"
+version = "0.3.0"
+dependencies = [
+ "hvm64-util",
+]
+
+[[package]]
 name = "insta"
 version = "1.38.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
