@@ -64,6 +64,8 @@
 #![allow(non_snake_case)]
 #![cfg_attr(not(feature = "trace"), allow(unused))]
 
+use hvm64_util::prelude::*;
+
 use core::{
   cell::UnsafeCell,
   fmt::{self, Debug, Formatter, Write},
@@ -73,7 +75,6 @@ use core::{
 #[cfg(feature = "std")]
 use std::sync::{Mutex, Once};
 
-use hvm64_util::prelude::*;
 use hvm64_util::ops::TypedOp as Op;
 
 use crate::{Addr, Port, Trg, Wire};

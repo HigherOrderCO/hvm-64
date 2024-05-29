@@ -53,9 +53,10 @@
 //!
 //! The pass also reduces subnets such as `(* *) -> *`
 
+use hvm64_util::prelude::*;
+
 use core::ops::RangeFrom;
 
-use hvm64_util::prelude::*;
 use hvm64_ast::{Net, Tree};
 
 use ordered_float::OrderedFloat;

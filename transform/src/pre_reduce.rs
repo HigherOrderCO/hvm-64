@@ -15,6 +15,7 @@
 //! overriding the previous one.
 
 use hvm64_util::prelude::*;
+
 use hvm64_ast::{Book, Tree};
 use hvm64_host::Host;
 use hvm64_runtime::{AsDef, Def, Heap, InterpretedDef, LabSet, Port, Rewrites};
