@@ -49,6 +49,7 @@ pub fn create_temp_hvm(host: &Host) -> Result<(), io::Error> {
     r#"
 [workspace]
 resolver = "2"
+package.version = "0.0.0"
 
 members = ["util", "runtime", "gen"]
 
@@ -60,7 +61,6 @@ members = ["util", "runtime", "gen"]
     r#"
 [package]
 name = "hvm64-gen"
-version = "0.3.0"
 edition = "2021"
 
 [lib]
