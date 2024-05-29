@@ -70,7 +70,7 @@ impl<'a> ReadbackState<'a> {
       }
       Tag::Ctr => {
         let node = port.traverse_node();
-        Tree::Ctr { lab: node.lab, lft: Box::new(self.read_wire(node.p1)), rgt: Box::new(self.read_wire(node.p2)) }
+        Tree::Ctr { lab: node.lab, p1: Box::new(self.read_wire(node.p1)), p2: Box::new(self.read_wire(node.p2)) }
       }
       Tag::Mat => {
         let node = port.traverse_node();

@@ -70,24 +70,24 @@ impl<'a, E: Encoder> State<'a, E> {
       Tree::Int { val } => self.encoder.link_const(trg, Port::new_int(*val)),
       Tree::F32 { val } => self.encoder.link_const(trg, Port::new_float(val.0)),
       Tree::Ref(name) => self.encoder.link_const(trg, Port::new_ref(&self.host.defs[name])),
-      Tree::Ctr { lab, lft, rgt } => {
+      Tree::Ctr { lab, p1, p2 } => {
         let (l, r) = self.encoder.ctr(*lab, trg);
-        self.visit_tree(lft, l);
-        self.visit_tree(rgt, r);
+        self.visit_tree(p1, l);
+        self.visit_tree(p2, r);
       }
-      Tree::Op { op, rhs: lft, out: rgt } => match &**lft {
+      Tree::Op { op, rhs, out } => match &**rhs {
         Tree::Int { val } => {
           let o = self.encoder.op_num(*op, trg, Port::new_int(*val));
-          self.visit_tree(rgt, o);
+          self.visit_tree(out, o);
         }
         Tree::F32 { val } => {
           let o = self.encoder.op_num(*op, trg, Port::new_float(val.0));
-          self.visit_tree(rgt, o);
+          self.visit_tree(out, o);
         }
         _ => {
-          let (l, r) = self.encoder.op(*op, trg);
-          self.visit_tree(lft, l);
-          self.visit_tree(rgt, r);
+          let (r, o) = self.encoder.op(*op, trg);
+          self.visit_tree(rhs, r);
+          self.visit_tree(out, o);
         }
       },
       Tree::Mat { arms, out } => {
@@ -131,10 +131,10 @@ impl Encoder for InterpretedDef {
     trg
   }
   fn ctr(&mut self, lab: Lab, trg: Self::Trg) -> (Self::Trg, Self::Trg) {
-    let lft = self.new_trg_id();
-    let rgt = self.new_trg_id();
-    self.instr.push(Instruction::Ctr { lab, trg, lft, rgt });
-    (lft, rgt)
+    let p1 = self.new_trg_id();
+    let p2 = self.new_trg_id();
+    self.instr.push(Instruction::Ctr { lab, trg, p1, p2 });
+    (p1, p2)
   }
   fn op(&mut self, op: Op, trg: Self::Trg) -> (Self::Trg, Self::Trg) {
     let rhs = self.new_trg_id();
@@ -148,10 +148,10 @@ impl Encoder for InterpretedDef {
     out
   }
   fn mat(&mut self, trg: Self::Trg) -> (Self::Trg, Self::Trg) {
-    let lft = self.new_trg_id();
-    let rgt = self.new_trg_id();
-    self.instr.push(Instruction::Mat { trg, lft, rgt });
-    (lft, rgt)
+    let arms = self.new_trg_id();
+    let out = self.new_trg_id();
+    self.instr.push(Instruction::Mat { trg, arms, out });
+    (arms, out)
   }
   fn wires(&mut self) -> (Self::Trg, Self::Trg, Self::Trg, Self::Trg) {
     let av = self.new_trg_id();

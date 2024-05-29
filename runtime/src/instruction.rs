@@ -46,9 +46,9 @@ pub enum Instruction {
   LinkConst { trg: TrgId, port: Port },
   /// See [`Net::do_ctr`].
   /// ```rust,ignore
-  /// let (lft, rgt) = net.do_ctr(lab, trg);
+  /// let (p1, p2) = net.do_ctr(lab, trg);
   /// ```
-  Ctr { lab: Lab, trg: TrgId, lft: TrgId, rgt: TrgId },
+  Ctr { lab: Lab, trg: TrgId, p1: TrgId, p2: TrgId },
   /// See [`Net::do_op`].
   /// ```rust,ignore
   /// let (rhs, out) = net.do_op(lab, trg);
@@ -61,9 +61,9 @@ pub enum Instruction {
   OpNum { op: Op, trg: TrgId, rhs: Port, out: TrgId },
   /// See [`Net::do_mat`].
   /// ```rust,ignore
-  /// let (lft, rgt) = net.do_mat(trg);
+  /// let (arms, out) = net.do_mat(trg);
   /// ```
-  Mat { trg: TrgId, lft: TrgId, rgt: TrgId },
+  Mat { trg: TrgId, arms: TrgId, out: TrgId },
   /// See [`Net::do_wires`].
   /// ```rust,ignore
   /// let (av, aw, bv, bw) = net.do_wires();

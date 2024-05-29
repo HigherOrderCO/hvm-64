@@ -63,10 +63,10 @@ impl<'i> Hvm64Parser<'i> {
             _ => unreachable!(),
           };
           self.skip_trivia();
-          let lft = Box::new(self.parse_tree()?);
-          let rgt = Box::new(self.parse_tree()?);
+          let p1 = Box::new(self.parse_tree()?);
+          let p2 = Box::new(self.parse_tree()?);
           self.consume(close)?;
-          Ok(Tree::Ctr { lab, lft, rgt })
+          Ok(Tree::Ctr { lab, p1, p2 })
         }
         // Ref = "@" Name
         Some('@') => {

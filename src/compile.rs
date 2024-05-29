@@ -134,8 +134,8 @@ fn compile_struct(code: &mut String, host: &Host, rust_name: &str, def: &Def<Int
       Instruction::LinkConst { trg, port } => {
         writeln!(code, "net.link_trg({trg}, Trg::port({}));", compile_port(host, port))
       }
-      Instruction::Ctr { lab, trg, lft, rgt } => {
-        writeln!(code, "let ({lft}, {rgt}) = net.do_ctr({lab}, {trg});")
+      Instruction::Ctr { lab, trg, p1, p2 } => {
+        writeln!(code, "let ({p1}, {p2}) = net.do_ctr({lab}, {trg});")
       }
       Instruction::Op { op, trg, rhs, out } => {
         writeln!(code, "let ({rhs}, {out}) = net.do_op({op:?}, {trg});")
@@ -143,8 +143,8 @@ fn compile_struct(code: &mut String, host: &Host, rust_name: &str, def: &Def<Int
       Instruction::OpNum { op, trg, rhs, out } => {
         writeln!(code, "let {out} = net.do_op_num({op:?}, {trg}, {});", compile_port(host, rhs))
       }
-      Instruction::Mat { trg, lft, rgt } => {
-        writeln!(code, "let ({lft}, {rgt}) = net.do_mat({trg});")
+      Instruction::Mat { trg, arms, out } => {
+        writeln!(code, "let ({arms}, {out}) = net.do_mat({trg});")
       }
       Instruction::Wires { av, aw, bv, bw } => {
         writeln!(code, "let ({av}, {aw}, {bv}, {bw}) = net.do_wires();")

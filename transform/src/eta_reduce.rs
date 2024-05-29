@@ -99,10 +99,10 @@ struct Phase1<'a> {
 impl<'a> Phase1<'a> {
   fn walk_tree(&mut self, tree: &'a Tree) {
     match tree {
-      Tree::Ctr { lab, lft, rgt } => {
+      Tree::Ctr { lab, p1, p2 } => {
         self.nodes.push(NodeType::Ctr(*lab));
-        self.walk_tree(lft);
-        self.walk_tree(rgt);
+        self.walk_tree(p1);
+        self.walk_tree(p2);
       }
       Tree::Var(name) => {
         if let Some(i) = self.vars.get(&**name) {
@@ -136,9 +136,9 @@ impl Phase2 {
   fn reduce_tree(&mut self, tree: &mut Tree) -> NodeType {
     let index = self.index.next().unwrap();
     let ty = self.nodes[index];
-    if let Tree::Ctr { lft, rgt, .. } = tree {
-      let a = self.reduce_tree(lft);
-      let b = self.reduce_tree(rgt);
+    if let Tree::Ctr { p1, p2, .. } = tree {
+      let a = self.reduce_tree(p1);
+      let b = self.reduce_tree(p2);
       if a == b {
         let reducible = match a {
           NodeType::Var(delta) => self.nodes[index.wrapping_add_signed(delta)] == ty,
@@ -146,7 +146,7 @@ impl Phase2 {
           _ => false,
         };
         if reducible {
-          *tree = mem::take(lft);
+          *tree = mem::take(p1);
           return a;
         }
       }
