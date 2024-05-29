@@ -1,6 +1,6 @@
 [package]
 name = "hvm64-runtime"
-version = "0.3.0"
+version.workspace = true
 edition = "2021"
 
 [lib]
