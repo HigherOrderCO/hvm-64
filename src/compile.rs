@@ -6,9 +6,9 @@ use alloc::collections::{BTreeMap, BTreeSet};
 use core::{fmt::Write, hash::Hasher};
 use std::hash::DefaultHasher;
 
-use crate::prelude::*;
 use hvm64_host::Host;
 use hvm64_runtime::{Def, Instruction, InterpretedDef, LabSet, Port, Tag};
+use hvm64_util::prelude::*;
 
 struct DefInfo<'a> {
   rust_name: String,

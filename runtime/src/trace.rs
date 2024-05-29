@@ -73,7 +73,7 @@ use core::{
 #[cfg(feature = "std")]
 use std::sync::{Mutex, Once};
 
-use crate::prelude::*;
+use hvm64_util::prelude::*;
 use hvm64_util::ops::TypedOp as Op;
 
 use crate::{Addr, Port, Trg, Wire};

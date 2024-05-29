@@ -1,4 +1,4 @@
-use crate::prelude::*;
+use hvm64_util::prelude::*;
 
 use alloc::collections::BTreeMap;
 use core::str::FromStr;

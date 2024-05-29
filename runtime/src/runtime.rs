@@ -20,9 +20,7 @@
 #![cfg_attr(feature = "trace", feature(const_type_name))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
-include!("../../prelude.rs");
-
-use crate::prelude::*;
+use hvm64_util::prelude::*;
 
 pub use hvm64_util::ops;
 

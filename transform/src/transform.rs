@@ -1,8 +1,6 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
-include!("../../prelude.rs");
-
-use crate::prelude::*;
+use hvm64_util::prelude::*;
 
 use hvm64_ast::Book;
 

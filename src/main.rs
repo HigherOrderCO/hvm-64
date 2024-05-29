@@ -1,11 +1,9 @@
-include!("../prelude.rs");
-
 mod compile;
 
 mod args;
 mod full;
 
-use crate::prelude::*;
+use hvm64_util::prelude::*;
 
 use core::time::Duration;
 use std::{

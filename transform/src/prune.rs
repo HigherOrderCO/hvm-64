@@ -1,4 +1,4 @@
-use crate::prelude::*;
+use hvm64_util::prelude::*;
 use hvm64_ast::{Book, Tree};
 use hvm64_util::maybe_grow;
 

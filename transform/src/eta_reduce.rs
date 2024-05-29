@@ -55,7 +55,7 @@
 
 use core::ops::RangeFrom;
 
-use crate::prelude::*;
+use hvm64_util::prelude::*;
 use hvm64_ast::{Net, Tree};
 
 use ordered_float::OrderedFloat;

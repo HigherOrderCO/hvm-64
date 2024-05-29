@@ -1,6 +1,6 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
-include!("../../prelude.rs");
+pub mod prelude;
 
 pub mod ops;
 

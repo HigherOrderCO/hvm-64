@@ -2,7 +2,7 @@
 
 use std::{sync::Barrier, thread};
 
-use ::alloc::sync::Arc;
+use alloc::sync::Arc;
 use atomic::AtomicUsize;
 
 use super::*;
