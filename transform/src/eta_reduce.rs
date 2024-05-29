@@ -104,13 +104,13 @@ impl<'a> Phase1<'a> {
         self.walk_tree(lft);
         self.walk_tree(rgt);
       }
-      Tree::Var { nam } => {
-        if let Some(i) = self.vars.get(&**nam) {
+      Tree::Var(name) => {
+        if let Some(i) = self.vars.get(&**name) {
           let j = self.nodes.len() as isize;
           self.nodes.push(NodeType::Var(*i as isize - j));
           self.nodes[*i] = NodeType::Var(j - *i as isize);
         } else {
-          self.vars.insert(nam, self.nodes.len());
+          self.vars.insert(name, self.nodes.len());
           self.nodes.push(NodeType::Hole);
         }
       }

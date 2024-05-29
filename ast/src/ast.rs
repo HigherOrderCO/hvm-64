@@ -64,7 +64,7 @@ pub enum Tree {
   /// A native 32-bit float.
   F32 { val: OrderedFloat<f32> },
   /// A nilary node, referencing a named net.
-  Ref { nam: String },
+  Ref(String),
   /// A n-ary interaction combinator.
   Ctr {
     /// The label of the combinator. (Combinators with the same label
@@ -97,7 +97,7 @@ pub enum Tree {
     out: Box<Tree>,
   },
   /// One side of a wire; the other side will have the same name.
-  Var { nam: String },
+  Var(String),
 }
 
 impl Net {
@@ -122,8 +122,8 @@ impl Net {
     let fresh_str = create_var(fresh + 1);
 
     let fun = mem::take(&mut self.root);
-    let app = Tree::Ctr { lab: 0, lft: Box::new(arg), rgt: Box::new(Tree::Var { nam: fresh_str.clone() }) };
-    self.root = Tree::Var { nam: fresh_str };
+    let app = Tree::Ctr { lab: 0, lft: Box::new(arg), rgt: Box::new(Tree::Var(fresh_str.clone())) };
+    self.root = Tree::Var(fresh_str);
     self.redexes.push((fun, app));
   }
 
@@ -141,7 +141,7 @@ impl Tree {
   pub fn children(&self) -> impl ExactSizeIterator + DoubleEndedIterator<Item = &Tree> {
     multi_iterator! { Iter { Nil, Two } }
     match self {
-      Tree::Era | Tree::Int { .. } | Tree::F32 { .. } | Tree::Ref { .. } | Tree::Var { .. } => Iter::Nil([]),
+      Tree::Era | Tree::Int { .. } | Tree::F32 { .. } | Tree::Ref(_) | Tree::Var(_) => Iter::Nil([]),
       Tree::Ctr { lft, rgt, .. } => Iter::Two([&**lft, rgt]),
       Tree::Op { rhs, out, .. } => Iter::Two([&**rhs, out]),
       Tree::Mat { arms, out } => Iter::Two([&**arms, out]),
@@ -152,7 +152,7 @@ impl Tree {
   pub fn children_mut(&mut self) -> impl ExactSizeIterator + DoubleEndedIterator<Item = &mut Tree> {
     multi_iterator! { Iter { Nil, Two } }
     match self {
-      Tree::Era | Tree::Int { .. } | Tree::F32 { .. } | Tree::Ref { .. } | Tree::Var { .. } => Iter::Nil([]),
+      Tree::Era | Tree::Int { .. } | Tree::F32 { .. } | Tree::Ref(_) | Tree::Var(_) => Iter::Nil([]),
       Tree::Ctr { lft, rgt, .. } => Iter::Two([&mut **lft, rgt]),
       Tree::Op { rhs, out, .. } => Iter::Two([&mut **rhs, out]),
       Tree::Mat { arms, out } => Iter::Two([&mut **arms, out]),
@@ -172,8 +172,8 @@ impl Tree {
   /// This function can be called multiple times with many trees to
   /// ensure that `fresh` does not conflict with any of them.
   pub(crate) fn ensure_no_conflicts(&self, fresh: &mut usize) {
-    if let Tree::Var { nam } = self {
-      if let Some(var_num) = var_to_num(nam) {
+    if let Tree::Var(name) = self {
+      if let Some(var_num) = var_to_num(name) {
         *fresh = (*fresh).max(var_num);
       }
     }
@@ -188,11 +188,11 @@ impl Clone for Tree {
       Tree::Era => Tree::Era,
       Tree::Int { val } => Tree::Int { val: *val },
       Tree::F32 { val } => Tree::F32 { val: *val },
-      Tree::Ref { nam } => Tree::Ref { nam: nam.clone() },
+      Tree::Ref(name) => Tree::Ref(name.clone()),
       Tree::Ctr { lab, lft, rgt } => Tree::Ctr { lab: *lab, lft: lft.clone(), rgt: rgt.clone() },
       Tree::Op { op, rhs, out } => Tree::Op { op: *op, rhs: rhs.clone(), out: out.clone() },
       Tree::Mat { arms, out } => Tree::Mat { arms: arms.clone(), out: out.clone() },
-      Tree::Var { nam } => Tree::Var { nam: nam.clone() },
+      Tree::Var(name) => Tree::Var(name.clone()),
     })
   }
 }
@@ -258,8 +258,8 @@ impl fmt::Display for Tree {
         1 => write!(f, "[{lft} {rgt}]"),
         _ => write!(f, "{{{lab} {lft} {rgt}}}"),
       },
-      Tree::Var { nam } => write!(f, "{nam}"),
-      Tree::Ref { nam } => write!(f, "@{nam}"),
+      Tree::Var(name) => write!(f, "{name}"),
+      Tree::Ref(name) => write!(f, "@{name}"),
       Tree::Int { val } => write!(f, "#{val}"),
       Tree::F32 { val } => write!(f, "#{:?}", val.0),
       Tree::Op { op, rhs, out } => write!(f, "<{op} {rhs} {out}>"),

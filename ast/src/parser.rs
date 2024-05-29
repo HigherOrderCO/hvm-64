@@ -72,8 +72,8 @@ impl<'i> Hvm64Parser<'i> {
         Some('@') => {
           self.advance_one();
           self.skip_trivia();
-          let nam = self.parse_name()?;
-          Ok(Tree::Ref { nam })
+          let name = self.parse_name()?;
+          Ok(Tree::Ref(name))
         }
         // Int = "#" [-] Int
         // F32 = "#" [-] ( Int "." Int | "NaN" | "inf" )
@@ -114,7 +114,7 @@ impl<'i> Hvm64Parser<'i> {
           Ok(Tree::Mat { arms, out })
         }
         // Var = Name
-        _ => Ok(Tree::Var { nam: self.parse_name()? }),
+        _ => Ok(Tree::Var(self.parse_name()?)),
       }
     })
   }

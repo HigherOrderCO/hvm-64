@@ -51,7 +51,7 @@ impl<'a, E: Encoder> State<'a, E> {
   fn visit_redex(&mut self, a: &'a Tree, b: &'a Tree) {
     let (port, tree) = match (a, b) {
       (Tree::Era, t) | (t, Tree::Era) => (Port::ERA, t),
-      (Tree::Ref { nam }, t) | (t, Tree::Ref { nam }) => (Port::new_ref(&self.host.defs[nam]), t),
+      (Tree::Ref(name), t) | (t, Tree::Ref(name)) => (Port::new_ref(&self.host.defs[name]), t),
       (Tree::Int { val }, t) | (t, Tree::Int { val }) => (Port::new_int(*val), t),
       (t, u) => {
         let (av, aw, bv, bw) = self.encoder.wires();
@@ -69,7 +69,7 @@ impl<'a, E: Encoder> State<'a, E> {
       Tree::Era => self.encoder.link_const(trg, Port::ERA),
       Tree::Int { val } => self.encoder.link_const(trg, Port::new_int(*val)),
       Tree::F32 { val } => self.encoder.link_const(trg, Port::new_float(val.0)),
-      Tree::Ref { nam } => self.encoder.link_const(trg, Port::new_ref(&self.host.defs[nam])),
+      Tree::Ref(name) => self.encoder.link_const(trg, Port::new_ref(&self.host.defs[name])),
       Tree::Ctr { lab, lft, rgt } => {
         let (l, r) = self.encoder.ctr(*lab, trg);
         self.visit_tree(lft, l);
@@ -95,7 +95,7 @@ impl<'a, E: Encoder> State<'a, E> {
         self.visit_tree(arms, a);
         self.visit_tree(out, o);
       }
-      Tree::Var { nam } => match self.scope.entry(nam) {
+      Tree::Var(name) => match self.scope.entry(name) {
         Entry::Occupied(e) => self.encoder.link(e.remove(), trg),
         Entry::Vacant(e) => {
           e.insert(trg);

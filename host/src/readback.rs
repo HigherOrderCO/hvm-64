@@ -54,15 +54,13 @@ impl<'a> ReadbackState<'a> {
       Tag::Var | Tag::Red => {
         // todo: resolve redirects
         let key = wire.unwrap().addr().min(port.addr());
-        Tree::Var {
-          nam: create_var(match self.vars.entry(key) {
-            Entry::Occupied(e) => e.remove(),
-            Entry::Vacant(e) => *e.insert(self.var_id.next().unwrap()),
-          }),
-        }
+        Tree::Var(create_var(match self.vars.entry(key) {
+          Entry::Occupied(e) => e.remove(),
+          Entry::Vacant(e) => *e.insert(self.var_id.next().unwrap()),
+        }))
       }
       Tag::Ref if port == Port::ERA => Tree::Era,
-      Tag::Ref => Tree::Ref { nam: self.host.back[&port.addr()].clone() },
+      Tag::Ref => Tree::Ref(self.host.back[&port.addr()].clone()),
       Tag::Int => Tree::Int { val: port.int() },
       Tag::F32 => Tree::F32 { val: port.float().into() },
       Tag::Op => {

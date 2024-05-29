@@ -9,9 +9,9 @@ fn list_got(index: u32) -> Book {
   let code = load_file("list_put_got.hvm");
   let mut book = parse_core(&code);
   let def = book.get_mut("GenGotIndex").unwrap();
-  def.apply_tree(Tree::Ref { nam: format!("S{index}") });
+  def.apply_tree(Tree::Ref(format!("S{index}")));
   let def = book.get_mut("main").unwrap();
-  def.apply_tree(Tree::Ref { nam: "GenGotIndex".to_string() });
+  def.apply_tree(Tree::Ref("GenGotIndex".to_string()));
   book
 }
 
@@ -19,10 +19,10 @@ fn list_put(index: u32, value: u32) -> Book {
   let code = load_file("list_put_got.hvm");
   let mut book = parse_core(&code);
   let def = book.get_mut("GenPutIndexValue").unwrap();
-  def.apply_tree(Tree::Ref { nam: format!("S{index}") });
-  def.apply_tree(Tree::Ref { nam: format!("S{value}") });
+  def.apply_tree(Tree::Ref(format!("S{index}")));
+  def.apply_tree(Tree::Ref(format!("S{value}")));
   let def = book.get_mut("main").unwrap();
-  def.apply_tree(Tree::Ref { nam: "GenPutIndexValue".to_string() });
+  def.apply_tree(Tree::Ref("GenPutIndexValue".to_string()));
   book
 }
 

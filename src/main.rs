@@ -80,7 +80,7 @@ fn main() {
 }
 
 fn run(host: &Host, opts: RuntimeOpts, args: RunArgs) {
-  let mut net = Net { root: Tree::Ref { nam: args.entry_point }, redexes: vec![] };
+  let mut net = Net { root: Tree::Ref(args.entry_point), redexes: vec![] };
   for arg in args.args {
     let arg: Net = arg.parse().unwrap();
     net.redexes.extend(arg.redexes);

@@ -51,11 +51,11 @@ impl Host {
     // First, we insert empty defs into the host. Even though their instructions
     // are not yet set, the address of the def will not change, meaning that
     // `net_to_runtime_def` can safely use `Port::new_def` on them.
-    for (name, labs) in calculate_label_sets(book, |nam| match self.defs.get(nam) {
+    for (name, labs) in calculate_label_sets(book, |name| match self.defs.get(name) {
       Some(x) => x.labs.clone(),
       None => {
-        self.insert_def(nam, default_def(nam));
-        self.defs[nam].labs.clone()
+        self.insert_def(name, default_def(name));
+        self.defs[name].labs.clone()
       }
     })
     .into_iter()
@@ -66,9 +66,9 @@ impl Host {
 
     // Now that `defs` is fully populated, we can fill in the instructions of
     // each of the new defs.
-    for (nam, net) in book.iter() {
+    for (name, net) in book.iter() {
       let data = self.encode_def(net);
-      self.get_mut::<InterpretedDef>(nam).data = data;
+      self.get_mut::<InterpretedDef>(name).data = data;
     }
   }
 
