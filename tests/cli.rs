@@ -2,6 +2,7 @@
 
 use std::{
   error::Error,
+  fs,
   io::Read,
   process::{Command, ExitStatus, Stdio},
 };
@@ -253,5 +254,5 @@ fn test_cli_compile() {
   [#13 #1]
   "###);
 
-  std::fs::remove_file("examples/arithmetic").unwrap();
+  fs::remove_file("examples/arithmetic").unwrap();
 }

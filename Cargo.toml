@@ -1,23 +1,12 @@
-[workspace]
-resolver = "2"
-
-members = ["ast", "host", "runtime", "transform", "util"]
-
-[workspace.lints.clippy]
-alloc_instead_of_core = "warn"
-std_instead_of_core = "warn"
-std_instead_of_alloc = "warn"
-absolute_paths = "warn"
-field_reassign_with_default = "allow"
-missing_safety_doc = "allow"
-new_ret_no_self = "allow"
-
 [package]
 name = "hvm64"
-version = "0.3.0"
+version.workspace = true
 edition = "2021"
 description = "HVM-Core is a massively parallel Interaction Combinator evaluator."
 license = "MIT"
+
+[workspace.package]
+version = "0.3.0"
 
 [[bin]]
 name = "hvm64"
@@ -57,3 +46,18 @@ highlight_error = { git = "https://github.com/tjjfvi/rust_highlight_error/", bra
 [[test]]
 name = "tests"
 harness = false
+
+[lints]
+workspace = true
+
+[workspace]
+resolver = "2"
+
+[workspace.lints.clippy]
+alloc_instead_of_core = "warn"
+std_instead_of_core = "warn"
+std_instead_of_alloc = "warn"
+absolute_paths = "warn"
+field_reassign_with_default = "allow"
+missing_safety_doc = "allow"
+new_ret_no_self = "allow"

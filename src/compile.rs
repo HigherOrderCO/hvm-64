@@ -2,11 +2,9 @@ mod include_files;
 
 pub use include_files::*;
 
-use std::{
-  collections::{BTreeMap, BTreeSet},
-  fmt::Write,
-  hash::{DefaultHasher, Hasher},
-};
+use alloc::collections::{BTreeMap, BTreeSet};
+use core::{fmt::Write, hash::Hasher};
+use std::hash::DefaultHasher;
 
 use crate::prelude::*;
 use hvm64_host::Host;

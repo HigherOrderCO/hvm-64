@@ -5,8 +5,8 @@
 use hvm64_ast::{Book, Net};
 use hvm64_transform::{eta_reduce::EtaReduce, inline::Inline, pre_reduce::PreReduce, prune::Prune, TransformError};
 
+use core::str::FromStr;
 use insta::assert_snapshot;
-use std::str::FromStr;
 
 mod loaders;
 use loaders::*;
