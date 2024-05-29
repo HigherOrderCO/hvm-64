@@ -1,6 +1,7 @@
+use core::str::FromStr;
 use dyntest::{dyntest, DynTester};
 use hvm64_transform::pre_reduce::PreReduce;
-use std::{fs, path::Path, str::FromStr};
+use std::{fs, path::Path};
 
 use hvm64_ast::{self as ast, Book, Net};
 use hvm64_host::Host;

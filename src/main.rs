@@ -5,13 +5,19 @@ mod compile;
 mod args;
 mod full;
 
+use crate::prelude::*;
+
+use core::time::Duration;
 use std::{
-  env::consts::{DLL_PREFIX, DLL_SUFFIX},
+  env::{
+    self,
+    consts::{DLL_PREFIX, DLL_SUFFIX},
+  },
   ffi::OsStr,
   fs, io,
   path::PathBuf,
   process::{self, Stdio},
-  time::{Duration, Instant},
+  time::Instant,
 };
 
 use self::full::{CliMode, FullCli};
@@ -21,12 +27,13 @@ use clap::Parser;
 
 use hvm64_ast::{Book, Net, Tree};
 use hvm64_host::Host;
-use hvm64_runtime::{DynDef, Heap, Port, Trg};
+use hvm64_runtime::{trace, DynDef, Heap, Port, Trg};
 use hvm64_transform::Transform;
+use hvm64_util::pretty_num;
 
 fn main() {
   if cfg!(feature = "trace") {
-    hvm64_runtime::trace::set_hook();
+    trace::set_hook();
   }
 
   let cli = FullCli::parse();
@@ -70,7 +77,7 @@ fn main() {
   };
 
   if cfg!(feature = "trace") {
-    hvm64_runtime::trace::_read_traces(usize::MAX);
+    trace::_read_traces(usize::MAX);
   }
 }
 
@@ -124,7 +131,7 @@ fn load_book(files: &[PathBuf], transform_args: TransformArgs) -> Book {
 }
 
 fn load_dylibs(host: &mut Host, include: &[PathBuf]) {
-  let current_dir = std::env::current_dir().unwrap();
+  let current_dir = env::current_dir().unwrap();
 
   for file in include {
     unsafe {
@@ -163,7 +170,7 @@ fn load_dylibs(host: &mut Host, include: &[PathBuf]) {
       });
 
       // Leak the lib to avoid unloading it, as code from it is still referenced.
-      std::mem::forget(lib);
+      mem::forget(lib);
     }
   }
 }
@@ -196,17 +203,6 @@ fn print_stats(net: &hvm64_runtime::Net, elapsed: Duration) {
   eprintln!("- OPER : {:>15}", pretty_num(net.rwts.oper));
   eprintln!("TIME   : {:.3?}", elapsed);
   eprintln!("RPS    : {:.3} M", (net.rwts.total() as f64) / (elapsed.as_millis() as f64) / 1000.0);
-}
-
-fn pretty_num(n: u64) -> String {
-  n.to_string()
-    .as_bytes()
-    .rchunks(3)
-    .rev()
-    .map(|x| std::str::from_utf8(x).unwrap())
-    .flat_map(|x| ["_", x])
-    .skip(1)
-    .collect()
 }
 
 /// Compiles the `.hvm` directory, appending the provided `args` to `cargo`.
