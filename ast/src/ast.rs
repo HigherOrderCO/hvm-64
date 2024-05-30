@@ -264,7 +264,7 @@ impl fmt::Display for Tree {
       Tree::Int { val } => write!(f, "~{val}"),
       Tree::F32 { val } => write!(f, "~{:?}", val.0),
       Tree::Op { op, rhs, out } => write!(f, "<{op} {rhs} {out}>"),
-      Tree::Switch { arms, out } => write!(f, "?<{arms} {out}>"),
+      Tree::Switch { arms, out } => write!(f, "?({arms} {out})"),
     })
   }
 }

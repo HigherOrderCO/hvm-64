@@ -107,12 +107,12 @@ impl<'i> Hvm64Parser<'i> {
           self.consume(">")?;
           Ok(Tree::Op { op, rhs, out })
         }
-        // Switch = "?<" Tree Tree ">"
+        // Switch = "?(" Tree Tree ")"
         Some('?') => {
-          self.consume("?<")?;
+          self.consume("?(")?;
           let arms = Box::new(self.parse_tree()?);
           let out = Box::new(self.parse_tree()?);
-          self.consume(">")?;
+          self.consume(")")?;
           Ok(Tree::Switch { arms, out })
         }
         // Var = Name

@@ -1,7 +1,7 @@
 @Leaf = (a ((a b) (* b)))
 @Node = (a (b (* ((a (b c)) c))))
 @add = (<+ a b> (a b))
-@gen = (?<(a b) d> d)
+@gen = (?((a b) d) d)
 & (a b) ~ (c @gen$S0)
 & @Leaf ~ (~1 c)
 @gen$S0 = (#1{a b} c)

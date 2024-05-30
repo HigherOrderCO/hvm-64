@@ -1,6 +1,6 @@
 @main = a
 & @sum ~ (~10000000 (~0 a))
-@sum = (?<(a b) d> d)
+@sum = (?((a b) d) d)
 & (a b) ~ ((c c) @sum$S0)
 @sum$S0 = (#1{a <+ b c>} (b d))
 & @sum ~ (a (c d))

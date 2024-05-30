@@ -1,5 +1,5 @@
 @MkTup8 = (a (b (c (d (e (f (g (h ((a (b (c (d (e (f (g (h i)))))))) i)))))))))
-@app = (?<(a b) c> c)
+@app = (?((a b) c) c)
 & (a b) ~ (@app$S0 @app$S1)
 @app$S0 = (* (a a))
 @app$S1 = (a (#1{b (c d)} (c e)))
