@@ -1,5 +1,5 @@
 [package]
-name = "hvm64_num"
+name = "hvm64-num"
 version.workspace = true
 edition = "2021"
 
@@ -7,7 +7,7 @@ edition = "2021"
 path = "src/num.rs"
 
 [dependencies]
-hvm64-util = { path = "../util" }
+hvm64-util = { path = "../util", default-features = false }
 
 [lints]
 workspace = true

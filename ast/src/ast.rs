@@ -16,9 +16,8 @@ pub mod parser;
 
 use alloc::collections::BTreeMap;
 
-use hvm64_util::{create_var, deref_to, maybe_grow, multi_iterator, ops::TypedOp as Op, prelude::*, var_to_num};
-
-use ordered_float::OrderedFloat;
+use hvm64_num::Num;
+use hvm64_util::{create_var, deref_to, maybe_grow, multi_iterator, prelude::*, var_to_num};
 
 pub type Lab = u16;
 
@@ -59,10 +58,8 @@ pub enum Tree {
   #[default]
   /// A nilary eraser node.
   Era,
-  /// A native 60-bit integer.
-  Int { val: i64 },
-  /// A native 32-bit float.
-  F32 { val: OrderedFloat<f32> },
+  /// A native number.
+  Num(Num),
   /// A nilary node, referencing a named net.
   Ref(String),
   /// A n-ary interaction combinator.
@@ -77,8 +74,6 @@ pub enum Tree {
   ///
   /// The principal port connects to the left operand.
   Op {
-    /// The operation associated with this node.
-    op: Op,
     /// An auxiliary port; connects to the right operand.
     rhs: Box<Tree>,
     /// An auxiliary port; connects to the output.
@@ -141,7 +136,7 @@ impl Tree {
   pub fn children(&self) -> impl ExactSizeIterator + DoubleEndedIterator<Item = &Tree> {
     multi_iterator! { Iter { Nil, Two } }
     match self {
-      Tree::Era | Tree::Int { .. } | Tree::F32 { .. } | Tree::Ref(_) | Tree::Var(_) => Iter::Nil([]),
+      Tree::Era | Tree::Num(..) | Tree::Ref(_) | Tree::Var(_) => Iter::Nil([]),
       Tree::Ctr { p1, p2, .. } => Iter::Two([&**p1, p2]),
       Tree::Op { rhs, out, .. } => Iter::Two([&**rhs, out]),
       Tree::Switch { arms, out } => Iter::Two([&**arms, out]),
@@ -261,9 +256,35 @@ impl fmt::Display for Tree {
       },
       Tree::Var(name) => write!(f, "{name}"),
       Tree::Ref(name) => write!(f, "@{name}"),
-      Tree::Int { val } => write!(f, "~{val}"),
-      Tree::F32 { val } => write!(f, "~{:?}", val.0),
-      Tree::Op { op, rhs, out } => write!(f, "<{op} {rhs} {out}>"),
+      Tree::Int { val } => write!(f, "{val}"),
+      Tree::F32 { val } => {
+        if val.is_nan() {
+          write!(f, "+NaN")
+        } else if val.is_infinite() {
+          write!(f, "{:+}", val)
+        } else {
+          write!(f, "{:?}", val.0)
+        }
+      }
+      Tree::Op { op, rhs, out } => {
+        let op = match op.op {
+          Opr::SubS => ":-",
+          Opr::DivS => ":/",
+          Opr::RemS => ":%",
+          Opr::ShlS => ":<<",
+          Opr::ShrS => ":>>",
+          Opr::Eq => "=",
+          Opr::Ne => "!",
+          Opr::Le => "??",
+          Opr::Ge => "??",
+          _ => Box::leak(Box::new(format!("{}", op.op))),
+        };
+        if matches!(**rhs, Tree::Int { .. } | Tree::F32 { .. }) {
+          write!(f, "$([{op}{rhs}] {out})",)
+        } else {
+          write!(f, "$([{op}] $({rhs} {out}))",)
+        }
+      }
       Tree::Switch { arms, out } => write!(f, "?({arms} {out})"),
     })
   }

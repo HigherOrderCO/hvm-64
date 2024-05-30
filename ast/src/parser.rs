@@ -4,7 +4,8 @@ use alloc::collections::BTreeMap;
 use core::str::FromStr;
 
 use crate::{Book, Net, Tree};
-use hvm64_util::{maybe_grow, ops::TypedOp as Op};
+use hvm64_num::{Num, NumTag};
+use hvm64_util::maybe_grow;
 
 use TSPL::{new_parser, Parser};
 
@@ -77,35 +78,13 @@ impl<'i> Hvm64Parser<'i> {
           let name = self.parse_name()?;
           Ok(Tree::Ref(name))
         }
-        // Int = "~" [-] Int
-        // F32 = "~" [-] ( Int "." Int | "NaN" | "inf" )
-        Some('~') => {
-          self.advance_one();
-          let is_neg = self.consume("-").is_ok();
-          let num = self.take_while(|c| c.is_alphanumeric() || c == '.');
-
-          if num.contains('.') || num.contains("NaN") || num.contains("inf") {
-            let mut val: f32 = num.parse().map_err(|err| format!("{err:?}"))?;
-            if is_neg {
-              val = -val;
-            }
-            Ok(Tree::F32 { val: val.into() })
-          } else {
-            let mut val: i64 = parse_int(num)? as i64;
-            if is_neg {
-              val = -val;
-            }
-            Ok(Tree::Int { val })
-          }
-        }
-        // Op = "<" Op Tree Tree ">"
-        Some('<') => {
-          self.advance_one();
-          let op = self.parse_op()?;
+        // Op = "$(" Tree Tree ")"
+        Some('$') => {
+          self.consume("$(");
           let rhs = Box::new(self.parse_tree()?);
           let out = Box::new(self.parse_tree()?);
           self.consume(">")?;
-          Ok(Tree::Op { op, rhs, out })
+          Ok(Tree::Op { rhs, out })
         }
         // Switch = "?(" Tree Tree ")"
         Some('?') => {
@@ -130,10 +109,54 @@ impl<'i> Hvm64Parser<'i> {
     Ok(name.to_owned())
   }
 
-  /// See `ops.rs` for the available operators.
-  fn parse_op(&mut self) -> Result<Op, String> {
-    let op = self.take_while(|c| c.is_alphanumeric() || ".+-=*/%<>|&^!?$".contains(c));
-    op.parse().map_err(|_| format!("Unknown operator: {op:?}"))
+  fn parse_num(&mut self) -> Result<Num, String> {
+    self.skip_trivia();
+
+    if self.peek_one() != Some('[') {
+      return self.parse_num_lit();
+    }
+
+    self.consume("[");
+
+    let Some(op) = NumTag::from_str_prefix(&self.input[self.index ..]) else { self.expected("operator")? };
+    self.advance_many(op.as_str().len());
+
+    self.skip_trivia();
+
+    if op.is_ty() || self.peek_one() == Some(']') {
+      self.consume("]");
+      return Ok(Num::new_sym(op));
+    }
+
+    let lhs = self.parse_num_lit()?;
+
+    self.consume("]");
+
+    Ok(Num::new(op, lhs.payload()))
+  }
+
+  fn parse_num_lit(&mut self) -> Result<Num, String> {
+    let num = self.take_while(|x| x.is_alphanumeric() || x == '+' || x == '-' || x == '.');
+    if num.contains('.') || num.contains("inf") || num.contains("NaN") {
+      let val: f32 = num.parse().map_err(|err| format!("{err:?}"))?;
+      Ok(Num::new_f24(val))
+    } else if num.starts_with('+') || num.starts_with('-') {
+      let val = Self::parse_int(&num[1 ..])? as i32;
+      Ok(Num::new_i24(if num.starts_with('-') { -val } else { val }))
+    } else {
+      let val = Self::parse_int(num)? as u32;
+      Ok(Num::new_u24(val))
+    }
+  }
+
+  fn parse_int(input: &str) -> Result<u64, String> {
+    if let Some(rest) = input.strip_prefix("0x") {
+      u64::from_str_radix(rest, 16).map_err(|err| format!("{err:?}"))
+    } else if let Some(rest) = input.strip_prefix("0b") {
+      u64::from_str_radix(rest, 2).map_err(|err| format!("{err:?}"))
+    } else {
+      input.parse::<u64>().map_err(|err| format!("{err:?}"))
+    }
   }
 }
 

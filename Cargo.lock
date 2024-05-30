@@ -215,8 +215,8 @@ name = "hvm64-ast"
 version = "0.3.0"
 dependencies = [
  "TSPL",
+ "hvm64-num",
  "hvm64-util",
- "ordered-float",
 ]
 
 [[package]]
@@ -225,6 +225,13 @@ version = "0.3.0"
 dependencies = [
  "hvm64-ast",
  "hvm64-runtime",
+ "hvm64-util",
+]
+
+[[package]]
+name = "hvm64-num"
+version = "0.3.0"
+dependencies = [
  "hvm64-util",
 ]
 
@@ -251,13 +258,6 @@ name = "hvm64-util"
 version = "0.3.0"
 dependencies = [
  "stacker",
-]
-
-[[package]]
-name = "hvm64_num"
-version = "0.3.0"
-dependencies = [
- "hvm64-util",
 ]
 
 [[package]]
