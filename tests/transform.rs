@@ -60,11 +60,11 @@ pub fn test_eta() {
   a
     & (a c) ~ c
   "###);
-  assert_snapshot!(parse_and_reduce("((a b) [a b])"), @"((a b) [a b])");
+  assert_snapshot!(parse_and_reduce("((a b) {a b})"), @"((a b) {a b})");
   assert_snapshot!(parse_and_reduce("((a (b c)) (b c))"), @"((a b) b)");
-  assert_snapshot!(parse_and_reduce("([(a b) (c d)] [(a b) (c d)])"), @"(a a)");
+  assert_snapshot!(parse_and_reduce("({(a b) (c d)} {(a b) (c d)})"), @"(a a)");
   assert_snapshot!(parse_and_reduce("(* *)"), @"*");
-  assert_snapshot!(parse_and_reduce("([(~0 ~0) (~12345 ~12345)] [(* *) (a a)])"), @"([~0 ~12345] [* (a a)])");
+  assert_snapshot!(parse_and_reduce("({(~0 ~0) (~12345 ~12345)} {(* *) (a a)})"), @"({~0 ~12345} {* (a a)})");
 }
 
 #[test]

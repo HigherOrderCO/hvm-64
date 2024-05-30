@@ -3,7 +3,7 @@ use hvm64_util::prelude::*;
 use alloc::collections::BTreeMap;
 use core::str::FromStr;
 
-use crate::{Book, Lab, Net, Tree};
+use crate::{Book, Net, Tree};
 use hvm64_util::{maybe_grow, ops::TypedOp as Op};
 
 use TSPL::{new_parser, Parser};
@@ -47,21 +47,23 @@ impl<'i> Hvm64Parser<'i> {
           self.advance_one();
           Ok(Tree::Era)
         }
-        // Ctr = "(" Tree Tree ")" | "[" Tree Tree "]" | "{" Int Tree Tree "}"
-        Some(char @ ('(' | '[' | '{')) => {
+        // Ctr = ("#" Num)? ("(" Tree Tree ")" | "{" Tree Tree "}")
+        mut char @ Some('(' | '{' | '#') => {
           self.advance_one();
-          let lab = match char {
-            '(' => 0,
-            '[' => 1,
-            '{' => self.parse_u64()? as Lab,
-            _ => unreachable!(),
+          let tag = if char == Some('#') {
+            let tag = self.parse_u64().unwrap() as u16;
+            self.skip_trivia();
+            char = self.advance_one();
+            tag
+          } else {
+            0
           };
-          let close = match char {
-            '(' => ")",
-            '[' => "]",
-            '{' => "}",
-            _ => unreachable!(),
+          let (close, kind) = match char {
+            Some('(') => (")", 0),
+            Some('{') => ("}", 1),
+            _ => self.expected("`(` or `{`")?,
           };
+          let lab = tag * 2 + kind;
           self.skip_trivia();
           let p1 = Box::new(self.parse_tree()?);
           let p2 = Box::new(self.parse_tree()?);

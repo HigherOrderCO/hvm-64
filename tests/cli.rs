@@ -87,7 +87,9 @@ fn test_cli_run_with_args() {
       "run", "-m", "100M",
       &arithmetic_program,
     ]).unwrap().1,
-    @"({3 </ a b> <% c d>} ({5 a c} [b d]))"
+    @r###"
+  (#1{</ a b> <% c d>} (#2{a c} {b d}))
+  "###
   );
 
   // Test partial argument passing
@@ -97,7 +99,9 @@ fn test_cli_run_with_args() {
       &arithmetic_program,
       "~64"
     ]).unwrap().1,
-    @"({5 </$ ~64 a> <%$ ~64 b>} [a b])"
+    @r###"
+  (#2{</$ ~64 a> <%$ ~64 b>} {a b})
+  "###
   );
 
   // Test passing all arguments.
@@ -108,7 +112,9 @@ fn test_cli_run_with_args() {
       "~64",
       "~3"
     ]).unwrap().1,
-    @"[~21 ~1]"
+    @r###"
+  {~21 ~1}
+  "###
   );
 }
 
@@ -128,7 +134,7 @@ fn test_cli_transform() {
 
   @div = (</ a b> (a b))
 
-  @main = ({3 </ a b> <% c d>} ({5 a c} [b d]))
+  @main = (#1{</ a b> <% c d>} (#2{a c} {b d}))
 
   @mod = (<% a b> (a b))
 
@@ -150,7 +156,7 @@ fn test_cli_transform() {
 
   @div = (</ a b> (a b))
 
-  @main = ({3 a b} ({5 c d} [e f]))
+  @main = (#1{a b} (#2{c d} {e f}))
     & @mod ~ (b (d f))
     & @div ~ (a (c e))
 
@@ -251,7 +257,7 @@ fn test_cli_compile() {
 
   assert_snapshot!(format_args!("{status}\n{output}"), @r###"
   exit status: 0
-  [~13 ~1]
+  {~13 ~1}
   "###);
 
   fs::remove_file("examples/arithmetic").unwrap();

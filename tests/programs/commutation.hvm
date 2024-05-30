@@ -1,1 +1,1 @@
-@main = root & (x x) ~ [* root]
+@main = root & (x x) ~ {* root}

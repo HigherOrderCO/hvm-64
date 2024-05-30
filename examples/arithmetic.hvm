@@ -1,6 +1,6 @@
 @add = (<+ a b> (a b))
 @div = (</ a b> (a b))
-@main = ({3 a b} ({5 c d} [e f]))
+@main = (#1{a b} (#2{c d} {e f}))
 & @mod ~ (b (d f))
 & @div ~ (a (c e))
 @mod = (<% a b> (a b))

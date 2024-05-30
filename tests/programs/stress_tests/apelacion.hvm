@@ -3,11 +3,11 @@
 @rec = (?<(a b) d> d)
 & (a b) ~ (c @rec$S0)
 & @sum ~ (~1000000 (~0 c))
-@rec$S0 = ({5 a b} c)
+@rec$S0 = (#2{a b} c)
 & @rec ~ (a <+ d c>)
 & @rec ~ (b d)
 @sum = (?<(a b) d> d)
 & (a b) ~ ((c c) @sum$S0)
-@sum$S0 = ({3 a <+ b c>} (b d))
+@sum$S0 = (#1{a <+ b c>} (b d))
 & @sum ~ (a (c d))
 

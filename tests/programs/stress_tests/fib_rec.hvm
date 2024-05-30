@@ -5,7 +5,7 @@
 @fib$S1 = (a (b c))
 & @fib ~ (b <+ d c>)
 & @fib ~ (a d)
-@fib$S2 = ({3 ?<(a b) (c d)> c} d)
+@fib$S2 = (#1{?<(a b) (c d)> c} d)
 & (a b) ~ (@fib$S0 @fib$S1)
 @main = a
 & @fib ~ (~30 a)

@@ -1,6 +1,6 @@
 @C0 = (* (a a))
 @C1 = ((a b) (a b))
-@C2 = ({3 (a b) (c a)} (c b))
+@C2 = (#1{(a b) (c a)} (c b))
 @Cons = (a (b ((a (b c)) (* c))))
 @Nil = (* (a a))
 @Queue.add = (a ((((a (b c)) c) d) (b d)))

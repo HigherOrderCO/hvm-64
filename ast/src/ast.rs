@@ -255,8 +255,9 @@ impl fmt::Display for Tree {
       Tree::Era => write!(f, "*"),
       Tree::Ctr { lab, p1, p2 } => match lab {
         0 => write!(f, "({p1} {p2})"),
-        1 => write!(f, "[{p1} {p2}]"),
-        _ => write!(f, "{{{lab} {p1} {p2}}}"),
+        1 => write!(f, "{{{p1} {p2}}}"),
+        _ if lab % 2 == 0 => write!(f, "#{}({p1} {p2})", lab / 2),
+        _ => write!(f, "#{}{{{p1} {p2}}}", lab / 2),
       },
       Tree::Var(name) => write!(f, "{name}"),
       Tree::Ref(name) => write!(f, "@{name}"),

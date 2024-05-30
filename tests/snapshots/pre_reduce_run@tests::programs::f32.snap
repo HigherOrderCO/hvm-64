@@ -3,7 +3,7 @@ source: tests/tests.rs
 expression: output
 input_file: tests/programs/f32.hvm
 ---
-[~inf [~-inf [~NaN [~2.5 [~-1.5 [~1.15 [~0.25 [~0.5 [~0 [~1 [~1 [~0 [~0 [~0 [~0 [~0 [~0 [~NaN [~inf [~-inf [~1.02 *]]]]]]]]]]]]]]]]]]]]]
+{~inf {~-inf {~NaN {~2.5 {~-1.5 {~1.15 {~0.25 {~0.5 {~0 {~1 {~1 {~0 {~0 {~0 {~0 {~0 {~0 {~NaN {~inf {~-inf {~1.02 *}}}}}}}}}}}}}}}}}}}}}
 pre-reduce:
 RWTS   :               4
 - ANNI :               0

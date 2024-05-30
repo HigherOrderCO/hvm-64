@@ -2,7 +2,7 @@
 @app = (?<(a b) c> c)
 & (a b) ~ (@app$S0 @app$S1)
 @app$S0 = (* (a a))
-@app$S1 = (a ({3 b (c d)} (c e)))
+@app$S1 = (a (#1{b (c d)} (c e)))
 & @app ~ (a (b (d e)))
 @main = a
 & @app ~ (~2000000 (@rot (b a)))
