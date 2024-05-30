@@ -3,7 +3,7 @@ source: tests/tests.rs
 expression: output
 input_file: tests/programs/stress_tests/tuple_rots.hvm
 ---
-((#1 (#2 (#3 (#4 (#5 (#6 (#7 (#8 a)))))))) a)
+((~1 (~2 (~3 (~4 (~5 (~6 (~7 (~8 a)))))))) a)
 RWTS   :      64_000_038
 - ANNI :      48_000_013
 - COMM :       2_000_000

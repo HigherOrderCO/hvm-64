@@ -3,7 +3,7 @@ source: tests/tests.rs
 expression: output
 input_file: tests/programs/chained_ops.hvm
 ---
-#7184190578800
+~7184190578800
 RWTS   :              28
 - ANNI :               2
 - COMM :               4

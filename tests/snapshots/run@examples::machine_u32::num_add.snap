@@ -3,7 +3,7 @@ source: tests/tests.rs
 expression: output
 input_file: examples/machine_u32/num_add.hvm
 ---
-#223
+~223
 RWTS   :               6
 - ANNI :               2
 - COMM :               0

@@ -1,12 +1,12 @@
 @add = (<+ a b> (a b))
 @fib = (?<(a b) c> c)
-& (a b) ~ (#1 @fib$S2)
-@fib$S0 = (* #1)
+& (a b) ~ (~1 @fib$S2)
+@fib$S0 = (* ~1)
 @fib$S1 = (a (b c))
 & @fib ~ (b <+ d c>)
 & @fib ~ (a d)
 @fib$S2 = ({3 ?<(a b) (c d)> c} d)
 & (a b) ~ (@fib$S0 @fib$S1)
 @main = a
-& @fib ~ (#30 a)
+& @fib ~ (~30 a)
 

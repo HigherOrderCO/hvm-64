@@ -18,5 +18,5 @@
 & @gen ~ (a d)
 @main = a
 & @all ~ (b a)
-& @gen ~ (#24 b)
+& @gen ~ (~24 b)
 

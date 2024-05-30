@@ -5,7 +5,7 @@
 @main = a
 & @sum ~ (b a)
 & @sort ~ (c b)
-& @range ~ (#2 (#0 c))
+& @range ~ (~2 (~0 c))
 @merge = (((a a) (@merge$S5 b)) b)
 @merge$S0 = (a (b c))
 & @List.cons ~ (a (b c))
@@ -23,7 +23,7 @@
 & (a b) ~ (@range$S0 @range$S1)
 @range$S0 = (a b)
 & @Leaf ~ (a b)
-@range$S1 = ({7 a b} ({9 <* #2 <+ #1 c>> <* #2 d>} e))
+@range$S1 = ({7 a b} ({9 <* ~2 <+ ~1 c>> <* ~2 d>} e))
 & @Node ~ (f (g e))
 & @range ~ (b (d g))
 & @range ~ (a (c f))
@@ -34,7 +34,7 @@
 & @merge ~ (d (e c))
 & @sort ~ (b e)
 & @sort ~ (a d)
-@sum = ((#0 (@sum$S0 a)) a)
+@sum = ((~0 (@sum$S0 a)) a)
 @sum$S0 = (<+ a b> (c b))
 & @sum ~ (c a)
 

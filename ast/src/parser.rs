@@ -75,9 +75,9 @@ impl<'i> Hvm64Parser<'i> {
           let name = self.parse_name()?;
           Ok(Tree::Ref(name))
         }
-        // Int = "#" [-] Int
-        // F32 = "#" [-] ( Int "." Int | "NaN" | "inf" )
-        Some('#') => {
+        // Int = "~" [-] Int
+        // F32 = "~" [-] ( Int "." Int | "NaN" | "inf" )
+        Some('~') => {
           self.advance_one();
           let is_neg = self.consume("-").is_ok();
           let num = self.take_while(|c| c.is_alphanumeric() || c == '.');

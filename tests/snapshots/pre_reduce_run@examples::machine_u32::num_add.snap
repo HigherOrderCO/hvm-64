@@ -3,7 +3,7 @@ source: tests/tests.rs
 expression: output
 input_file: examples/machine_u32/num_add.hvm
 ---
-#223
+~223
 pre-reduce:
 RWTS   :               1
 - ANNI :               0

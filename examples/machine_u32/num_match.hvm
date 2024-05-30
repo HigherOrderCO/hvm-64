@@ -1,5 +1,5 @@
 @main = a
-& @pred ~ (#10 a)
+& @pred ~ (~10 a)
 @pred = (?<(a b) d> d)
-& (a b) ~ (#0 (c c))
+& (a b) ~ (~0 (c c))
 

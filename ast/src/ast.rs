@@ -260,8 +260,8 @@ impl fmt::Display for Tree {
       },
       Tree::Var(name) => write!(f, "{name}"),
       Tree::Ref(name) => write!(f, "@{name}"),
-      Tree::Int { val } => write!(f, "#{val}"),
-      Tree::F32 { val } => write!(f, "#{:?}", val.0),
+      Tree::Int { val } => write!(f, "~{val}"),
+      Tree::F32 { val } => write!(f, "~{:?}", val.0),
       Tree::Op { op, rhs, out } => write!(f, "<{op} {rhs} {out}>"),
       Tree::Switch { arms, out } => write!(f, "?<{arms} {out}>"),
     })

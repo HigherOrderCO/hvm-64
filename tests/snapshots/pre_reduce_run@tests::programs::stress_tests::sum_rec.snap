@@ -3,7 +3,7 @@ source: tests/tests.rs
 expression: output
 input_file: tests/programs/stress_tests/sum_rec.hvm
 ---
-#67108864
+~67108864
 pre-reduce:
 RWTS   :              13
 - ANNI :               7

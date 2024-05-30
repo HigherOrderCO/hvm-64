@@ -64,7 +64,7 @@ pub fn test_eta() {
   assert_snapshot!(parse_and_reduce("((a (b c)) (b c))"), @"((a b) b)");
   assert_snapshot!(parse_and_reduce("([(a b) (c d)] [(a b) (c d)])"), @"(a a)");
   assert_snapshot!(parse_and_reduce("(* *)"), @"*");
-  assert_snapshot!(parse_and_reduce("([(#0 #0) (#12345 #12345)] [(* *) (a a)])"), @"([#0 #12345] [* (a a)])");
+  assert_snapshot!(parse_and_reduce("([(~0 ~0) (~12345 ~12345)] [(* *) (a a)])"), @"([~0 ~12345] [* (a a)])");
 }
 
 #[test]
@@ -75,7 +75,7 @@ pub fn test_inline() {
   }
   assert_snapshot!(parse_and_inline("
     @era = *
-    @num = #123
+    @num = ~123
     @abab = (a (b (a b)))
     @ref = @abab
     @def = @ref
@@ -99,9 +99,9 @@ pub fn test_inline() {
 
   @foo = @unbound
 
-  @into = (* (#123 (@abab (@abab (@abab (@abab (@into (@unbound (@unbound (@unbound @unbound))))))))))
+  @into = (* (~123 (@abab (@abab (@abab (@abab (@into (@unbound (@unbound (@unbound @unbound))))))))))
 
-  @num = #123
+  @num = ~123
 
   @ref = @abab
   "###);

@@ -3,7 +3,7 @@ source: tests/tests.rs
 expression: output
 input_file: examples/sort/radix/radix_sort_lam.hvm
 ---
-#549755289600
+~549755289600
 pre-reduce:
 RWTS   :             153
 - ANNI :              63
