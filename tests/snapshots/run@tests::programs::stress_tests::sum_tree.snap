@@ -3,7 +3,7 @@ source: tests/tests.rs
 expression: output
 input_file: tests/programs/stress_tests/sum_tree.hvm
 ---
-~16777216
+0
 RWTS   :     771_751_906
 - ANNI :     369_098_738
 - COMM :      83_886_075

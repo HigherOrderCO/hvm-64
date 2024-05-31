@@ -8,7 +8,7 @@
 @gen = (?((@gen$C0 @gen$C1) a) a)
 @gen$C0 = (a b)
 & @Single ~ (a b)
-@gen$C1 = (#3{a b} ($([<<1] #4{c $([|1] d)}) e))
+@gen$C1 = (#3{a b} ($([:<<1] #4{c $([|1] d)}) e))
 & @Concat ~ (f (g e))
 & @gen ~ (b (d g))
 & @gen ~ (a (c f))

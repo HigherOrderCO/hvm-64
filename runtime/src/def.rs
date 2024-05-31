@@ -267,12 +267,12 @@ impl AsDef for InterpretedDef {
             trgs.set_trg(rhs, r);
             trgs.set_trg(out, o);
           }
-          Instruction::OpNum { op, trg, ref rhs, out } => {
-            let o = net.do_op_num(op, trgs.get_trg(trg), rhs.clone());
+          Instruction::OpNum { op, trg, rhs, out } => {
+            let o = net.do_op_num(op, trgs.get_trg(trg), rhs);
             trgs.set_trg(out, o);
           }
           Instruction::Switch { trg, arms, out } => {
-            let (a, o) = net.do_match(trgs.get_trg(trg));
+            let (a, o) = net.do_switch(trgs.get_trg(trg));
             trgs.set_trg(arms, a);
             trgs.set_trg(out, o);
           }

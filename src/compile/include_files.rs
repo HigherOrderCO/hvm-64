@@ -50,8 +50,7 @@ pub fn create_temp_hvm(host: &Host) -> Result<(), io::Error> {
 [workspace]
 resolver = "2"
 package.version = "0.0.0"
-
-members = ["util", "runtime", "gen"]
+members = ["gen"]
 
 [workspace.lints]
   "#,
@@ -67,12 +66,16 @@ edition = "2021"
 crate-type = ["dylib"]
 
 [dependencies]
-hvm64-runtime = { path = "../runtime", default-features = false }
+hvm64-runtime = { path = "../runtime" }
+hvm64-num = { path = "../num" }
 "#,
   )?;
   fs::write(".hvm/gen/src/lib.rs", lib)?;
 
   include_files! {
+    crate num {
+      num
+    }
     crate util {
       lib
       bi_enum
@@ -81,10 +84,6 @@ hvm64-runtime = { path = "../runtime", default-features = false }
       new_uninit_slice
       maybe_grow
       multi_iterator
-      ops {
-        num
-        word
-      }
       parse_abbrev_number
       prelude
       pretty_num

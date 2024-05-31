@@ -147,7 +147,7 @@ impl Tree {
   pub fn children_mut(&mut self) -> impl ExactSizeIterator + DoubleEndedIterator<Item = &mut Tree> {
     multi_iterator! { Iter { Nil, Two } }
     match self {
-      Tree::Era | Tree::Int { .. } | Tree::F32 { .. } | Tree::Ref(_) | Tree::Var(_) => Iter::Nil([]),
+      Tree::Era | Tree::Num(_) | Tree::Ref(_) | Tree::Var(_) => Iter::Nil([]),
       Tree::Ctr { p1, p2, .. } => Iter::Two([&mut **p1, p2]),
       Tree::Op { rhs, out, .. } => Iter::Two([&mut **rhs, out]),
       Tree::Switch { arms, out } => Iter::Two([&mut **arms, out]),
@@ -181,11 +181,10 @@ impl Clone for Tree {
   fn clone(&self) -> Tree {
     maybe_grow(|| match self {
       Tree::Era => Tree::Era,
-      Tree::Int { val } => Tree::Int { val: *val },
-      Tree::F32 { val } => Tree::F32 { val: *val },
+      Tree::Num(num) => Tree::Num(*num),
       Tree::Ref(name) => Tree::Ref(name.clone()),
       Tree::Ctr { lab, p1, p2 } => Tree::Ctr { lab: *lab, p1: p1.clone(), p2: p2.clone() },
-      Tree::Op { op, rhs, out } => Tree::Op { op: *op, rhs: rhs.clone(), out: out.clone() },
+      Tree::Op { rhs, out } => Tree::Op { rhs: rhs.clone(), out: out.clone() },
       Tree::Switch { arms, out } => Tree::Switch { arms: arms.clone(), out: out.clone() },
       Tree::Var(name) => Tree::Var(name.clone()),
     })
@@ -256,35 +255,8 @@ impl fmt::Display for Tree {
       },
       Tree::Var(name) => write!(f, "{name}"),
       Tree::Ref(name) => write!(f, "@{name}"),
-      Tree::Int { val } => write!(f, "{val}"),
-      Tree::F32 { val } => {
-        if val.is_nan() {
-          write!(f, "+NaN")
-        } else if val.is_infinite() {
-          write!(f, "{:+}", val)
-        } else {
-          write!(f, "{:?}", val.0)
-        }
-      }
-      Tree::Op { op, rhs, out } => {
-        let op = match op.op {
-          Opr::SubS => ":-",
-          Opr::DivS => ":/",
-          Opr::RemS => ":%",
-          Opr::ShlS => ":<<",
-          Opr::ShrS => ":>>",
-          Opr::Eq => "=",
-          Opr::Ne => "!",
-          Opr::Le => "??",
-          Opr::Ge => "??",
-          _ => Box::leak(Box::new(format!("{}", op.op))),
-        };
-        if matches!(**rhs, Tree::Int { .. } | Tree::F32 { .. }) {
-          write!(f, "$([{op}{rhs}] {out})",)
-        } else {
-          write!(f, "$([{op}] $({rhs} {out}))",)
-        }
-      }
+      Tree::Num(val) => write!(f, "{val}"),
+      Tree::Op { rhs, out } => write!(f, "$({rhs} {out})"),
       Tree::Switch { arms, out } => write!(f, "?({arms} {out})"),
     })
   }

@@ -203,6 +203,7 @@ dependencies = [
  "dyntest",
  "hvm64-ast",
  "hvm64-host",
+ "hvm64-num",
  "hvm64-runtime",
  "hvm64-transform",
  "hvm64-util",
@@ -224,6 +225,7 @@ name = "hvm64-host"
 version = "0.3.0"
 dependencies = [
  "hvm64-ast",
+ "hvm64-num",
  "hvm64-runtime",
  "hvm64-util",
 ]
@@ -239,6 +241,7 @@ dependencies = [
 name = "hvm64-runtime"
 version = "0.3.0"
 dependencies = [
+ "hvm64-num",
  "hvm64-util",
 ]
 
@@ -248,6 +251,7 @@ version = "0.3.0"
 dependencies = [
  "hvm64-ast",
  "hvm64-host",
+ "hvm64-num",
  "hvm64-runtime",
  "hvm64-util",
  "ordered-float",

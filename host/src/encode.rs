@@ -2,8 +2,9 @@ use hvm64_util::prelude::*;
 
 use crate::Host;
 use hvm64_ast::{Lab, Net as AstNet, Tree};
+use hvm64_num::{Num, NumTag};
 use hvm64_runtime::{Instruction, InterpretedDef, Net, Port, Trg, TrgId};
-use hvm64_util::{maybe_grow, ops::TypedOp as Op};
+use hvm64_util::maybe_grow;
 
 impl Host {
   /// Converts an ast net to a list of instructions to create the net.
@@ -52,7 +53,7 @@ impl<'a, E: Encoder> State<'a, E> {
     let (port, tree) = match (a, b) {
       (Tree::Era, t) | (t, Tree::Era) => (Port::ERA, t),
       (Tree::Ref(name), t) | (t, Tree::Ref(name)) => (Port::new_ref(&self.host.defs[name]), t),
-      (Tree::Int { val }, t) | (t, Tree::Int { val }) => (Port::new_int(*val), t),
+      (Tree::Num(num), t) | (t, Tree::Num(num)) => (Port::new_num(*num), t),
       (t, u) => {
         let (av, aw, bv, bw) = self.encoder.wires();
         self.visit_tree(t, av);
@@ -67,29 +68,27 @@ impl<'a, E: Encoder> State<'a, E> {
   fn visit_tree(&mut self, tree: &'a Tree, trg: E::Trg) {
     maybe_grow(move || match tree {
       Tree::Era => self.encoder.link_const(trg, Port::ERA),
-      Tree::Int { val } => self.encoder.link_const(trg, Port::new_int(*val)),
-      Tree::F32 { val } => self.encoder.link_const(trg, Port::new_float(val.0)),
+      Tree::Num(num) => self.encoder.link_const(trg, Port::new_num(*num)),
       Tree::Ref(name) => self.encoder.link_const(trg, Port::new_ref(&self.host.defs[name])),
       Tree::Ctr { lab, p1, p2 } => {
         let (l, r) = self.encoder.ctr(*lab, trg);
         self.visit_tree(p1, l);
         self.visit_tree(p2, r);
       }
-      Tree::Op { op, rhs, out } => match &**rhs {
-        Tree::Int { val } => {
-          let o = self.encoder.op_num(*op, trg, Port::new_int(*val));
+      Tree::Op { rhs, out } => {
+        let (op, rhs, out) = match (&**rhs, &**out) {
+          (Tree::Num(op), Tree::Op { rhs, out }) if op.tag() == NumTag::Sym => (unsafe { op.get_sym() }, rhs, out),
+          _ => (NumTag::Sym, rhs, out),
+        };
+        if let Tree::Num(num) = **rhs {
+          let o = self.encoder.op_num(op, trg, num);
           self.visit_tree(out, o);
-        }
-        Tree::F32 { val } => {
-          let o = self.encoder.op_num(*op, trg, Port::new_float(val.0));
-          self.visit_tree(out, o);
-        }
-        _ => {
-          let (r, o) = self.encoder.op(*op, trg);
+        } else {
+          let (r, o) = self.encoder.op(op, trg);
           self.visit_tree(rhs, r);
           self.visit_tree(out, o);
         }
-      },
+      }
       Tree::Switch { arms, out } => {
         let (a, o) = self.encoder.switch(trg);
         self.visit_tree(arms, a);
@@ -111,8 +110,8 @@ trait Encoder {
   fn link(&mut self, a: Self::Trg, b: Self::Trg);
   fn make_const(&mut self, port: Port) -> Self::Trg;
   fn ctr(&mut self, lab: Lab, trg: Self::Trg) -> (Self::Trg, Self::Trg);
-  fn op(&mut self, op: Op, trg: Self::Trg) -> (Self::Trg, Self::Trg);
-  fn op_num(&mut self, op: Op, trg: Self::Trg, rhs: Port) -> Self::Trg;
+  fn op(&mut self, op: NumTag, trg: Self::Trg) -> (Self::Trg, Self::Trg);
+  fn op_num(&mut self, op: NumTag, trg: Self::Trg, rhs: Num) -> Self::Trg;
   fn switch(&mut self, trg: Self::Trg) -> (Self::Trg, Self::Trg);
   fn wires(&mut self) -> (Self::Trg, Self::Trg, Self::Trg, Self::Trg);
 }
@@ -136,13 +135,13 @@ impl Encoder for InterpretedDef {
     self.instr.push(Instruction::Ctr { lab, trg, p1, p2 });
     (p1, p2)
   }
-  fn op(&mut self, op: Op, trg: Self::Trg) -> (Self::Trg, Self::Trg) {
+  fn op(&mut self, op: NumTag, trg: Self::Trg) -> (Self::Trg, Self::Trg) {
     let rhs = self.new_trg_id();
     let out = self.new_trg_id();
     self.instr.push(Instruction::Op { op, trg, rhs, out });
     (rhs, out)
   }
-  fn op_num(&mut self, op: Op, trg: Self::Trg, rhs: Port) -> Self::Trg {
+  fn op_num(&mut self, op: NumTag, trg: Self::Trg, rhs: Num) -> Self::Trg {
     let out = self.new_trg_id();
     self.instr.push(Instruction::OpNum { op, trg, rhs, out });
     out
@@ -178,14 +177,14 @@ impl<'a> Encoder for Net<'a> {
   fn ctr(&mut self, lab: Lab, trg: Self::Trg) -> (Self::Trg, Self::Trg) {
     self.do_ctr(lab, trg)
   }
-  fn op(&mut self, op: Op, trg: Self::Trg) -> (Self::Trg, Self::Trg) {
+  fn op(&mut self, op: NumTag, trg: Self::Trg) -> (Self::Trg, Self::Trg) {
     self.do_op(op, trg)
   }
-  fn op_num(&mut self, op: Op, trg: Self::Trg, rhs: Port) -> Self::Trg {
+  fn op_num(&mut self, op: NumTag, trg: Self::Trg, rhs: Num) -> Self::Trg {
     self.do_op_num(op, trg, rhs)
   }
   fn switch(&mut self, trg: Self::Trg) -> (Self::Trg, Self::Trg) {
-    self.do_match(trg)
+    self.do_switch(trg)
   }
   fn wires(&mut self) -> (Self::Trg, Self::Trg, Self::Trg, Self::Trg) {
     self.do_wires()

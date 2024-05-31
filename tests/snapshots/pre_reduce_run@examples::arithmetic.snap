@@ -3,7 +3,7 @@ source: tests/tests.rs
 expression: output
 input_file: examples/arithmetic.hvm
 ---
-(#1{</ a b> <% c d>} (#2{a c} {b d}))
+(#1{$([/] $(a b)) $([%] $(c d))} (#2{a c} {b d}))
 pre-reduce:
 RWTS   :               5
 - ANNI :               0

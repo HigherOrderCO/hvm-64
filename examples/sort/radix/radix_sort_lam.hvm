@@ -9,7 +9,7 @@
 & (a b) ~ (@gen$S0 @gen$S1)
 @gen$S0 = (a b)
 & @Single ~ (a b)
-@gen$S1 = (#3{a b} ($([<<1] #4{c $([|1] d)}) e))
+@gen$S1 = (#3{a b} ($([:<<1] #4{c $([|1] d)}) e))
 & @Concat ~ (f (g e))
 & @gen ~ (b (d g))
 & @gen ~ (a (c f))

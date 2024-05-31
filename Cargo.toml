@@ -30,6 +30,7 @@ hvm64-runtime = { path = "./runtime" }
 hvm64-transform = { path = "./transform" }
 hvm64-util = { path = "./util" }
 hvm64-host = { path = "./host" }
+hvm64-num = { path = "./num" }
 
 dyntest = "0.1.2"
 TSPL = { git = "https://github.com/tjjfvi/TSPL", branch = "no_std" }

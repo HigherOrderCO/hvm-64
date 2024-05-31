@@ -9,5 +9,9 @@ path = "src/num.rs"
 [dependencies]
 hvm64-util = { path = "../util", default-features = false }
 
+[features]
+default = ["std"]
+std = ["hvm64-util/std"]
+
 [lints]
 workspace = true

@@ -1,0 +1,12 @@
+---
+source: tests/tests.rs
+expression: output
+input_file: tests/programs/f24.hvm
+---
+{+inf {-inf {+NaN {2.5 {-1.5 {1.1499939 {0.25 {0.5 {0 {1 {1 {0 {0 {0 {0 {+NaN {+inf {-inf {1.019989 {0.1000061 {0.1000061 {-0.1000061 {-0.1000061 *}}}}}}}}}}}}}}}}}}}}}}}
+RWTS   :             174
+- ANNI :              23
+- COMM :               1
+- ERAS :              24
+- DREF :              88
+- OPER :              38

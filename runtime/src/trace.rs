@@ -75,7 +75,7 @@ use core::{
 #[cfg(feature = "std")]
 use std::sync::{Mutex, Once};
 
-use hvm64_util::ops::TypedOp as Op;
+use hvm64_num::{Num, NumTag};
 
 use crate::{Addr, Port, Trg, Wire};
 
@@ -363,12 +363,21 @@ impl TraceArg for Trg {
   }
 }
 
-impl TraceArg for Op {
+impl TraceArg for Num {
   fn to_word(&self) -> u64 {
-    u16::from(*self) as u64
+    self.raw() as u64
   }
   fn from_word(word: u64) -> impl Debug {
-    unsafe { Op::from_unchecked(word as u16) }
+    unsafe { Num::from_raw(word as u32) }
+  }
+}
+
+impl TraceArg for NumTag {
+  fn to_word(&self) -> u64 {
+    *self as u64
+  }
+  fn from_word(word: u64) -> impl Debug {
+    unsafe { NumTag::from_unchecked(word as u8) }
   }
 }
 

@@ -5,6 +5,7 @@ use super::{Addr, Host, Port, Tag, Wire};
 use core::ops::RangeFrom;
 
 use hvm64_ast::{Net, Tree};
+use hvm64_num::{Num, NumTag};
 use hvm64_util::{create_var, maybe_grow};
 
 impl Host {
@@ -61,12 +62,16 @@ impl<'a> ReadbackState<'a> {
       }
       Tag::Ref if port == Port::ERA => Tree::Era,
       Tag::Ref => Tree::Ref(self.host.back[&port.addr()].clone()),
-      Tag::Int => Tree::Int { val: port.int() },
-      Tag::F32 => Tree::F32 { val: port.float().into() },
+      Tag::Num => Tree::Num(port.num()),
       Tag::Op => {
         let op = port.op();
         let node = port.traverse_node();
-        Tree::Op { op, rhs: Box::new(self.read_wire(node.p1)), out: Box::new(self.read_wire(node.p2)) }
+        let node = Tree::Op { rhs: Box::new(self.read_wire(node.p1)), out: Box::new(self.read_wire(node.p2)) };
+        if op == NumTag::Sym {
+          node
+        } else {
+          Tree::Op { rhs: Box::new(Tree::Num(Num::new_sym(op))), out: Box::new(node) }
+        }
       }
       Tag::Ctr => {
         let node = port.traverse_node();

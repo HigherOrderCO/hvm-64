@@ -3,7 +3,7 @@ source: tests/tests.rs
 expression: output
 input_file: examples/machine_u32/num_match.hvm
 ---
-~9
+9
 RWTS   :               9
 - ANNI :               4
 - COMM :               0

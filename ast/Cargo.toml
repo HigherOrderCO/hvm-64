@@ -14,7 +14,7 @@ hvm64-num = { path = "../num", default-features = false }
 
 [features]
 default = ["std", "parser"]
-std = ["hvm64-util/std"]
+std = ["hvm64-util/std", "hvm64-num/std"]
 parser = ["dep:TSPL"]
 
 [lints]

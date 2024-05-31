@@ -58,8 +58,7 @@ use hvm64_util::prelude::*;
 use core::ops::RangeFrom;
 
 use hvm64_ast::{Net, Tree};
-
-use ordered_float::OrderedFloat;
+use hvm64_num::Num;
 
 pub trait EtaReduce {
   fn eta_reduce(&mut self);
@@ -83,8 +82,7 @@ impl EtaReduce for Net {
 enum NodeType {
   Ctr(u16),
   Var(isize),
-  Int(i64),
-  F32(OrderedFloat<f32>),
+  Num(Num),
   Era,
   Other,
   Hole,
@@ -115,8 +113,7 @@ impl<'a> Phase1<'a> {
         }
       }
       Tree::Era => self.nodes.push(NodeType::Era),
-      Tree::Int { val } => self.nodes.push(NodeType::Int(*val)),
-      Tree::F32 { val } => self.nodes.push(NodeType::F32(*val)),
+      Tree::Num(num) => self.nodes.push(NodeType::Num(*num)),
       _ => {
         self.nodes.push(NodeType::Other);
         for i in tree.children() {
@@ -142,7 +139,7 @@ impl Phase2 {
       if a == b {
         let reducible = match a {
           NodeType::Var(delta) => self.nodes[index.wrapping_add_signed(delta)] == ty,
-          NodeType::Era | NodeType::Int(_) | NodeType::F32(_) => true,
+          NodeType::Era | NodeType::Num(_) => true,
           _ => false,
         };
         if reducible {

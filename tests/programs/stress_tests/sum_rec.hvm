@@ -1,6 +1,6 @@
 @add = ($([+] $(a b)) (a b))
 @main = a
-& @sum ~ (26 a)
+& @sum ~ (23 a)
 @sum = (?((a b) c) c)
 & (a b) ~ (1 @sum$S0)
 @sum$S0 = (#1{a b} c)

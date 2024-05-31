@@ -10,9 +10,9 @@ impl<'a> Net<'a> {
       // not actually an active pair
       (Var | Red, _) | (_, Var | Red) => unreachable!(),
       // nil-nil
-      (Ref, Ref | Int | F32) if !a.is_skippable() => self.call(a, b),
-      (Ref | Int | F32, Ref) if !b.is_skippable() => self.call(b, a),
-      (Int | F32 | Ref, Int | F32 | Ref) => self.rwts.eras += 1,
+      (Ref, Ref | Num) if !a.is_skippable() => self.call(a, b),
+      (Ref | Num, Ref) if !b.is_skippable() => self.call(b, a),
+      (Num | Ref, Num | Ref) => self.rwts.eras += 1,
       // comm 2/2
       (Ctr, Switch) if a.lab() != 0 => self.comm22(a, b),
       (Switch, Ctr) if b.lab() != 0 => self.comm22(a, b),
@@ -23,22 +23,20 @@ impl<'a> Net<'a> {
       // comm 2/0
       (Ref, Ctr) if b.lab() >= a.lab() => self.comm02(a, b),
       (Ctr, Ref) if a.lab() >= b.lab() => self.comm02(b, a),
-      (Int | F32, Ctr) => self.comm02(a, b),
-      (Ctr, Int | F32) => self.comm02(b, a),
+      (Num, Ctr) => self.comm02(a, b),
+      (Ctr, Num) => self.comm02(b, a),
       (Ref, _) if a == Port::ERA => self.comm02(a, b),
       (_, Ref) if b == Port::ERA => self.comm02(b, a),
       // deref
       (Ref, _) => self.call(a, b),
       (_, Ref) => self.call(b, a),
       // native ops
-      (Op, Int | F32) => self.op_num(a, b),
-      (Int | F32, Op) => self.op_num(b, a),
-      (Switch, Int) => self.switch_int(a, b),
-      (Int, Switch) => self.switch_int(b, a),
+      (Op, Num) => self.op_num(a, b),
+      (Num, Op) => self.op_num(b, a),
+      (Switch, Num) => self.switch_num(a, b),
+      (Num, Switch) => self.switch_num(b, a),
       // todo: what should the semantics of these be?
-      (Switch, F32)
-      | (F32, Switch)
-      | (Switch, Ctr) // b.lab() == 0
+      (Switch, Ctr) // b.lab() == 0
       | (Ctr, Switch) // a.lab() == 0
       | (Op, Switch)
       | (Switch, Op) => unimplemented!("{:?}-{:?}", a.tag(), b.tag()),
@@ -200,12 +198,13 @@ impl<'a> Net<'a> {
   ///                             |
   /// ```
   #[inline(never)]
-  pub fn switch_int(&mut self, a: Port, b: Port) {
+  pub fn switch_num(&mut self, a: Port, b: Port) {
     trace!(self.tracer, a, b);
     self.rwts.oper += 1;
     let a = a.consume_node();
-    let b = b.int();
-    if b == 0 {
+    let num = b.num();
+    let num = if num.tag() == NumTag::U24 { num.get_u24() } else { 0 };
+    if num == 0 {
       let x = self.create_node(Ctr, 0);
       trace!(self.tracer, x.p0);
       self.link_port_port(x.p2, Port::ERA);
@@ -217,7 +216,7 @@ impl<'a> Net<'a> {
       trace!(self.tracer, x.p0, y.p0);
       self.link_port_port(x.p1, Port::ERA);
       self.link_port_port(x.p2, y.p0);
-      self.link_port_port(y.p1, Port::new_int(b - 1));
+      self.link_port_port(y.p1, Port::new_num(Num::new_u24(num - 1)));
       self.link_wire_port(a.p2, y.p2);
       self.link_wire_port(a.p1, x.p0);
     }
@@ -251,25 +250,20 @@ impl<'a> Net<'a> {
   #[inline(never)]
   pub fn op_num(&mut self, a: Port, b: Port) {
     trace!(self.tracer, a, b);
+    let op = a.op();
     let a = a.consume_node();
-    let op = unsafe { Op::try_from(a.lab).unwrap_unchecked() };
     let a1 = a.p1.load_target();
     if a1.is_num() {
       self.rwts.oper += 1;
       self.half_free(a.p1.addr());
 
-      let out = if op.is_int() {
-        Port::new_num(Tag::Int, op.op(b.num(), a1.num()))
-      } else {
-        Port::new_num(Tag::F32, op.op(b.num(), a1.num()))
-      };
+      let out = Num::operate_binary(b.num(), op, a1.num());
 
-      self.link_wire_port(a.p2, out);
+      self.link_wire_port(a.p2, Port::new_num(out));
     } else {
-      let op = op.swap();
-      let x = self.create_node(Op, op.into());
+      let x = self.create_node(Op, NumTag::Sym as u16);
       trace!(self.tracer, x.p0);
-      self.link_port_port(x.p1, b);
+      self.link_port_port(x.p1, Port::new_num(Num::operate_unary(op, b.num())));
       self.link_wire_port(a.p2, x.p2);
       self.link_wire_port(a.p1, x.p0);
     }

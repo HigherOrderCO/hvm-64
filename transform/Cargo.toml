@@ -13,10 +13,17 @@ hvm64-util = { path = "../util", default-features = false }
 hvm64-runtime = { path = "../runtime", default-features = false }
 hvm64-ast = { path = "../ast", default-features = false }
 hvm64-host = { path = "../host", default-features = false }
+hvm64-num = { path = "../num", default-features = false }
 
 [features]
 default = ["std"]
-std = ["hvm64-util/std", "hvm64-runtime/std", "hvm64-ast/std", "hvm64-host/std"]
+std = [
+  "hvm64-util/std",
+  "hvm64-runtime/std",
+  "hvm64-ast/std",
+  "hvm64-host/std",
+  "hvm64-num/std",
+]
 
 [lints]
 workspace = true

@@ -3,7 +3,7 @@ source: tests/tests.rs
 expression: output
 input_file: tests/programs/stress_tests/fib_rec.hvm
 ---
-~1346269
+1346269
 pre-reduce:
 RWTS   :              13
 - ANNI :               6

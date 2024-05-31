@@ -7,7 +7,9 @@ use core::hint::unreachable_unchecked;
 use hvm64_util::bi_enum;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Num(u32);
+pub struct Num {
+  raw: u32,
+}
 
 bi_enum! {
   #[repr(u8)]
@@ -52,27 +54,27 @@ impl NumTag {
 }
 
 impl Num {
-  pub const INVALID: Self = Num::new(NumTag::U24, 0);
+  pub const ID: Self = Num::new_sym(NumTag::Sym);
+  pub const INVALID: Self = Num::new_u24(0);
   pub const TAG: u8 = 3;
 
-  #[inline(always)]
-  pub const fn new(tag: NumTag, payload: u32) -> Self {
-    Self((payload << 8) | ((tag as u32) << 3) | (Self::TAG as u32))
+  pub const unsafe fn new(tag: NumTag, payload: u32) -> Self {
+    Self { raw: (payload << 8) | ((tag as u32) << 3) | (Self::TAG as u32) }
   }
 
   #[inline(always)]
   pub const unsafe fn from_raw(raw: u32) -> Self {
-    Num(raw)
+    Num { raw }
   }
 
   #[inline(always)]
   pub const fn new_u24(val: u32) -> Self {
-    Self::new(NumTag::U24, val << 8)
+    unsafe { Self::new(NumTag::U24, val) }
   }
 
   #[inline(always)]
   pub const fn new_i24(val: i32) -> Self {
-    Self::new(NumTag::I24, (val << 8) as u32)
+    unsafe { Self::new(NumTag::I24, val as u32) }
   }
 
   #[inline]
@@ -84,27 +86,27 @@ impl Num {
     shifted_bits += u32::from(!val.is_nan()) & ((lost_bits - ((lost_bits >> 7) & !shifted_bits)) >> 7);
     // ensure NaNs don't become infinities
     shifted_bits |= u32::from(val.is_nan());
-    Self::new(NumTag::F24, shifted_bits << 8)
+    unsafe { Self::new(NumTag::F24, shifted_bits) }
   }
 
   #[inline(always)]
   pub const fn new_sym(val: NumTag) -> Self {
-    Self::new(NumTag::Sym, (val as u32) << 8)
+    unsafe { Self::new(NumTag::Sym, val as u32) }
   }
 
   #[inline(always)]
   pub fn raw(self) -> u32 {
-    self.0
+    self.raw
   }
 
   #[inline(always)]
   pub fn tag(self) -> NumTag {
-    unsafe { NumTag::from_unchecked((self.0 >> 3 & 0x1f) as u8) }
+    unsafe { NumTag::from_unchecked((self.raw >> 3 & 0x1f) as u8) }
   }
 
   #[inline(always)]
   pub fn payload(self) -> u32 {
-    self.0 >> 8
+    self.raw >> 8
   }
 
   #[inline(always)]
@@ -114,12 +116,12 @@ impl Num {
 
   #[inline(always)]
   pub fn get_i24(self) -> i32 {
-    (self.0 as i32) >> 8
+    (self.raw as i32) >> 8
   }
 
   #[inline(always)]
   pub fn get_f24(self) -> f32 {
-    f32::from_bits(self.0 & !0xff)
+    f32::from_bits(self.raw & !0xff)
   }
 
   #[inline(always)]
@@ -128,14 +130,44 @@ impl Num {
   }
 
   #[inline]
-  pub fn operate(a: Self, b: Self) -> Self {
+  pub fn operate_unary(op: NumTag, num: Self) -> Self {
+    const U24_MAX: u32 = (1 << 24) - 1;
+    const U24_MIN: u32 = 0;
+    const I24_MAX: i32 = (1 << 23) - 1;
+    const I24_MIN: i32 = (-1) << 23;
+
+    match op {
+      NumTag::Sym => num,
+      NumTag::U24 => match num.tag() {
+        NumTag::U24 => num,
+        NumTag::I24 => Num::new_u24(num.get_u24()),
+        NumTag::F24 => Num::new_u24((num.get_f24() as u32).clamp(U24_MIN, U24_MAX)),
+        _ => Self::INVALID,
+      },
+      NumTag::I24 => match num.tag() {
+        NumTag::U24 => Num::new_i24(num.get_i24()),
+        NumTag::I24 => num,
+        NumTag::F24 => Num::new_i24((num.get_f24() as i32).clamp(I24_MIN, I24_MAX)),
+        _ => Self::INVALID,
+      },
+      NumTag::F24 => match num.tag() {
+        NumTag::U24 => Num::new_f24(num.get_u24() as f32),
+        NumTag::I24 => Num::new_f24(num.get_i24() as f32),
+        NumTag::F24 => num,
+        _ => Self::INVALID,
+      },
+      _ => unsafe { Self::new(op, num.payload()) },
+    }
+  }
+
+  #[inline]
+  pub fn operate_sym(a: Self, b: Self) -> Self {
     let at = a.tag();
     let bt = b.tag();
     let (op, ty, a, b) = match ((at, at.is_op(), a), (bt, bt.is_op(), b)) {
-      ((NumTag::Sym, ..), (NumTag::Sym, ..)) | ((_, false, _), (_, false, _)) | ((_, true, _), (_, true, _)) => {
-        return Self::INVALID;
-      }
-      sym!((NumTag::Sym, _, a), (.., b)) => return Self::new(unsafe { a.get_sym() }, b.payload()),
+      ((NumTag::Sym, ..), (NumTag::Sym, ..)) => return Self::INVALID,
+      sym!((NumTag::Sym, _, a), (.., b)) => return Self::operate_unary(unsafe { a.get_sym() }, b),
+      ((_, false, _), (_, false, _)) | ((_, true, _), (_, true, _)) => return Self::INVALID,
       sym!((op, true, a), (ty, false, b)) => (op, ty, a, b),
     };
     match ty {
@@ -147,7 +179,7 @@ impl Num {
           NumTag::Add => Num::new_u24(a.wrapping_add(b)),
           NumTag::Sub => Num::new_u24(a.wrapping_sub(b)),
           NumTag::SubS => Num::new_u24(b.wrapping_sub(a)),
-          NumTag::Mul => Num::new_u24(b.wrapping_sub(a)),
+          NumTag::Mul => Num::new_u24(a.wrapping_mul(b)),
           NumTag::Div => Num::new_u24(a.wrapping_div(b)),
           NumTag::DivS => Num::new_u24(b.wrapping_div(a)),
           NumTag::Rem => Num::new_u24(a.wrapping_rem(b)),
@@ -173,7 +205,7 @@ impl Num {
           NumTag::Add => Num::new_i24(a.wrapping_add(b)),
           NumTag::Sub => Num::new_i24(a.wrapping_sub(b)),
           NumTag::SubS => Num::new_i24(b.wrapping_sub(a)),
-          NumTag::Mul => Num::new_i24(b.wrapping_sub(a)),
+          NumTag::Mul => Num::new_i24(a.wrapping_mul(b)),
           NumTag::Div => Num::new_i24(a.wrapping_div(b)),
           NumTag::DivS => Num::new_i24(b.wrapping_div(a)),
           NumTag::Rem => Num::new_i24(a.wrapping_rem(b)),
@@ -208,16 +240,25 @@ impl Num {
           NumTag::Ne => Num::new_u24((a != b) as u32),
           NumTag::Lt => Num::new_u24((a < b) as u32),
           NumTag::Gt => Num::new_u24((a > b) as u32),
+          #[cfg(feature = "std")]
           NumTag::And => Num::new_f24(a.atan2(b)),
+          #[cfg(feature = "std")]
           NumTag::Or => Num::new_f24(b.log(a)),
+          #[cfg(feature = "std")]
           NumTag::Xor => Num::new_f24(a.powf(b)),
-          NumTag::Shl => Num::INVALID,
-          NumTag::ShlS => Num::INVALID,
-          NumTag::Shr => Num::INVALID,
-          NumTag::ShrS => Num::INVALID,
+          _ => Num::INVALID,
         }
       }
       _ => unsafe { unreachable_unchecked() },
+    }
+  }
+
+  #[inline]
+  pub fn operate_binary(a: Self, op: NumTag, b: Self) -> Self {
+    if op == NumTag::Sym {
+      Self::operate_sym(a, b)
+    } else {
+      Self::operate_sym(Self::operate_sym(a, Num::new_sym(op)), b)
     }
   }
 }
@@ -259,7 +300,7 @@ impl fmt::Display for Num {
           write!(f, "{val:?}")
         }
       }
-      _ => write!(f, "["),
+      _ => write!(f, "[{}{}]", self.tag(), self.payload()),
     }
   }
 }

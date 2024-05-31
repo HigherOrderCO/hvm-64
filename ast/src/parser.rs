@@ -80,10 +80,10 @@ impl<'i> Hvm64Parser<'i> {
         }
         // Op = "$(" Tree Tree ")"
         Some('$') => {
-          self.consume("$(");
+          self.consume("$(")?;
           let rhs = Box::new(self.parse_tree()?);
           let out = Box::new(self.parse_tree()?);
-          self.consume(">")?;
+          self.consume(")")?;
           Ok(Tree::Op { rhs, out })
         }
         // Switch = "?(" Tree Tree ")"
@@ -93,6 +93,10 @@ impl<'i> Hvm64Parser<'i> {
           let out = Box::new(self.parse_tree()?);
           self.consume(")")?;
           Ok(Tree::Switch { arms, out })
+        }
+        Some('0' ..= '9' | '+' | '-' | '[') => {
+          let num = self.parse_num()?;
+          Ok(Tree::Num(num))
         }
         // Var = Name
         _ => Ok(Tree::Var(self.parse_name()?)),
@@ -116,7 +120,7 @@ impl<'i> Hvm64Parser<'i> {
       return self.parse_num_lit();
     }
 
-    self.consume("[");
+    self.consume("[")?;
 
     let Some(op) = NumTag::from_str_prefix(&self.input[self.index ..]) else { self.expected("operator")? };
     self.advance_many(op.as_str().len());
@@ -124,15 +128,15 @@ impl<'i> Hvm64Parser<'i> {
     self.skip_trivia();
 
     if op.is_ty() || self.peek_one() == Some(']') {
-      self.consume("]");
+      self.consume("]")?;
       return Ok(Num::new_sym(op));
     }
 
     let lhs = self.parse_num_lit()?;
 
-    self.consume("]");
+    self.consume("]")?;
 
-    Ok(Num::new(op, lhs.payload()))
+    Ok(Num::operate_unary(op, lhs))
   }
 
   fn parse_num_lit(&mut self) -> Result<Num, String> {
@@ -157,17 +161,6 @@ impl<'i> Hvm64Parser<'i> {
     } else {
       input.parse::<u64>().map_err(|err| format!("{err:?}"))
     }
-  }
-}
-
-/// Parses an unsigned integer with an optional radix prefix.
-fn parse_int(input: &str) -> Result<u64, String> {
-  if let Some(rest) = input.strip_prefix("0x") {
-    u64::from_str_radix(rest, 16).map_err(|err| format!("{err:?}"))
-  } else if let Some(rest) = input.strip_prefix("0b") {
-    u64::from_str_radix(rest, 2).map_err(|err| format!("{err:?}"))
-  } else {
-    input.parse::<u64>().map_err(|err| format!("{err:?}"))
   }
 }
 

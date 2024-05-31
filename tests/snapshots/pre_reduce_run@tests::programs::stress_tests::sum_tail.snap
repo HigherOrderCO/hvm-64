@@ -3,7 +3,7 @@ source: tests/tests.rs
 expression: output
 input_file: tests/programs/stress_tests/sum_tail.hvm
 ---
-~49999995000000
+15783104
 pre-reduce:
 RWTS   :               6
 - ANNI :               3

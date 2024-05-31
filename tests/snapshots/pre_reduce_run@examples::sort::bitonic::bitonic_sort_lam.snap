@@ -3,7 +3,7 @@ source: tests/tests.rs
 expression: output
 input_file: examples/sort/bitonic/bitonic_sort_lam.hvm
 ---
-~523776
+523776
 pre-reduce:
 RWTS   :             130
 - ANNI :              51
