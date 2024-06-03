@@ -3,7 +3,7 @@ name = "hvm64"
 version.workspace = true
 edition = "2021"
 description = "HVM-Core is a massively parallel Interaction Combinator evaluator."
-license = "MIT"
+license = "Apache-2.0"
 
 [workspace.package]
 version = "0.3.0"
