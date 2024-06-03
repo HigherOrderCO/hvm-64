@@ -12,7 +12,7 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
 #[cfg(feature = "parser")]
-pub mod parser;
+mod parser;
 
 use alloc::collections::BTreeMap;
 

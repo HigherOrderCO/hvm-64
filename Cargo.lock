@@ -198,7 +198,6 @@ source = "git+https://github.com/tjjfvi/rust_highlight_error/?branch=no_std#e413
 name = "hvm64"
 version = "0.3.0"
 dependencies = [
- "TSPL",
  "clap",
  "dyntest",
  "hvm64-ast",
