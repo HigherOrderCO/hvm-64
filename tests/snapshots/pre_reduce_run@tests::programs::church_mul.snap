@@ -3,7 +3,7 @@ source: tests/tests.rs
 expression: output
 input_file: tests/programs/church_mul.hvm
 ---
-({3 (a {3 b {3 c {3 d {3 e {3 f {3 g {3 h {3 i {3 j {3 k {3 l {3 m {3 n {3 o {3 p {3 q {3 r {3 s {3 t u}}}}}}}}}}}}}}}}}}}) {3 (v a) {3 (w v) {3 (x w) {3 (y x) {3 (z y) {3 (aa z) {3 (ab aa) {3 (ac ab) {3 (ad ac) {3 (ae ad) {3 (af ae) {3 (ag af) {3 (ah ag) {3 (ai ah) {3 (aj ai) {3 (ak aj) {3 (al ak) {3 (am al) ({3 c {3 d {3 e {3 f {3 g {3 h {3 i {3 j {3 k {3 l {3 m {3 n {3 o {3 p {3 q {3 r {3 s {3 t {3 u an}}}}}}}}}}}}}}}}}}} am)}}}}}}}}}}}}}}}}}}} (an b))
+(#1{(a #1{b #1{c #1{d #1{e #1{f #1{g #1{h #1{i #1{j #1{k #1{l #1{m #1{n #1{o #1{p #1{q #1{r #1{s #1{t u}}}}}}}}}}}}}}}}}}}) #1{(v a) #1{(w v) #1{(x w) #1{(y x) #1{(z y) #1{(aa z) #1{(ab aa) #1{(ac ab) #1{(ad ac) #1{(ae ad) #1{(af ae) #1{(ag af) #1{(ah ag) #1{(ai ah) #1{(aj ai) #1{(ak aj) #1{(al ak) #1{(am al) (#1{c #1{d #1{e #1{f #1{g #1{h #1{i #1{j #1{k #1{l #1{m #1{n #1{o #1{p #1{q #1{r #1{s #1{t #1{u an}}}}}}}}}}}}}}}}}}} am)}}}}}}}}}}}}}}}}}}} (an b))
 pre-reduce:
 RWTS   :               2
 - ANNI :               0

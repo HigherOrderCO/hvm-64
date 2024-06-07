@@ -30,6 +30,7 @@ hvm64-runtime = { path = "./runtime" }
 hvm64-transform = { path = "./transform" }
 hvm64-util = { path = "./util" }
 hvm64-host = { path = "./host" }
+hvm64-num = { path = "./num" }
 
 [dev-dependencies]
 insta = { version = "1.34.0", features = ["glob"] }

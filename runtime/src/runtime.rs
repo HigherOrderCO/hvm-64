@@ -22,8 +22,6 @@
 
 use hvm64_util::prelude::*;
 
-pub use hvm64_util::ops;
-
 use hvm64_util::{bi_enum, deref_to, pretty_num};
 
 use self::trace::Tracer;
@@ -35,7 +33,7 @@ use core::{
   mem::size_of,
   ops::{Add, AddAssign, Deref, DerefMut},
 };
-use ops::TypedOp as Op;
+use hvm64_num::{Num, NumTag};
 
 use core::sync::atomic;
 

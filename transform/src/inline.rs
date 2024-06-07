@@ -43,19 +43,19 @@ impl InlineState {
         let mut tortoise = &net.root;
         // Whether or not the tortoise should take a step
         let mut parity = false;
-        while let Tree::Ref { nam } = hare {
-          let Some(net) = &book.nets.get(nam) else { break };
+        while let Tree::Ref(name) = hare {
+          let Some(net) = &book.nets.get(name) else { break };
           if net.should_inline() {
             hare = &net.root;
           } else {
             break;
           }
           if parity {
-            let Tree::Ref { nam: tortoise_nam } = tortoise else { unreachable!() };
-            if tortoise_nam == nam {
-              Err(TransformError::InfiniteRefCycle(nam.to_owned()))?;
+            let Tree::Ref(tortoise_name) = tortoise else { unreachable!() };
+            if tortoise_name == name {
+              Err(TransformError::InfiniteRefCycle(name.to_owned()))?;
             }
-            tortoise = &book.nets[tortoise_nam].root;
+            tortoise = &book.nets[tortoise_name].root;
           }
           parity = !parity;
         }
@@ -66,10 +66,10 @@ impl InlineState {
   }
   fn inline_into(&self, tree: &mut Tree) -> bool {
     maybe_grow(|| {
-      let Tree::Ref { nam } = &*tree else {
+      let Tree::Ref(name) = &*tree else {
         return tree.children_mut().map(|t| self.inline_into(t)).fold(false, bool::bitor);
       };
-      if let Some(inlined) = self.inlinees.get(nam) {
+      if let Some(inlined) = self.inlinees.get(name) {
         *tree = inlined.clone();
         true
       } else {

@@ -3,7 +3,7 @@ source: tests/tests.rs
 expression: output
 input_file: tests/programs/stress_tests/sum_rec.hvm
 ---
-#67108864
+8388608
 pre-reduce:
 RWTS   :              13
 - ANNI :               7
@@ -12,9 +12,9 @@ RWTS   :              13
 - DREF :               6
 - OPER :               0
 run:
-RWTS   :     671_088_637
-- ANNI :     201_326_591
-- COMM :      67_108_863
-- ERAS :     134_217_727
-- DREF :      67_108_866
-- OPER :     201_326_590
+RWTS   :      83_886_077
+- ANNI :      25_165_823
+- COMM :       8_388_607
+- ERAS :      16_777_215
+- DREF :       8_388_610
+- OPER :      25_165_822

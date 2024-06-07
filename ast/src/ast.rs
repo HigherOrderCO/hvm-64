@@ -16,9 +16,8 @@ mod parser;
 
 use alloc::collections::BTreeMap;
 
-use hvm64_util::{create_var, deref_to, maybe_grow, multi_iterator, ops::TypedOp as Op, prelude::*, var_to_num};
-
-use ordered_float::OrderedFloat;
+use hvm64_num::Num;
+use hvm64_util::{create_var, deref_to, maybe_grow, multi_iterator, prelude::*, var_to_num};
 
 pub type Lab = u16;
 
@@ -59,26 +58,22 @@ pub enum Tree {
   #[default]
   /// A nilary eraser node.
   Era,
-  /// A native 60-bit integer.
-  Int { val: i64 },
-  /// A native 32-bit float.
-  F32 { val: OrderedFloat<f32> },
+  /// A native number.
+  Num(Num),
   /// A nilary node, referencing a named net.
-  Ref { nam: String },
+  Ref(String),
   /// A n-ary interaction combinator.
   Ctr {
     /// The label of the combinator. (Combinators with the same label
     /// annihilate, and combinators with different labels commute.)
     lab: Lab,
-    lft: Box<Tree>,
-    rgt: Box<Tree>,
+    p1: Box<Tree>,
+    p2: Box<Tree>,
   },
   /// A binary node representing an operation on native integers.
   ///
   /// The principal port connects to the left operand.
   Op {
-    /// The operation associated with this node.
-    op: Op,
     /// An auxiliary port; connects to the right operand.
     rhs: Box<Tree>,
     /// An auxiliary port; connects to the output.
@@ -87,7 +82,7 @@ pub enum Tree {
   /// A binary node representing a match on native integers.
   ///
   /// The principal port connects to the integer to be matched on.
-  Mat {
+  Switch {
     /// An auxiliary port; connects to a tree of the following structure:
     /// ```text
     /// (+value_if_zero (-predecessor_of_number +value_if_succ))
@@ -97,7 +92,7 @@ pub enum Tree {
     out: Box<Tree>,
   },
   /// One side of a wire; the other side will have the same name.
-  Var { nam: String },
+  Var(String),
 }
 
 impl Net {
@@ -122,8 +117,8 @@ impl Net {
     let fresh_str = create_var(fresh + 1);
 
     let fun = mem::take(&mut self.root);
-    let app = Tree::Ctr { lab: 0, lft: Box::new(arg), rgt: Box::new(Tree::Var { nam: fresh_str.clone() }) };
-    self.root = Tree::Var { nam: fresh_str };
+    let app = Tree::Ctr { lab: 0, p1: Box::new(arg), p2: Box::new(Tree::Var(fresh_str.clone())) };
+    self.root = Tree::Var(fresh_str);
     self.redexes.push((fun, app));
   }
 
@@ -141,10 +136,10 @@ impl Tree {
   pub fn children(&self) -> impl ExactSizeIterator + DoubleEndedIterator<Item = &Tree> {
     multi_iterator! { Iter { Nil, Two } }
     match self {
-      Tree::Era | Tree::Int { .. } | Tree::F32 { .. } | Tree::Ref { .. } | Tree::Var { .. } => Iter::Nil([]),
-      Tree::Ctr { lft, rgt, .. } => Iter::Two([&**lft, rgt]),
+      Tree::Era | Tree::Num(..) | Tree::Ref(_) | Tree::Var(_) => Iter::Nil([]),
+      Tree::Ctr { p1, p2, .. } => Iter::Two([&**p1, p2]),
       Tree::Op { rhs, out, .. } => Iter::Two([&**rhs, out]),
-      Tree::Mat { arms, out } => Iter::Two([&**arms, out]),
+      Tree::Switch { arms, out } => Iter::Two([&**arms, out]),
     }
   }
 
@@ -152,10 +147,10 @@ impl Tree {
   pub fn children_mut(&mut self) -> impl ExactSizeIterator + DoubleEndedIterator<Item = &mut Tree> {
     multi_iterator! { Iter { Nil, Two } }
     match self {
-      Tree::Era | Tree::Int { .. } | Tree::F32 { .. } | Tree::Ref { .. } | Tree::Var { .. } => Iter::Nil([]),
-      Tree::Ctr { lft, rgt, .. } => Iter::Two([&mut **lft, rgt]),
+      Tree::Era | Tree::Num(_) | Tree::Ref(_) | Tree::Var(_) => Iter::Nil([]),
+      Tree::Ctr { p1, p2, .. } => Iter::Two([&mut **p1, p2]),
       Tree::Op { rhs, out, .. } => Iter::Two([&mut **rhs, out]),
-      Tree::Mat { arms, out } => Iter::Two([&mut **arms, out]),
+      Tree::Switch { arms, out } => Iter::Two([&mut **arms, out]),
     }
   }
 
@@ -172,8 +167,8 @@ impl Tree {
   /// This function can be called multiple times with many trees to
   /// ensure that `fresh` does not conflict with any of them.
   pub(crate) fn ensure_no_conflicts(&self, fresh: &mut usize) {
-    if let Tree::Var { nam } = self {
-      if let Some(var_num) = var_to_num(nam) {
+    if let Tree::Var(name) = self {
+      if let Some(var_num) = var_to_num(name) {
         *fresh = (*fresh).max(var_num);
       }
     }
@@ -186,13 +181,12 @@ impl Clone for Tree {
   fn clone(&self) -> Tree {
     maybe_grow(|| match self {
       Tree::Era => Tree::Era,
-      Tree::Int { val } => Tree::Int { val: *val },
-      Tree::F32 { val } => Tree::F32 { val: *val },
-      Tree::Ref { nam } => Tree::Ref { nam: nam.clone() },
-      Tree::Ctr { lab, lft, rgt } => Tree::Ctr { lab: *lab, lft: lft.clone(), rgt: rgt.clone() },
-      Tree::Op { op, rhs, out } => Tree::Op { op: *op, rhs: rhs.clone(), out: out.clone() },
-      Tree::Mat { arms, out } => Tree::Mat { arms: arms.clone(), out: out.clone() },
-      Tree::Var { nam } => Tree::Var { nam: nam.clone() },
+      Tree::Num(num) => Tree::Num(*num),
+      Tree::Ref(name) => Tree::Ref(name.clone()),
+      Tree::Ctr { lab, p1, p2 } => Tree::Ctr { lab: *lab, p1: p1.clone(), p2: p2.clone() },
+      Tree::Op { rhs, out } => Tree::Op { rhs: rhs.clone(), out: out.clone() },
+      Tree::Switch { arms, out } => Tree::Switch { arms: arms.clone(), out: out.clone() },
+      Tree::Var(name) => Tree::Var(name.clone()),
     })
   }
 }
@@ -253,17 +247,17 @@ impl fmt::Display for Tree {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     maybe_grow(move || match self {
       Tree::Era => write!(f, "*"),
-      Tree::Ctr { lab, lft, rgt } => match lab {
-        0 => write!(f, "({lft} {rgt})"),
-        1 => write!(f, "[{lft} {rgt}]"),
-        _ => write!(f, "{{{lab} {lft} {rgt}}}"),
+      Tree::Ctr { lab, p1, p2 } => match lab {
+        0 => write!(f, "({p1} {p2})"),
+        1 => write!(f, "{{{p1} {p2}}}"),
+        _ if lab % 2 == 0 => write!(f, "#{}({p1} {p2})", lab / 2),
+        _ => write!(f, "#{}{{{p1} {p2}}}", lab / 2),
       },
-      Tree::Var { nam } => write!(f, "{nam}"),
-      Tree::Ref { nam } => write!(f, "@{nam}"),
-      Tree::Int { val } => write!(f, "#{val}"),
-      Tree::F32 { val } => write!(f, "#{:?}", val.0),
-      Tree::Op { op, rhs, out } => write!(f, "<{op} {rhs} {out}>"),
-      Tree::Mat { arms, out } => write!(f, "?<{arms} {out}>"),
+      Tree::Var(name) => write!(f, "{name}"),
+      Tree::Ref(name) => write!(f, "@{name}"),
+      Tree::Num(val) => write!(f, "{val}"),
+      Tree::Op { rhs, out } => write!(f, "$({rhs} {out})"),
+      Tree::Switch { arms, out } => write!(f, "?({arms} {out})"),
     })
   }
 }
@@ -278,15 +272,15 @@ fn test_tree_drop() {
   let mut long_tree = Tree::Era;
   let mut cursor = &mut long_tree;
   for _ in 0 .. 100_000 {
-    *cursor = Tree::Ctr { lab: 0, lft: Box::new(Tree::Era), rgt: Box::new(Tree::Era) };
-    let Tree::Ctr { lft, .. } = cursor else { unreachable!() };
-    cursor = lft;
+    *cursor = Tree::Ctr { lab: 0, p1: Box::new(Tree::Era), p2: Box::new(Tree::Era) };
+    let Tree::Ctr { p1, .. } = cursor else { unreachable!() };
+    cursor = p1;
   }
   drop(long_tree);
 
   let mut big_tree = Tree::Era;
   for _ in 0 .. 16 {
-    big_tree = Tree::Ctr { lab: 0, lft: Box::new(big_tree.clone()), rgt: Box::new(big_tree) };
+    big_tree = Tree::Ctr { lab: 0, p1: Box::new(big_tree.clone()), p2: Box::new(big_tree) };
   }
   drop(big_tree);
 }

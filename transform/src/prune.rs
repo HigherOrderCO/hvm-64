@@ -36,8 +36,8 @@ impl<'a> PruneState<'a> {
   }
   fn visit_tree(&mut self, tree: &Tree) {
     maybe_grow(|| {
-      if let Tree::Ref { nam } = tree {
-        self.visit_def(nam);
+      if let Tree::Ref(name) = tree {
+        self.visit_def(name);
       } else {
         tree.children().for_each(|t| self.visit_tree(t));
       }

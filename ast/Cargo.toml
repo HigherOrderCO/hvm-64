@@ -7,14 +7,14 @@ edition = "2021"
 path = "src/ast.rs"
 
 [dependencies]
-ordered-float = { version = "4.2.0", default-features = false }
 TSPL = { git = "https://github.com/tjjfvi/TSPL", branch = "no_std", optional = true }
 
 hvm64-util = { path = "../util", default-features = false }
+hvm64-num = { path = "../num", default-features = false }
 
 [features]
 default = ["std", "parser"]
-std = ["hvm64-util/std"]
+std = ["hvm64-util/std", "hvm64-num/std"]
 parser = ["dep:TSPL"]
 
 [lints]

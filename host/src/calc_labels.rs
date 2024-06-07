@@ -96,8 +96,8 @@ pub(crate) struct LabelSets<'b>(Map<&'b str, LabelState>);
 
 impl<'b> LabelSets<'b> {
   pub(crate) fn into_iter(self) -> impl Iterator<Item = (&'b str, LabSet)> {
-    self.0.into_iter().map(|(nam, lab)| match lab {
-      LabelState::Done(lab) => (nam, lab),
+    self.0.into_iter().map(|(name, lab)| match lab {
+      LabelState::Done(lab) => (name, lab),
       _ => unreachable!(),
     })
   }
@@ -180,12 +180,12 @@ impl<'b, F: FnMut(&'b str) -> LabSet> State<'b, F> {
           out.add(lab);
         }
       }
-      if let Tree::Ref { nam } = tree {
-        if self.book.contains_key(nam) {
-          return self.visit_def(nam, depth.map(|x| x + 1), out);
+      if let Tree::Ref(name) = tree {
+        if self.book.contains_key(name) {
+          return self.visit_def(name, depth.map(|x| x + 1), out);
         }
         if let Some(out) = &mut out {
-          out.union(&(self.lookup)(nam));
+          out.union(&(self.lookup)(name));
         }
       }
       tree.children().map(|child| self.visit_tree(child, depth, out.as_deref_mut())).fold(usize::MAX, usize::min)

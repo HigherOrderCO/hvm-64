@@ -3,7 +3,7 @@ source: tests/tests.rs
 expression: output
 input_file: examples/sort/bitonic/bitonic_sort_lam.hvm
 ---
-#523776
+523776
 RWTS   :       2_293_690
 - ANNI :       1_375_188
 - COMM :          96_766

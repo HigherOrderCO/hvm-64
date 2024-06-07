@@ -58,8 +58,7 @@ use hvm64_util::prelude::*;
 use core::ops::RangeFrom;
 
 use hvm64_ast::{Net, Tree};
-
-use ordered_float::OrderedFloat;
+use hvm64_num::Num;
 
 pub trait EtaReduce {
   fn eta_reduce(&mut self);
@@ -83,8 +82,7 @@ impl EtaReduce for Net {
 enum NodeType {
   Ctr(u16),
   Var(isize),
-  Int(i64),
-  F32(OrderedFloat<f32>),
+  Num(Num),
   Era,
   Other,
   Hole,
@@ -99,24 +97,23 @@ struct Phase1<'a> {
 impl<'a> Phase1<'a> {
   fn walk_tree(&mut self, tree: &'a Tree) {
     match tree {
-      Tree::Ctr { lab, lft, rgt } => {
+      Tree::Ctr { lab, p1, p2 } => {
         self.nodes.push(NodeType::Ctr(*lab));
-        self.walk_tree(lft);
-        self.walk_tree(rgt);
+        self.walk_tree(p1);
+        self.walk_tree(p2);
       }
-      Tree::Var { nam } => {
-        if let Some(i) = self.vars.get(&**nam) {
+      Tree::Var(name) => {
+        if let Some(i) = self.vars.get(&**name) {
           let j = self.nodes.len() as isize;
           self.nodes.push(NodeType::Var(*i as isize - j));
           self.nodes[*i] = NodeType::Var(j - *i as isize);
         } else {
-          self.vars.insert(nam, self.nodes.len());
+          self.vars.insert(name, self.nodes.len());
           self.nodes.push(NodeType::Hole);
         }
       }
       Tree::Era => self.nodes.push(NodeType::Era),
-      Tree::Int { val } => self.nodes.push(NodeType::Int(*val)),
-      Tree::F32 { val } => self.nodes.push(NodeType::F32(*val)),
+      Tree::Num(num) => self.nodes.push(NodeType::Num(*num)),
       _ => {
         self.nodes.push(NodeType::Other);
         for i in tree.children() {
@@ -136,17 +133,17 @@ impl Phase2 {
   fn reduce_tree(&mut self, tree: &mut Tree) -> NodeType {
     let index = self.index.next().unwrap();
     let ty = self.nodes[index];
-    if let Tree::Ctr { lft, rgt, .. } = tree {
-      let a = self.reduce_tree(lft);
-      let b = self.reduce_tree(rgt);
+    if let Tree::Ctr { p1, p2, .. } = tree {
+      let a = self.reduce_tree(p1);
+      let b = self.reduce_tree(p2);
       if a == b {
         let reducible = match a {
           NodeType::Var(delta) => self.nodes[index.wrapping_add_signed(delta)] == ty,
-          NodeType::Era | NodeType::Int(_) | NodeType::F32(_) => true,
+          NodeType::Era | NodeType::Num(_) => true,
           _ => false,
         };
         if reducible {
-          *tree = mem::take(lft);
+          *tree = mem::take(p1);
           return a;
         }
       }

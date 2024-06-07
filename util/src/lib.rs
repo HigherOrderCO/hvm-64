@@ -2,8 +2,6 @@
 
 pub mod prelude;
 
-pub mod ops;
-
 mod bi_enum;
 mod deref;
 mod multi_iterator;

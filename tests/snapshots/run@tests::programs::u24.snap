@@ -1,0 +1,12 @@
+---
+source: tests/tests.rs
+expression: output
+input_file: tests/programs/u24.hvm
+---
+{12 {8 {20 {5 {0 {0 {1 {0 {1 {2 {10 {8 {40 {2 {16777215 {0 {3 *}}}}}}}}}}}}}}}}}
+RWTS   :             108
+- ANNI :              17
+- COMM :               1
+- ERAS :              18
+- DREF :              55
+- OPER :              17

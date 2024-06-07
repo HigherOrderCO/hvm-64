@@ -1,4 +1,4 @@
-@C2 = ({3 (a b) (c a)} (c b))
+@C2 = (#1{(a b) (c a)} (c b))
 @False = (* (a a))
 @Mul = ((a b) ((c a) (c b)))
 @Neg = ((a (b c)) (b (a c)))

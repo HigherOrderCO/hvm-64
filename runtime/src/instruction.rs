@@ -46,24 +46,24 @@ pub enum Instruction {
   LinkConst { trg: TrgId, port: Port },
   /// See [`Net::do_ctr`].
   /// ```rust,ignore
-  /// let (lft, rgt) = net.do_ctr(lab, trg);
+  /// let (p1, p2) = net.do_ctr(lab, trg);
   /// ```
-  Ctr { lab: Lab, trg: TrgId, lft: TrgId, rgt: TrgId },
+  Ctr { lab: Lab, trg: TrgId, p1: TrgId, p2: TrgId },
   /// See [`Net::do_op`].
   /// ```rust,ignore
   /// let (rhs, out) = net.do_op(lab, trg);
   /// ```
-  Op { op: Op, trg: TrgId, rhs: TrgId, out: TrgId },
+  Op { op: NumTag, trg: TrgId, rhs: TrgId, out: TrgId },
   /// See [`Net::do_op_num`].
   /// ```rust,ignore
   /// let out = net.do_op_num(lab, trg, rhs);
   /// ```
-  OpNum { op: Op, trg: TrgId, rhs: Port, out: TrgId },
-  /// See [`Net::do_mat`].
+  OpNum { op: NumTag, trg: TrgId, rhs: Num, out: TrgId },
+  /// See [`Net::do_switch`].
   /// ```rust,ignore
-  /// let (lft, rgt) = net.do_mat(trg);
+  /// let (arms, out) = net.do_switch(trg);
   /// ```
-  Mat { trg: TrgId, lft: TrgId, rgt: TrgId },
+  Switch { trg: TrgId, arms: TrgId, out: TrgId },
   /// See [`Net::do_wires`].
   /// ```rust,ignore
   /// let (av, aw, bv, bw) = net.do_wires();
@@ -133,19 +133,19 @@ impl<'a> Net<'a> {
 
   /// `trg ~ <op x y>`
   #[inline(always)]
-  pub fn do_op(&mut self, op: Op, trg: Trg) -> (Trg, Trg) {
+  pub fn do_op(&mut self, op: NumTag, trg: Trg) -> (Trg, Trg) {
     trace!(self.tracer, op, trg);
     let port = trg.target();
     if port.is_num() {
       self.free_trg(trg);
-      let n = self.create_node(Op, op.swap().into());
-      n.p1.wire().set_target(port);
+      let n = self.create_node(Op, NumTag::Sym as u16);
+      n.p1.wire().set_target(Port::new_num(Num::operate_unary(op, port.num())));
       (Trg::port(n.p0), Trg::port(n.p2))
     } else if port == Port::ERA {
       self.free_trg(trg);
       (Trg::port(Port::ERA), Trg::port(Port::ERA))
     } else {
-      let n = self.create_node(Op, op.into());
+      let n = self.create_node(Op, op as u16);
       self.link_trg_port(trg, n.p0);
       (Trg::port(n.p1), Trg::port(n.p2))
     }
@@ -153,34 +153,33 @@ impl<'a> Net<'a> {
 
   /// `trg ~ <op #b x>`
   #[inline(always)]
-  pub fn do_op_num(&mut self, op: Op, trg: Trg, rhs: Port) -> Trg {
+  pub fn do_op_num(&mut self, op: NumTag, trg: Trg, rhs: Num) -> Trg {
     let port = trg.target();
     if port.is_num() {
       self.rwts.oper += 1;
       self.free_trg(trg);
-
-      let res = op.op(port.num(), rhs.num());
-
-      Trg::port(Port::new_num(if op.is_int() { Tag::Int } else { Tag::F32 }, res))
+      let out = Num::operate_binary(port.num(), op, rhs);
+      Trg::port(Port::new_num(out))
     } else if port == Port::ERA {
       self.free_trg(trg);
       Trg::port(Port::ERA)
     } else {
-      let n = self.create_node(Op, op.into());
+      let n = self.create_node(Op, op as u16);
       self.link_trg_port(trg, n.p0);
-      n.p1.wire().set_target(rhs);
+      n.p1.wire().set_target(Port::new_num(rhs));
       Trg::port(n.p2)
     }
   }
 
   /// `trg ~ ?<x y>`
   #[inline(always)]
-  pub fn do_mat(&mut self, trg: Trg) -> (Trg, Trg) {
+  pub fn do_switch(&mut self, trg: Trg) -> (Trg, Trg) {
     let port = trg.target();
-    if port.tag() == Int {
+    if port.tag() == Num {
       self.rwts.oper += 1;
       self.free_trg(trg);
-      let num = port.int();
+      let num = port.num();
+      let num = if num.tag() == NumTag::U24 { num.get_u24() } else { 0 };
       let c1 = self.create_node(Ctr, 0);
       if num == 0 {
         self.link_port_port(c1.p2, Port::ERA);
@@ -189,7 +188,7 @@ impl<'a> Net<'a> {
         let c2 = self.create_node(Ctr, 0);
         self.link_port_port(c1.p1, Port::ERA);
         self.link_port_port(c1.p2, c2.p0);
-        self.link_port_port(c2.p1, Port::new_int(num - 1));
+        self.link_port_port(c2.p1, Port::new_num(Num::new_u24(num - 1)));
         (Trg::port(c1.p0), Trg::wire(self.create_wire_to(c2.p2)))
       }
     } else if port == Port::ERA {
@@ -197,7 +196,7 @@ impl<'a> Net<'a> {
       self.free_trg(trg);
       (Trg::port(Port::ERA), Trg::port(Port::ERA))
     } else {
-      let m = self.create_node(Mat, 0);
+      let m = self.create_node(Switch, 0);
       self.link_trg_port(trg, m.p0);
       (Trg::port(m.p1), Trg::port(m.p2))
     }
@@ -208,63 +207,5 @@ impl<'a> Net<'a> {
     let a = self.alloc();
     let b = a.other_half();
     (Trg::port(Port::new_var(a)), Trg::wire(Wire::new(a)), Trg::port(Port::new_var(b)), Trg::wire(Wire::new(b)))
-  }
-
-  /// `trg ~ ?<(x (y z)) out>`
-  #[inline(always)]
-  #[allow(unused)] // TODO: emit this instruction
-  pub fn do_mat_con_con(&mut self, trg: Trg, out: Trg) -> (Trg, Trg, Trg) {
-    let port = trg.target();
-    if trg.target().tag() == Int {
-      self.rwts.oper += 1;
-      self.free_trg(trg);
-      let num = port.int();
-      if num == 0 {
-        (out, Trg::port(Port::ERA), Trg::port(Port::ERA))
-      } else {
-        (Trg::port(Port::ERA), Trg::port(Port::new_int(num - 1)), out)
-      }
-    } else if port == Port::ERA {
-      self.link_trg_port(out, Port::ERA);
-      (Trg::port(Port::ERA), Trg::port(Port::ERA), Trg::port(Port::ERA))
-    } else {
-      let m = self.create_node(Mat, 0);
-      let c1 = self.create_node(Ctr, 0);
-      let c2 = self.create_node(Ctr, 0);
-      self.link_port_port(m.p1, c1.p0);
-      self.link_port_port(c1.p2, c2.p0);
-      self.link_trg_port(out, m.p2);
-      (Trg::port(c1.p1), Trg::port(c2.p1), Trg::port(c2.p2))
-    }
-  }
-
-  /// `trg ~ ?<(x y) out>`
-  #[inline(always)]
-  #[allow(unused)] // TODO: emit this instruction
-  pub fn do_mat_con(&mut self, trg: Trg, out: Trg) -> (Trg, Trg) {
-    let port = trg.target();
-    if trg.target().tag() == Int {
-      self.rwts.oper += 1;
-      self.free_trg(trg);
-      let num = port.int();
-      if num == 0 {
-        (out, Trg::port(Port::ERA))
-      } else {
-        let c2 = self.create_node(Ctr, 0);
-        c2.p1.wire().set_target(Port::new_int(num - 1));
-        self.link_trg_port(out, c2.p2);
-        (Trg::port(Port::ERA), Trg::port(c2.p0))
-      }
-    } else if port == Port::ERA {
-      self.link_trg_port(out, Port::ERA);
-      (Trg::port(Port::ERA), Trg::port(Port::ERA))
-    } else {
-      let m = self.create_node(Mat, 0);
-      let c1 = self.create_node(Ctr, 0);
-      self.link_port_port(m.p1, c1.p0);
-      self.link_trg_port(out, m.p2);
-      self.link_trg_port(trg, m.p0);
-      (Trg::port(c1.p1), Trg::port(c1.p2))
-    }
   }
 }

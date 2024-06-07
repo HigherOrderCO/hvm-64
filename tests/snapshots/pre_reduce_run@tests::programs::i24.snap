@@ -1,0 +1,20 @@
+---
+source: tests/tests.rs
+expression: output
+input_file: tests/programs/i24.hvm
+---
+{+12 {+8 {+20 {+5 {+0 {0 {1 {0 {1 {+2 {+10 {+8 {+8388607 {-8388608 {+1 {+1 {-1 {-1 *}}}}}}}}}}}}}}}}}}
+pre-reduce:
+RWTS   :              90
+- ANNI :              17
+- COMM :               1
+- ERAS :              18
+- DREF :              36
+- OPER :              18
+run:
+RWTS   :              43
+- ANNI :               1
+- COMM :               0
+- ERAS :               1
+- DREF :              41
+- OPER :               0

@@ -53,19 +53,19 @@ impl PreReduce for Book {
       rewrites: Rewrites::default(),
     };
 
-    for nam in self.nets.keys() {
-      state.pre_reduce(nam)
+    for name in self.nets.keys() {
+      state.pre_reduce(name)
     }
 
     let State { seen, rewrites, .. } = state;
 
     let mut not_normal = vec![];
-    for (nam, state) in seen {
+    for (name, state) in seen {
       if let SeenState::Reduced { net, normal } = state {
         if !normal {
-          not_normal.push(nam.clone());
+          not_normal.push(name.clone());
         }
-        self.nets.insert(nam, net);
+        self.nets.insert(name, net);
       }
     }
 
@@ -120,8 +120,8 @@ struct State<'a> {
 impl<'a> State<'a> {
   fn visit_tree(&mut self, tree: &Tree) {
     maybe_grow(move || {
-      if let Tree::Ref { nam } = tree {
-        self.pre_reduce(nam);
+      if let Tree::Ref(name) = tree {
+        self.pre_reduce(name);
       }
       tree.children().for_each(|child| self.visit_tree(child))
     })
@@ -133,17 +133,17 @@ impl<'a> State<'a> {
       self.visit_tree(b);
     }
   }
-  fn pre_reduce(&mut self, nam: &str) {
-    if self.seen.contains_key(nam) || (self.skip)(nam) || self.book.get(nam).is_none() {
+  fn pre_reduce(&mut self, name: &str) {
+    if self.seen.contains_key(name) || (self.skip)(name) || self.book.get(name).is_none() {
       return;
     }
 
-    self.seen.insert(nam.to_owned(), SeenState::Cycled);
+    self.seen.insert(name.to_owned(), SeenState::Cycled);
     // First, pre-reduce all nets referenced by this net by walking the tree
-    self.visit_net(self.book.get(nam).unwrap());
+    self.visit_net(self.book.get(name).unwrap());
 
     let mut rt = hvm64_runtime::Net::new(self.area);
-    rt.boot(self.host.defs.get(nam).expect("No function."));
+    rt.boot(self.host.defs.get(name).expect("No function."));
     let n_reduced = rt.reduce(self.max_rwts as usize);
 
     self.rewrites += rt.rwts;
@@ -157,9 +157,9 @@ impl<'a> State<'a> {
 
     // Mutate the host in-place with the pre-reduced net.
     let instr = self.host.encode_def(&net);
-    self.host.get_mut::<InterpretedDef>(nam).data = instr;
+    self.host.get_mut::<InterpretedDef>(name).data = instr;
 
     // Replace the "Cycled" state with the "Reduced" state
-    *self.seen.get_mut(nam).unwrap() = SeenState::Reduced { net, normal: n_reduced.is_some() };
+    *self.seen.get_mut(name).unwrap() = SeenState::Reduced { net, normal: n_reduced.is_some() };
   }
 }

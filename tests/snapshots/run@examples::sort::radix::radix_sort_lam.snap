@@ -3,7 +3,7 @@ source: tests/tests.rs
 expression: output
 input_file: examples/sort/radix/radix_sort_lam.hvm
 ---
-#549755289600
+16252928
 RWTS   :   1_500_512_246
 - ANNI :     846_200_803
 - COMM :      28_311_560

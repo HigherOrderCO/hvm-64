@@ -19,12 +19,14 @@ macro_rules! bi_enum {
 
     impl $Ty {
       #[allow(unused)]
+      #[inline(always)]
       pub unsafe fn from_unchecked(value: $uN) -> $Ty {
         Self::try_from(value).unwrap_unchecked()
       }
     }
 
     impl From<$Ty> for $uN {
+      #[inline(always)]
       fn from(value: $Ty) -> Self { value as Self }
     }
   };
@@ -37,9 +39,23 @@ macro_rules! bi_enum {
   ) => {
     bi_enum! { #[repr($uN)] $(#$attr)* $vis enum $Ty { $($(#$var_addr)* $Variant = $value,)* } }
 
+    #[allow(unused)]
+    impl $Ty {
+      #[inline]
+      pub fn from_str_prefix(str: &str) -> Option<Self> {
+        $(if str.starts_with($str) { Some($Ty::$Variant) } else)*
+        { None }
+      }
+
+      #[inline]
+      pub fn as_str(self) -> &'static str {
+        match self { $($Ty::$Variant => $str,)* }
+      }
+    }
+
     impl core::fmt::Display for $Ty {
       fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.write_str(match self { $($Ty::$Variant => $str,)* })
+        f.write_str(self.as_str())
       }
     }
 

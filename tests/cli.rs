@@ -41,18 +41,25 @@ fn execute_hvm64(args: &[&str]) -> Result<(ExitStatus, String), Box<dyn Error>> 
 fn test_cli_reduce() {
   // Test normal-form expressions
   assert_snapshot!(
-    execute_hvm64(&["reduce", "-m", "100M", "--", "#1"]).unwrap().1,
-    @"#1"
+    execute_hvm64(&["reduce", "-m", "100M", "--", "1"]).unwrap().1,
+    @r###"
+  1
+  "###
   );
   // Test non-normal form expressions
   assert_snapshot!(
-    execute_hvm64(&["reduce", "-m", "100M", "--", "a & #3 ~ <* #4 a>"]).unwrap().1,
-    @"#12"
+    execute_hvm64(&["reduce", "-m", "100M", "--", "a & 3 ~ $([*] $(4 a))"]).unwrap().1,
+    @r###"
+  12
+  "###
   );
   // Test multiple expressions
   assert_snapshot!(
-    execute_hvm64(&["reduce", "-m", "100M", "--", "a & #3 ~ <* #4 a>", "a & #64 ~ </ #2 a>"]).unwrap().1,
-    @"#12\n#32"
+    execute_hvm64(&["reduce", "-m", "100M", "--", "a & 3 ~ $([*] $(4 a))", "a & 64 ~ $([/] $(2 a))"]).unwrap().1,
+    @r###"
+  12
+  32
+  "###
   );
 
   // Test loading file and reducing expression
@@ -62,18 +69,23 @@ fn test_cli_reduce() {
     execute_hvm64(&[
       "reduce", "-m", "100M",
       &arithmetic_program,
-      "--", "a & @mul ~ (#3 (#4 a))"
+      "--", "a & @mul ~ (3 (4 a))"
     ]).unwrap().1,
-    @"#12"
+    @r###"
+  12
+  "###
   );
 
   assert_snapshot!(
     execute_hvm64(&[
       "reduce", "-m", "100M",
       &arithmetic_program,
-      "--", "a & @mul ~ (#3 (#4 a))", "a & @div ~ (#64 (#2 a))"
+      "--", "a & @mul ~ (3 (4 a))", "a & @div ~ (64 (2 a))"
     ]).unwrap().1,
-    @"#12\n#32"
+    @r###"
+  12
+  32
+  "###
   )
 }
 
@@ -87,7 +99,9 @@ fn test_cli_run_with_args() {
       "run", "-m", "100M",
       &arithmetic_program,
     ]).unwrap().1,
-    @"({3 </ a b> <% c d>} ({5 a c} [b d]))"
+    @r###"
+  (#1{$([/] $(a b)) $([%] $(c d))} (#2{a c} {b d}))
+  "###
   );
 
   // Test partial argument passing
@@ -95,9 +109,11 @@ fn test_cli_run_with_args() {
     execute_hvm64(&[
       "run", "-m", "100M",
       &arithmetic_program,
-      "#64"
+      "64"
     ]).unwrap().1,
-    @"({5 </$ #64 a> <%$ #64 b>} [a b])"
+    @r###"
+  (#2{$([/64] a) $([%64] b)} {a b})
+  "###
   );
 
   // Test passing all arguments.
@@ -105,10 +121,12 @@ fn test_cli_run_with_args() {
     execute_hvm64(&[
       "run", "-m", "100M",
       &arithmetic_program,
-      "#64",
-      "#3"
+      "64",
+      "3"
     ]).unwrap().1,
-    @"[#21 #1]"
+    @r###"
+  {21 1}
+  "###
   );
 }
 
@@ -124,17 +142,17 @@ fn test_cli_transform() {
       &arithmetic_program,
     ]).unwrap().1,
     @r###"
-  @add = (<+ a b> (a b))
+  @add = ($([+] $(a b)) (a b))
 
-  @div = (</ a b> (a b))
+  @div = ($([/] $(a b)) (a b))
 
-  @main = ({3 </ a b> <% c d>} ({5 a c} [b d]))
+  @main = (#1{$([/] $(a b)) $([%] $(c d))} (#2{a c} {b d}))
 
-  @mod = (<% a b> (a b))
+  @mod = ($([%] $(a b)) (a b))
 
-  @mul = (<* a b> (a b))
+  @mul = ($([*] $(a b)) (a b))
 
-  @sub = (<- a b> (a b))
+  @sub = ($([-] $(a b)) (a b))
   "###
   );
 
@@ -146,19 +164,19 @@ fn test_cli_transform() {
       &arithmetic_program,
     ]).unwrap().1,
     @r###"
-  @add = (<+ a b> (a b))
+  @add = ($([+] $(a b)) (a b))
 
-  @div = (</ a b> (a b))
+  @div = ($([/] $(a b)) (a b))
 
-  @main = ({3 a b} ({5 c d} [e f]))
+  @main = (#1{a b} (#2{c d} {e f}))
     & @mod ~ (b (d f))
     & @div ~ (a (c e))
 
-  @mod = (<% a b> (a b))
+  @mod = ($([%] $(a b)) (a b))
 
-  @mul = (<* a b> (a b))
+  @mul = ($([*] $(a b)) (a b))
 
-  @sub = (<- a b> (a b))
+  @sub = ($([-] $(a b)) (a b))
   "###
   );
 }
@@ -215,20 +233,20 @@ fn test_apply_tree() {
     @"(a a)"
   );
   assert_snapshot!(
-    eval_with_args("(* #1)", &["(a a)"]),
-    @"#1"
+    eval_with_args("(* 1)", &["(a a)"]),
+    @"1"
   );
   assert_snapshot!(
-    eval_with_args("(<+ a b> (a b))", &["#1", "#2"]),
-    @"#3"
+    eval_with_args("($([+] $(a b)) (a b))", &["1", "2"]),
+    @"3"
   );
   assert_snapshot!(
-    eval_with_args("(<* a b> (a b))", &["#2", "#3"]),
-    @"#6"
+    eval_with_args("($([*] $(a b)) (a b))", &["2", "3"]),
+    @"6"
   );
   assert_snapshot!(
-    eval_with_args("(<* a b> (a b))", &["#2"]),
-    @"(<* #2 a> a)"
+    eval_with_args("($([*] $(a b)) (a b))", &["2"]),
+    @"($([*2] a) a)"
   );
 }
 
@@ -247,11 +265,11 @@ fn test_cli_compile() {
     panic!("{:?}", "compilation failed");
   };
 
-  let (status, output) = execute_hvm64(&["run", "-i", "examples/arithmetic", "/dev/null", "#40", "#3"]).unwrap();
+  let (status, output) = execute_hvm64(&["run", "-i", "examples/arithmetic", "/dev/null", "40", "3"]).unwrap();
 
   assert_snapshot!(format_args!("{status}\n{output}"), @r###"
   exit status: 0
-  [#13 #1]
+  {13 1}
   "###);
 
   fs::remove_file("examples/arithmetic").unwrap();

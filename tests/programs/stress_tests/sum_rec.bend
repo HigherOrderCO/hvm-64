@@ -5,4 +5,4 @@ sum = λn match n {
   1+: (add (sum n-1) (sum n-1))
 }
 
-main = (sum 26)
+main = (sum 23)

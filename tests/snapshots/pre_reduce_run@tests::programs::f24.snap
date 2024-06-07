@@ -1,0 +1,20 @@
+---
+source: tests/tests.rs
+expression: output
+input_file: tests/programs/f24.hvm
+---
+{+inf {-inf {+NaN {2.5 {-1.5 {1.1499939 {0.25 {0.5 {0 {1 {1 {0 {0 {0 {0 {+NaN {+inf {-inf {1.019989 {0.1000061 {0.1000061 {-0.1000061 {-0.1000061 *}}}}}}}}}}}}}}}}}}}}}}}
+pre-reduce:
+RWTS   :             134
+- ANNI :              22
+- COMM :               1
+- ERAS :              23
+- DREF :              63
+- OPER :              25
+run:
+RWTS   :              53
+- ANNI :               1
+- COMM :               0
+- ERAS :               1
+- DREF :              51
+- OPER :               0

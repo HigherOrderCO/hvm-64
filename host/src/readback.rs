@@ -5,6 +5,7 @@ use super::{Addr, Host, Port, Tag, Wire};
 use core::ops::RangeFrom;
 
 use hvm64_ast::{Net, Tree};
+use hvm64_num::{Num, NumTag};
 use hvm64_util::{create_var, maybe_grow};
 
 impl Host {
@@ -54,31 +55,33 @@ impl<'a> ReadbackState<'a> {
       Tag::Var | Tag::Red => {
         // todo: resolve redirects
         let key = wire.unwrap().addr().min(port.addr());
-        Tree::Var {
-          nam: create_var(match self.vars.entry(key) {
-            Entry::Occupied(e) => e.remove(),
-            Entry::Vacant(e) => *e.insert(self.var_id.next().unwrap()),
-          }),
-        }
+        Tree::Var(create_var(match self.vars.entry(key) {
+          Entry::Occupied(e) => e.remove(),
+          Entry::Vacant(e) => *e.insert(self.var_id.next().unwrap()),
+        }))
       }
       Tag::Ref if port == Port::ERA => Tree::Era,
-      Tag::Ref => Tree::Ref { nam: self.host.back[&port.addr()].clone() },
-      Tag::Int => Tree::Int { val: port.int() },
-      Tag::F32 => Tree::F32 { val: port.float().into() },
+      Tag::Ref => Tree::Ref(self.host.back[&port.addr()].clone()),
+      Tag::Num => Tree::Num(port.num()),
       Tag::Op => {
         let op = port.op();
         let node = port.traverse_node();
-        Tree::Op { op, rhs: Box::new(self.read_wire(node.p1)), out: Box::new(self.read_wire(node.p2)) }
+        let node = Tree::Op { rhs: Box::new(self.read_wire(node.p1)), out: Box::new(self.read_wire(node.p2)) };
+        if op == NumTag::Sym {
+          node
+        } else {
+          Tree::Op { rhs: Box::new(Tree::Num(Num::new_sym(op))), out: Box::new(node) }
+        }
       }
       Tag::Ctr => {
         let node = port.traverse_node();
-        Tree::Ctr { lab: node.lab, lft: Box::new(self.read_wire(node.p1)), rgt: Box::new(self.read_wire(node.p2)) }
+        Tree::Ctr { lab: node.lab, p1: Box::new(self.read_wire(node.p1)), p2: Box::new(self.read_wire(node.p2)) }
       }
-      Tag::Mat => {
+      Tag::Switch => {
         let node = port.traverse_node();
         let arms = self.read_wire(node.p1);
         let out = self.read_wire(node.p2);
-        Tree::Mat { arms: Box::new(arms), out: Box::new(out) }
+        Tree::Switch { arms: Box::new(arms), out: Box::new(out) }
       }
     })
   }

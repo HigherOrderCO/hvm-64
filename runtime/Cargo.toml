@@ -8,10 +8,11 @@ path = "src/runtime.rs"
 
 [dependencies]
 hvm64-util = { path = "../util", default-features = false }
+hvm64-num = { path = "../num", default-features = false }
 
 [features]
 default = ["std"]
-std = ["hvm64-util/std"]
+std = ["hvm64-util/std", "hvm64-num/std"]
 trace = ["std"]
 
 [lints]

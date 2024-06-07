@@ -1,3 +1,5 @@
+use hvm64_util::prelude::*;
+
 mod include_files;
 
 pub use include_files::*;
@@ -7,8 +9,8 @@ use core::{fmt::Write, hash::Hasher};
 use std::hash::DefaultHasher;
 
 use hvm64_host::Host;
+use hvm64_num::Num;
 use hvm64_runtime::{Def, Instruction, InterpretedDef, LabSet, Port, Tag};
-use hvm64_util::prelude::*;
 
 struct DefInfo<'a> {
   rust_name: String,
@@ -47,7 +49,8 @@ fn _compile_host(host: &Host) -> Result<String, fmt::Error> {
 
 extern crate alloc;
 
-use hvm64_runtime::{{*, ops::{{TypedOp, Ty::*, Op::*}}}};
+use hvm64_runtime::*;
+use hvm64_num::{{NumTag::*, Num}};
 use alloc::boxed::Box;
 
 #[no_mangle]
@@ -134,17 +137,17 @@ fn compile_struct(code: &mut String, host: &Host, rust_name: &str, def: &Def<Int
       Instruction::LinkConst { trg, port } => {
         writeln!(code, "net.link_trg({trg}, Trg::port({}));", compile_port(host, port))
       }
-      Instruction::Ctr { lab, trg, lft, rgt } => {
-        writeln!(code, "let ({lft}, {rgt}) = net.do_ctr({lab}, {trg});")
+      Instruction::Ctr { lab, trg, p1, p2 } => {
+        writeln!(code, "let ({p1}, {p2}) = net.do_ctr({lab}, {trg});")
       }
       Instruction::Op { op, trg, rhs, out } => {
         writeln!(code, "let ({rhs}, {out}) = net.do_op({op:?}, {trg});")
       }
       Instruction::OpNum { op, trg, rhs, out } => {
-        writeln!(code, "let {out} = net.do_op_num({op:?}, {trg}, {});", compile_port(host, rhs))
+        writeln!(code, "let {out} = net.do_op_num({op:?}, {trg}, {});", compile_num(*rhs))
       }
-      Instruction::Mat { trg, lft, rgt } => {
-        writeln!(code, "let ({lft}, {rgt}) = net.do_mat({trg});")
+      Instruction::Switch { trg, arms, out } => {
+        writeln!(code, "let ({arms}, {out}) = net.do_mat({trg});")
       }
       Instruction::Wires { av, aw, bv, bw } => {
         writeln!(code, "let ({av}, {aw}, {bv}, {bw}) = net.do_wires();")
@@ -163,23 +166,15 @@ fn compile_port(host: &Host, port: &Port) -> String {
   } else if port.tag() == Tag::Ref {
     let name = sanitize_name(&host.back[&port.addr()]);
     format!("slf.data.def_{name}.clone()")
-  } else if port.tag() == Tag::Int {
-    format!("Port::new_int({})", port.int())
-  } else if port.tag() == Tag::F32 {
-    let float = port.float();
-
-    if float.is_nan() {
-      "Port::new_float(f32::NAN)".to_string()
-    } else if float.is_infinite() && float > 0.0 {
-      "Port::new_float(f32::INFINITY)".to_string()
-    } else if float.is_infinite() {
-      "Port::new_float(f32::NEG_INFINITY)".to_string()
-    } else {
-      format!("Port::new_float({float:?})")
-    }
+  } else if port.tag() == Tag::Num {
+    format!("Port::new_num({})", compile_num(port.num()))
   } else {
     unreachable!()
   }
+}
+
+fn compile_num(num: Num) -> String {
+  format!("unsafe {{ Num::from_raw({}) }}", num.raw())
 }
 
 fn compile_lab_set(labs: &LabSet) -> Result<String, fmt::Error> {

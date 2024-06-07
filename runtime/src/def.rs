@@ -257,24 +257,24 @@ impl AsDef for InterpretedDef {
             }
             net.link_trg_port(trgs.get_trg(trg), port.clone())
           }
-          Instruction::Ctr { lab, trg, lft, rgt } => {
-            let (l, r) = net.do_ctr(lab, trgs.get_trg(trg));
-            trgs.set_trg(lft, l);
-            trgs.set_trg(rgt, r);
+          Instruction::Ctr { lab, trg, p1, p2 } => {
+            let (t1, t2) = net.do_ctr(lab, trgs.get_trg(trg));
+            trgs.set_trg(p1, t1);
+            trgs.set_trg(p2, t2);
           }
           Instruction::Op { op, trg, rhs, out } => {
             let (r, o) = net.do_op(op, trgs.get_trg(trg));
             trgs.set_trg(rhs, r);
             trgs.set_trg(out, o);
           }
-          Instruction::OpNum { op, trg, ref rhs, out } => {
-            let o = net.do_op_num(op, trgs.get_trg(trg), rhs.clone());
+          Instruction::OpNum { op, trg, rhs, out } => {
+            let o = net.do_op_num(op, trgs.get_trg(trg), rhs);
             trgs.set_trg(out, o);
           }
-          Instruction::Mat { trg, lft, rgt } => {
-            let (l, r) = net.do_mat(trgs.get_trg(trg));
-            trgs.set_trg(lft, l);
-            trgs.set_trg(rgt, r);
+          Instruction::Switch { trg, arms, out } => {
+            let (a, o) = net.do_switch(trgs.get_trg(trg));
+            trgs.set_trg(arms, a);
+            trgs.set_trg(out, o);
           }
           Instruction::Wires { av, aw, bv, bw } => {
             let (avt, awt, bvt, bwt) = net.do_wires();
